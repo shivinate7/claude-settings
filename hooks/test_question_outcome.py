@@ -42,9 +42,10 @@ Interface the hook must match:
   are left out. The read goes back from the tail to that 3rd-last owner message, never past 16 MiB.
   With no owner message in that range: did-not-run, no model call.
 - Budget: the span text is trimmed from its oldest end to SPAN_BUDGET characters (20,000), labels,
-  fences and separators included. The whole prompt stays within PROMPT_MAX (30,000). When the owner
-  messages and the question alone exceed it, no model call is made and one did-not-run line is written.
-  The 3 owner messages stay whole, with no per-message cap (ruling 2026-10-14 00:00 CDT).
+  fences and separators included. The whole prompt stays within PROMPT_MAX (150,000). When the
+  fixed text and the question alone exceed it, no model call is made and one did-not-run line is
+  written. The 3 owner messages stay whole, with no per-message cap (ruling 2026-10-14 00:00 CDT).
+  Only when they overflow the room are they cut, oldest first, and each cut block shows CUT_MARK.
 - The model call keeps `timeout=MODEL_TIMEOUT` (90 s).
 - `Goal:` needs text on its own line. Blank or whitespace-only after the marker is missing.
 - Goal format (owner ruling 2026-10-13): a question with options needs a `Goal:` line and a
@@ -1914,9 +1915,10 @@ def case_j10_no_owner_message_in_16_mib_does_what_today_does():
 
 
 # --------------------------------------------------------------------------- judge prompt cap (k)
-# The whole judge prompt stays within PROMPT_MAX; a prompt that cannot fit makes no model call.
-# The span is fenced, so no span text can open or close a fence early. An owner message is whole,
-# with no per-message cap (ruling 2026-10-14 00:00 CDT). K4 and K7 pin that.
+# The whole judge prompt stays within PROMPT_MAX. Owner messages are whole unless they overflow the
+# bound; then each cut block shows CUT_MARK (K8-K10). The question alone over the bound makes no
+# model call (K2). The span is fenced, so no span text can open or close a fence early.
+# No per-message cap (ruling 2026-10-14 00:00 CDT). K4 and K7 pin that.
 PROMPT_LIMIT = 30000  # chars: the old gate, now a fixture figure (K7 runs above it)
 PROMPT_BOUND = 150000  # chars, the whole judge prompt (question_outcome.PROMPT_MAX)
 ARGV_UNITS = 32767  # the old Windows command-line cap, in UTF-16 units. argv is gone: a fixture figure only.
@@ -1953,15 +1955,14 @@ def case_k1_1000_small_assistant_blocks_fit_the_prompt_cap_and_the_judge_runs():
     check(name + ": newest owner message whole", "K1-OWN-3" in prompt, "K1-OWN-3")
 
 
-def case_k2_owner_messages_and_question_over_prompt_max_make_no_model_call():
-    name = "caseK2 owner messages and question alone over PROMPT_MAX: no model call, did-not-run line, allowed"
+def case_k2_question_alone_over_prompt_max_makes_no_model_call():
+    name = "caseK2 question and fixed text alone over PROMPT_MAX (owner messages present): no model call, did-not-run line, allowed"
     if not need_module(name):
         return
     big_q = GOOD_Q + "\n" + "Context for the owner. " * 7000
     records = [owner(("K2-OWN-%d " % i).ljust(1500, "k")) for i in (1, 2, 3)]
     path = write_transcript("k2", records)
-    check(name + ": fixture: owner messages and question alone exceed PROMPT_MAX",
-          len(big_q) + 3 * 1500 > PROMPT_BOUND, len(big_q))
+    check(name + ": fixture: the question alone exceeds PROMPT_MAX", len(big_q) > PROMPT_BOUND, len(big_q))
     with model_stub(ALLOW) as stub:
         code, out, _ = run_main(ask_payload(fresh_session("k2"), [question(big_q, LABELS)], path))
     check(name + ": no model call", len(stub.prompts) == 0, len(stub.prompts))
@@ -2107,6 +2108,101 @@ def case_k7_whole_owner_messages_over_prompt_max_still_run_the_judge():
               len(text))
 
 
+def owner_block_bodies(prompt):
+    """The body of each Owner block in the prompt, in prompt order."""
+    return re.findall(r"<<<BEGIN Owner message>>>\n(.*?)\n<<<END>>>", prompt, re.DOTALL)
+
+
+def owner_text(tag, chars):
+    """One owner message: `tag`, then `chars` filler characters."""
+    return "%s %s" % (tag, "p" * chars)
+
+
+def owner_only_prompt(text):
+    """The judge prompt for one owner message and nothing else. Stub, no model call."""
+    path = write_transcript(fresh_session("probe"), [owner(text)])
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("probe"), [question(GOOD_Q, LABELS)], path))
+    return prompt_of(stub)
+
+
+def owner_claims(name, prompt, texts):
+    """One Owner block per owner message. Each block holds text once CUT_MARK is removed. A block
+    that differs from its message was cut, and it shows CUT_MARK."""
+    bodies = owner_block_bodies(prompt)
+    check(name + ": one owner block per owner message", len(bodies) == len(texts), len(bodies))
+    for i, (body, text) in enumerate(zip(bodies, texts), 1):
+        check(name + ": owner block %d holds text" % i, body.replace(qo.CUT_MARK, "").strip() != "",
+              repr(body[:60]))
+        if body != text:
+            check(name + ": cut owner block %d shows CUT_MARK" % i, qo.CUT_MARK in body, repr(body[:60]))
+
+
+# --------------------------------------------------------------------------- judge prompt cap, overflow
+# Owner messages overflow PROMPT_MAX: a cut owner block keeps text and shows CUT_MARK (K8, K9). The
+# span text that is left out keeps its own mark or is shown whole (K10). The question is never cut.
+# The fixtures are sized from the code's own prompt, so they stay valid after a fix.
+
+def case_k8_one_owner_message_over_the_bound_keeps_text_and_shows_cut_mark():
+    name = "caseK8 one owner message over PROMPT_MAX: its block holds text, a cut block shows CUT_MARK"
+    if not need_module(name):
+        return
+    text = owner_text("K8-OWN", 160000) + " K8-OWN-END"
+    check(name + ": fixture: the owner message alone is over PROMPT_MAX", len(text) > PROMPT_BOUND, len(text))
+    path = write_transcript("k8", [owner(text)])
+    with model_stub(ALLOW) as stub:
+        _, out, _ = run_main(ask_payload(fresh_session("k8"), [question(GOOD_Q, LABELS)], path))
+    prompt = prompt_of(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": not denied", deny_reason(out) is None, out)
+    check(name + ": the question is whole", GOOD_Q in prompt, "question")
+    check(name + ": prompt within PROMPT_MAX", len(prompt) <= PROMPT_BOUND, len(prompt))
+    owner_claims(name, prompt, [text])
+
+
+def case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_show_cut_mark():
+    name = "caseK9 three owner messages over PROMPT_MAX: no empty block, each cut block shows CUT_MARK"
+    if not need_module(name):
+        return
+    texts = [owner_text("K9-OLD", 200) + " K9-OLD-END",
+             owner_text("K9-MID", 90000) + " K9-MID-END",
+             owner_text("K9-NEW", 90000) + " K9-NEW-END"]
+    total = sum(len(t) for t in texts)
+    check(name + ": fixture: the owner messages together are over PROMPT_MAX", total > PROMPT_BOUND, total)
+    path = write_transcript("k9", [owner(t) for t in texts])
+    with model_stub(ALLOW) as stub:
+        _, out, _ = run_main(ask_payload(fresh_session("k9"), [question(GOOD_Q, LABELS)], path))
+    prompt = prompt_of(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": not denied", deny_reason(out) is None, out)
+    check(name + ": the question is whole", GOOD_Q in prompt, "question")
+    check(name + ": prompt within PROMPT_MAX", len(prompt) <= PROMPT_BOUND, len(prompt))
+    owner_claims(name, prompt, texts)
+
+
+def case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent():
+    name = "caseK10 owner message leaves 36 chars or fewer for the span: assistant text marked or whole"
+    if not need_module(name):
+        return
+    calib_text = owner_text("K10-OWN", 1000) + " K10-OWN-END"
+    grow = 1000 + PROMPT_BOUND - 20 - len(owner_only_prompt(calib_text))
+    text = owner_text("K10-OWN", grow) + " K10-OWN-END"
+    left = PROMPT_BOUND - len(owner_only_prompt(text))
+    check(name + ": fixture: the owner message leaves 1 to 36 chars for the span", 0 < left <= 36, left)
+    said = "K10-ASSIST " + "x" * 300 + " K10-ASSIST-END"
+    path = write_transcript("k10", [owner(text), assistant_text(said, "msg_k10")])
+    with model_stub(ALLOW) as stub:
+        _, out, _ = run_main(ask_payload(fresh_session("k10"), [question(GOOD_Q, LABELS)], path))
+    prompt = prompt_of(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": not denied", deny_reason(out) is None, out)
+    check(name + ": the question is whole", GOOD_Q in prompt, "question")
+    check(name + ": prompt within PROMPT_MAX", len(prompt) <= PROMPT_BOUND, len(prompt))
+    check(name + ": the assistant text is whole, or CUT_MARK stands in for it",
+          said in prompt or qo.CUT_MARK in prompt, len(prompt))
+    owner_claims(name, prompt, [text])
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -2171,12 +2267,15 @@ def main():
              case_j9_model_call_keeps_the_module_timeout,
              case_j10_no_owner_message_in_16_mib_does_what_today_does,
              case_k1_1000_small_assistant_blocks_fit_the_prompt_cap_and_the_judge_runs,
-             case_k2_owner_messages_and_question_over_prompt_max_make_no_model_call,
+             case_k2_question_alone_over_prompt_max_makes_no_model_call,
              case_k3_an_assistant_block_cannot_close_its_own_fence,
              case_k4_owner_message_of_5000_chars_reaches_the_prompt_whole,
              case_k5_a_four_bracket_fence_cannot_close_a_block_or_open_an_owner_block,
              case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block,
-             case_k7_whole_owner_messages_over_prompt_max_still_run_the_judge)
+             case_k7_whole_owner_messages_over_prompt_max_still_run_the_judge,
+             case_k8_one_owner_message_over_the_bound_keeps_text_and_shows_cut_mark,
+             case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_show_cut_mark,
+             case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent)
     for case in cases:
         case()
     if LOAD_ERROR is None:
