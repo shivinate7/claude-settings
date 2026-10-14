@@ -90,6 +90,20 @@ def allowed(cwd, rng):
     return res
 
 
+def misplaced(cwd, rng):
+    """Hint lines for commits of the range with a line that starts `Drops-lines:` and that git did not read as a trailer
+    (it is not in the last paragraph, so it excuses nothing). A hint never excuses a finding."""
+    fmt = "%H%x00%(trailers:key=" + TRAILER + ",valueonly)%x00%B%x01"
+    out = []
+    for rec in git(cwd, "log", "--format=" + fmt, rng)[1].split("\x01"):
+        if rec.count("\x00") < 2:
+            continue
+        sha, got, body = rec.strip("\n").split("\x00", 2)
+        if len(re.findall(r"^" + TRAILER + r":", body, re.I | re.M)) > len([l for l in got.splitlines() if l.strip()]):
+            out.append("%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER))
+    return out
+
+
 def judge(items, ok):
     """items: (path, text). -> (texts whose path no trailer excuses, ALLOWED notes for the rest)."""
     bad = [t for p, t in items if p not in ok]
@@ -502,7 +516,7 @@ def check(cwd, upstream, head, default=None):
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
     bad, notes = judge(items, ok)
-    return bad, notes
+    return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
 def history(cwd, rev, window):
