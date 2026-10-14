@@ -64,8 +64,12 @@ def _fake_run(argv, **kwargs):
     env = kwargs.get("env") or {}
     cfg = env.get("CLAUDE_CONFIG_DIR")
     cwd = kwargs.get("cwd")
+    stdin = kwargs.get("input")
+    if isinstance(stdin, bytes):  # the judge sends the prompt as UTF-8 bytes, not text
+        stdin = stdin.decode("utf-8")
     rec = {
         "argv": list(argv),
+        "stdin": stdin,
         "cwd": cwd,
         "cwd_entries": sorted(os.listdir(cwd)) if cwd and os.path.isdir(cwd) else None,
         "config_dir": cfg,
@@ -135,8 +139,8 @@ class Run:
                 self.calls = [json.loads(line) for line in f if line.strip()]
 
     def prompt(self):
-        argv = self.calls[0]["argv"] if self.calls else []
-        return argv[argv.index("-p") + 1] if "-p" in argv else ""
+        # The prompt travels on the child's stdin, never in argv (Windows caps a command line).
+        return (self.calls[0].get("stdin") or "") if self.calls else ""
 
 
 def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
@@ -304,7 +308,7 @@ TIMEOUT_SENTINEL = "SENTINEL-timeout-5d0e"
 def case_timeout_leaks_no_reply_text():
     run = run_hook("Reply body %s, end." % TIMEOUT_SENTINEL, scenario="timeout")
     prompt = run.prompt()
-    check("timeout: claude was called, so the leak checks mean something", bool(prompt), run.calls)
+    check("timeout: claude was called, so the leak checks mean something", bool(run.calls), run.calls)
     check("timeout: stderr holds no reply text", TIMEOUT_SENTINEL not in run.err, run.err)
     check("timeout: stderr holds no prompt, raw or repr-escaped",
           prompt != "" and prompt not in run.err and repr(prompt)[1:-1] not in run.err, run.err)
