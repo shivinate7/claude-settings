@@ -5306,6 +5306,28 @@ for _label, _cmd in (
     sh("git env set: PowerShell, a name split by a substitution, %s, denies" % _label,
        _cmd % _SPLIT, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 
+# Round 2 review of a01afb0 (guard-speed): a name split by a printf directive. `%s` and `%b` with
+# no argument print nothing, so the profile gets `GIT_DIR=/x`. The walk drops the directives
+# (`_PRINTF_DIRECTIVE`) before it reads the name, so the raw text holds no whole name and a quick
+# test of the raw text or of a substitution's text skips the walk. Each case below is denied on
+# 46c3191 and allowed on a01afb0.
+for _label, _cmd in (
+    ("%s, GIT_DIR", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%b, GIT_DIR", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
+    ("%s, GIT_INDEX_FILE", r"printf 'GIT_INDEX_%sFILE=/x\n' >> ~/.bashrc"),
+    ("%s, GIT_WORK_TREE", r"printf 'GIT_WORK_%sTREE=/x\n' >> ~/.bashrc"),
+    ("%s, with an export prefix", r"printf 'export GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%s, piped to tee -a", r"printf 'GIT_%sDIR=/x\n' | tee -a ~/.bashrc"),
+):
+    sh("git env set: Bash printf into a profile, a name split by a directive %s, denies" % _label,
+       _cmd, "deny", GIT_ENV_RULE, cwd=NOGIT)
+for _label, _cmd in (
+    ("%s", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%b", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
+):
+    sh("git env set: PowerShell printf into a profile, a name split by a directive %s, denies"
+       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
