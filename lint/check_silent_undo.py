@@ -176,7 +176,7 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-OWN_LOOKUPS = 25  # per file: `git log -G` calls spent finding who added a lost line
+OWN_LOOKUPS = 25  # per file: lost lines checked for a branch-only adder in one `git log -p` read; the rest count as lost
 
 
 def changed(patch):
@@ -202,11 +202,11 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
     always has main's own commit in the range, older than any merge that carried it."""
     try:
-        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=\x01%H", p, "--not", *bases, "--", path)
+        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
     except Unknown:
         return set()
     commits = []  # (sha, the changed lines of that diff, newline-joined)
-    for chunk in out.split("\x01")[1:]:
+    for chunk in out.split("\0")[1:]:  # NUL: a text diff never holds one
         sha, _, body = chunk.partition("\n")
         commits.append((sha.strip(), "\n".join(changed(body))))
     held, res = {}, set()
@@ -240,7 +240,7 @@ class Blobs:
             raise Unknown("git cat-file failed: %s" % e)
 
     def get(self, rev, path):
-        if "\n" in path:
+        if "\n" in path or "\r" in path:  # cat-file reads a line and strips a trailing CR
             return blob(self.cwd, rev, path)
         try:
             self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
