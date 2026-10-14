@@ -1300,6 +1300,10 @@ class GhHalf(Env):
     def test_a_required_check_read_with_gh_http_500_stops_without_a_revert(self):
         self.required_read_fails_after_the_claim("gh: HTTP 500")
 
+    def test_a_required_check_read_with_a_json_body_then_a_gh_502_line_is_retried_then_stops_without_a_revert(self):
+        # round 2: the JSON body and gh's error line share one line, with no newline between them
+        self.required_read_fails_after_the_claim('{"message":"Server Error"}gh: Server Error (HTTP 502)')
+
     def merge_reply_is_retried_then_stops(self, msg):
         """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert."""
         self.set(merge_replies=[[msg, False]])
@@ -1372,6 +1376,25 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
+
+    def run_list_fails_wrapped(self, msg):
+        """Every check is green and `gh run list` fails with the wrapped line `msg`: a network error, retried 3 times, then a stop. Nothing is claimed."""
+        self.set(runs_fail=msg)
+        before = self.head()
+        rc, out = self.go()
+        self.assertNotIn("not green", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
+        self.assertIn("network", out.lower())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.head(), before)  # nothing claimed or pushed
+        self.assertFalse(self.lock_ref())
+
+    def test_a_wrapped_run_list_http_502_is_a_network_error_retried_then_stopped(self):
+        self.run_list_fails_wrapped("failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+
+    def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
+        self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
 
     def test_a_merge_lock_read_that_fails_once_with_a_json_error_is_retried_and_the_run_goes_on(self):
         # Windows credential manager (PR 411, 2026-10-13 20:35): ls-remote of the lock ref fails once, then works
@@ -2651,6 +2674,107 @@ class GhReleaseReports(unittest.TestCase):
         out = release_out(self, lock, "tok")
         self.assertIn("not this run's", out)
         self.assertFalse([c for c in calls if c[:2] == ("-X", "DELETE")])
+
+class NetErrorLines(unittest.TestCase):
+    """merge.is_net on the output of one failed gh or git call. Round 2: a wrapped 5xx or 429 line, and a JSON body with gh's
+    error line after it. The false-match cases stay green: a PR title, a check name, a refusal that quotes a 5xx."""
+    def test_a_wrapped_5xx_or_429_line_is_a_network_error(self):
+        for out in ("failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)",
+                    "failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)"):
+            with self.subTest(out=out):
+                self.assertTrue(merge.is_net(1, out))
+
+    def test_a_json_body_with_gh_error_line_after_it_is_a_network_error(self):
+        self.assertTrue(merge.is_net(1, '{"message":"Server Error"}gh: Server Error (HTTP 502)'))
+
+    def test_a_json_check_list_is_never_a_network_error(self):
+        # gh's JSON answer names checks: a check named "build: HTTP 500 guard" is a red check, not a network error
+        for out in ('[{"name":"build: HTTP 500 guard","bucket":"fail","link":""}]',
+                    '[{"name":"gates: HTTP 502","bucket":"fail","link":""}]',
+                    '[{"name":"EOF lint","bucket":"fail","link":""}]'):
+            with self.subTest(out=out):
+                self.assertFalse(merge.is_net(1, out))
+
+    def test_a_pr_title_or_refusal_that_quotes_a_5xx_is_not_a_network_error(self):
+        for out in ('GraphQL: Pull Request is not mergeable: #7 "Fix (HTTP 502 retry)"',
+                    "GraphQL: Pull Request is not mergeable: #502 Bad Gateway fix",
+                    'GraphQL: Pull Request is not mergeable: #7 "Fix: HTTP 502: proxy"'):
+            with self.subTest(out=out):
+                self.assertFalse(merge.is_net(1, out))
+
+class GhLockReadRetry(unittest.TestCase):
+    """GhLock.read on a network error: retried as GitLock is (round 2: GhLock is in scope). merge.sh is the only seam,
+    so the test holds wherever the retry sits, in read or in api."""
+    def run_read(self, replies):
+        """The ref reads answer `replies` in order, the last repeats. -> the read's result. self.reads and self.pauses count the calls."""
+        seq, self.reads, self.pauses = list(replies), 0, []
+        def fake_sh(args, cwd=None, input=None, env=None):
+            if args[:2] == ["gh", "api"] and "/git/ref/merge-lock/" in args[2]:
+                self.reads += 1
+                return seq.pop(0) if len(seq) > 1 else seq[0]
+            if args[:2] == ["gh", "api"] and "/git/commits/" in args[2]:
+                return 0, "merge lock\nexpires: 2000\nowner: x"  # a live lock, held until 2000
+            return 1, "unhandled " + " ".join(args)
+        with unittest.mock.patch.object(merge, "sh", fake_sh):
+            lock = merge.GhLock(now=lambda: 1000.0)
+            lock.pause = self.pauses.append
+            return lock.read("main")
+
+    def read_that_must_not_stop(self, replies):
+        try:
+            return self.run_read(replies)
+        except merge.Stop as e:
+            self.fail(f"GhLock.read stopped on a network error after {self.reads} read(s): {e}")
+
+    def test_a_transient_gh_server_error_on_the_lock_read_is_retried_and_the_read_succeeds(self):
+        got = self.read_that_must_not_stop([(1, "gh: Server Error (HTTP 502)"), (0, "sha1")])
+        self.assertEqual(got[0], "sha1")
+        self.assertEqual(self.reads, 2)
+        self.assertEqual(len(self.pauses), 1)
+
+    def test_a_gh_server_error_that_keeps_failing_on_the_lock_read_is_a_net_stop_after_three_retries(self):
+        try:
+            self.run_read([(1, "gh: Server Error (HTTP 502)")])
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"a network error stopped the lock read as a plain Stop, not a NetStop: {e}")
+        else:
+            self.fail("GhLock.read returned without a stop")
+        self.assertEqual(self.reads, 4)  # one try and three retries
+        self.assertEqual(len(self.pauses), 3)
+
+    def test_a_404_on_the_lock_read_means_no_lock_and_is_not_retried(self):
+        self.assertIsNone(self.read_that_must_not_stop([(1, "gh: Not Found (HTTP 404)")]))
+        self.assertEqual(self.reads, 1)
+        self.assertEqual(self.pauses, [])
+
+class GitLockReadExhaustion(unittest.TestCase):
+    """GitLock.read on a failing ls-remote. A network text stops with NetStop after three retries. Any other text stops at once.
+    No test held either path before round 2."""
+    def read_fails(self, reply):
+        """-> (the Stop the read raised, its ls-remote calls, its retry pauses)."""
+        calls, pauses = [], []
+        def fake_git(cwd, *a, input=None):
+            calls.append(a)
+            return reply
+        with unittest.mock.patch.object(merge, "git", fake_git):
+            lock = merge.GitLock("unused", now=lambda: 1000.0, pause=pauses.append)
+            with self.assertRaises(merge.Stop) as cm:
+                lock.read("main")
+        return cm.exception, calls, pauses
+
+    def test_a_network_text_on_the_lock_read_is_a_net_stop_after_three_retries(self):
+        exc, calls, pauses = self.read_fails((1, NET_HOST))
+        self.assertIsInstance(exc, merge.NetStop, str(exc))
+        self.assertEqual(len(calls), 4, calls)  # one try and three retries
+        self.assertEqual(len(pauses), 3)
+
+    def test_fatal_not_a_repository_on_the_lock_read_is_a_plain_stop_after_one_call(self):
+        exc, calls, pauses = self.read_fails((128, "fatal: not a repository (or any of the parent directories): .git"))
+        self.assertNotIsInstance(exc, merge.NetStop)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(pauses, [])
 
 @windows_slice
 class ResolveProgram(unittest.TestCase):
