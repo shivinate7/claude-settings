@@ -4186,14 +4186,18 @@ for _name, _command in (
 ):
     sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
 
-# ---- guard-command-position, round 2 bypass (lane gcp-quote-fix). Each case below is RED on
-# 39160ee and denies on 103a976. The apostrophe in `don't` opens a single quote that closes inside
+# ---- guard-command-position, round 2 bypass (lane gcp-quote-fix). The first three cases are RED on
+# 39160ee and deny on 103a976. The apostrophe in `don't` opens a single quote that closes inside
 # the double-quoted run, so the line break after it is a real separator and `pkill foo` runs in
-# bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way.
+# bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way. The
+# heredoc case is RED on 39160ee and also allows on 103a976: `it's` opens a quote that closes on
+# the line below, so `pkill foo` runs there, and it must deny.
 for _name, _command in (
     ("a lone apostrophe in a double-quoted run", "echo don't \" don't \npkill foo\n \""),
     ("a lone apostrophe closing a double-quoted run", "echo don't \" '\npkill foo\n \""),
     ("an apostrophe after x closing a double-quoted run", "echo don't \" x'\npkill foo\n \""),
+    ("an apostrophe before a heredoc, closed on the next line",
+     "echo it's <<EOF\n'; pkill foo\nEOF"),
 ):
     sh("guard-command-position: round 2 bypass, %s, then pkill on the next line, denies" % _name,
        _command, "deny", rule="machine-wide-kill", cwd=NOGIT)
