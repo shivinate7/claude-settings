@@ -14,6 +14,7 @@ One source of truth for my user-level Claude Code config. Local sessions and clo
 | `lint/`         | The Simplified Technical English prose linter and its hook gate | `~/.claude/lint/*` |
 | `janitor/`      | A machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md` | not installed to `~/.claude`, runs from the clone |
 | `decisions/`    | One file per ruling, cited by slug                          | stays in the repo |
+| `debts/`        | One file per known gap, pointing to its decision where one exists. See `debts/README.md` | stays in the repo |
 | `deferred/`, `plans/` | Open questions and plans, not yet a ruling             | stay in the repo |
 | `actions/`      | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`) | callers pin them by commit SHA |
 | `merge/`, `bin/` | The `merge` command, and its launchers `bin/merge` and `bin/merge.cmd` | `bin/` lands in `~/.claude/bin`. `merge/` runs from the clone |
