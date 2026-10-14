@@ -100,6 +100,8 @@ Round 3 review. Each finding stays open at the cap.
   passes the order check even before `Goal:`.
 - A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
   is correct: the question breaks Goal first. The free pass lets the retry through.
+- An owner message over 1500 chars is cut, because argv holds at most 32,767 chars on Windows; lane
+  model-prompt-stdin removes the cap. This is a bandaid.
 
 Kind: process
 Home: hooks/question_outcome.py
