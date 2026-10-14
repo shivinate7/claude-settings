@@ -179,7 +179,7 @@ _loading = "guard_core"   # the module being loaded, for the fallback line below
 try:
     import guard_core
     from guard_core import (
-        AUTHOR_ROLE, GIT_WORK_TREE_RE, HEREDOC_HEADER, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+        AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
         SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
         _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
         command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
@@ -892,46 +892,26 @@ UNREAD_REASON = (
 )
 
 
-def heredoc_heads(text: str, quote: str = ""):
-    """Return (delimiters, quote) for the heredoc headers in `text` that sit outside quotes and
-    comments, in order, and what is still open at its end. `quote` is a stack of open quotes and
-    parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does: a `$(`
-    inside double quotes is shell again. Quotes are read as split_segments reads them: no escape.
-    """
-    heads = []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        top = quote[-1:]
-        if top == "'":
-            quote = quote[:-1] if char == "'" else quote
-        elif top == '"':
-            if text.startswith("$(", index):
-                quote += "("
-                index += 1
-            elif char == '"':
-                quote = quote[:-1]
-        elif char == "(":
-            quote += "("
-        elif char == ")" and top == "(":
-            quote = quote[:-1]
-        elif char == "#" and (index == 0 or text[index - 1] in " \t\n;|&("):
-            while index < len(text) and text[index] != "\n":
-                index += 1
+def heredoc_offsets(segments, ends, bodies_kept=True):
+    """Return, for each segment, the count of heredoc headers ahead of it (own_heredoc_bodies's
+    `before`). A line inside a body is no header: `x = 1 << y` in `python3 - <<'EOF'` would shift the
+    count and make the commit after it read the wrong body. A body runs from the line after its
+    header, to a segment that is its delimiter. `bodies_kept` is false when the segments come from a
+    command whose bodies were stripped: no body is in them to skip."""
+    offsets, heads, queue, reading = [], 0, [], False
+    for segment, end in zip(segments, ends):
+        offsets.append(heads)
+        if reading:
+            if segment.strip() == queue[0]:
+                queue.pop(0)
+                reading = bool(queue)
             continue
-        elif char in "'\"":
-            quote += char
-        elif text.startswith("<<<", index):
-            index += 3
-            continue
-        elif char == "<":
-            header = HEREDOC_HEADER.match(text, index)
-            if header:
-                heads.append(header.group(2))
-                index = header.end()
-                continue
-        index += 1
-    return heads, quote
+        found = [delimiter for _, delimiter in heredoc_heads(segment)[0]]
+        heads += len(found)
+        # a body that opens and closes inside one quoted segment (`-m "$(cat <<EOF ... EOF`) is whole
+        queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
+        reading = bodies_kept and bool(queue) and end == "\n"
+    return offsets
 
 
 def own_heredoc_bodies(segment: str, raw: str, before: int):
@@ -953,7 +933,7 @@ def own_heredoc_bodies(segment: str, raw: str, before: int):
     while index < len(lines):
         heads, quote = heredoc_heads(lines[index], quote)
         index += 1
-        for delimiter in heads:
+        for _, delimiter in heads:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
@@ -1582,10 +1562,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
-    heads = 0   # heredoc headers in the segments so far: each segment takes its own bodies
-    for segment in split_segments(stripped):
-        before = heads
-        heads += len(heredoc_heads(segment)[0])
+    # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
+    for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
         if not segment.strip():
             continue
         matched = cited_record_path(segment, raw, cite_where, before)
