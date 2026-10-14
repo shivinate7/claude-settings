@@ -2259,6 +2259,23 @@ class UndoMemo(Env):
         self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
 
 
+class MemoKeyRead(Env):
+    """undo_check reads the memo key with git rev-parse. A timeout on that read leaves the history unread,
+    so it must surface as the Unknown refusal, not crash the merge tool."""
+
+    def test_a_timeout_on_the_memo_key_read_refuses_as_unknown(self):
+        real_sh = merge.sh
+
+        def slow(args, cwd=None, input=None, env=None):
+            if "rev-parse" in args:
+                raise subprocess.TimeoutExpired(args, 1)
+            return real_sh(args, cwd=cwd, input=input, env=env)
+        with unittest.mock.patch.object(merge, "sh", slow):
+            with self.assertRaises(merge.Stop) as cm:
+                merge.undo_check(self.co, "origin/main")
+        self.assertIn("could not read the history", str(cm.exception))
+
+
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: an owner flag with a reason, logged."""
     def unreadable(self):
