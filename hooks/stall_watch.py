@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Stall watch for background Bash commands. Standard library only.
 
+Modes:
+- --hook: Before a background Bash command, wraps it so a watcher reports a stall after
+  300 seconds with no new output. The job keeps running.
+- --stop: At Stop, lists each open background job whose output file did not change for
+  the quiet age.
+
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
   (no permissionDecision), with this command, run by the harness shell:

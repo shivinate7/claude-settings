@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """The global PreToolUse guard.
 
+Modes:
+- PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
+  order and denies or asks on the first match. Bad input allows the call.
+- SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
+  against its role, for example a builder that changed a test path. Logs an offence for
+  the reviewer and never blocks the stop.
+
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
 
