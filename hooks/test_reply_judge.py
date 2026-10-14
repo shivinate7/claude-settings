@@ -64,9 +64,12 @@ def _fake_run(argv, **kwargs):
     env = kwargs.get("env") or {}
     cfg = env.get("CLAUDE_CONFIG_DIR")
     cwd = kwargs.get("cwd")
+    stdin = kwargs.get("input")
+    if isinstance(stdin, bytes):  # the judge sends the prompt as UTF-8 bytes, not text
+        stdin = stdin.decode("utf-8")
     rec = {
         "argv": list(argv),
-        "stdin": kwargs.get("input"),
+        "stdin": stdin,
         "cwd": cwd,
         "cwd_entries": sorted(os.listdir(cwd)) if cwd and os.path.isdir(cwd) else None,
         "config_dir": cfg,

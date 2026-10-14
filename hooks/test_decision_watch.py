@@ -706,7 +706,7 @@ def _invoke_model_argv_body():
     check("invoke_model_argv: prompt is not in argv",
           not any("JUDGE THIS PROMPT" in arg for arg in argv), argv)
     check("invoke_model_argv: prompt arrives on stdin",
-          kwargs.get("input") == "JUDGE THIS PROMPT", kwargs.get("input"))
+          kwargs.get("input") == b"JUDGE THIS PROMPT", kwargs.get("input"))
     # --effort xhigh is checked above; its position is free, so it is dropped before the compare.
     if "--effort" in argv:
         i = argv.index("--effort")
