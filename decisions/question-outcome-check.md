@@ -26,8 +26,21 @@ Owner rulings, 2026-10-08:
   owner sees at a glance whether the goal was read right.
 - A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`.
   It reads the owner's last messages from `transcript_path`. It asks a model whether the
-  `Goal:` line matches those messages, and whether each option serves that goal. It
-  also asks whether an option that serves the goal better is missing.
+  `Goal:` line matches those messages. It asks six things in all:
+  1. Does the `Goal:` line match the goal?
+  2. Does each option serve the goal?
+  3. Is an option that serves the goal better missing?
+  4. Can the owner answer from the box alone, with every id, code or name explained in words?
+  5. Does the question point at anything the box does not show? Examples: an earlier
+     message, a time that refers to an earlier message, or "item 4".
+  6. Does each option say what the owner gains and what the owner loses, as a change for
+     the owner and not for a record (rule `style-option-says-effect`)?
+- Owner ruling, 2026-10-14: a question must be plain, in every repo. The model judge asks all
+  six, in this one hook, with no separate pre-check. A FLAG on any ask denies, and the judge's
+  reason goes to the session. Incidents, 2026-10-14: three questions passed and the owner could
+  not use them. Two named ids, a branch, a sha and a key with no words, and one pointed at
+  messages the box does not hold. The third offered a false choice.
+  It left out the better option.
 - The model call reuses `invoke_model` from `hooks/decision_watch.py`. The model is Haiku
   at effort `xhigh`.
 - `invoke_model` starts a second `claude` program. That program does not share the app's
