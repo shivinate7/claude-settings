@@ -174,8 +174,20 @@ def gh_watches(rest) -> bool:
             words.append(t)
     if words == ["run", "watch"]:
         return True
-    return words == ["pr", "checks"] and any(
-        t == "--watch" or t.startswith("--watch=") for t in rest[i:])
+    return words == ["pr", "checks"] and watch_flag(rest[i:])
+
+
+def watch_flag(args) -> bool:
+    """True for `--watch` or `--watch=<v>`; not when the value is `false` or `0`, in either spelling
+    (`--watch=false`, `--watch 0`), as test runners take it."""
+    for i, a in enumerate(args):
+        if a == "--watch":
+            if args[i + 1:i + 2] and args[i + 1].lower() in ("false", "0"):
+                continue
+            return True
+        if a.startswith("--watch=") and a[8:].lower() not in ("false", "0"):
+            return True
+    return False
 
 
 def waiter_verdict(segments, background: bool) -> str:
@@ -242,10 +254,15 @@ RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
 RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
                       "-p", "--package")
 SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
-SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon")
+SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon", "uvicorn", "http.server")
+# A program that serves when its first positional word is one of these verbs.
+SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab", "notebook"),
+                "webpack": ("serve",), "astro": ("dev",), "rails": ("s", "server"),
+                "streamlit": ("run",)}
 SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
-# Named holes (decision background-needs-end-note): `node <file>` is not in the roster, and the
-# note is checked for presence only.
+# Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
+# is checked for presence only, and some wrappers and forms are not read (debt
+# server-wrappers-unread).
 
 
 def until_note(description) -> str:
@@ -259,23 +276,32 @@ def program_name(token: str) -> str:
     return SHELL_EXTENSION.sub("", basename(token)).split("@", 1)[0]
 
 
+def server_script(name: str) -> bool:
+    """True for a script name with a part, split on `:` and `-`, that serves or watches."""
+    return any(part in SERVER_SCRIPTS for part in re.split(r"[:-]", name))
+
+
 def server_program(word: str, args) -> bool:
-    """True for a program (with its args) that serves or watches and never ends by itself."""
-    if word != "gh" and any(a == "--watch" or a.startswith("--watch=") for a in args):
-        return True  # `gh ... --watch` ends when the run ends, so it is out of the roster
+    """True for a program (with its args) that serves or watches and never ends by itself.
+    The `--watch` flag is read by the caller, on the whole command tail."""
     if word in SERVER_PROGRAMS:
         return True
     if re.fullmatch(r"python[\d.]*|py", word):
         for i, a in enumerate(args):  # options (`-u`, `-3`) may come before -m
-            if a == "-m":
-                return args[i + 1:i + 2] == ["http.server"]
+            if a == "-m":  # the module is read as the program: `-m flask run`, `-m http.server`
+                return i + 1 < len(args) and server_program(args[i + 1], args[i + 2:])
             if not a.startswith("-"):
                 return False
         return False
     if word == "vite":
         return "build" not in args
-    if word == "next":
-        return any(a in ("dev", "start") for a in args)
+    positional = [a for a in args if not a.startswith("-")]
+    if word == "deno" and positional[:1] == ["task"]:
+        return len(positional) > 1 and server_script(positional[1])
+    if word in SERVER_VERBS:
+        return positional[:1] != [] and positional[0] in SERVER_VERBS[word]
+    if word == "flask":  # `flask --app hello run` puts an option value before the verb
+        return "run" in positional
     if word == "tsc":
         return "-w" in args
     return False
@@ -306,15 +332,20 @@ def _tokens_hit(tokens) -> str:
     if script:
         return next((hit for hit in map(server_hit, split_segments(script)) if hit), "")
     word, args = program_name(tokens[at]), tokens[at + 1:]
+    tail, runner, script = args, word, word in SCRIPT_MANAGERS
     if word in SCRIPT_RUNNERS:
+        # The flag skip below drops `--watch` and `--hot`, so both are read on `tail`, the whole args.
         while args and (args[0].startswith("-") or args[0] in RUNNER_VERBS):
+            script = script and args[0] not in ("exec", "dlx", "x")  # a package binary, not a script
             args = args[2:] if args[0] in RUNNER_VALUE_FLAGS else args[1:]
         if not args:
             return ""
         name, rest = program_name(args[0]), args[1:]
-        if word in SCRIPT_MANAGERS and any(part in SERVER_SCRIPTS for part in name.split(":")):
+        if script and server_script(name):
             return word + " " + name
         word, args = name, rest
+    if word != "gh" and (watch_flag(tail) or runner == "bun" and "--hot" in tail):
+        return word  # `gh ... --watch` ends when the run ends, so it is out of the roster
     return word if server_program(word, args) else ""
 
 
