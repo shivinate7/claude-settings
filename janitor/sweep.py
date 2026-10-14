@@ -2472,10 +2472,10 @@ MODES = ("full", "tier1", "branches")
 
 
 REAPER_SCRIPT = "reap:worktrees"
-# The SessionEnd hook is killed at 55 s (settings.json). The whole sweep has to fit, so the repo's
-# own script gets 40 s, which leaves the rest of the sweep 15 s. After a timeout the older rules
-# alone judge the trees.
-REAPER_TIMEOUT_SECONDS = 40
+# session_end_sweep.py kills this sweep at 25 s (SWEEP_TIMEOUT_SECONDS). The repo's own script has
+# to end well inside that, or the kill orphans its npm child, so it gets 15 s. After a timeout the
+# older rules alone judge the trees.
+REAPER_TIMEOUT_SECONDS = 15
 
 
 def repo_reaper(root: str):
