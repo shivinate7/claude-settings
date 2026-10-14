@@ -311,7 +311,7 @@ function Install-File([string]$Src, [string]$Dest) {
 }
 
 # Same for a directory. A real directory from an earlier copy is refreshed in place when no
-# link can be made (the test watches for a rename of the name too). Otherwise: build at
+# link can be made. Otherwise: build at
 # "$Dest.cs-new", rename $Dest to $Old, rename the new one to $Dest, then remove $Old (unless
 # $KeepOld: it is a backup). If the second rename fails the first is undone.
 # Named gap: Windows cannot swap a directory in one call, so a real directory replaced by a
