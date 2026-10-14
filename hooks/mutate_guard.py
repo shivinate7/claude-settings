@@ -194,10 +194,14 @@ MUTATIONS = [
      'worktree prune: a stale record asks, never denies'),
     ("worktree-prune: never asks, so a dropped record is silent",
      '        if subcommand == "worktree-prune":\n'
-     '            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)',
+     '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")',
      '        if False:\n'
-     '            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)', "guard",
+     '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
      'worktree prune: a stale record asks, never denies'),
+    ("ask-alone: a chained ask step asks instead of denying",
+     '    if sum(1 for segment in split_segments(stripped) if segment.strip()) > 1:',
+     '    if False:', "guard",
+     'ask-alone: the incident, prune then worktree add then grep, denies and names the prune'),
     ("worktree-prune: the call's own -n no longer reads as a pure read",
      '                if any(a in ("-n", "--dry-run") for a in args[1:]):\n'
      '                    continue  # the call\'s own dry run is a read, never a discard',
@@ -317,8 +321,9 @@ MUTATIONS = [
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
     ("force-push: a deny names the wrong reason",
-     'PUSH_REASON if verdict == "deny" else PUSH_ASK_REASON',
-     'PUSH_ASK_REASON', "guard", 'the long force flag'),
+     'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
+     'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
+     "guard", 'the long force flag'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
