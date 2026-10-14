@@ -246,14 +246,19 @@ def segment_tokens(segment: str):
     if found is None:
         return None
     tokens = _Tokens(found)
-    if any(t[:1] == "(" or t[:2] == "$(" for t in tokens):
+    if any(_GROUP_OPEN.match(t) for t in tokens):
         tokens.quoted = _quoted_opens(segment, len(tokens))
     return tokens
 
 
+# A token that opens a subshell, a substitution, or a PowerShell block or group.
+_GROUP_OPEN = re.compile(r"[&.$@]?[({]")
+
+
 class _Tokens(list):
-    """A segment's tokens, plus `quoted`: the indexes of tokens whose opening `(` or `$(` sat inside
-    quotes, which makes it text, never a subshell. `command_indexes` reads it."""
+    """A segment's tokens, plus `quoted`: the indexes of tokens whose opening `(`, `$(` or `{` sat
+    inside quotes, which makes it text, never a subshell or a script block. `command_indexes` and
+    the git-env PowerShell reader read it."""
     quoted = frozenset()
 
 

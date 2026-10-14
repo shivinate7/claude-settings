@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order (decision
 guard-split-by-family). Other files reach these names through `guard`.
 """
+import itertools
 import os
 import re
 import subprocess
@@ -485,27 +486,26 @@ _PS_CMDLETS = ("set-item", "si", "new-item", "ni", "set-content", "sc")
 _PS_UNSET = ("$null", "")
 
 
-_PS_BLOCK_OPEN = re.compile(r"[&.]?\{")
-_PS_BLOCK_CALLS = ("invoke-command", "icm")
+# A script block or a group that runs its body: `{`, `&{`, `.{`, `(`, `$(`, `@(`.
+_PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
 
 
 def _open_script_blocks(tokens):
-    """Split a glued script block token (`{$env:X=1}`, `&{...}`, `.{...}`) into `{` and its body,
-    where a block can stand: first in the statement, after `&`, `.` or `-ScriptBlock`, or as an
-    argument of Invoke-Command. A `{` token inside quoted text, one argument of another command,
-    is left whole."""
-    start = _skip_assignments_and_keywords(tokens)
-    caller = basename(tokens[start]).lower() if start < len(tokens) else ""
+    """Split each glued script block or paren group (`{$env:X=1}`, `&{...}`, `($env:X=1)`) into
+    its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
+    `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
+    stays whole. Known ceiling: an unquoted block passed as a plain argument (`Write-Host {...}`)
+    is read as code too, a false deny, the safe side."""
+    quoted = getattr(tokens, "quoted", ())
     out = []
     for i, tok in enumerate(tokens):
-        opens = _PS_BLOCK_OPEN.match(tok)
-        before = tokens[i - 1].lower() if i else ""
-        if (opens and len(tok) > opens.end() and (
-                i <= start or before in ("&", ".", "-scriptblock")
-                or (caller in _PS_BLOCK_CALLS and i > start))):
-            out += ["{", tok[opens.end():].rstrip("}")]
-        else:
+        if i in quoted:
             out.append(tok)
+            continue
+        while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
+            out.append(opens.group(0)[-1])
+            tok = tok[opens.end():].rstrip("})")
+        out.append(tok)
     return out
 
 
@@ -606,8 +606,11 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
         if hit:
             return hit
     elif watch is GIT_ENV_WATCH and word == "export" and any(
-            re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", t) for t in rest):
-        pass   # `export -n NAME` takes the name OUT of the environment
+            re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", t) for t in itertools.takewhile(
+                lambda t: t.startswith("-") and t != "--", rest)):
+        # `export -n NAME` takes the name OUT of the environment. Only a leading option counts:
+        # export stops reading options at its first name, so `export GIT_DIR=x -n` still sets.
+        pass
     elif word in ASSIGNING_BUILTINS and any(_assigned_var(t, watch) for t in rest):
         return word + " " + next(_assigned_var(t, watch) for t in rest if _assigned_var(t, watch))
     elif watch is GIT_ENV_WATCH and word in ("setx", "setx.exe") and any(
@@ -639,6 +642,11 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
     if script is None:
         script = npx_script or (" ".join(rest) if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
+        if word in PLAYWRIGHT_PS_SHELLS and POWERSHELL_CALL[0]:
+            # the outer PowerShell takes its backtick escapes (`` `$env:X ``) before pwsh runs the
+            # script. Known ceiling: a backtick in outer single quotes stays literal; dropping it
+            # there too can only cause a false deny.
+            script = re.sub(r"`(.)", r"\1", script)
     for segment in split_segments(script) if script else ():
         hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS,
                                   install=install, watch=watch)
@@ -722,10 +730,16 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
     """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE. Each command
     substitution (`$(...)`, backticks, in double quotes too) is judged as a command of its own,
     through the one reader in guard_env; one nested past its depth bound is refused."""
-    found, too_deep = _substitutions(stripped)
+    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
     texts = [text for text, _in_message in found]
     if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
         texts = [stripped]
+    # An UNQUOTED heredoc body runs its substitutions; the body text around them is data. A quoted
+    # delimiter (`<<'EOF'`) runs nothing. The same read as env_heredoc_refusal; a body nested too
+    # deep is refused there. KNOWN LIMIT, shared with that rule: `_substitutions` reads a `'` in the
+    # body as a quote, where bash reads it as text, so `'$(...)'` in a body is not judged.
+    texts = [text for quote, body, _ in _split_heredocs(raw)[1] if not quote
+             for text, _in_message in _substitutions(body)[0][:-1]] + texts   # command stays last
     for text in texts:
         matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
         if matched:
