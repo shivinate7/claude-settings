@@ -366,7 +366,7 @@ def env_heredoc_refusal(raw: str):
     unquoted body still runs its `$(...)`, backticks and `<(...)`, so those are judged. A quoted
     delimiter (`<<'EOF'`) makes the body text, and it stays dropped.
     """
-    for quote, body in _split_heredocs(raw)[1]:
+    for quote, body, _ in _split_heredocs(raw)[1]:
         if not quote:
             refusal = env_refusal(body, subs_only=True)
             if refusal[0]:

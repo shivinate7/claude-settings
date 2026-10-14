@@ -2240,6 +2240,60 @@ sh("work-tree: the spaced form is read the same way",
    VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
    cwd=SUBJCLEAN)
 
+# ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
+# or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
+# header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
+# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
+# PINNED cases already deny or allow, and a fix must keep them so.
+for _name, _command in (
+    ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
+    ("a glued subshell before stash", "(" + VCS + " stash push -u -m lane)"),
+    ("a dollar paren before stash", "$(" + VCS + " stash push -u -m lane)"),
+    ("a dollar paren inside echo before reset", "echo $(" + VCS + " reset --hard origin/main)"),
+    ("a here-string header before reset", "cat <<<word\n" + VCS + " reset --hard origin/main"),
+    ("a here-string header before stash", "cat <<<word\n" + VCS + " stash push -u -m lane"),
+    ("a quoted header before reset", 'echo "<<EOF"\n' + VCS + " reset --hard origin/main"),
+    ("a single-quoted header before stash", "echo '<<X'\n" + VCS + " stash push -u -m lane"),
+    ("a comment opener in quotes before a quoted header",
+     'echo "# <<EOF"\n' + VCS + " reset --hard origin/main"),
+    ("a commented header before reset", "# note <<EOF\n" + VCS + " reset --hard origin/main"),
+    ("a multi-line quoted text holding a header before reset",
+     'echo "first\n<<EOF"\n' + VCS + " reset --hard origin/main"),
+):
+    sh("guard-command-position: %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag", "env -u X " + VCS + " reset --hard origin/main"),
+    ("a nice value flag", "nice -n 5 " + VCS + " reset --hard origin/main"),
+    ("a sudo value flag", "sudo -u root " + VCS + " reset --hard origin/main"),
+    ("an xargs value flag", "xargs -n 1 " + VCS + " stash push -u -m lane"),
+    ("time -p", "time -p " + VCS + " reset --hard origin/main"),
+    ("exec", "exec " + VCS + " reset --hard origin/main"),
+    ("builtin exec", "builtin exec " + VCS + " reset --hard origin/main"),
+    ("a leading bang", "! " + VCS + " reset --hard origin/main"),
+    ("a spaced subshell", "( " + VCS + " reset --hard origin/main )"),
+    ("a brace group", "{ " + VCS + " stash push -u -m lane; }"),
+    ("an assignment prefix", "FOO=1 " + VCS + " reset --hard origin/main"),
+    ("a heredoc body, then a reset after its delimiter",
+     "cat <<EOF\n" + VCS + " reset --hard origin/main\nEOF\n" + VCS + " reset --hard origin/main"),
+    ("a comment opener in quotes before a reset", 'echo "# note"; ' + VCS + " reset --hard origin/main"),
+    ("a lone apostrophe on the line before a reset", "echo don't\n" + VCS + " reset --hard origin/main"),
+    ("a multi-line quoted text before a reset", 'echo "first\nline"\n' + VCS + " reset --hard origin/main"),
+):
+    sh("guard-command-position: pinned, %s denies" % _name, _command, "deny", "shared-tree",
+       cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag before status", "env -u X " + VCS + " status"),
+    ("a nice value flag before status", "nice -n 5 " + VCS + " status"),
+    ("a sudo value flag before status", "sudo -u root " + VCS + " status"),
+    ("a glued subshell around status", "(" + VCS + " status)"),
+    ("a dollar paren around status", "echo $(" + VCS + " status)"),
+    ("a heredoc body that names a reset, then status",
+     "cat <<EOF\n" + VCS + " reset --hard origin/main\nEOF\n" + VCS + " status"),
+    ("a multi-line quoted text, then status", 'echo "first\nline"\n' + VCS + " status"),
+    ("a lone apostrophe on the line before status", "echo don't\n" + VCS + " status"),
+):
+    sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
 
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
@@ -4213,6 +4267,204 @@ sh("wsl: a test path whose bracket glob expands to ..",
 sh("wsl: a test path whose dot-led glob expands to ..",
    "wsl -e node --test .*/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 
+# ---- guard-command-position (lane). A refused WSL call hides from the allow list in these ways:
+# a command-position form the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued
+# `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
+# `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
+# that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
+# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
+# refuse or allow, and a fix must keep them so.
+for _name, _command in (
+    ("exec", "exec wsl --shutdown"),
+    ("builtin exec", "builtin exec wsl --shutdown"),
+    ("a leading bang", "! wsl --shutdown"),
+    ("a dollar paren", "$(wsl --shutdown)"),
+    ("a dollar paren inside echo", "echo $(wsl --shutdown)"),
+    ("a glued subshell", "(wsl --shutdown)"),
+    ("cmd /c", "cmd /c wsl --shutdown"),
+    ("bash -c with the call in quotes", 'bash -c "wsl --shutdown"'),
+    ("exec with -a", "exec -a x wsl --shutdown"),
+    ("exec with a refused shell form", "exec wsl -e bash -c ls"),
+    ("a nice value flag", "nice -n 5 wsl --shutdown"),
+    ("a sudo value flag", "sudo -u root wsl --shutdown"),
+    ("an env value flag", "env -u X wsl --shutdown"),
+    ("an xargs value flag", "xargs -n 1 wsl --shutdown"),
+    ("a time format flag", '/usr/bin/time -f "%e" wsl --shutdown'),
+    ("a here-string header", "cat <<<word\nwsl --shutdown"),
+    ("a quoted header", 'echo "<<EOF"\nwsl --shutdown'),
+    ("a commented header", "# note <<EOF\nwsl --shutdown"),
+    ("a comment opener in quotes before exec", 'echo "# note"; exec wsl --shutdown'),
+    ("a lone apostrophe in text before a value flag", "echo don't; nice -n 5 wsl --shutdown"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("an ampersand call", "& wsl --shutdown"),
+    ("iex with double quotes", 'iex "wsl --shutdown"'),
+    ("iex with single quotes", "iex 'wsl --shutdown'"),
+):
+    sh("guard-command-position: wsl PowerShell %s denies" % _name, _command, "deny",
+       rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+for _name, _command in (
+    ("env with a WSL prefix", "env X=1 wsl --shutdown"),
+    ("command", "command wsl --shutdown"),
+    ("nice", "nice wsl --shutdown"),
+    ("timeout", "timeout 5 wsl --shutdown"),
+    ("sudo", "sudo wsl --shutdown"),
+    ("xargs", "xargs wsl --shutdown"),
+    ("time", "time wsl --shutdown"),
+    ("time -p", "time -p wsl --shutdown"),
+    ("doas", "doas wsl --shutdown"),
+    ("a spaced subshell", "( wsl --shutdown )"),
+    ("a brace group", "{ wsl --shutdown; }"),
+    ("an if block", "if true; then wsl --shutdown; fi"),
+    ("two env wrappers", "env X=1 env Y=2 wsl --shutdown"),
+    ("a lone apostrophe on the line before a call", "echo don't\nwsl --shutdown"),
+):
+    sh("guard-command-position: wsl pinned, %s denies" % _name, _command, "deny",
+       rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag", "env -u X wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a nice value flag", "nice -n 5 wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a sudo value flag", "sudo -u root wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("exec", "exec wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a glued subshell", "(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    ("a dollar paren", "echo $(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    ("cmd /c", "cmd /c wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("bash -c with the allowed call in quotes",
+     'bash -c "wsl -e node --test mods/plain-diff/plain-diff.test.mjs"'),
+    ("a heredoc body that names the refused call", "cat <<'EOF'\nwsl --shutdown\nEOF"),
+    ("a comment opener in quotes", 'echo "# wsl --shutdown"'),
+):
+    sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
+
+# ---- guard-command-position, review round 1 (lane). Each RED case below is a hole on 707f9dd.
+# A real quote that opens after a letter (`sed -e's/a/b/'`, `cut -d't'`) or closes after one
+# (`x'd'`) is read as a contraction, so the call after it is hidden. A quoted `(wsl` is text, and
+# must allow. A long value flag (`--unset`, `--user`, `--adjustment`, `--max-args`) and the short
+# value flags `-S`, `-P`, `-h` move the verb slot onto the value, as `-u` and `-n` already do.
+# `$( )` outside wsl is a named gap, not covered here.
+for _name, _command in (
+    ("a quote opened after e in a sed flag", "sed -e's/a/b/' f; wsl --shutdown"),
+    ("a quote opened after t in a cut flag", "cut -d't' f; wsl --shutdown"),
+    ("a quote closed after x", "echo x'd'; wsl --shutdown"),
+    ("env with a long unset flag", "env --unset X wsl"),
+    ("sudo with a long user flag", "sudo --user root wsl"),
+    ("nice with a long adjustment flag", "nice --adjustment 5 wsl"),
+    ("xargs with a long max-args flag", "xargs --max-args 1 wsl"),
+    ("env -S with the call in one string", "env -S 'wsl --shutdown'"),
+    ("env -P with a path before the call", "env -P /bin wsl"),
+    ("sudo -h with a host before the call", "sudo -h host wsl"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("a quoted run with a semicolon after a letter", "echo foo'd; X'"),
+    ("a quoted glued subshell to grep", "grep -r '(wsl' ."),
+):
+    sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
+
+# ---- guard-command-position, review round 2 (lane). Each RED case below is a hole on 8b6813a.
+# Item 1 is a regression: main denies these, and 8b6813a allows them. A contraction (`a's b'`) is
+# read as a contraction, so the real quote after it is not seen, and the call after that quote is
+# hidden. `sed -e's;a;b;'` holds a real quote, and the call after it must deny. Item 3: a short flag
+# bundled with a value flag (`-Eu`, `-iu`, `-rn`, `-iS`) moves the verb slot onto the value, as a
+# lone `-u` or `-n` does. Item 4 is a false alarm: `env -S` named as echo text is not a wrapper.
+# The pins keep a contraction followed by a real quote in view of the call after it, straight or
+# curly. `$( )` inside a token is known gap 6, and is not covered here.
+for _sep, _sep_name in ((";", "a semicolon"), (" && ", "and-and"), (" | ", "a pipe")):
+    for _name, _command, _rule in (
+        ("a contraction before pkill", "echo a's b'" + _sep + "pkill foo", "machine-wide-kill"),
+        ("a sed quote before pkill", "sed -e's;a;b;' f" + _sep + "pkill foo", "machine-wide-kill"),
+        ("a contraction before wsl", "echo a's b'" + _sep + "wsl --shutdown", WSL_RULE),
+    ):
+        sh("guard-command-position: regression, %s, %s denies" % (_name, _sep_name), _command,
+           "deny", rule=_rule, cwd=NOGIT)
+for _name, _command in (
+    ("sudo with bundled -Eu", "sudo -Eu root wsl --shutdown"),
+    ("sudo with bundled -iu", "sudo -iu root wsl --shutdown"),
+    ("xargs with bundled -rn", "xargs -rn 1 wsl --shutdown"),
+    ("env with bundled -iu", "env -iu X wsl --shutdown"),
+    ("env with bundled -iS", "env -iS 'wsl --shutdown'"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("guard-command-position: env -S named as echo text allows", "echo env -S 'wsl x'", "allow",
+   cwd=NOGIT)
+for _name, _command in (
+    ("a straight apostrophe before a semicolon", "echo it's; wsl --shutdown"),
+    ("a curly apostrophe before a semicolon", "echo it’s; wsl --shutdown"),
+    ("a straight apostrophe before a real quote", "echo it's 'x'; wsl --shutdown"),
+    ("a curly apostrophe before a real quote", "echo it’s 'x'; wsl --shutdown"),
+):
+    sh("guard-command-position: contraction pin, %s, wsl denies" % _name, _command, "deny",
+       rule=WSL_RULE, cwd=NOGIT)
+
+
+# ---- guard-command-position, review round 3 (lane gcp-quote-fix). Each RED case below is a hole
+# on 335c4a9, and origin/main denies it. is_contraction counted every later `'`, so a later
+# apostrophe (`don't`, `"it's"`) paired with the contraction's own `'`, and the contraction read
+# hid the refused call after it. The first two groups must deny. The scanner group holds comment
+# openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
+# pins keep a lone apostrophe, and a quoted one, from hiding a later call that must stay allowed.
+for _name, _command, _rule in (
+    ("a contraction, a quoted apostrophe, then pkill", "echo a's b'; pkill foo; echo \"it's\"",
+     "machine-wide-kill"),
+    ("a contraction, a lone apostrophe, then pkill", "echo a's b'; pkill foo; echo don't",
+     "machine-wide-kill"),
+    ("a sed quote, a lone apostrophe, then pkill", "sed -e's;a;b;' f; pkill foo; echo don't",
+     "machine-wide-kill"),
+    ("a contraction, a quoted apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo \"it's\"",
+     WSL_RULE),
+    ("a contraction, a lone apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo don't",
+     WSL_RULE),
+    ("a sed quote, a lone apostrophe, then wsl", "sed -e's;a;b;' f; wsl --shutdown; echo don't",
+     WSL_RULE),
+    ("a contraction, a hash in the quote, then pkill", "echo a's # b'; pkill foo",
+     "machine-wide-kill"),
+    ("a contraction, a double slash in the quote, then wsl", "echo a's // b'; wsl --shutdown",
+     WSL_RULE),
+    ("a contraction, a slash-star in the quote, then pkill", "echo a's /* b'; pkill foo",
+     "machine-wide-kill"),
+    ("a contraction and a quote, then pkill on the next line",
+     "echo a's b'\npkill foo\necho \"it's\"", "machine-wide-kill"),
+    ("a lone apostrophe, an open paren, then pkill", "echo don't (x; pkill foo",
+     "machine-wide-kill"),
+):
+    sh("guard-command-position: regression, %s, denies" % _name, _command, "deny", rule=_rule,
+       cwd=NOGIT)
+for _name, _command in (
+    ("a lone apostrophe, a quoted apostrophe, then ls", "echo don't; echo \"it's\"; ls"),
+    ("a contraction in plain text", "echo it's fine"),
+):
+    sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
+
+# ---- guard-command-position, round 2 bypass (lane gcp-quote-fix). The first three cases are RED on
+# 39160ee and deny on 103a976. The apostrophe in `don't` opens a single quote that closes inside
+# the double-quoted run, so the line break after it is a real separator and `pkill foo` runs in
+# bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way. The
+# heredoc case is RED on 39160ee and also allows on 103a976: `it's` opens a quote that closes on
+# the line below, so `pkill foo` runs there, and it must deny.
+for _name, _command in (
+    ("a lone apostrophe in a double-quoted run", "echo don't \" don't \npkill foo\n \""),
+    ("a lone apostrophe closing a double-quoted run", "echo don't \" '\npkill foo\n \""),
+    ("an apostrophe after x closing a double-quoted run", "echo don't \" x'\npkill foo\n \""),
+    ("an apostrophe before a heredoc, closed on the next line",
+     "echo it's <<EOF\n'; pkill foo\nEOF"),
+):
+    sh("guard-command-position: round 2 bypass, %s, then pkill on the next line, denies" % _name,
+       _command, "deny", rule="machine-wide-kill", cwd=NOGIT)
+
+# ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The RED case is
+# text `env -S` before the real wrapper: it hides the call after `$(`. It is RED on 1633efa and
+# GREEN on 335c4a9. The two cases after it are PINS: each denies on 1633efa and 335c4a9, and a
+# fix must keep them so.
+sh("guard-command-position: wsl env -S text before a dollar-paren env -S denies",
+   "echo env -S x $(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
+   "echo $(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
+   "(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
@@ -5059,6 +5311,15 @@ for _cmd in (
        "deny", "env-file", cwd=NOGIT)
 
 
+# ---- guard-command-position, review round 1 (lane). Two heredoc headers on one line: the first
+# body ends at its delimiter `A`, and the second body follows that line and ends at `B`.
+# The export is in the second body, which `cat >>` writes into the shell rc file, so the guard
+# must deny. A header read that strips the lines after it hides this write (RED on 707f9dd).
+sh("guard-command-position: playwright, two heredoc headers on one line write the export",
+   "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
@@ -5538,6 +5799,108 @@ def cite_unread_folders_case():
         return False, "want a deny that says could not be read, got %r" % result.stdout[:120]
     return True, "deny: the -F file is unread, and the record folders are unread too"
 
+
+# ---- guard-command-position (lane). A lane number hides from the message scan in these ways: a
+# wrapper the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued `(git`, and value
+# flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
+# quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
+# interpreter-fed body, which shifts the header count so the commit reads another body; and a case
+# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
+# cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
+for _name, _command in (
+    ("exec", "exec " + VCS + ' commit -m "fix (N20)"'),
+    ("builtin exec", "builtin exec " + VCS + ' commit -m "fix (N20)"'),
+    ("a leading bang", "! " + VCS + ' commit -m "fix (N20)"'),
+    ("a dollar paren", "$(" + VCS + ' commit -m "fix (N20)")'),
+    ("a glued subshell", "(" + VCS + ' commit -m "fix (N20)")'),
+    ("a nice value flag", "nice -n 5 " + VCS + ' commit -m "fix (N20)"'),
+    ("a sudo value flag", "sudo -u root " + VCS + ' commit -m "fix (N20)"'),
+    ("an env value flag", "env -u X " + VCS + ' commit -m "fix (N20)"'),
+    ("an xargs value flag", "xargs -n 1 " + VCS + ' commit -m "fix (N20)"'),
+    ("a glued subshell with a heredoc commit",
+     "(" + VCS + " commit -F - <<'B'\nLane N20 lands\nB\n)"),
+    ("a nice value flag with a heredoc commit",
+     "nice -n 5 " + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a nice value flag with a PR create",
+     "nice -n 5 gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("a sudo value flag with a PR create",
+     "sudo -u root gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("an env value flag with a PR create",
+     "env -u X gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("a here-string header", "cat <<<word\n" + VCS + ' commit -m "fix (N20)"'),
+    ("a quoted header", 'echo "<<EOF"\n' + VCS + ' commit -m "fix (N20)"'),
+    ("a commented header", "# note <<EOF\n" + VCS + ' commit -m "fix (N20)"'),
+    ("a comment opener in quotes before a heredoc commit",
+     'echo "# <<EOF"\n' + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an interpreter body with a << word, then a heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an interpreter -c body with a << word, then a heredoc commit",
+     "python3 -c 'print(1)' <<EOF\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("two interpreter bodies with << words, then a heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\npython3 - <<'EOF'\nz = 2 << w\nEOF\n"
+     + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a case pattern paren in an open dollar paren, then an interpreter body with a << word",
+     "echo $(case a in (a) echo ok;; esac\npython3 - <<'EOF'\nx = 1 << y\nEOF\n"
+     + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a lone apostrophe on the line before a heredoc commit",
+     "echo don't\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a lone apostrophe on the line before a -m commit",
+     "echo don't\n" + VCS + ' commit -m "fix (N20)"'),
+):
+    sh("guard-command-position: lane %s denies" % _name, _command, "deny", "lane-by-slug",
+       cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("command", "command " + VCS + ' commit -m "fix (N20)"'),
+    ("nice", "nice " + VCS + ' commit -m "fix (N20)"'),
+    ("timeout", "timeout 5 " + VCS + ' commit -m "fix (N20)"'),
+    ("sudo", "sudo " + VCS + ' commit -m "fix (N20)"'),
+    ("xargs", "xargs " + VCS + ' commit -m "fix (N20)"'),
+    ("time", "time " + VCS + ' commit -m "fix (N20)"'),
+    ("nohup", "nohup " + VCS + ' commit -m "fix (N20)"'),
+    ("doas", "doas " + VCS + ' commit -m "fix (N20)"'),
+    ("an env prefix", "env X=1 " + VCS + ' commit -m "fix (N20)"'),
+    ("a spaced subshell", "( " + VCS + ' commit -m "fix (N20)" )'),
+    ("a brace group", "{ " + VCS + ' commit -m "fix (N20)"; }'),
+    ("an interpreter body with a << word, then a lane -m commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + ' commit -m "fix (N20)"'),
+    ("an interpreter body with a shift operator, then a heredoc lane commit",
+     "python3 - <<'EOF'\nprint(1 << 2)\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a plain heredoc body with a << word, then a heredoc lane commit",
+     "cat <<'A'\nx = 1 << y\nA\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a closed case pattern paren in a dollar paren, then a heredoc lane commit",
+     "echo $(case a in (a) echo ok;; esac)\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an open case pattern paren in a dollar paren, then a heredoc lane commit",
+     "echo $(case a in (a) echo ok;; esac\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a multi-line quoted text, then a heredoc lane commit",
+     'echo "first\nline"\n' + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+):
+    sh("guard-command-position: lane pinned, %s denies" % _name, _command, "deny",
+       "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("an env value flag with a clean commit", "env -u X " + VCS + ' commit -m "fix guard parsing"'),
+    ("a nice value flag with a clean commit", "nice -n 5 " + VCS + ' commit -m "fix guard parsing"'),
+    ("a sudo value flag with a clean PR create", "sudo -u root gh pr create --draft -t 'fix guard' -b ok"),
+    ("a heredoc body that names a lane", "cat <<'EOF'\n" + VCS + ' commit -m "fix (N20)"\nEOF'),
+    ("a lone apostrophe on the line before a clean commit",
+     "echo don't\n" + VCS + ' commit -m "fix guard"'),
+    ("a quoted lane in echo", 'echo "lane N20 lands"'),
+    ("a comment opener in quotes before a clean commit",
+     'echo "# N20"\n' + VCS + ' commit -m "fix guard parsing"'),
+    ("a glued subshell around a clean commit", "(" + VCS + ' commit -m "fix guard parsing")'),
+    ("an interpreter body with a << word, then a clean heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nclean\nB"),
+):
+    sh("guard-command-position: lane pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT,
+       config=MERGECFG)
+
+# heredoc_offsets reads the stripped text of a plain command, which keeps no bodies, so it must not
+# skip the line after a header. Without its bodies_kept flag, a commit that is the third of three
+# plain heredocs is counted one header short, and reads the second body, not its own. Pinned: the
+# lane is named in the third body, so the lane rule must deny. The first and second positions do
+# not expose this, so they add nothing here.
+sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
+   "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
+   "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
@@ -8836,6 +9199,60 @@ def rm_var_64000_case():
 
 LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
                          rm_var_64000_case))
+
+
+# gcp-quote-fix, round 2 speed. A run of apostrophes must be judged in well under the budget.
+# The bound is the CPU time of judge, 1 s, generous on purpose: no wall-clock bound, which flakes
+# on macOS runners. The judge runs in a child process, so a slow judge stops at a 30 s kill guard
+# and fails the case, instead of hanging the suite. The kill guard only stops a hang; it is not the
+# bound.
+APOSTROPHE_CHILD = r'''
+import contextlib, importlib.util, io, json, os, sys, time
+hooks = sys.argv[1]
+sys.path.insert(0, hooks)
+spec = importlib.util.spec_from_file_location("guard_under_test", os.path.join(hooks, "guard.py"))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+payload = json.load(sys.stdin)
+printed = io.StringIO()
+started = time.process_time()
+try:
+    with contextlib.redirect_stdout(printed):
+        mod.judge(payload)
+except SystemExit:
+    pass
+print(json.dumps({"cpu": time.process_time() - started, "out": printed.getvalue()}))
+'''
+
+
+def _apostrophe_speed_case(command):
+    def check():
+        materialize(NOGIT)
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT}
+        try:
+            done = subprocess.run(
+                [sys.executable, "-c", APOSTROPHE_CHILD, os.path.dirname(GUARD)],
+                input=json.dumps(payload), capture_output=True, text=True, timeout=30,
+                env=dict(os.environ, CLAUDE_CONFIG_DIR=CFG),
+            )
+        except subprocess.TimeoutExpired:
+            return False, "not judged within 30 s, killed; the bound is 1 s of CPU"
+        reply = json.loads(done.stdout.strip())
+        took = reply["cpu"]
+        if took >= 1.0:
+            return False, "judged in %.2f s CPU, not under 1 s" % took
+        got = "allow" if not reply["out"].strip() else \
+            json.loads(reply["out"])["hookSpecificOutput"]["permissionDecision"]
+        return True, "judged %s in %.2f s CPU, under 1 s" % (got, took)
+    return check
+
+
+for _name, _command in (
+    ("a run of lone apostrophes", "echo " + "don't " * 60),
+    ("a run of contraction pairs", "a's b'; " * 50),
+):
+    LOG_CHECKS_EXTRA.append(("guard-command-position: speed, %s, judged in under 1 s CPU" % _name,
+                             _apostrophe_speed_case(_command)))
 
 
 # Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
