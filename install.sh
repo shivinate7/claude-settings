@@ -201,6 +201,30 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
+# put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
+# DEST is never absent or half-written (a gate hook reads it at any moment). In guard.py and
+# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its
+# post-merge hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other
+# line is touched. STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh
+# cannot share that code); an optional CR before the line end is kept. A failure leaves DEST as it
+# was, is printed, and makes the run exit 1; the caller must not count the file as landed.
+INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
+STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
+STAMP_CR="$(printf '\r')"
+INSTALL_FAILED=0
+put_file() {
+  t="$2.cs-new"
+  case "$1" in
+    */guard.py|*/guard_*.py)
+      sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
+    *) cp "$1" "$t" ;;
+  esac && mv -f "$t" "$2" && return 0
+  rm -f "$t"
+  log "could not replace $2; left as it was"
+  INSTALL_FAILED=1
+  return 1
+}
+
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
 # agents/: one file per role (builder, reviewer). lint/: the STE linter and its hook gate.
 # Local: per-file symlink. Cloud: copy.
@@ -232,7 +256,7 @@ land_dir() {
     [ -f "$f" ] || continue
     DEST="$DEST_DIR/$(basename "$f")"
     if [ "$CLOUD" = 1 ]; then
-      cp "$f" "$DEST"
+      put_file "$f" "$DEST" || continue
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
       # A real file at DEST (not a symlink): on the first local install ever, it is a
@@ -410,4 +434,4 @@ fi
 # definition.
 [ "$CLOUD" = 1 ] || : > "$COPY_MARKER"
 
-exit 0
+exit "$INSTALL_FAILED"

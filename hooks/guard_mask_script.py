@@ -129,3 +129,7 @@ def mask_script(script: str):
             out.append(ch)
             i += 1
     return "".join(out), strings
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"
