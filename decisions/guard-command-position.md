@@ -13,7 +13,7 @@ One resolver finds the command word for every rule. It lives in `hooks/guard_cor
 - It reads each wrapper's flags getopt-style against the one table `WRAPPER_VALUE_FLAGS`. A short-flag cluster such as `sudo -Eu root` or `xargs -rn 1` skips its value.
 - `nested_script` reads the script that `sh -c`, `cmd /c`, `pwsh -c`, `iex` and `env -S` run. `env -S` counts only when `env` is a wrapper of the segment.
 - `heredoc_heads` is the one quote-aware reader of heredoc headers.
-- A contraction (`don't`) opens no quote only when the rest of the text holds an even count of `'`. Else the `'` is a quote, as the shell and main read it. So `echo a's b'; pkill foo` still shows its second command.
+- `split_segments` reads quotes as bash does, so each unquoted `'` opens a quote. Only when that reading ends inside an open quote does a second pass read each contraction-shaped `'` (`don't`) as text. The guard judges the segments of both readings. Both passes are linear. So `echo a's b'; pkill foo` and `echo don't (x; pkill foo` show their second command.
 
 ## Why
 
@@ -29,6 +29,8 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 - Only the WSL rule reads the script of `env -S 'cmd'`. The impeccable-review-only, draft-pr, detached-launch and rm-var-unguarded rules do not see inside it. Debt: env-split-string-wsl-only.
 - The wrapper and value-flag lists are closed. An unlisted wrapper, such as `stdbuf` or `chrt`, or an unlisted value flag hides the command word. Debt: guard-wrapper-lists-closed.
 - The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. Debt: guard-split-ignores-backslash.
+- The second reading can show a `cd` that bash never runs, as in `git restore f.txt` then `echo don't; cd <lane>`. The run-folder walk then judges the restore in the lane. Debt: guard-cd-walk-extra-reading.
+- A command of about 6,000 words with an odd count of `'` takes about 18 s, near the 20 s hook timeout. Most of the cost is the per-word path read. Debt: guard-long-command-near-timeout.
 
 Kind: process
 Home: hooks/guard_core.py
