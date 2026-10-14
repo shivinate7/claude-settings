@@ -101,8 +101,9 @@ Why the cap: it needs no knowledge of who booted a device.
   Each step has its own timeout: bootstatus 90 s, screenshot 15 s, shutdown 30 s, boot
   60 s. For one device the worst case is 480 s: the list read 60 s, two launchd_sim reads
   of 60 s each, one check, one retry and a second check. The PostToolUse entry in
-  `settings.json` allows 600 s. An MCP `launch` whose `device` and `udid` name two
-  devices can pass 600 s. The hook is then killed after the record lines are written, and
+  `settings.json` allows 600 s. A call that boots two or more devices, such as
+  `simctl boot A && simctl boot B` or an MCP `launch` whose `device` and `udid` differ,
+  can pass 600 s. The hook is then killed after the record lines are written, and
   the session gets no message. A Bash call is read only
   when its text names a simulator tool as a whole word, such as simctl, xcodebuild or xcrun.
   An MCP call is read only when its action is `launch`. Bandaid: a boot behind a script
@@ -124,7 +125,11 @@ Why the cap: it needs no knowledge of who booted a device.
   the device type, not the runtime. The record hook records nothing for `OS=latest` on such
   a name, so the sweep keeps that device.
   Ruling 5 checks only `simctl boot` and MCP `launch`. An `xcodebuild -destination` boot
-  is not checked. A broken device is left booted until the sweep stops it.
+  is not checked. Nor is a boot by `simctl bootstatus -b`, or a `simctl boot` with a flag
+  before the device. A broken device is left booted until the sweep stops it. When no
+  single launchd_sim is readable after the retry, no second line goes in, and the newest
+  line keeps the old pid. The device is then most likely shut down, so the sweep does not
+  judge it.
 
 ## Measured, 2026-10-10
 
