@@ -64,8 +64,8 @@ Owner rulings, 2026-10-08:
   preview or description) does not count.
 - Owner ruling, 2026-10-13: the judge reads the conversation text (owner messages, assistant
   text, relayed cross-session messages, each labeled) from the owner's 3rd-last message up to
-  the question, searching back up to 16 MiB; never tool calls, tool results, task notices or
-  reminders. Oldest span text is cut to a budget; the owner messages stay whole. Fewer than
+  the question. It searches back up to 16 MiB. It reads no tool calls, tool results, task
+  notices or reminders. Oldest span text is cut to a budget; the owner messages stay whole. Fewer than
   3 owner messages: the span starts at the oldest found. None: the check did not run.
   The goal is read from owner records only. The owner's words are user records with `origin.kind` "human", plus the owner's answers
   in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
