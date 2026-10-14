@@ -13,8 +13,8 @@ The state comes from `claude agents --json`, read by mods/session-board/hooks/re
   The wording judge, the SendMessage prompt hook in settings.json, covers that receiver.
 
 Fail open. Any error exits 0 with one stderr line. Deny: one PreToolUse deny JSON, exit 0.
-The receiver-state.mjs path resolves through this file's real path, so it needs the symlink
-install: a copied hooks/ folder has no mods/ beside it, and every receiver reads as unseen.
+receiver-state.mjs is found in the pointer checkout (a copy install has no mods/ beside hooks/),
+else beside this file's real path (a symlink install, a worktree). Neither found reads as unseen.
 """
 import json
 import os
@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-READER = os.path.join(HERE, "..", "mods", "session-board", "hooks", "receiver-state.mjs")
+READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
 # THE TIME BUDGET. The reader allows 8 s and the model call MODEL_TIMEOUT, so the settings.json
 # PreToolUse entry for this hook carries "timeout": 45 = 8 + MODEL_TIMEOUT + 12 s margin.
@@ -35,11 +35,29 @@ MODEL_TIMEOUT = 25
 MESSAGE_MAX = 4000  # one argv element: Windows caps the command line near 32,767 characters
 
 
+def find_reader():
+    """The reader's path, or ''. The pointer checkout first (guard_pointer.pointer_checkout, the one
+    Python reader of the `@<clone>/CLAUDE.md` line the installers write), then the clone this file
+    really sits in. A copy install has only the first."""
+    roots = []
+    try:
+        from guard_pointer import pointer_checkout
+        roots.append(pointer_checkout())
+    except Exception:
+        pass
+    roots.append(os.path.join(HERE, ".."))
+    for root in roots:
+        path = os.path.join(root, *READER_PARTS) if root else ""
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
 def receiver_state(name):
-    node = shutil.which("node")
-    if not node or not os.path.isfile(READER):
+    node, reader = shutil.which("node"), find_reader()
+    if not node or not reader:
         return "unseen"
-    run = subprocess.run([node, READER, name], capture_output=True, text=True, encoding="utf-8",
+    run = subprocess.run([node, reader, name], capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=READER_TIMEOUT)
     word = run.stdout.strip()
     return word if run.returncode == 0 and word in ("busy", "idle", "waiting") else "unseen"
