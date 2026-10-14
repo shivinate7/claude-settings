@@ -138,9 +138,11 @@ def capture(raw, stamp, at=None):
             f.write(at.isoformat().encode("ascii"))
         if judge:
             try:  # the same detached-child pattern as janitor/agent_end_reap.py; the hook does not wait
-                subprocess.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
+                child = subprocess.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
                                   hook["session_id"], at.isoformat(), prompt[:MESSAGE_MAX]], stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                if os.environ.get("FEEDBACK_JUDGE_INLINE"):
+                    child.wait()  # test seam: the hook waits for the judge
             except OSError:
                 pass  # no judge: the message stays saved and capture stays open
     except (OSError, ValueError) as e:  # stderr never reaches the owner or the session: use stdout
