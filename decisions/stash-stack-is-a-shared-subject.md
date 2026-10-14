@@ -91,9 +91,9 @@ instead, which is the only half of the conflict this repository controls.
 
 ## Holes, named
 
-- An action word git adds later is read as a push, so the working tree judges it. Over a
-  clean tree it passes, even when another session's entry is on the stack. Owner
-  ruling pending.
+- An unknown stash word is judged on the tree side only. A future action that takes a
+  stack entry would pass over a clean tree, even with another session's entry on the
+  stack. Debt: `unknown-stash-word-tree-only`.
 - `git stash create` writes no stack entry and changes no tree, and it falls on
   the stack side. It is refused over a non-empty stack. This is unmeasured
   against real use, and it is a known false refusal.
