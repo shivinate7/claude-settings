@@ -26,6 +26,9 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     a tab in place of the space in `fb done`, and `fb - done`. Plain `fb done` opens nothing.
   - While closed, a prompt that starts with `fb done` or `fb: done` opens nothing, even with more
     text after it (`fb done, more text`). That text is a new message to the session, not feedback.
+  - A prompt that opens with `fb` and ends with a line `fb done` saves the note and closes capture
+    in that same prompt: no open marker remains, and the next prompt is not saved (owner ruling
+    2026-10-14).
   - While open, a prompt that starts with `fb done` or `fb: done` closes capture and is not
     captured, and neither is any text after those words (owner ruling 2026-10-14). Surrounding
     whitespace, trailing punctuation and letter case do not matter: `fb done.`, `FB done`,
@@ -1195,6 +1198,50 @@ def case_fb_done_prefix_opens_nothing_while_closed():
               and no_judge_call(cfg, before, p), p.desc())
 
 
+SAME_MSG_NOTE = "fb: the gate is too strict on Stop"
+
+
+def case_fb_done_line_at_the_end_closes_in_the_same_message():
+    """Owner ruling 2026-10-14: a message that ends with `fb done` saves the note and closes
+    capture in that same message. Incident: the marker stayed open, so the next message was saved."""
+    cfg, sid = new_cfg(), "same-msg"
+    p = capture(cfg, sid, SAME_MSG_NOTE + "\nfb done", now=at(0))
+    check("same message: hook ran", ran_central(p), p.desc())
+    check("same message: the note is saved",
+          any(SAME_MSG_NOTE in text for text in captured_texts(cfg, sid)),
+          captured_texts(cfg, sid))
+    check("same message: no open marker remains after the hook",
+          not os.path.exists(marker_of(cfg, sid)), p.desc())
+    saved = captured_texts(cfg, sid)
+    p = capture(cfg, sid, "the owner's next message, after the close", now=at(1))
+    check("next message: hook ran", ran_central(p), p.desc())
+    check("next message: not saved, since the message before closed capture",
+          bool(saved) and captured_texts(cfg, sid) == saved, captured_texts(cfg, sid))
+
+
+def case_same_message_close_keeps_the_old_controls():
+    """Controls: `fb: X` alone opens capture, `fb done` alone closes it, and `fb done` quoted
+    mid-sentence does not close it (today's rule: the close words count only at the start)."""
+    cfg, sid = new_cfg(), "same-msg-controls"
+    p = capture(cfg, sid, SAME_MSG_NOTE, now=at(0))
+    check("control opener: hook ran", ran_central(p), p.desc())
+    check("control opener: `fb: X` alone opens capture and is saved",
+          os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == [SAME_MSG_NOTE],
+          captured_texts(cfg, sid))
+    quoted = "I typed fb done by mistake, so keep this message"
+    p = capture(cfg, sid, quoted, now=at(1))
+    check("control quote: hook ran", ran_central(p), p.desc())
+    texts = [SAME_MSG_NOTE, quoted]
+    check("control quote: a mid-sentence `fb done` does not close: saved, marker stays",
+          os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == texts,
+          captured_texts(cfg, sid))
+    p = capture(cfg, sid, "fb done", now=at(2))
+    check("control closer: hook ran", ran_central(p), p.desc())
+    check("control closer: `fb done` alone closes capture and is not saved",
+          not os.path.exists(marker_of(cfg, sid))
+          and captured_texts(cfg, sid) == [SAME_MSG_NOTE, quoted], captured_texts(cfg, sid))
+
+
 def case_notices_are_never_captured():
     for label, notice in (("task-notification", NOTICE_TASK), ("system-reminder", NOTICE_REMINDER)):
         cfg, sid = new_cfg(), "notice-" + label
@@ -1389,6 +1436,8 @@ CASES = (
     case_near_miss_closers_open_nothing_while_closed,
     case_fb_done_prefix_closes_and_drops_the_rest,
     case_fb_done_prefix_opens_nothing_while_closed,
+    case_fb_done_line_at_the_end_closes_in_the_same_message,
+    case_same_message_close_keeps_the_old_controls,
     case_notices_are_never_captured,
     case_quiet_gap_closes_capture,
     case_quiet_gap_ignores_notices,
