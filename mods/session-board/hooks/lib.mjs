@@ -247,7 +247,17 @@ export function agentRows(list) {
   const state = s => (s === 'busy' ? 'working' : s === 'idle' || s === 'waiting' ? 'waiting' : 'unknown')
   return list
     .filter(r => r && typeof r === 'object' && isId(r.sessionId))
-    .map(r => ({ id: r.sessionId, repo: clean(baseName(r.cwd), 40), state: state(r.status), ask: r.status === 'waiting' }))
+    .map(r => ({ id: r.sessionId, name: typeof r.name === 'string' ? clean(r.name, 40) : '', repo: clean(baseName(r.cwd), 40), state: state(r.status), ask: r.status === 'waiting' }))
+}
+
+// The `claude agents` state of the one row named `name`: busy, idle or waiting (on a permission
+// answer). 'unseen' when no row, or more than one row, has that name, or its state is unknown.
+export function receiverState(rows, name) {
+  const bare = typeof name === 'string' ? name.replace(/ \[[^\]]*\]$/, '') : '' // ListAgents prints `name [ref]` when names clash
+  const hits = (rows ?? []).filter(r => bare && r.name === bare)
+  if (hits.length !== 1) return 'unseen'
+  const r = hits[0]
+  return r.state === 'working' ? 'busy' : r.state !== 'waiting' ? 'unseen' : r.ask ? 'waiting' : 'idle'
 }
 
 // Rows for the board: `claude agents` rows seeded first, then fresh store entries merged in by

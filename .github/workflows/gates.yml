@@ -114,6 +114,9 @@ jobs:
       - name: Reply judge fixture suite
         run: python3 hooks/test_reply_judge.py
 
+      - name: SendMessage state fixture suite
+        run: python3 hooks/test_sendmessage_state.py
+
       - name: Question outcome fixture suite
         run: python3 hooks/test_question_outcome.py
 

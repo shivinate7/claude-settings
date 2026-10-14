@@ -177,6 +177,44 @@ await test('agents json: busy is working, idle is waiting, anything else is unkn
   same(lib.parseAgentsJson(text).map(r => r.state), ['working', 'waiting', 'unknown', 'unknown'], 'states')
 })
 
+await test('agents json: a row keeps its name, so a SendMessage to a name can find its busy state', () => {
+  const [row] = lib.parseAgentsJson(JSON.stringify([{ sessionId: sid(1), cwd: '/x/app', status: 'busy', name: 'worker-a' }]))
+  same(row.name, 'worker-a', 'name from claude agents --json')
+})
+
+// ---- receiverState: the state of the one row named like a SendMessage `to`
+
+const namedRows = json => lib.parseAgentsJson(json)
+
+await test('receiver: busy, idle and waiting by name', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'b', status: 'idle' },
+    { sessionId: sid(3), cwd: '/x/c', name: 'c', status: 'waiting' },
+  ]))
+  same([lib.receiverState(rows, 'a'), lib.receiverState(rows, 'b'), lib.receiverState(rows, 'c')], ['busy', 'idle', 'waiting'], 'states')
+})
+
+await test('receiver: no row with the name is unseen', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' }]))
+  same(lib.receiverState(rows, 'zzz'), 'unseen', 'no match')
+  same(lib.receiverState(rows, ''), 'unseen', 'empty name')
+  same(lib.receiverState(null, 'a'), 'unseen', 'no rows')
+})
+
+await test('receiver: two rows with the same name are unseen, busy or not', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'a', status: 'idle' },
+  ]))
+  same(lib.receiverState(rows, 'a'), 'unseen', 'duplicate name')
+})
+
+await test('receiver: an unknown status is unseen, not busy', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'u', status: 'running' }]))
+  same(lib.receiverState(rows, 'u'), 'unseen', 'unknown status')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
