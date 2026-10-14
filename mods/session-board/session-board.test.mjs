@@ -177,6 +177,11 @@ await test('agents json: busy is working, idle is waiting, anything else is unkn
   same(lib.parseAgentsJson(text).map(r => r.state), ['working', 'waiting', 'unknown', 'unknown'], 'states')
 })
 
+await test('agents json: a row keeps its name, so a SendMessage to a name can find its busy state', () => {
+  const [row] = lib.parseAgentsJson(JSON.stringify([{ sessionId: sid(1), cwd: '/x/app', status: 'busy', name: 'worker-a' }]))
+  same(row.name, 'worker-a', 'name from claude agents --json')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
