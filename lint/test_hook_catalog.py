@@ -17,9 +17,14 @@ Interface the generator must meet. The builder builds to this.
   Exit 2: the path of an input it cannot read (settings.json, the model table, a file it names).
 - Sources, read from the root:
   - settings.json `hooks`: one row per registration (event, matcher, `if`, command or prompt).
-  - A command names its script as `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`. A command with no
-    script is a problem. Source: a .py docstring (ast.get_docstring), or a .sh leading comment
-    block after an optional shebang, which stops at the first other line.
+  - A command names its script as `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`. Source: a .py
+    docstring (ast.get_docstring), or a .sh leading comment block after an optional shebang, which
+    stops at the first other line. No docstring is a problem.
+  - A command that names no script is inline. Its text is the one-line value in
+    lint/hook_catalog_inline.json under its label: the event, then ` matcher=<m>` and ` if=<c>` when
+    present. Its row key is `inline: <label>`. A label with no value, an empty or multi-line value,
+    or a sidecar key that matches no inline command is a problem. A missing sidecar is a problem
+    too: exit 1, never exit 2.
   - A prompt's first sentence: text up to and including the first ". ", or up to the first
     newline, whichever comes first. An empty first sentence is a problem.
   - Enabled mods: `enabledPlugins` keys `<name>@claude-settings` set true. Source: the text
@@ -30,14 +35,15 @@ Interface the generator must meet. The builder builds to this.
   - Model and effort: the model-table row whose first cell names the script in backticks. None:
     "no model" and "n/a". A prompt hook takes its own `model` field, effort "n/a". A skill takes
     "no model". A script that calls or defines invoke_model (ast) needs its own table row.
+    An inline command takes "no model" and "n/a".
 - Page: docs/catalog.md. Header row, exactly:
   | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
   Kind: hook, judge, mod or skill. Key: the script path (hook), the first sentence (judge),
   mods/<name> (mod), skills/<name> (skill). A pipe inside a cell is written \\|.
   Event, Matcher and If are "-" when absent. Mods and skills have no event, matcher or if.
 
-Red on main: the generator and the page do not exist. Real-repo cases R1-R8 read this repo.
-Fixture cases F1-F22 run the generator on temp trees, so a generator that is silent for every
+Red on main: the generator and the page do not exist. Real-repo cases R1-R9 read this repo.
+Fixture cases F1-F24 run the generator on temp trees, so a generator that is silent for every
 input fails them. Unit cases U1-U4 pin the table and sentence helpers used here.
 
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
@@ -58,6 +64,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 GEN = os.path.join(HERE, "hook_catalog.py")
+INLINE_JSON = os.path.join(HERE, "hook_catalog_inline.json")
 PAGE = os.path.join(ROOT, "docs", "catalog.md")
 TABLE = os.path.join(ROOT, "decisions", "subagent-model-cap.md")
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
@@ -86,6 +93,11 @@ def registrations():
 def command_script(hook):
     found = CMD_PATH.search(hook.get("command", ""))
     return found.group(1) if found else None
+
+
+def inline_label(event, matcher, cond):
+    """The label lint/hook_catalog_inline.json keys an inline command by, as the generator prints it."""
+    return event + ("" if matcher == "-" else " matcher=" + matcher) + ("" if cond == "-" else " if=" + cond)
 
 
 def first_sentence(prompt):
@@ -176,6 +188,14 @@ def generator(root, *args):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+MAIN_SESSION_REFRESH = (
+    '[ -n "$CLAUDE_CODE_REMOTE" ] && exit 0; d=$(sed -n "s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p" "${CLAUDE_CONFIG_DI'
+    'R:-$HOME/.claude}/CLAUDE.md" | head -n1); case "$d" in "~"/*) d="$HOME${d#\\~}";; esac; [ -n "$d" ] &'
+    '& [ -d "$d/.git" ] && git -C "$d" pull -q --ff-only >/dev/null 2>&1; [ -f "$d/install.sh" ] && comma'
+    'nd -v bash >/dev/null 2>&1 && bash "$d/install.sh" >/dev/null 2>&1; exit 0'
+)
+
+
 # ---- real repo -------------------------------------------------------------------------------
 
 
@@ -185,8 +205,8 @@ class RealRepo(unittest.TestCase):
             self.fail("docs/catalog.md does not exist yet: the generator writes it")
         return read(PAGE)
 
-    def test_r1_every_command_hook_names_a_script_with_a_docstring(self):
-        # Red today: the SessionStart startup|resume command is inline shell with no script.
+    def test_r1_every_script_command_names_a_script_with_a_docstring(self):
+        # An inline command names no script. R1b checks its summary instead.
         problems = []
         for event, matcher, _cond, hook in registrations():
             if hook.get("type") != "command":
@@ -194,11 +214,36 @@ class RealRepo(unittest.TestCase):
             where = "%s matcher=%s" % (event, matcher)
             path = command_script(hook)
             if path is None:
-                problems.append("%s: command names no script (inline shell)" % where)
-            elif not os.path.isfile(os.path.join(ROOT, path)):
+                continue
+            if not os.path.isfile(os.path.join(ROOT, path)):
                 problems.append("%s: %s does not exist" % (where, path))
             elif path.endswith(".py") and not (ast.get_docstring(ast.parse(read(os.path.join(ROOT, path)))) or "").strip():
                 problems.append("%s: %s has no docstring" % (where, path))
+        self.assertFalse(problems, "\n".join(problems))
+
+    def test_r1b_every_inline_command_has_one_line_summary_in_the_sidecar(self):
+        labels = [inline_label(event, matcher, cond) for event, matcher, cond, hook in registrations()
+                  if hook.get("type") == "command" and command_script(hook) is None]
+        self.assertTrue(labels, "no inline command in settings.json, so the scan proves nothing: "
+                                "the SessionStart startup|resume refresh must stay inline (F1 ruling)")
+        self.assertTrue(os.path.isfile(INLINE_JSON), "lint/hook_catalog_inline.json does not exist")
+        summaries = json.loads(read(INLINE_JSON))
+        rows = {r["Key"].strip("`"): r for r in page_rows(self.page()) if r["Kind"] == "hook"}
+        problems = []
+        for label in labels:
+            text = summaries.get(label)
+            if not isinstance(text, str) or not text.strip():
+                problems.append("%s: no summary in lint/hook_catalog_inline.json" % label)
+                continue
+            if "\n" in text or text != text.strip():
+                problems.append("%s: summary is not one trimmed line" % label)
+            row = rows.get("inline: " + label)
+            if row is None:
+                problems.append("%s: no row keyed 'inline: %s'" % (label, label))
+            elif row["What it does"] != " ".join(text.split()):
+                problems.append("%s: row text %r is not the summary %r" % (label, row["What it does"], text))
+        for stray in sorted(set(summaries) - set(labels)):
+            problems.append("%s: sidecar key matches no inline command" % stray)
         self.assertFalse(problems, "\n".join(problems))
 
     def test_r2_every_prompt_judge_has_a_row_keyed_by_its_first_sentence(self):
@@ -242,8 +287,9 @@ class RealRepo(unittest.TestCase):
     def test_r5_one_row_per_registration_and_no_stale_hook_row(self):
         want = collections.Counter()
         for event, matcher, cond, hook in registrations():
-            if hook.get("type") == "command" and command_script(hook):
-                want[(command_script(hook), event, matcher, cond)] += 1
+            if hook.get("type") == "command":
+                key = command_script(hook) or "inline: " + inline_label(event, matcher, cond)
+                want[(key, event, matcher, cond)] += 1
             elif hook.get("type") == "prompt":
                 want[(first_sentence(hook.get("prompt", "")), event, matcher, cond)] += 1
         self.assertTrue(want, "no registration found, so the scan proves nothing")
@@ -276,9 +322,9 @@ class RealRepo(unittest.TestCase):
         table = table_rows()
         problems = []
         for event, matcher, cond, hook in registrations():
-            if hook.get("type") == "command" and command_script(hook):
+            if hook.get("type") == "command":
                 path = command_script(hook)
-                key = (path, event, matcher, cond)
+                key = (path or "inline: " + inline_label(event, matcher, cond), event, matcher, cond)
                 want_model, want_effort = table.get(path, ("no model", "n/a"))
             elif hook.get("type") == "prompt":
                 key = (first_sentence(hook.get("prompt", "")), event, matcher, cond)
@@ -306,6 +352,14 @@ class RealRepo(unittest.TestCase):
     def test_r8_the_ci_check_passes_on_this_repo(self):
         code, out, err = generator(None, "--check")
         self.assertEqual((code, out + err), (0, ""), out + err)
+
+    def test_r9_session_start_refresh_command_is_byte_identical_to_main(self):
+        # F1 ruling: the refresh stays inline. A move into a script gates recovery on an install.
+        # Equal as the JSON decodes, which is the exact text the harness runs.
+        commands = [hook.get("command") for event, matcher, _cond, hook in registrations()
+                    if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
+        self.assertIn(MAIN_SESSION_REFRESH, commands,
+                      "no SessionStart startup|resume command is byte-identical to the refresh on origin/main")
 
 
 # ---- fixtures: the generator on temp trees ----------------------------------------------------
@@ -516,6 +570,28 @@ class Fixtures(unittest.TestCase):
 
 
 # ---- helper cases: these pass today and pin the readers the cases above rely on ---------------
+
+    def test_f23_inline_command_with_no_summary_fails_check(self):
+        hooks = dict(CLEAN_HOOKS)
+        hooks["Notification"] = [{"hooks": [{"type": "command", "command": "echo inline-with-no-summary"}]}]
+        spec = clean()
+        spec["settings.json"] = json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        code, out, err = generator(self.tree(spec), "--check")
+        text = out + err
+        self.assertEqual(code, 1, text)
+        self.assertNotIn("Traceback", text)
+        lines = [line for line in text.splitlines() if line.startswith("Notification")]
+        self.assertTrue(any("summary" in line for line in lines), text)
+
+    def test_f24_inline_command_with_a_summary_renders_it(self):
+        hooks = dict(CLEAN_HOOKS)
+        hooks["Notification"] = [{"hooks": [{"type": "command", "command": "echo inline-with-summary"}]}]
+        spec = clean()
+        spec["settings.json"] = json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        spec["lint/hook_catalog_inline.json"] = json.dumps({"Notification": "Says one plain thing."})
+        row = row_for(self.rows_of(spec), "inline: Notification")
+        self.assertEqual(row["What it does"], "Says one plain thing.")
+        self.assertEqual((row["Event"], row["Model"], row["Effort"]), ("Notification", "no model", "n/a"))
 
 
 class Helpers(unittest.TestCase):
