@@ -961,21 +961,26 @@ elif a[:2] == ["pr", "merge"]:
     sha = a[a.index("--match-head-commit") + 1]
     if S.get("merge_fail"):
         print(S["merge_fail"]); sys.exit(1)
-    seq = S.get("merge_replies") or []  # [msg, lands] per call, the last repeats. lands: the merge reaches the server first; msg: the reply ("" for none)
-    msg, lands = (seq.pop(0) if len(seq) > 1 else seq[0]) if seq else ("", True)
+    seq = S.get("merge_replies") or []  # [msg, lands(, code)] per call, the last repeats. lands: the merge reaches the server first; msg: the reply ("" for none); code: the exit status, 1 unless given
+    ent = (seq.pop(0) if len(seq) > 1 else seq[0]) if seq else ["", True]
+    msg, lands, code = ent[0], ent[1], (ent[2] if len(ent) > 2 else 1)
     if seq: save()
     if not lands:
-        print(msg); sys.exit(1)
+        print(msg); sys.exit(code)
     if git("ls-remote", "origin", "refs/heads/feat").split("\t")[0] != sha:
         print("GraphQL: Head branch was modified. Review and try the merge again."); sys.exit(1)
     B = S.get("base", "main")
     git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
     git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
-    if msg: print(msg); sys.exit(1)
+    if msg: print(msg); sys.exit(code)
 elif a[:2] == ["repo", "view"]:
     print(json.dumps({"defaultBranchRef": {"name": S.get("default_branch", "main")}}))
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
+    af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
+    if af and S["checks_calls"] >= af["after_checks"]:
+        S["api_failed"] = S.get("api_failed", 0) + 1; save()
+        print(af["msg"]); sys.exit(1)
     if S.get("contexts") is None:
         print("HTTP 404: Branch not protected"); sys.exit(1)
     print(json.dumps(S["contexts"]))
@@ -1258,6 +1263,99 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertIn("state,mergeCommit", self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    # ---- lane merge-net-holes (owner ruling "Retry 3 times"): only a proven refusal reverts the claim
+
+    def test_a_merge_that_exits_zero_while_the_pr_reads_open_stops_without_a_revert(self):
+        self.set(merge_replies=[["", False, 0]])  # gh exits 0 and says nothing; nothing landed; the PR reads OPEN
+        rc, out = self.go()
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def required_read_fails_after_the_claim(self, msg):
+        """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert."""
+        self.set(contexts=["gates"], api_fail={"msg": msg, "after_checks": 1})
+        rc, out = self.go(required="protection")
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("api_failed"), 4, out)  # one try and three retries
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_a_required_check_read_with_gh_server_error_502_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
+
+    def test_a_required_check_read_with_gh_http_503_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim("gh: HTTP 503")
+
+    def test_a_required_check_read_with_http_502_and_a_url_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim("HTTP 502 (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)")
+
+    def test_a_required_check_read_with_gh_http_500_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim("gh: HTTP 500")
+
+    def merge_reply_is_retried_then_stops(self, msg):
+        """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert."""
+        self.set(merge_replies=[[msg, False]])
+        rc, out = self.go()
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("pr merge"), 4, out)  # one try and three retries
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_a_merge_reply_something_went_wrong_is_retried_then_stops_without_a_revert(self):
+        self.merge_reply_is_retried_then_stops("GraphQL: Something went wrong while executing your query on this domain.")
+
+    def test_a_merge_reply_http_429_is_retried_then_stops_without_a_revert(self):
+        self.merge_reply_is_retried_then_stops("HTTP 429: Too Many Requests")
+
+    def fetch_fails_after_the_claim_push(self, msg):
+        """The fetch of main after the claim push fails with `msg`, a network-class error: the claim stays, nothing is reverted."""
+        rc, out = self.go_with_fetch_after_push(msg)
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_a_git_fetch_http2_stream_error_after_the_claim_push_stops_without_a_revert(self):
+        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
+
+    def test_a_git_fetch_empty_reply_after_the_claim_push_stops_without_a_revert(self):
+        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Empty reply from server")
+
+    def test_a_git_fetch_gnutls_recv_error_after_the_claim_push_stops_without_a_revert(self):
+        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': GnuTLS recv error (-9): Error decoding the received TLS packet.")
+
+    def test_a_git_fetch_failed_sending_after_the_claim_push_stops_without_a_revert(self):
+        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Failed sending data to the peer")
+
+    def test_a_git_fetch_ssh_kex_error_after_the_claim_push_stops_without_a_revert(self):
+        self.fetch_fails_after_the_claim_push("kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.")
+
+    def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
+        self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]],  # the merge lands, its reply and the retries are lost
+                 state_read_fail="GraphQL: Could not resolve to a PullRequest with the number of 7.")
+        rc, out = self.go()
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("by hand", out)  # the owner's next steps are named, not only "Run again"
+        self.assertRegex(out, r"(?i)after-?merge")
+        self.assertRegex(out, r"(?i)check (?:the|#7)")
+
+    def test_a_real_first_refusal_reverts_the_claim_and_is_not_retried(self):  # pin: a proven refusal still reverts
+        self.set(merge_replies=[["GraphQL: Pull Request is not mergeable", False]])
+        rc, out = self.go()
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("pr merge"), 1)  # a refusal is not retried
+        self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
     def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
