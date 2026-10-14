@@ -20,11 +20,11 @@ The protected outcome: a known gap stays findable in one list, after its decisio
 
 ## Grandfathering
 
-On origin/main, the "Holes, named" sections in `decisions/` total 34: 32 headings and 2 plain-text mentions (`haiku-prompt-hooks` at line 74, `subagent-model-cap` at line 72). Each names at least one open hole. They have no debt files. The planned lane debts-migrate must find both forms, and it files them. Until that lane lands, those holes stay where they are, in their decisions.
+On origin/main, the "Holes, named" sections in `decisions/` totaled 34: 32 headings and 2 plain-text mentions (`haiku-prompt-hooks` and `subagent-model-cap`). Each named at least one open hole, with no debt file. The debts-migrate lane filed every hole as a debt file. Each decision with a Holes section now carries one `Debts:` line.
 
 ## What protects it
 
-Prose. The rule has an audit row in `lint/rule_mechanisms.json` (kind `unmechanized`) and the pin `UNMECHANIZED_EXPECTED` at 76 in `lint/rule_audit.py`. Both landed in 17402e8. On default Windows the audit crashes before its pin check runs (see the fourth hole).
+Prose. The rule has an audit row in `lint/rule_mechanisms.json` (kind `unmechanized`) and the pin `UNMECHANIZED_EXPECTED` at 76 in `lint/rule_audit.py`. Both landed in 17402e8. On default Windows the audit crashes before its pin check runs. The debt is `rule-audit-crashes-on-windows` (the audit crash on Windows).
 
 ## Holes, named
 

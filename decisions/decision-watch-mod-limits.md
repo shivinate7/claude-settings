@@ -44,11 +44,10 @@ On 2026-10-13 at 12:09 CDT, a spike ran a mod's `$.model.complete` in the deskto
 
 ## Holes, named
 
-Debts: `dw-slash-cache-hit-reads-clean` (a /dw cache hit reads like a clean turn, and Stops seen caps at 500), `dw-log-write-failures-silent` (a lost log write is silent), `dw-slot-timers-unmeasured` (the slot timers are computed, not measured), `dw-log-keeps-model-text` (the log keeps model text that may hold a secret), `dw-text-of-drops-reason` (textOf drops the abort reason), `dw-ffff-regex-literal` (asciiJson holds a literal U+FFFF), `dw-where-exe-both-phases` (pickPython runs where.exe in both phases), `dw-stop-row-unproven` (the Stop row drop is unproven live), `dw-busy-stop-skipped` (a Stop during a judge is never judged), `dw-notice-lead-space-lost` (the log drops a notice's leading whitespace).
+Debts: `dw-slash-cache-hit-reads-clean` (a /dw cache hit reads like a clean turn, and Stops seen caps at 500), `dw-log-write-failures-silent` (a lost log write is silent), `dw-slot-timers-unmeasured` (the slot timers are computed, not measured), `dw-log-keeps-model-text` (the log keeps model text that may hold a secret), `dw-text-of-drops-reason` (textOf drops the abort reason), `dw-ffff-regex-literal` (asciiJson holds a literal U+FFFF), `dw-where-exe-both-phases` (pickPython runs where.exe in both phases), `dw-stop-row-unproven` (the Stop row drop is unproven live), `dw-busy-stop-skipped` (a Stop during a judge is never judged), `dw-notice-lead-space-lost` (the log drops a notice's leading whitespace). `dw-human-message-moves-baseline` (a human message between the phases moves the baseline, and a real FLAG reads verdict lost).
 
 ## Named limits
 
-- A human message between the two phases moves the baseline. A real FLAG then prints `verdict lost`. The output is loud and correct, and the README names this cause.
 - HOLE 7: a bad flag combination on `decision_watch.py` makes the script use `invoke_model` instead, which can start a 120 s `claude -p` call. The fallback is pinned on purpose.
 
 ## Deferred, not built

@@ -20,6 +20,7 @@ Writing prose and records is not building.
 | Point | Model | Effort |
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
+| `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` | sonnet, set beside `CLAUDE_CODE_SUBAGENT_MODEL` (changelog 2.1.296), so workflow agents follow the same default | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
 | Explore that audits or judges meaning, not a plain search | sonnet, set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
