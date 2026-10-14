@@ -896,7 +896,7 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
     """Return, for each segment, the count of heredoc headers ahead of it (own_heredoc_bodies's
     `before`). A line inside a body is no header: `x = 1 << y` in `python3 - <<'EOF'` would shift the
     count and make the commit after it read the wrong body. A body runs from the line after its
-    header, to a segment that is its delimiter. A segment that ends '' closes one reading of split_segments, so the count restarts for the next.
+    header, to a segment that is its delimiter.
     `bodies_kept` is false when the segments come from a command whose bodies were stripped: no body is in them to skip."""
     offsets, heads, queue, reading = [], 0, [], False
     for segment, end in zip(segments, ends):
