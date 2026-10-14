@@ -384,12 +384,14 @@ class Host:
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
         not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
-        say("merge: checking the required checks ...")  # before the first gh read, which can block
+        listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
+        say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
         names = self.required_names()
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
-        say("merge: required: " + ", ".join(names))
+        if not listed:
+            say("merge: required: " + ", ".join(names))
         said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
 
         def progress(what):
