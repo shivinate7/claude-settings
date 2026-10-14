@@ -38,6 +38,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,6 +84,7 @@ FAMILIES = {
     "rm-var": "every case named rm-var, wherever it sits",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
+    "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "misc": "anything outside a tagged section",
 }
@@ -8977,6 +8979,198 @@ for _label, _check in (
 ):
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# --------------------------------------------------------------------------- reload-stamp
+#
+# Owner ruling 2026-10-14 (install-atomic, arbiter 03:41). The installer writes each hook file to a
+# temp name and renames it into place, and stamps every installed hook file with one install-id
+# constant. The guard compares the stamps of the modules it loads. On an import or load failure, or
+# a stamp mismatch, it waits briefly and reloads. After the wait it refuses the call as guard-crash,
+# and never allows it. Each case runs two ways. The damage is fixed during the wait, and the call is
+# allowed. Or the damage stays, and the call is refused.
+#
+# The contract the cases hold the guard to: each hook file holds a module-level line
+# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.
+#
+# Timing. The damage is fixed RELOAD_DELAY_S after the guard starts. The fix is one rename, so the
+# guard reads the old damaged file or the whole new one, never half of one. A guard that does not
+# wait finishes on its first load, well inside that delay, and so is caught refusing or allowing
+# before the fix lands.
+FAMILY = "reload-stamp"
+RELOAD_DELAY_S = 1.0
+INSTALL_ID = "3f1a9c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b"
+STALE_INSTALL_ID = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a"
+RELOAD_CORE = "guard_core.py"
+RELOAD_MISSING = "guard_pointer.py"
+RELOAD_CONTROL = []   # the intact copy's (decision, exit), read once, for the refusal's exit code
+
+
+def _stamp_line(install_id):
+    return 'INSTALL_ID = "%s"\n' % install_id
+
+
+def _put_whole(path, text):
+    """Writes a file the way the installer does: a temp name, then one rename over the old name."""
+    temp = path + ".put-tmp"
+    with open(temp, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    os.replace(temp, path)
+
+
+def _reload_copy(name, install_id):
+    """A scratch folder with a copy of guard.py and every guard_* sibling, each stamped with
+    install_id. Returns (folder, good): good maps each file name to the text an install leaves."""
+    source = os.path.dirname(GUARD)
+    folder = os.path.join(ROOT, "reload", name)
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    sources = [("guard.py", GUARD)] + [
+        (entry, os.path.join(source, entry)) for entry in sorted(os.listdir(source))
+        if entry.startswith("guard_") and entry.endswith(".py")]
+    good = {}
+    for entry, src in sources:
+        with open(src, encoding="utf-8") as handle:
+            good[entry] = _stamp_line(install_id) + handle.read()
+        _put_whole(os.path.join(folder, entry), good[entry])
+    return folder, good
+
+
+def _truncated(text):
+    """The first part of text that does not compile: a write cut short, not an empty file."""
+    cut = len(text) // 2
+    while cut < len(text):
+        try:
+            compile(text[:cut], RELOAD_CORE, "exec")
+        except SyntaxError:
+            return text[:cut]
+        cut += 7
+    raise RuntimeError("no cut of %s fails to compile" % RELOAD_CORE)
+
+
+def _damage_truncated(folder, good):
+    _put_whole(os.path.join(folder, RELOAD_CORE), _truncated(good[RELOAD_CORE]))
+    return [RELOAD_CORE]
+
+
+def _damage_missing(folder, good):
+    os.remove(os.path.join(folder, RELOAD_MISSING))
+    return [RELOAD_MISSING]
+
+
+def _damage_stamp(folder, good):
+    stale = good[RELOAD_CORE].replace(_stamp_line(INSTALL_ID), _stamp_line(STALE_INSTALL_ID), 1)
+    _put_whole(os.path.join(folder, RELOAD_CORE), stale)
+    return [RELOAD_CORE]
+
+
+def _fix_with(folder, good, names):
+    """The fix: each named file put back whole, the way the installer puts it."""
+    def fix():
+        for entry in names:
+            _put_whole(os.path.join(folder, entry), good[entry])
+    return fix
+
+
+def _reload_run(folder, name, fix=None, command=None):
+    """One Bash call through the copy's guard.py. fix, when given, runs once, RELOAD_DELAY_S after the
+    guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
+    only if the guard waited."""
+    cfg = os.path.join(ROOT, "reload-cfg", name)
+    os.makedirs(cfg, exist_ok=True)
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL},
+                          "cwd": NOGIT})
+    fixed = threading.Event()
+
+    def land():
+        fix()
+        fixed.set()
+    timer = threading.Timer(RELOAD_DELAY_S, land) if fix else None
+    if timer:
+        timer.daemon = True
+        timer.start()
+    try:
+        run = subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+                             capture_output=True, text=True, env=env, timeout=120)
+    finally:
+        if timer:
+            timer.cancel()
+            timer.join()
+    return run, fixed.is_set()
+
+
+def _reload_control():
+    """(decision, exit) of an intact copy's deny. A refusal from a damaged copy must match it."""
+    if not RELOAD_CONTROL:
+        folder, _good = _reload_copy("control", INSTALL_ID)
+        run, _fixed = _reload_run(folder, "control", command=FAILCLOSED_CONTROL)
+        RELOAD_CONTROL.append((_decision(run)[0], run.returncode))
+    return RELOAD_CONTROL[0]
+
+
+def reload_fixed_case(name, damage):
+    """The damage is fixed during the wait. The guard waits, reloads the whole file, and allows."""
+    def check():
+        folder, good = _reload_copy(name, INSTALL_ID)
+        names = damage(folder, good)
+        run, fixed = _reload_run(folder, name, _fix_with(folder, good, names))
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before the fix landed, so it never waited "
+                           "to reload: %r" % (decision, reason[:90]))
+        if decision != "allow" or run.returncode != 0:
+            return False, ("the damage was fixed during the wait, but the call is %r, exit %d, "
+                           "want allow: %r" % (decision, run.returncode, reason[:90]))
+        return True, "waited, reloaded the whole file, and allowed the call, exit 0"
+    return check
+
+
+def reload_stuck_case(name, damage):
+    """The damage stays. The guard waits, then refuses as guard-crash with the intact copy's exit
+    code. It never allows the call."""
+    def check():
+        folder, good = _reload_copy(name, INSTALL_ID)
+        damage(folder, good)
+        run, _fixed = _reload_run(folder, name)
+        decision, reason = _decision(run)
+        control_decision, control_exit = _reload_control()
+        problems = []
+        if control_decision != "deny":
+            problems.append("the intact copy did not deny the control call: %r" % control_decision)
+        if decision != "deny":
+            problems.append("the call is %r with the damage never fixed, want deny" % decision)
+        if "guard-crash" not in reason:
+            problems.append("the reason is not guard-crash: %r" % reason[:90])
+        if run.returncode != control_exit:
+            problems.append("exit %d, the intact copy's deny exits %d" % (run.returncode, control_exit))
+        if problems:
+            return False, "; ".join(problems)
+        return True, "refused as guard-crash with exit %d, and never allowed" % run.returncode
+    return check
+
+
+RELOAD_CHECKS = (
+    ("reload-stamp: a truncated guard_core.py fixed during the wait is reloaded, and the call allowed",
+     reload_fixed_case("truncated-fixed", _damage_truncated)),
+    ("reload-stamp: a truncated guard_core.py never fixed is refused as guard-crash, never allowed",
+     reload_stuck_case("truncated-stuck", _damage_truncated)),
+    ("reload-stamp: a guard_pointer.py missing during the wait, then restored, is reloaded and allowed",
+     reload_fixed_case("missing-fixed", _damage_missing)),
+    ("reload-stamp: a guard_pointer.py never restored is refused as guard-crash, never allowed",
+     reload_stuck_case("missing-stuck", _damage_missing)),
+    ("reload-stamp: a stamp mismatch fixed during the wait is reloaded, and the call allowed",
+     reload_fixed_case("stamp-fixed", _damage_stamp)),
+    ("reload-stamp: a stamp mismatch never fixed is refused as guard-crash, never allowed",
+     reload_stuck_case("stamp-stuck", _damage_stamp)),
+)
+for _label, _check in RELOAD_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+FAMILY = "fail-closed"  # the family the cases below had before this section
 
 
 # --------------------------------------------------------------------------- session-log

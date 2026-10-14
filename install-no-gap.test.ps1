@@ -19,9 +19,10 @@
 #   lock1     first local run, skill locked: a .bak or no copy marker after run 1, and no person
 #             file lost after run 2. Needs no symlink rights; copy mode is forced.
 #
-# Two more, atomic1 and atomic2, at the end of the file. They check that the live hooks folder is
-# replaced as one unit, never rewritten file by file: install.ps1 run 2 (atomic1), and the
-# post-merge hook it writes (atomic2, which needs git and a Git Bash sh and FAILs without them).
+# One more, hooks-whole, at the end of the file: no live hook file is rewritten in place. A rewrite
+# in place keeps a file's identity, so each changed hook file must get a new one, through install.ps1
+# run 2 and through the post-merge hook it writes. The hook route needs git and a Git Bash sh, and
+# FAILs without them.
 #
 # Seams. install.ps1 must honour each one:
 #   CLAUDE_CONFIG_DIR              target dir.
@@ -433,27 +434,21 @@ try {
     Check "lock1: run 2 keeps the person's my-notes.md at the skill dir or in a .bak, never pruned" $NotesKept
     Check "lock1: run 2 keeps the person's SKILL.md content at the skill dir or in a .bak" $SkillKept
 
-    # ---- atomic1, atomic2: the live hooks folder is replaced as one unit, never file by file ----
-    # Incident 2026-10-14 ~03:25 CDT: after a merge, the post-merge hook refreshed ~\.claude\hooks
-    # file by file, in place. guard.py and guard_core.py each changed on their own, so a reader saw
-    # a truncated file, or guard.py beside an old guard_core.py. Either fails the import, and the
-    # gate refuses every call as guard-crash.
-    # Oracle: the identity of the live hooks folder, following links, before and after the refresh.
-    # A folder replaced as one unit gets a new identity. A file rewritten in place, or renamed in
-    # one at a time, leaves the folder as it was. The check has no timing in it.
-    # Non-vacuity: the new text must land in both guard files, so an install that copies nothing
-    # cannot pass.
-    # Routes: install.ps1 run 2 in copy mode (atomic1), and the post-merge hook install.ps1 writes
-    # into .git\hooks (atomic2). atomic2 needs git and a Git Bash sh. Without them it FAILs, since a
-    # skipped hook case would hide the incident path.
-    if (-not ('FolderIdentity' -as [type])) {
+    # ---- hooks-whole: no live hook file is ever seen truncated (temp, then rename) --------------
+    # Owner ruling 2026-10-14 (install-atomic, arbiter 03:41). The installer writes each file to a
+    # temp name and renames it into place, so a reader sees the old file or the new one, never a
+    # half-written one. An in-place rewrite keeps the file's identity. A rename into place gives it a
+    # new identity. So in a re-run that changes a hook file's text, each hook file that changes must
+    # get a new identity, and the new text must land (non-vacuous). Two routes: install.ps1 run 2 in
+    # copy mode, and the post-merge hook install.ps1 writes into .git\hooks, run by git's sh.
+    if (-not ('FileIdentity' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-public static class FolderIdentity
+public static class FileIdentity
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct FileInfoById
@@ -472,8 +467,8 @@ public static class FolderIdentity
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInfoById info);
 
-    // Identity of the object at path, following links: a junction resolves to its target.
-    // Access 0 (query only), share read|write|delete, OPEN_EXISTING, BACKUP_SEMANTICS (opens a folder).
+    // Identity of the object at path, following links. A rewrite in place keeps it; a rename gives a new one.
+    // Access 0 (query only), share read|write|delete, OPEN_EXISTING, BACKUP_SEMANTICS.
     public static string Of(string path)
     {
         using (SafeFileHandle h = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
@@ -488,21 +483,34 @@ public static class FolderIdentity
 '@
     }
 
-    $AtomicV1 = @('# guard v1', '# guard core v1')
-    $AtomicV2 = @('# guard v2, new text of another length', '# guard core v2, new text of another length')
+    $HookFiles = @('guard.py', 'guard_core.py')
+    $HookV1 = @('# guard v1', '# guard core v1')
+    $HookV2 = @('# guard v2, new text of another length', '# guard core v2, new text of another length')
 
-    # Writes the two guard files the atomic cases watch, in the clone.
-    function Use-AtomicSource([string]$Dir, [string[]]$Texts) {
+    # Writes the two hook files the case watches, in the clone.
+    function Use-HookSource([string]$Dir, [string[]]$Texts) {
         Write-FixtureFile (Join-Path $Dir 'hooks\guard.py') $Texts[0]
         Write-FixtureFile (Join-Path $Dir 'hooks\guard_core.py') $Texts[1]
     }
 
-    # True when both guard files in $Hooks hold exactly $Texts. A missing file reads as empty.
-    function Test-AtomicLanded([string]$Hooks, [string[]]$Texts) {
+    # True when both hook files in $Hooks hold exactly $Texts. A missing file reads as empty.
+    function Test-HookLanded([string]$Hooks, [string[]]$Texts) {
         $g = ''; $c = ''
         if (Test-Path -LiteralPath (Join-Path $Hooks 'guard.py')) { $g = [IO.File]::ReadAllText((Join-Path $Hooks 'guard.py')) }
         if (Test-Path -LiteralPath (Join-Path $Hooks 'guard_core.py')) { $c = [IO.File]::ReadAllText((Join-Path $Hooks 'guard_core.py')) }
         return ($g -eq $Texts[0]) -and ($c -eq $Texts[1])
+    }
+
+    # The identity of each hook file in $Hooks, by name.
+    function Get-HookIds([string]$Hooks) {
+        $ids = @{}
+        foreach ($n in $HookFiles) { $ids[$n] = [FileIdentity]::Of((Join-Path $Hooks $n)) }
+        return $ids
+    }
+
+    # The hook files whose identity did not change: each one was rewritten in place.
+    function Get-InPlaceHookFiles($Before, $After) {
+        return @($HookFiles | Where-Object { $Before[$_] -eq $After[$_] })
     }
 
     # The git Bash sh: from PATH, else beside the git on PATH (Git\cmd\git.exe -> Git\bin\sh.exe).
@@ -517,59 +525,61 @@ public static class FolderIdentity
         return $null
     }
 
-    # atomic1: install.ps1 run 2 in copy mode.
-    $A1 = New-Scratch 'atomic-install' @('hooks')
-    $A1Hooks = Join-Path $A1.Cfg 'hooks'
-    Use-AtomicSource $A1.Clone $AtomicV1
-    $env:CLAUDE_CONFIG_DIR = $A1.Cfg
+    # Route 1: install.ps1 run 2 in copy mode.
+    $H1 = New-Scratch 'hooks-whole-install' @('hooks')
+    $H1Hooks = Join-Path $H1.Cfg 'hooks'
+    Use-HookSource $H1.Clone $HookV1
+    $env:CLAUDE_CONFIG_DIR = $H1.Cfg
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
     try {
-        $rcA1 = Invoke-Install $A1.Clone 'atomic-install-run1.log'
-        Check "atomic-install: run 1 (forced copy) exits 0 (exit $rcA1)" ($rcA1 -eq 0)
-        Check "atomic-install: run 1 lands both guard files as copies, not links" ((Test-AtomicLanded $A1Hooks $AtomicV1) -and (-not (Test-ReparsePoint (Join-Path $A1Hooks 'guard.py'))))
-        Use-AtomicSource $A1.Clone $AtomicV2
-        $idA1 = [FolderIdentity]::Of($A1Hooks)
-        $rcA2 = Invoke-Install $A1.Clone 'atomic-install-run2.log'
-        Check "atomic-install: run 2 exits 0 (exit $rcA2)" ($rcA2 -eq 0)
-        Check "atomic-install: run 2 lands the new text in both guard files (non-vacuous)" (Test-AtomicLanded $A1Hooks $AtomicV2)
-        $idA2 = [FolderIdentity]::Of($A1Hooks)
-        Check "atomic-install: run 2 replaces the live hooks folder as one unit (folder identity changed)" ($idA1 -ne $idA2)
+        $rcH1 = Invoke-Install $H1.Clone 'hooks-whole-install-run1.log'
+        Check "hooks-whole: install run 1 (forced copy) exits 0 (exit $rcH1)" ($rcH1 -eq 0)
+        Check "hooks-whole: install run 1 lands both hook files as copies, not links" ((Test-HookLanded $H1Hooks $HookV1) -and (-not (Test-ReparsePoint (Join-Path $H1Hooks 'guard.py'))))
+        Use-HookSource $H1.Clone $HookV2
+        $idsH1 = Get-HookIds $H1Hooks
+        $rcH2 = Invoke-Install $H1.Clone 'hooks-whole-install-run2.log'
+        Check "hooks-whole: install run 2 exits 0 (exit $rcH2)" ($rcH2 -eq 0)
+        Check "hooks-whole: install run 2 lands the new text in both hook files (non-vacuous)" (Test-HookLanded $H1Hooks $HookV2)
+        $inPlaceH1 = @(Get-InPlaceHookFiles $idsH1 (Get-HookIds $H1Hooks))
+        foreach ($f in $inPlaceH1) { Write-Host "  rewritten in place by install run 2: $f" }
+        Check "hooks-whole: install run 2 rewrites no hook file in place ($($inPlaceH1.Count) in place)" ($inPlaceH1.Count -eq 0)
     } finally {
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
 
-    # atomic2: the post-merge hook that install.ps1 writes into .git\hooks, run by git's sh.
-    $A2 = New-Scratch 'atomic-hook' @('hooks')
-    $A2Hooks = Join-Path $A2.Cfg 'hooks'
-    Use-AtomicSource $A2.Clone $AtomicV1
+    # Route 2: the post-merge hook that install.ps1 writes into .git\hooks, run by git's sh.
+    $H2 = New-Scratch 'hooks-whole-hook' @('hooks')
+    $H2Hooks = Join-Path $H2.Cfg 'hooks'
+    Use-HookSource $H2.Clone $HookV1
     $GitCmd = Get-Command git -ErrorAction SilentlyContinue
     $Sh = Get-GitSh
     if (-not $GitCmd -or -not $Sh) {
-        Check "atomic-hook: git and a Git Bash sh are both found, so the hook can run" $false
+        Check "hooks-whole: git and a Git Bash sh are both found, so the post-merge hook can run" $false
     } else {
-        $env:CLAUDE_CONFIG_DIR = $A2.Cfg
+        $env:CLAUDE_CONFIG_DIR = $H2.Cfg
         $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
         try {
             # A real repo on main, with one commit, so the hook's branch check passes.
-            & git -C $A2.Clone init -q
-            & git -C $A2.Clone symbolic-ref HEAD refs/heads/main
-            & git -C $A2.Clone add -A
-            & git -C $A2.Clone -c user.name=atomic-test -c user.email=atomic-test@example.invalid commit -q -m fixture
-            Check "atomic-hook: the scratch clone is a git repo on main with one commit (exit $LASTEXITCODE)" ($LASTEXITCODE -eq 0)
+            & git -C $H2.Clone init -q
+            & git -C $H2.Clone symbolic-ref HEAD refs/heads/main
+            & git -C $H2.Clone -c core.autocrlf=false add -A
+            & git -C $H2.Clone -c core.autocrlf=false -c user.name=hooks-whole-test -c user.email=hooks-whole-test@example.invalid commit -q -m fixture
+            Check "hooks-whole: the scratch clone is a git repo on main with one commit (exit $LASTEXITCODE)" ($LASTEXITCODE -eq 0)
 
-            $rcA2a = Invoke-Install $A2.Clone 'atomic-hook-run1.log'
-            Check "atomic-hook: run 1 (forced copy) exits 0 (exit $rcA2a)" ($rcA2a -eq 0)
-            Check "atomic-hook: run 1 writes the post-merge hook into .git\hooks" (Test-Path -LiteralPath (Join-Path $A2.Clone '.git\hooks\post-merge'))
-            Use-AtomicSource $A2.Clone $AtomicV2
-            $idA2a = [FolderIdentity]::Of($A2Hooks)
+            $rcH2a = Invoke-Install $H2.Clone 'hooks-whole-hook-run1.log'
+            Check "hooks-whole: hook route: install run 1 (forced copy) exits 0 (exit $rcH2a)" ($rcH2a -eq 0)
+            Check "hooks-whole: hook route: install run 1 writes the post-merge hook into .git\hooks" (Test-Path -LiteralPath (Join-Path $H2.Clone '.git\hooks\post-merge'))
+            Use-HookSource $H2.Clone $HookV2
+            $idsH2 = Get-HookIds $H2Hooks
             # The hook reads CLAUDE_CONFIG_DIR inside sh, so it gets forward slashes.
-            $env:CLAUDE_CONFIG_DIR = $A2.Cfg.Replace('\', '/')
-            $hookLog = Join-Path $Tmp 'atomic-hook-run2.log'
-            $pH = Start-Process -FilePath $Sh -ArgumentList '.git/hooks/post-merge' -WorkingDirectory $A2.Clone -Wait -PassThru -NoNewWindow -RedirectStandardOutput $hookLog -RedirectStandardError ($hookLog + '.err')
-            Check "atomic-hook: the post-merge hook exits 0 (exit $($pH.ExitCode))" ($pH.ExitCode -eq 0)
-            Check "atomic-hook: the hook lands the new text in both guard files (non-vacuous)" (Test-AtomicLanded $A2Hooks $AtomicV2)
-            $idA2b = [FolderIdentity]::Of($A2Hooks)
-            Check "atomic-hook: the hook replaces the live hooks folder as one unit (folder identity changed)" ($idA2a -ne $idA2b)
+            $env:CLAUDE_CONFIG_DIR = $H2.Cfg.Replace('\', '/')
+            $hookLog = Join-Path $Tmp 'hooks-whole-hook-run2.log'
+            $pH = Start-Process -FilePath $Sh -ArgumentList '.git/hooks/post-merge' -WorkingDirectory $H2.Clone -Wait -PassThru -NoNewWindow -RedirectStandardOutput $hookLog -RedirectStandardError ($hookLog + '.err')
+            Check "hooks-whole: hook route: the post-merge hook exits 0 (exit $($pH.ExitCode))" ($pH.ExitCode -eq 0)
+            Check "hooks-whole: hook route: the hook lands the new text in both hook files (non-vacuous)" (Test-HookLanded $H2Hooks $HookV2)
+            $inPlaceH2 = @(Get-InPlaceHookFiles $idsH2 (Get-HookIds $H2Hooks))
+            foreach ($f in $inPlaceH2) { Write-Host "  rewritten in place by the hook: $f" }
+            Check "hooks-whole: hook route: the hook rewrites no hook file in place ($($inPlaceH2.Count) in place)" ($inPlaceH2.Count -eq 0)
         } finally {
             Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
         }
