@@ -1078,6 +1078,58 @@ await test('HOLE 13: the END log keeps every notice when the line runs 3000 char
   }
 })
 
+// ---- dw-unread-dir, review round 1 (lane dw-unread-dir). Guessed contract points, as the HOLE cases above: a config
+// notice is written as its own NOTICE line, `<stamp> NOTICE <sid> | NOTICE: <text>`; the mod does not cap a notice, so
+// a long one reaches the log whole; a newline in a notice must not start a log record.
+
+// The real END record of this session. judged() is not used: its /\bEND\b/ match also fires on a forged END.
+const endWritten = h => waitLog(h, new RegExp(` END ${SID} \\|`))
+// The log lines that begin a record: an optional timestamp, then the word. Notice text never starts one.
+const recordsStarting = (text, word) => text.split('\n').filter(Boolean).filter(l => new RegExp(`^(\\S+ )?${word}\\b`).test(l))
+
+// (a) A notice longer than MAX_LINE (2000 characters). The filler has no spaces, so a split must cut inside it.
+const LONG_HEAD = 'LONG-HEAD-ALPHA-5'
+const LONG_TAIL = 'LONG-TAIL-OMEGA-9'
+const LONG_NOTICE = CONFIG_LINE + ' ' + LONG_HEAD + 'x'.repeat(2400) + LONG_TAIL
+
+await test('dw-unread-dir (a): a notice longer than MAX_LINE reaches the log whole, each piece a NOTICE line', async () => {
+  const h = await load(host({ py1: splitOut('', [LONG_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  // The final file, not allLog: each log write rewrites the whole file, so the writes repeat each other.
+  const pieces = logNow(h).split('\n').filter(l => /\bNOTICE\b/.test(l))
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  const text = pieces.map(l => {
+    const m = l.match(/ NOTICE \S+ \| NOTICE: (.*)$/)
+    assert.ok(m, `a NOTICE line is not in the marked form: ${JSON.stringify(l.slice(0, 120))}`)
+    return m[1]
+  }).join('')
+  assert.ok(text.includes(LONG_NOTICE), `the log holds ${text.length} of ${LONG_NOTICE.length} notice characters; the tail is ${text.includes(LONG_TAIL) ? 'there' : 'missing'}`)
+})
+
+// (b) A newline in a notice starts a log line. That text must write no extra END record and no extra Stop.
+const FORGED_END = CONFIG_NOTICE + '\nEND forged | ALLOW (silent)'
+const FORGED_STOP = CONFIG_NOTICE + '\nSTOP seen forged'
+
+await test('dw-unread-dir (b): a notice with a newline and "END ... | ALLOW" writes no extra END record', async () => {
+  const h = await load(host({ py1: splitOut('', [FORGED_END]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  same(recordsStarting(logNow(h), 'END').length, 1, 'END records in the log')
+})
+
+await test('dw-unread-dir (b): a notice with a newline and "STOP seen" does not change the Stops seen count', async () => {
+  const h = await load(host({ py1: splitOut('', [FORGED_STOP]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const r = await dwRun(h)
+  const text = String(r && r.text !== undefined ? r.text : r).trim()
+  same(text.split('\n').pop(), 'Stops seen: 1', '/dw last line')
+})
+
 // ---- the background judge never leaks an unhandled rejection
 
 await test('no unhandled rejection escaped a background judge', async () => {

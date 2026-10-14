@@ -1641,6 +1641,54 @@ def case_split_output_carries_the_config_notice_apart_from_the_verdict():
           "Config files changed" not in str(got.get("verdict", "")), result.stdout[:300])
 
 
+# --------------------------------------------------------------------------- dw-unread-dir (c)
+# Under the mod env, python gets CLAUDE_CONFIG_DIR = the mod's state folder and no DW_REAL_CONFIG_DIR. The unread
+# reader then falls back to the state folder, where guard.log is not, so the real folder's unread subject is lost.
+# The fallback must print a line that names DW_REAL_CONFIG_DIR, on stdout or stderr. Red on 2bba35a: it is silent.
+# Guessed contract point: only the name DW_REAL_CONFIG_DIR is pinned, not the wording.
+def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
+    name = "unread_fallback"
+    repo = make_repo(name)
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    now = datetime.now(timezone.utc)
+    records = [
+        human_record("check the record folders", (now - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
+        assistant_record(text="done"),
+    ]
+    hook = {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+    # The real config folder holds one unread-subject line from this turn. The mod's state folder holds none.
+    real = os.path.join(ROOT, name + "-real")
+    os.makedirs(real, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    write(os.path.join(real, "guard.log"), "\t".join([stamp, "Bash", "noted", "subject-unread", "UNREAD-SUBJECT-BETA-4", "sess-" + name]) + "\n")
+    state = os.path.join(ROOT, name + "-state", "decision-watch-shadow")
+    os.makedirs(state, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=state)
+    for key in list(env):
+        if key.upper() == "DW_REAL_CONFIG_DIR":
+            del env[key]
+    def emit(run_env):
+        return subprocess.run(
+            [sys.executable, "-I", MODULE_PATH, "--emit-prompt"],
+            input=json.dumps(hook), capture_output=True, text=True, timeout=60, env=run_env,
+        )
+
+    result = emit(env)
+    seen = result.stdout + result.stderr
+    check("unread fallback: exit 0", result.returncode == 0, result.stderr[:300])
+    check("unread fallback: a line names DW_REAL_CONFIG_DIR, so the fallback is not silent",
+          "DW_REAL_CONFIG_DIR" in seen, seen[:300])
+    # Control, green on 2bba35a: with the real folder named, the same fixture shows the subject. So a red above is
+    # the fallback, not a fixture that never produces the notice.
+    control = emit(dict(env, DW_REAL_CONFIG_DIR=real))
+    got = _json_or_none(control.stdout.strip())
+    notices = got.get("notices") if isinstance(got, dict) else None
+    shown = isinstance(notices, list) and any("UNREAD-SUBJECT-BETA-4" in n for n in notices if isinstance(n, str))
+    check("unread fallback control: with DW_REAL_CONFIG_DIR set, the unread subject shows",
+          shown, (control.stdout + control.stderr)[:300])
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1703,6 +1751,7 @@ def main():
         case_phase_two_with_a_moved_key_reads_unknown_never_allow,
         case_phase_two_with_the_same_key_stays_silent_on_allow,
         case_split_output_carries_the_config_notice_apart_from_the_verdict,
+        case_unread_fallback_is_named_when_dw_real_config_dir_is_unset,
     ):
         run_case(case)
 
