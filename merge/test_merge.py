@@ -2724,6 +2724,10 @@ class NetErrorLines(unittest.TestCase):
             with self.subTest(out=out):
                 self.assertTrue(merge.is_net(1, out))
 
+    def test_a_wrapped_5xx_with_no_space_after_its_colon_is_not_a_network_error(self):
+        # Round 1 fix guard: the anchor edit must keep the space in `: ` before the message, or `HTTP 502:x (url)` matches.
+        self.assertFalse(merge.is_net(1, "failed to get runs: HTTP 502:x (https://x)"))
+
 class GhLockReadRetry(unittest.TestCase):
     """GhLock.read on a network error: retried as GitLock is (round 2: GhLock is in scope). merge.sh is the only seam,
     so the test holds wherever the retry sits, in read or in api."""
