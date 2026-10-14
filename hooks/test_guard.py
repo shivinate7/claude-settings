@@ -6756,7 +6756,8 @@ sh("cap: an append onto a project settings file asks",
 
 # A PYTHON WRITE IS A WRITE. A program that opens a settings file and writes the cap into it lands the
 # same bytes the redirect and tee cases above land, so it asks the same way. Both forms are pinned: an
-# inline `python -c`, and a heredoc fed to `python3 -`. (Incident 2026-10-14: both allowed.)
+# inline `python -c`, and a heredoc fed to `python3 -`. MEASURED 2026-10-14 on main: both allowed, so
+# these two cases are red there.
 sh("cap: python -c that opens a project settings file and writes the cap asks",
    "python -c \"import json; open('" + PROJ_LOCAL + "', 'w').write(json.dumps({'env': {'" + CAP_KEY
    + "': '" + OPUS + "'}}))\"",
