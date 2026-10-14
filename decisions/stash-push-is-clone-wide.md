@@ -129,6 +129,10 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
   beside a `-C` call. Any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`,
   `GIT_DIR` or `GIT_COMMON_DIR` token. `restore --source`, `-p` or `-f`. A glob or `$(…)`
   pathspec. A segment the tokenizer cannot read. The remedy names the `-C` form.
+- A command that sets `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is denied, not asked
+  (rule `git-env-set`). A child git inherits the set. On q_max, 2026-10-14 02:41-02:47 CDT, a
+  child `git init` wrote `core.worktree` into the shared config, and every checkout read the
+  wrong tree. An approved ask would reopen that path (arbiter ruling, 03:05 CDT).
 - Any linked worktree passes the allow, not only the caller's own.
 - Unread, as on main: a discard inside `sh -c`, `eval`, or a `$(…)` substitution, such as
   `echo $(cd <shared>; git restore f.txt)`. Review 2026-10-12, three rounds, eight shapes
