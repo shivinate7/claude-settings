@@ -208,7 +208,7 @@ function replyOut(h, key, text) {
 }
 
 // The evidence key: phase 1 prints it, and phase 2 is given it back with --key. A key the live
-// evidence no longer gives reads UNKNOWN (HOLE 1, decisions/decision-watch-mod-limits.md).
+// evidence no longer gives reads UNKNOWN (HOLE 1 of decision decision-watch-mod-limits).
 const keyOf = h => 'key:' + h.evidence
 const keyArg = argv => (argv.indexOf('--key') >= 0 ? argv[argv.indexOf('--key') + 1] : undefined)
 const moved = (h, argv) => keyArg(argv) !== undefined && keyArg(argv) !== keyOf(h)
@@ -445,7 +445,7 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
 })
 
-// ---- HOLE 1 (decisions/decision-watch-mod-limits.md): phase 2 is given the phase-1 key.
+// ---- HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
 
 // Red on main: main passes no key, so the moved evidence is judged afresh and reads a silent ALLOW.
 await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
@@ -521,12 +521,12 @@ await test('shown: an ALLOW shows nothing', async () => {
   same(h.toasts, [], 'toasts')
 })
 
-// ---- the model table: a mod that calls a model has a row (decisions/subagent-model-cap.md)
+// ---- the model table (decision subagent-model-cap): a mod that calls a model has a row
 
 await test('model table: a row names mods/decision-watch, and that row names haiku', () => {
   const rows = readFileSync(MODEL_CAP, 'utf8').split('\n').filter(l => l.startsWith('|'))
   const row = rows.find(l => l.includes('mods/decision-watch'))
-  assert.ok(row, 'no row in decisions/subagent-model-cap.md names mods/decision-watch')
+  assert.ok(row, 'no model-table row names mods/decision-watch')
   assert.match(row, /\bhaiku\b/, 'the mods/decision-watch row does not name haiku')
 })
 

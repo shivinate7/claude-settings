@@ -1448,7 +1448,7 @@ def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
 
 
 def case_phase_one_prints_a_key_for_the_evidence_it_judged():
-    # Red on main. HOLE 1 (decisions/decision-watch-mod-limits.md): phase 1 prints a non-empty
+    # Red on main. HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
     # "key" with the needs_model JSON, so phase 2 can be given back the evidence it judged.
     name = "key_printed"
     with scratch_config(name):
