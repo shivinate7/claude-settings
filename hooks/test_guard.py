@@ -7860,6 +7860,43 @@ sh("impeccable powershell: a plain here-string naming the word is allowed",
 sh("impeccable powershell: a hash opener inside a here-string is text",
    "$body = @'\n# impeccable audit\n'@", "allow", tool="PowerShell", cwd=NOGIT)
 
+# impeccable, heredoc bodies, review round 1. RED here means red on eff5b5d. Each body names
+# `npx impeccable install`, and each command runs that body: a quoted shell word behind a wrapper
+# flag (`sudo -b "bash"`), behind a message-flag pattern that swallows it (`tool --run-m "sh"`,
+# `ssh -t "bash -s"`), a script a heredoc writes and `bash` runs by name, and `pwsh`.
+#   RED   = a deny that eff5b5d allows.
+#   GREEN = an allow that eff5b5d already gets right. It must stay an allow.
+
+# RED: the run hides behind a wrapper, a message-flag value, a written script, or pwsh.
+sh("impeccable heredoc: a sudo flag before a quoted bash word runs the body is denied (red)",
+   "sudo -b \"bash\" <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable heredoc: a run-m flag before a quoted sh word runs the body is denied (red)",
+   "tool --run-m \"sh\" <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable heredoc: an ssh tty flag before a quoted bash -s word runs the body is denied (red)",
+   "ssh -t \"bash -s\" <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable heredoc: a run.sh written by heredoc and run by bash is denied (red)",
+   "cat > run.sh <<'EOF'\nnpx impeccable install\nEOF\nbash run.sh", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable heredoc: a run.bash written by heredoc and run by bash is denied (red)",
+   "cat > run.bash <<'EOF'\nnpx impeccable install\nEOF\nbash run.bash", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable heredoc: a pwsh body that names install is denied (red)",
+   "pwsh <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only", cwd=NOGIT)
+
+# GREEN: a message body or a file body that names install is text, so it stays an allow.
+sh("impeccable heredoc: a git commit body that names install is allowed (green)",
+   "git commit -F - <<'EOF'\nfeat: note\n\nnpx impeccable install is not run here.\nEOF",
+   "allow", cwd=NOGIT)
+sh("impeccable heredoc: a gh pr body that names install is allowed (green)",
+   "gh pr create --draft --title \"impeccable note\" --body-file - <<'EOF'\n"
+   "npx impeccable install is not run here.\nEOF", "allow", cwd=NOGIT)
+sh("impeccable heredoc: a node-notes.md body that names install is allowed (green)",
+   "cat > node-notes.md <<'EOF'\nnpx impeccable install is not run here.\nEOF", "allow",
+   cwd=NOGIT)
+
 
 def impeccable_settings_case():
     """settings.json names no impeccable plugin or marketplace. The skill folder is the install."""
