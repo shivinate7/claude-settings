@@ -81,6 +81,9 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 
 Why the cap: it needs no knowledge of who booted a device.
 
+Kind: build
+Plan: decisions/sweep-shuts-down-idle-simulators.md#mechanism-built (macos)
+
 ## Sources
 
 - The measured incident above. Rules 3 and 4 rest on it and on the owner's rulings.
