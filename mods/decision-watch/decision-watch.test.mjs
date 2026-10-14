@@ -1130,6 +1130,46 @@ await test('dw-unread-dir (b): a notice with a newline and "STOP seen" does not 
   same(text.split('\n').pop(), 'Stops seen: 1', '/dw last line')
 })
 
+// ---- dw-unread-dir, review round 2. A long notice is split into pieces (register.mjs, the split loop in shadow()).
+// The pieces, read back in order from the final log, must join to the notice exactly.
+
+// The payloads of the NOTICE lines in the final log, in order. A split round-trips only if these join to the notice.
+const noticePieces = h => logNow(h).split('\n').filter(l => /\bNOTICE\b/.test(l)).map(l => {
+  const m = l.match(/ NOTICE \S+ \| NOTICE: (.*)$/)
+  assert.ok(m, `a NOTICE line is not in the marked form: ${JSON.stringify(l.slice(0, 120))}`)
+  return m[1]
+})
+// A lone surrogate is half of a character. Written to a file it reads back as U+FFFD, so no piece may hold one.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+// (1) The split falls between the two halves of a surrogate pair: 1920 characters, then an emoji, then TAIL.
+const EMOJI_NOTICE = 'x'.repeat(1920) + '😀' + 'TAIL'
+
+await test('dw-unread-dir round 2 (1): a split long notice cuts no surrogate pair, and the pieces join back to the notice', async () => {
+  const h = await load(host({ py1: splitOut('', [EMOJI_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const pieces = noticePieces(h)
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  for (const p of pieces) assert.doesNotMatch(p, LONE_SURROGATE, `a piece holds half a surrogate pair, ends ${JSON.stringify(p.slice(-6))}`)
+  same(pieces.join(''), EMOJI_NOTICE, 'the joined pieces')
+})
+
+// (2) The split falls on a space. The space starts the second piece, and log() folds whitespace on every line,
+// so the space must survive the fold for the pieces to join back to the notice.
+const SPACE_NOTICE = 'x'.repeat(1921) + ' next ' + 'y'.repeat(50)
+
+await test('dw-unread-dir round 2 (2): a space at a piece boundary survives the whitespace fold, so the pieces join back', async () => {
+  const h = await load(host({ py1: splitOut('', [SPACE_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const pieces = noticePieces(h)
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  same(pieces.join(''), SPACE_NOTICE, 'the joined pieces')
+})
+
 // ---- the background judge never leaks an unhandled rejection
 
 await test('no unhandled rejection escaped a background judge', async () => {
