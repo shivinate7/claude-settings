@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def added():
     cmd = ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"]
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("check_record_slugs: UNKNOWN, git diff failed: " + r.stderr.strip())
         sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there

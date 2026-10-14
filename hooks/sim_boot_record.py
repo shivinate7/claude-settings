@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Record each simulator a session call booted (decisions/sweep-shuts-down-idle-simulators.md, ruling 1).
 
+Modes:
+- PreToolUse: Before a Bash call that names simulator tooling (simctl, xcodebuild) and a device,
+  or a simulator MCP launch, saves the state of each simulator.
+- PostToolUse: After such a call, appends each simulator that the call took from Shutdown to
+  Booted to the boot record. Never blocks.
+
 PreToolUse saves every device's state. PostToolUse of the same call appends each device that went
 Shutdown -> Booted to <config>/state/sim-boots.jsonl. It never blocks: stdout stays empty, exit 0.
 No snapshot, an unreadable snapshot or an unreadable list records nothing.

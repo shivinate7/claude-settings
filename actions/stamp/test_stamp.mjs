@@ -5,7 +5,7 @@
 // repository's own tree and never share state with each other.
 
 import assert from "node:assert/strict";
-import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
+import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -1437,7 +1437,10 @@ test("--check names an unreadable default-branch ref in the refusal, and keeps r
 test("the CLI runs, and never exits 0 silent, when reached through a symlinked directory", () =>
   withTempDir((root) => {
     const link = join(root, "link");
-    symlinkSync(HERE, link);
+    // Windows: a directory symlink needs a privilege most users lack (EPERM, WinError 1314). A
+    // junction needs none, and realpath resolves it the same way, so the case still runs there.
+    symlinkSync(HERE, link, process.platform === "win32" ? "junction" : "dir");
+    assert.notEqual(realpathSync(link), link, "the link must resolve, or this case proves nothing");
     initRepo(root);
     write(root, "docs/decisions/a.md", rec(1, "a"));
     commit(root, "main");

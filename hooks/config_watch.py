@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """The PostToolUse and Stop watch on the subagent model cap.
 
+Modes:
+- PostToolUse: After a write or shell call, checks the subagent model cap in each watched
+  settings file. Reverts a cap change that the guard did not ask about, or a raise past its
+  expiry time.
+- Stop: At the end of the turn, checks the subagent model cap in each watched settings file.
+  Reverts a cap change that no tool call explains, or a raise past its expiry time.
+
 Claude Code runs this file after every tool call that matches, and again when the turn ends:
 
   stdin  : one JSON object with tool_name, tool_input, cwd and session_id

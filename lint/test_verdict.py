@@ -254,5 +254,38 @@ class T(unittest.TestCase):
             self.assertIn("log unreadable", first)
             self.assertNotIn("Traceback", r.stdout + r.stderr)
 
+    def _fail_with_child_bytes(self, expr):
+        # The child writes raw bytes itself: its own print() of a non-cp1252 character would fail first.
+        # PYTHONUTF8 and PYTHONIOENCODING are removed so verdict meets the machine's default encoding.
+        with tempfile.TemporaryDirectory() as d:
+            script = os.path.join(d, "fx.py")
+            with open(script, "w", encoding="ascii") as f:
+                f.write("import sys\nsys.stdout.buffer.write(%s)\nsys.stdout.flush()\nsys.exit(7)\n" % expr)
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("VERDICT_LOG", "VERDICT_HEARTBEAT", "PYTHONUTF8", "PYTHONIOENCODING")}
+            env["VERDICT_LOG"] = os.path.join(d, "v.log")
+            return subprocess.run([sys.executable, V, sys.executable, script], capture_output=True, env=env, timeout=60)
+
+    def test_non_ascii_excerpt_reaches_stdout_as_utf8(self):
+        # Windows: a piped stdout is cp1252. print() of U+2192 raised UnicodeEncodeError, the FAIL
+        # excerpt was lost, and verdict exited 1 instead of the child's 7.
+        r = self._fail_with_child_bytes("'caf\\u00e9 \\u2192 ok\\n'.encode('utf-8')")
+        err = r.stderr.decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 7, err[-300:])
+        out = r.stdout.decode("utf-8")
+        self.assertTrue(out.startswith("FAIL ") and " rc=7 " in out.splitlines()[0], out[:300])
+        self.assertIn("→", out)
+        self.assertNotIn("Traceback", err)
+
+    def test_lone_non_utf8_byte_in_excerpt_does_not_crash_verdict(self):
+        # A byte that is not valid UTF-8 decodes to U+FFFD in the excerpt, and cp1252 cannot print that either.
+        r = self._fail_with_child_bytes("b'caf\\xe9 ok\\n'")
+        err = r.stderr.decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 7, err[-300:])
+        out = r.stdout.decode("utf-8", "replace")
+        self.assertTrue(out.startswith("FAIL ") and " rc=7 " in out.splitlines()[0], out[:300])
+        self.assertIn("caf", out)
+        self.assertNotIn("Traceback", err)
+
 if __name__ == "__main__":
     unittest.main()
