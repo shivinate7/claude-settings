@@ -5849,6 +5849,16 @@ add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool
     file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
 add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
     file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The harness set is a list of exact names, not a shape: a near miss stays product code, a name with
+# a colon is not a harness, and a name that differs only in case is the same file on Windows.
+add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_x.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of hooks/mutate_:guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_:guard_core.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Edit",
+    file_path="janitor/mutate_sweep.py", **A)
+add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
+    file_path="HOOKS/mutate_guard.py", **A)
 
 # ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
 # `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
