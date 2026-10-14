@@ -140,3 +140,6 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 - An empty tree still passes a push in every tree. A session that dirties the tree
   between the guard's read and the command's run is not covered. This is the same gap
   the earlier decision named for the TAKE arm.
+
+Kind: process
+Home: hooks/guard_shared_tree.py
