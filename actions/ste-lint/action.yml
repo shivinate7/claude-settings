@@ -18,13 +18,6 @@ inputs:
     description: Glob passed to `git ls-files` when scope is 'all'.
     required: false
     default: "**/*.md"
-  exclude:
-    description: >
-      Newline- or comma-separated git pathspecs to leave out of both scopes, added to the
-      repo's .ste-lint-exclude (one pathspec per line, at the repo root). Use this for
-      a generated file the linter should never see.
-    required: false
-    default: ""
   changed_paths:
     description: >
       Pathspec passed to `git diff --name-only` when scope is 'changed', selecting which
@@ -52,7 +45,6 @@ runs:
         SCOPE: ${{ inputs.scope }}
         FAIL: ${{ inputs.fail }}
         PATHS_GLOB: ${{ inputs.paths }}
-        EXCLUDE: ${{ inputs.exclude }}
         CHANGED_PATHS_GLOB: ${{ inputs.changed_paths }}
         DECISIONS_DIR: ${{ inputs.decisions-dir }}
       run: |

@@ -6,11 +6,10 @@ set -euo pipefail
 # base branch, and a shallow clone would not carry that history.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
 
-# Excludes come from two places: the action's 'exclude' input (newline- or comma-separated
-# pathspecs) and the repo's .ste-lint-exclude (one pathspec per line, '#' starts a comment).
-# STE_EXCLUDE_FILE overrides the file's path. Trim each, skip empty lines, turn each into
-# git's ':(exclude)<pattern>' pathspec magic.
-EXCLUDE_FILE="${STE_EXCLUDE_FILE:-$(git rev-parse --show-toplevel)/.ste-lint-exclude}"
+# Excludes come only from .ste-lint-exclude at the git top level of the repo being linted
+# (one pathspec per line, '#' starts a comment). No file, nothing excluded. Trim each line,
+# skip empty ones, turn each into git's ':(exclude)<pattern>' pathspec magic.
+EXCLUDE_FILE="$(git rev-parse --show-toplevel)/.ste-lint-exclude"
 EXCLUDE_PATTERNS=()
 EXCLUDE_PATHSPECS=()
 while IFS= read -r p; do
@@ -18,7 +17,7 @@ while IFS= read -r p; do
   case "$p" in ''|'#'*) continue ;; esac
   EXCLUDE_PATTERNS+=("$p")
   EXCLUDE_PATHSPECS+=(":(exclude)$p")
-done < <({ echo "$EXCLUDE" | tr ',' '\n'; [ -f "$EXCLUDE_FILE" ] && cat "$EXCLUDE_FILE"; true; })
+done < <([ -f "$EXCLUDE_FILE" ] && cat "$EXCLUDE_FILE"; true)
 
 RAW_FILES=()
 FILES=()
