@@ -2262,6 +2262,18 @@ sh("heredoc: a body fed to a shell stays under inspection",
 # inside a quoted string. The guard allows it, and this case says so rather than hiding it.
 sh("heredoc: a quoted call inside python source is not parsed as a shell call",
    "python - <<EOF\nimport os\nos.system(\"" + VCS + " stash\")\nEOF", "allow", cwd=NOGIT)
+# A DENY IN A PYTHON BODY STILL DENIES, one command or not (owner ruling 2026-10-14 22:25). The delimiter
+# `E-F` is read as the whole word. HEREDOC_HEADER reads `E` alone, so the cat case below holds no closer:
+# its body runs to the end, is dropped, and the stash after it is never judged. RED TODAY: that cat case.
+sh("heredoc: a stash push in a python body still denies, in one command",
+   "python3 - <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
+sh("heredoc: a python heredoc with the delimiter E-F, then a stash push, still denies",
+   "python3 - <<E-F\nx = 1\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
+sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
+   "cat <<E-F\nx\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
 
 
 # `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
@@ -3726,6 +3738,12 @@ sh("detached: a quoted mention of the shape prints text and starts nothing",
    'echo "cmd /c start something"', "allow", tool="PowerShell", cwd=NOGIT)
 sh("detached: a grep for Start-Job is not a call to it",
    'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
+
+
+# A MACHINE-WIDE KILL IN A ONE-COMMAND PYTHON BODY STILL DENIES (owner ruling 2026-10-14 22:25): the
+# body is one step, and the kill is a deny, which wins over any ask step in the same command.
+sh("heredoc: a machine-wide kill in a python body still denies, in one command",
+   "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
 
 
 # =========================================================================== 2c. live streams
@@ -7015,6 +7033,82 @@ sh("ask-alone: a single & inside a quoted URL beside the cap write is one step, 
    "ask", "subagent-model-cap", cwd=PROJ)
 sh("ask-alone: an escaped double quote around a single & is one step, so it asks",
    'echo "' + CAP_KEY + '=v \\" & \\"" > settings.local.json', "ask", "subagent-model-cap", cwd=PROJ)
+
+
+# =========================================================================== 6d. an interpreter heredoc is one step
+FAMILY = "ask-alone"
+#
+# OWNER RULING (2026-10-14 22:25): an inline interpreter script, a `python - <<PY`, `node`, `perl` or
+# `ruby` heredoc, is ONE step, so one command holding an ask step asks once, as a lone ask step does.
+# count_steps counts every body line as a step today, so the same command denies. RED TODAY, by
+# design: the one-command heredocs with an ask step in the body (the first block). GREEN TODAY, by
+# design: the pins below it. A chain before or after the heredoc, a pipe after the header, two
+# interpreter heredocs, and a bash or `ssh host "bash -s"` body still count more than one step. A deny
+# in a body still wins (the shared-tree and kill sections hold those cases).
+LANE_STASH = VCS + " stash push -u -m lane"
+FORCE_PUSH = VCS + " push --force origin HEAD:main"
+
+sh("ask-alone: a one-command python heredoc holding a prune asks, not denies",
+   "python3 - <<'PY'\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command python heredoc with a print line and a prune asks once",
+   "python3 - <<'PY'\nprint(1)\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command node heredoc holding a prune asks, not denies",
+   "node <<'JS'\n" + PRUNE + "\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command perl heredoc holding a prune asks, not denies",
+   "perl <<'PL'\n" + PRUNE + "\nPL", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command ruby heredoc holding a prune asks, not denies",
+   "ruby <<'RB'\n" + PRUNE + "\nRB", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command python heredoc holding a forced push asks, not denies",
+   "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
+sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
+   "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
+sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "subagent-model-cap", cwd=PROJ)
+
+# Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
+# multi-line template literal inside the body. None of them hides the prune or adds a step.
+sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
+   "python3 - <<'PY'\n# don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a // line with a lone apostrophe in a python body holds no quote, so the prune asks",
+   "python3 - <<'PY'\n// don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a /* opener in a python body opens no quote, so the prune asks",
+   "python3 - <<'PY'\n/* x */\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a lone apostrophe in plain python body text, then the prune, asks",
+   "python3 - <<'PY'\ndon't stop\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune inside a multi-line node template literal asks, not denies",
+   "node <<'JS'\nconst s = `\n" + PRUNE + "\n`;\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a python body that holds a shell prune only as a # comment is no step, so it allows",
+   "python3 - <<'PY'\n# " + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
+
+# The delimiter `E-F` is read as the whole word. Today HEREDOC_HEADER reads `E` alone, so this asks
+# nothing, and the first case is RED. The second and third are the pins that a misread would break.
+sh("ask-alone: a one-command python heredoc with the delimiter E-F, holding a prune, asks",
+   "python3 - <<E-F\n" + PRUNE + "\nE-F", "ask", "shared-tree", cwd=WTPRUNE)
+chained_prune("ask-alone: a whole-word delimiter E-F, a python body, then a prune, still denies",
+              "python3 - <<E-F\nprint(1)\nE-F\n" + PRUNE)
+
+# PINS, GREEN TODAY: each is more than one step, so the prune denies as a chained ask step.
+chained_prune("ask-alone: a chain before a python heredoc holding a prune still denies",
+              "echo hi && python3 - <<'PY'\n" + PRUNE + "\nPY")
+chained_prune("ask-alone: a python heredoc holding a prune, then echo, still denies",
+              "python3 - <<'PY'\n" + PRUNE + "\nPY\necho x")
+chained_prune("ask-alone: a python heredoc header with a trailing pipe to tee still denies",
+              "python3 - <<'PY' | tee out.txt\n" + PRUNE + "\nPY")
+chained_prune("ask-alone: a bash heredoc body holding a prune still counts each line, so it denies",
+              "bash <<'SH'\n" + PRUNE + "\nSH")
+chained_prune("ask-alone: an ssh bash -s heredoc body holding a prune still counts each line",
+              'ssh host "bash -s" <<\'SH\'\n' + PRUNE + "\nSH")
+chained_prune("ask-alone: two python heredocs, a prune in the first, still deny as two steps",
+              "python3 - <<'A'\n" + PRUNE + "\nA\npython3 - <<'B'\nprint(1)\nB")
+chained_prune("ask-alone: a python heredoc holding a prune, then a bash heredoc, still denies",
+              "python3 - <<'PY'\n" + PRUNE + "\nPY\nbash <<'SH'\necho x\nSH")
+chained_prune("ask-alone: a bash heredoc holding a prune, then a python heredoc, still denies",
+              "bash <<'SH'\n" + PRUNE + "\nSH\npython3 - <<'PY'\nprint(1)\nPY")
+chained_prune("ask-alone: a python header in quoted echo text is no heredoc, so the prune after it denies",
+              'echo "python <<EOF"\n' + PRUNE)
+deny_beats("ask-alone: a python body holding a prune and a stash push denies as the stash push",
+           "python3 - <<'PY'\n" + PRUNE + "\n" + LANE_STASH + "\nPY", "shared-tree", cwd=GITWT,
+           carries="stash stack")
 
 
 # =========================================================================== ordinary work
