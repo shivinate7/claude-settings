@@ -3024,10 +3024,50 @@ sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} ad
    'rm -rf "${PWD:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${PWD:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
-   "D=$(pwd); rm -rf $D/*", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+# ---- rm-var taint spellings, one table against the assigned-value reader. A delete whose variable is
+# set from pwd, HOME or ~ (in any substitution, loop or quoting) is tainted, so its refusal names the
+# literal path and never ${NAME:?}. guard_rm_var.rm_var_hits reads the bindings (_rm_values) and the
+# taint names, and the one sh() case per distinct branch stays above. Incident 2026-10-10 to 10-11:
+# 7 of 24 Bash prompts were rm on a $var path. Rows: (text, name). Each is a spelling that reaches a
+# branch the sh() rows already hold, so it is a row here, not a subprocess case.
+TAINT_READER_ROWS = (
+    ("D=$(pwd); rm -rf $D/*", "D"),
+    ('D=$(/bin/pwd); rm -rf "$D"/*', "D"),
+    ('D=$(command pwd); rm -rf "$D"/*', "D"),
+    ('D=`pwd -P`; rm -rf "$D"/*', "D"),
+    ('OUT=$(pwd -L); rm -rf "$OUT"/*', "OUT"),
+    ('D="$(pwd -P)"; rm -rf "$D"/*', "D"),
+    ("D=$HOME; rm -rf ${D:?}/*", "D"),
+    ('for D in $HOME; do rm -rf "${D:?}"/*; done', "D"),
+    ("D=$(echo $HOME); rm -rf $D/*", "D"),
+    ('D=$(cd ..; pwd); rm -rf "$D"/*', "D"),
+    ('D=$(cd .. || exit; pwd -P); rm -rf "$D"/*', "D"),
+    ('D=`cd .. && pwd`; rm -rf "$D"/*', "D"),
+    ('D=$(echo x | (cd .. && pwd)); rm -rf "$D"/*', "D"),
+    ("""D="$(: ')' ; pwd)"; rm -rf "${D:?}"/*""", "D"),
+)
+
+
+def rm_var_taint_reader_case():
+    """Each TAINT_READER_ROWS text gets the literal-path reason, and the reason never names ${NAME:?}.
+    The module loads from the folder of GUARD, so a GUARD_UNDER_TEST copy of guard_rm_var is the one
+    read. A reader that loses a taint source fails here, and the sh() rows above fail too."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(GUARD), "guard_rm_var.py")
+    spec = importlib.util.spec_from_file_location("guard_rm_var_under_test", path)
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    bad = []
+    for text, name in TAINT_READER_ROWS:
+        reason = reader.rm_var_reason(reader.rm_var_hits(text, NOGIT))
+        if "literal path" not in reason or ("${%s:?}" % name) in reason:
+            bad.append(text)
+    if bad:
+        return False, "the reader does not name the literal path for: " + " | ".join(bad)
+    return True, ("%d taint spellings name the literal path, none names ${NAME:?}"
+                  % len(TAINT_READER_ROWS))
+
+
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3037,36 +3077,13 @@ sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from $(/bin/pwd) is refused for a literal path, not ${D:?}",
-   'D=$(/bin/pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from $(command pwd) is refused for a literal path, not ${D:?}",
-   'D=$(command pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from a backtick pwd -P is refused for a literal path, not ${D:?}",
-   'D=`pwd -P`; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from $(pwd -L) is refused for a literal path, not ${OUT:?}",
-   'OUT=$(pwd -L); rm -rf "$OUT"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${OUT:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a loop over $(pwd -P) is refused for a literal path, not ${D:?}",
    'for D in $(pwd -P); do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a quoted $(pwd -P) assignment is refused for a literal path, not ${D:?}",
-   'D="$(pwd -P)"; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays allowed",
    'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a guarded variable set from $HOME is refused and its remedy names no ${D:?} advice",
-   "D=$HOME; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
 # A guarded variable set to a literal path passes.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
@@ -3078,16 +3095,8 @@ sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a loop over $HOME names a literal path, not ${D:?}",
-   'for D in $HOME; do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
    "D=${X:-$HOME}; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a variable set from $(echo $HOME) names a literal path, not ${D:?}",
-   "D=$(echo $HOME); rm -rf $D/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
 # (b) ruling changed: $HOME/x is not the trigger shape any more, so it is not refused. The
 # literal-path case for a $HOME target is "$HOME/$d" above.
@@ -3121,22 +3130,6 @@ sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a pwd after ; inside $(…) taints the variable, not ${D:?}",
-   'D=$(cd ..; pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a pwd -P after || inside $(…) taints the variable, not ${D:?}",
-   'D=$(cd .. || exit; pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a pwd after && inside a backtick span taints the variable, not ${D:?}",
-   'D=`cd .. && pwd`; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a pwd after | inside a nested $(…) taints the variable, not ${D:?}",
-   'D=$(echo x | (cd .. && pwd)); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
 # Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
@@ -3145,9 +3138,6 @@ sh("rm-var: a guarded variable set after && in a list stays allowed",
 # with the literal-path reason and never name ${D:?}.
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${D:?}",))
-sh("rm-var: a pwd after a quoted ) in a double-quoted $(…) taints D, not ${D:?}",
-   """D="$(: ')' ; pwd)"; rm -rf "${D:?}"/*""", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
@@ -3347,42 +3337,54 @@ sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowe
 # Node 26.11. The install hangs while it unpacks (measured, see decision playwright-browsers-path).
 # One hung 20 minutes, and they fought over the shared ~/Library/Caches/ms-playwright/__dirlock.
 # The main-session forms below are denied. Each one runs an install under the default Node.
-sh("playwright-install: npx names the browser install", "npx playwright install chromium", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: npx -y installs without a prompt", "npx -y playwright install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: npx pins a version for the install", "npx playwright@1.58 install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: the local bin runs the install", "node_modules/.bin/playwright install",
-   "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: the local bin with deps runs the install",
-   "./node_modules/.bin/playwright install --with-deps", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: the default node runs the cli.js install",
-   "node node_modules/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: pnpm exec runs the install", "pnpm exec playwright install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: yarn runs the install", "yarn playwright install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: bunx runs the install", "bunx playwright install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: bash -c wraps the install",
-   "bash -c 'npx playwright install chromium'", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: cd then && runs the install", "cd x && npx playwright install chromium",
-   "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a ; chain runs the install", "npm test; npx playwright install", "deny",
-   "playwright-install", cwd=NOGIT)
-sh("playwright-install: the Node 22 bin form is not the cli.js form",
-   "npx -y node@22 node_modules/.bin/playwright install", "deny", "playwright-install", cwd=NOGIT)
-# Scanner cases: a lone quote, a comment opener inside quotes, and a multi-line quoted string
-# must not hide an install that follows them.
-sh("playwright-install: a double-quoted apostrophe in an echo does not hide the install",
-   'echo "don\'t"; npx playwright install', "deny", "playwright-install", cwd=NOGIT)
+# One table of the main-session deny forms. Each row is one branch of guard_kill.py's walk
+# (_playwright_install_hit): a name right after its runner, a word or flag between runner and name,
+# the npx-only flag exclusion, a name followed by another name, a wrapper shell, a scoped or pinned
+# name, a bin path, a chain, and the quoted text the scanner must see past. A runner word (pnpm,
+# yarn, bunx, npm exec, pnpm dlx) takes the same branch as npx, and so does a `--flag` before the
+# name, so each of those is no row. Row: (name, command, tool).
+PLAYWRIGHT_INSTALL_DENY = (
+    ("playwright-install: npx names the browser install", "npx playwright install chromium", "Bash"),
+    ("playwright-install: npx -y installs without a prompt", "npx -y playwright install", "Bash"),
+    ("playwright-install: npx -p names the package, the install still denies",
+     "npx -p playwright playwright install", "Bash"),
+    # npx takes only its own value flags (--prefix, -w, --workspace), so -F's value is the name here.
+    ("playwright-install: npx -F names the package and the install runs",
+     "npx -F playwright install", "Bash"),
+    ("playwright-install: npx pins a version for the install", "npx playwright@1.58 install", "Bash"),
+    ("playwright-install: the local bin runs the install", "node_modules/.bin/playwright install",
+     "Bash"),
+    ("playwright-install: the default node runs the cli.js install",
+     "node node_modules/playwright/cli.js install", "Bash"),
+    ("playwright-install: bash -c wraps the install", "bash -c 'npx playwright install chromium'",
+     "Bash"),
+    ("playwright-install: cd then && runs the install", "cd x && npx playwright install chromium",
+     "Bash"),
+    ("playwright-install: the Node 22 bin form is not the cli.js form",
+     "npx -y node@22 node_modules/.bin/playwright install", "Bash"),
+    # Scanner cases: a lone quote, a comment opener inside quotes, and a multi-line quoted string
+    # must not hide an install that follows them.
+    ("playwright-install: a double-quoted apostrophe in an echo does not hide the install",
+     'echo "don\'t"; npx playwright install', "Bash"),
+    ("playwright-install: a hash inside quotes is no comment, the install still denies",
+     'echo "#" && npx playwright install chromium', "Bash"),
+    ("playwright-install: a multi-line quoted string does not hide the install",
+     'echo "one\ntwo" && npx playwright install chromium', "Bash"),
+    ("playwright-install: npx -c runs the install in a shell string", "npx -c 'npx playwright install'",
+     "Bash"),
+    ("playwright-install: cmd /c runs the install", "cmd /c npx playwright install", "Bash"),
+    ("playwright-install: powershell -Command runs the install",
+     'powershell -Command "npx playwright install"', "Bash"),
+    # The scoped package's bin is playwright, so its install is the same act.
+    ("playwright-install: the scoped test package installs the browsers",
+     "npx @playwright/test install", "Bash"),
+    ("playwright-install: npm exec --yes runs the install", "npm exec --yes playwright install",
+     "Bash"),
+)
+for _name, _command, _tool in PLAYWRIGHT_INSTALL_DENY:
+    sh(_name, _command, "deny", "playwright-install", tool=_tool, cwd=NOGIT)
 sh("playwright-install: an apostrophe in a commit message names the install and is allowed",
    'git commit -m "don\'t run npx playwright install"', "allow", cwd=NOGIT)
-sh("playwright-install: a hash inside quotes is no comment, the install still denies",
-   'echo "#" && npx playwright install chromium', "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a multi-line quoted string does not hide the install",
-   'echo "one\ntwo" && npx playwright install chromium', "deny", "playwright-install", cwd=NOGIT)
 # The allowed main-session form: Node 22 through the cli.js file, with or without the GC skip.
 sh("playwright-install: the Node 22 cli.js install is allowed in the main session",
    "npx -y node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
@@ -3399,75 +3401,20 @@ sh("playwright-install: grep for the install text in a README is allowed",
 sh("playwright-install: echo of the install text is allowed", "echo npx playwright install",
    "allow", cwd=NOGIT)
 # Rule 1: a subagent call that runs an install is denied whatever the form, including the Node 22
-# cli.js form, and whatever the role the subagent carries.
+# cli.js form, and whatever the role the subagent carries. The switch reads agent_id alone (guard.py
+# passes bool(payload["agent_id"])), so one row per outcome pins it: a plain install and the Node 22
+# cli.js form denied, and a test run allowed.
 sh("playwright-install: a subagent install is denied",
    "npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT,
    agent_id="pw-sub1", agent_type="builder")
-sh("playwright-install: a subagent bash -c install is denied",
-   "bash -c 'npx -y playwright install'", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
 sh("playwright-install: a subagent Node 22 cli.js install is denied, rule 1 wins",
    "npx -y node@22 node_modules/playwright/cli.js install chromium", "deny",
    "playwright-install", cwd=NOGIT, agent_id="pw-sub1", agent_type="test-author")
 sh("playwright-install: a subagent test run is allowed", "npx playwright test", "allow",
    cwd=NOGIT, agent_id="pw-sub1")
-# Review of #329: a flag's value sits before the command word, so the word is still the install.
-sh("playwright-install: npx -p names the package, the install still denies",
-   "npx -p playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: npx --prefix takes a value, the install still denies",
-   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: pnpm --filter takes a value, the install still denies",
-   "pnpm --filter app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
-# The scoped package's bin is playwright, so its install is the same act.
-sh("playwright-install: the scoped test package installs the browsers",
-   "npx @playwright/test install", "deny", "playwright-install", cwd=NOGIT)
-# A shell that wraps the command runs the same install.
-sh("playwright-install: cmd /c runs the install",
-   "cmd /c npx playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: powershell -Command runs the install",
-   'powershell -Command "npx playwright install"', "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: pwsh -c runs the install",
-   "pwsh -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
 # False alarm: the Node 22 cli.js form with a ./ path is the allowed form.
 sh("playwright-install: the Node 22 cli.js form with a ./ path is allowed in the main session",
    "npx -y node@22 ./node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
-# Rule 1 for a subagent: a flag's value does not hide the install either.
-sh("playwright-install: a subagent npx --prefix install is denied",
-   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-# Re-review of #329: each wrapper below hides the install behind a flag, a workspace, or a shell.
-# Each form is denied in the main session and again as a subagent.
-sh("playwright-install: npm -w exec runs the install",
-   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npm -w exec install is denied",
-   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: npm --workspace exec -- runs the install",
-   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npm --workspace exec -- install is denied",
-   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: npx --registry takes a value, the install still denies",
-   "npx --registry https://r.example playwright install", "deny", "playwright-install",
-   cwd=NOGIT)
-sh("playwright-install: a subagent npx --registry install is denied",
-   "npx --registry https://r.example playwright install", "deny", "playwright-install",
-   cwd=NOGIT, agent_id="pw-sub1")
-sh("playwright-install: yarn workspace runs the install",
-   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent yarn workspace install is denied",
-   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: pwsh -Command runs the install",
-   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent pwsh -Command install is denied",
-   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: npx -c runs the install in a shell string",
-   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npx -c install is denied",
-   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
 # Allowed main-session forms: the cli.js file named by an absolute or a parent-relative path.
 sh("playwright-install: the Node 22 cli.js form with an absolute path is allowed",
    "npx -y node@22 /abs/path/node_modules/playwright/cli.js install chromium", "allow",
@@ -3477,22 +3424,6 @@ sh("playwright-install: the Node 22 cli.js form with a parent-relative path is a
 # Control: a workspace exec that runs a test is not an install.
 sh("playwright-install: a workspace exec test run is allowed",
    "npm -w app exec playwright test", "allow", cwd=NOGIT)
-# Round 4 of #329: a plain node run of a cli.js named by the playwright-core package, or by a
-# path that holds the word playwright, is an install. Each is denied in the main session and as a
-# subagent.
-sh("playwright-install: node runs the playwright-core cli.js install",
-   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent node playwright-core cli.js install is denied",
-   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: node runs a cli.js under a playwright path install",
-   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent node cli.js under a playwright path install is denied",
-   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: a subagent Node 22 playwright-core cli.js install is denied",
-   "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "deny",
-   "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
 # Round 4 allows, main session. A package manager's own install, a flag's value, and a test
 # filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
 sh("playwright-install: pnpm -C takes a directory, its install is allowed",
@@ -3513,47 +3444,6 @@ sh("playwright-install: the Node 22 cli.js form with --yes is allowed",
    "npx --yes node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
 sh("playwright-install: the Node 22 playwright-core cli.js form is allowed in the main session",
    "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "allow", cwd=NOGIT)
-# Final review of #329: regressions. Each form is denied in the main session and as a subagent.
-sh("playwright-install: node with a flag before the cli.js runs the install",
-   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
-   cwd=NOGIT)
-sh("playwright-install: a subagent node with a flag before the cli.js install is denied",
-   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
-   cwd=NOGIT, agent_id="pw-sub1")
-sh("playwright-install: npm exec --yes runs the install",
-   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npm exec --yes install is denied",
-   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: bunx --bun runs the install",
-   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent bunx --bun install is denied",
-   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
-sh("playwright-install: npm exec --package= runs the install",
-   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npm exec --package= install is denied",
-   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-sh("playwright-install: pnpm dlx --package= runs the install",
-   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent pnpm dlx --package= install is denied",
-   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
-   agent_id="pw-sub1")
-# npx has no --filter, -F or --dir flag, so the value's name is taken as the package and the
-# install runs. Each form is denied in the main session and as a subagent.
-sh("playwright-install: npx --filter names the package and the install runs",
-   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npx --filter install is denied",
-   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
-sh("playwright-install: npx -F names the package and the install runs",
-   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npx -F install is denied",
-   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
-sh("playwright-install: npx --dir names the package and the install runs",
-   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT)
-sh("playwright-install: a subagent npx --dir install is denied",
-   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
-
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
 # denied as a machine-wide kill, although the command calls grep. Each case below names the word
@@ -9636,6 +9526,8 @@ def mask_long_case():
     return True, "unclosed quote then 64 KB of escaped quotes returned within 1 s"
 
 
+LOG_CHECKS_EXTRA.append(("rm-var: the taint spellings name the literal path at the assigned-value "
+                         "reader, never ${NAME:?}", rm_var_taint_reader_case))
 LOG_CHECKS_EXTRA.append(("mask_script: unclosed double quote then 64 KB of escaped quotes "
                          "returns within 1 s", mask_long_case))
 # F2, a memory bound. A 64 KB script of deeply nested closed templates must scan within 200 MB. The
