@@ -5228,5 +5228,143 @@ class SimulatorTierActTests(unittest.TestCase):
         self.assertEqual(world.shutdowns(), [SIM_U1])
 
 
+# --------------------------------------------------------------------------- the sweep finishes
+#
+# Owner ruling 2026-10-15 15:08 CDT ("make the janitor sweep finish"). Measured: `decide_worktree`
+# costs about 7.5 s per tree, SessionEnd gives the whole sweep 25 s, and confirm mode judges trees
+# one at a time with no deadline. Owner ruling 2026-10-15 12:40 (decision test-strategy-reset): no
+# case times a run on a local device. These cases count git calls and drive an injected clock.
+#
+# The seams below are set with `create=True`, so they exist only inside these cases. On origin/main
+# nothing reads them, which is why every case here is red there. The builder must honour them:
+#   sweep._now                  zero-argument callable, seconds. `main` reads it once when a pass
+#                               starts, and again before each tree it judges.
+#   sweep.JUDGE_BUDGET_SECONDS  the pass's budget. When `_now()` reaches start + budget, the pass
+#                               judges no further tree.
+# A tree the pass did not judge gets a decision in the result: action "keep", reason starting
+# "not judged". Its folder stays on disk.
+
+TREE_IDLE_HOURS = (("wt-a", 2), ("wt-b", 3), ("wt-c", 4), ("wt-d", 5), ("wt-e", 6))
+
+
+@contextlib.contextmanager
+def _no_deadline():
+    """A pass whose clock never reaches its deadline."""
+    with mock.patch.object(sweep, "_now", lambda: 0.0, create=True), \
+            mock.patch.object(sweep, "JUDGE_BUDGET_SECONDS", 1e9, create=True):
+        yield
+
+
+@contextlib.contextmanager
+def _clock_and_budget(clock, budget):
+    """The seams read CLOCK[0], a mutable list the test advances."""
+    with mock.patch.object(sweep, "_now", lambda: clock[0], create=True), \
+            mock.patch.object(sweep, "JUDGE_BUDGET_SECONDS", budget, create=True):
+        yield
+
+
+def _is_worktree_list(argv):
+    return any(argv[i:i + 2] == ["worktree", "list"] for i in range(len(argv) - 1))
+
+
+def _is_pushed_check(argv):
+    """The pushed check in any shape a builder may pick: one `rev-list --stdin` over the remote
+    heads, or a `--contains` ref walk (`branch -r --contains`, `for-each-ref --contains`)."""
+    return ("rev-list" in argv and "--stdin" in argv) or "--contains" in argv
+
+
+class SweepFinishesTests(unittest.TestCase):
+    """A sweep pass over one repository with TREE_IDLE_HOURS linked trees. Each tree is detached at
+    main's tip, pushed (main is on the bare remote), clean, and idle for its hours, so the strict
+    rule reaps it. The pass runs through `sweep.main`, the path SessionEnd takes."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="finish-", dir=ROOT)  # short: Windows path length
+        self.repo = os.path.join(self.base, "r")
+        make_repo(self.repo, {"f.txt": "base\n"})
+        give_remote(self.repo)
+        self.restore_log = os.path.join(self.base, "restore.log")
+        self.trees = {}  # name -> folder
+        for name, hours in TREE_IDLE_HOURS:
+            path = os.path.join(self.base, name)
+            made = run_vcs(self.repo, "worktree", "add", "-q", "--detach", path, "main")
+            require(made.returncode == 0, "worktree add %r failed: %s" % (path, made.stderr.strip()))
+            _age_admin_files(path, hours * 3600)
+            self.trees[name] = path
+        self.oldest_first = [name for name, _ in sorted(TREE_IDLE_HOURS, key=lambda t: -t[1])]
+
+    def run_pass(self, argv, clock=None, budget=None, tick=10.0):
+        """One `sweep.main` pass. Returns (git argv calls, result dicts, tree names in the order the
+        pass judged them). CLOCK, when given, is a mutable [seconds]; each judged tree adds TICK
+        seconds, so the clock passes the deadline after a fixed count of trees, however often the
+        builder reads it."""
+        calls, results, judged = [], [], []
+        real_decide = sweep.decide_worktree
+
+        def judging(where, entry, *args, **kwargs):
+            judged.append(os.path.basename(entry["path"]))
+            decision = real_decide(where, entry, *args, **kwargs)
+            if clock is not None:
+                clock[0] += tick
+            return decision
+
+        def capture(found, confirm, out=None):
+            results.extend(found)
+
+        seams = _no_deadline() if clock is None else _clock_and_budget(clock, budget)
+        with _watch_git(calls), _process_table({}), _machine_quiet(), seams, \
+                mock.patch.object(sweep, "decide_worktree", judging), \
+                mock.patch.object(sweep, "print_sweep_report", side_effect=capture), \
+                mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": os.path.join(self.base, "runs.jsonl")}):
+            sweep.main([self.repo, *argv, "--restore-log", self.restore_log])
+        return calls, results, judged
+
+    def assert_each_git_fact_read_once(self, calls, mode):
+        counts = {"worktree list": sum(_is_worktree_list(c) for c in calls),
+                  "ls-remote": sum("ls-remote" in c for c in calls),
+                  "pushed check": sum(_is_pushed_check(c) for c in calls)}
+        over = {k: v for k, v in counts.items() if v > 1}
+        self.assertEqual(over, {}, "a %s pass over %d trees ran these more than once: %r (all: %r)"
+                         % (mode, len(self.trees), over, counts))
+
+    def test_a_preview_pass_reads_each_git_fact_once_not_once_per_tree(self):
+        calls, _results, _judged = self.run_pass([])
+        self.assert_each_git_fact_read_once(calls, "preview")
+
+    def test_a_confirm_pass_reads_each_git_fact_once_not_once_per_tree(self):
+        calls, _results, _judged = self.run_pass(["--confirm"])
+        self.assert_each_git_fact_read_once(calls, "confirm")
+
+    def test_a_pass_past_its_deadline_stops_judging_and_reports_the_rest_not_judged(self):
+        # Budget 15 s, 10 s a judged tree: the clock reads 0, then 10, then 20. The pass judges two.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm"], clock=clock, budget=15.0, tick=10.0)
+        self.assertEqual(len(results), 1, "the pass reported %d roots, not 1" % len(results))
+        self.assertEqual(len(judged), 2, "a 15 s budget at 10 s a tree judges 2 trees; the pass "
+                                         "judged %r" % judged)
+        decisions = {os.path.basename(d["path"]): d for d in results[0]["worktrees"]}
+        for name in self.trees:
+            if name in judged:
+                continue
+            decision = decisions.get(name)
+            self.assertIsNotNone(decision, "no decision for %s, which the pass did not judge" % name)
+            self.assertEqual(decision["action"], "keep", decision)
+            self.assertTrue(decision["reason"].startswith("not judged"), decision)
+            self.assertTrue(os.path.isdir(self.trees[name]),
+                            "%s was removed though the pass did not judge it" % name)
+        removed = [n for n, d in decisions.items() if d["action"] == "reap" and not d.get("error")]
+        self.assertLessEqual(len(removed), len(judged),
+                             "the pass removed %r, more than the %r it judged" % (removed, judged))
+
+    def test_the_oldest_idle_tree_is_judged_first(self):
+        listed = [os.path.basename(e["path"]) for e in sweep.parse_worktree_list(self.repo) or []
+                  if os.path.basename(e["path"]) in self.trees]
+        self.assertNotEqual(listed, self.oldest_first, "the listing is already oldest-first, so this "
+                            "case cannot tell the order apart")
+        _calls, _results, judged = self.run_pass(["--confirm"])
+        self.assertEqual(judged, self.oldest_first, "judged %r; the oldest idle tree must go first, "
+                                                    "not the listing order %r" % (judged, listed))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
