@@ -3387,11 +3387,15 @@ class WaitStepLines(unittest.TestCase):
 
 # ---- the records page is rebuilt at merge time --------------------------------------------------------------------
 
-FAKE_RECORDS = '''import os, sys
+# The records-only mode the builder adds to lint/hook_catalog.py: it writes docs/records.md and nothing else. The merge
+# tool passes it with --root on every run, so a root with catalog parts gets no docs/catalog.md in its merge commit.
+RECORDS_ONLY = "--records-only"
+
+FAKE_RECORDS = '''import json, os, sys
 a = sys.argv[1:]
 root = a[a.index("--root") + 1]
 with open(os.environ["RECORDS_CALLS"], "a") as f:
-    f.write(" ".join(a) + "\\n")
+    f.write(json.dumps(a) + "\\n")
 if os.path.exists(os.path.join(root, "debts", "bad.md")):
     print("records: debts/bad.md has no What")
     sys.exit(1)
@@ -3535,14 +3539,20 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.rev("origin/integ^2"), before)
         self.assertNotIn("docs/records.md", self.tree_names("origin/integ"))
 
-    def test_the_generator_runs_in_the_merge_worktree_and_takes_only_the_root(self):
+    def test_the_generator_runs_in_the_merge_worktree_in_records_only_mode(self):
+        # Re-pointed from the --root-only pin (stale, owner ruling test-strategy-reset). The merge tool runs the records-only
+        # mode, RECORDS_ONLY, and no other argument. Red on 392cc37: the call is --root <wt> with no mode flag.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(os.path.exists(self.calls), "the generator never ran")
-        ran = [l.split(" ", 1) for l in open(self.calls).read().splitlines()]
-        for flag, path in ran:
-            self.assertEqual(flag, "--root")
+        ran = [json.loads(l) for l in open(self.calls).read().splitlines()]
+        self.assertTrue(ran, "the generator log is empty")
+        for args in ran:
+            self.assertIn("--root", args, args)
+            path = args[args.index("--root") + 1]
+            self.assertEqual(set(args), {"--root", path, RECORDS_ONLY}, args)
+            self.assertEqual(len(args), 3, args)
             self.assertTrue(os.path.basename(os.path.dirname(path)).startswith("merge-wt-"), path)  # the detached worktree
             self.assertNotEqual(os.path.realpath(path), os.path.realpath(self.co))
 
@@ -3723,6 +3733,150 @@ class RecordsRebuildReal(RecordsEnv):
         self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
+
+class RecordsScope(RecordsEnv):
+    """The real generator, lint/hook_catalog.py. merge.py runs it on every root, so a root with catalog parts must merge, and
+    its merge commit may carry the records page alone (the records-only mode, RECORDS_ONLY). Red on 392cc37: the whole
+    generator refuses a root with hooks/ and no settings.json, and it writes docs/catalog.md into the merge."""
+    def test_a_page_edited_on_both_sides_with_no_records_stops_the_merge(self):
+        # Red on 392cc37: the generator writes nothing here, so the page with conflict markers is committed and merged.
+        self.kinds_off()
+        self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"))  # the defect: markers reach main
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "conflict" in l and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.head(), before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_root_with_hooks_and_no_settings_merges(self):
+        # Red on 392cc37: "hook_catalog: cannot read settings.json", so the records page cannot be rebuilt.
+        self.kinds_off()
+        self.on("feat", {"hooks/guard.sh": "#!/bin/sh\necho hi\n", "debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+
+    def test_the_merge_commit_carries_no_catalog_page(self):
+        # Red on 392cc37: the root renders a catalog, so the generator writes docs/catalog.md and the merge brings it in.
+        self.kinds_off()
+        self.on("feat", {"settings.json": "{}\n", "hooks/.gitkeep": "", "skills/.gitkeep": "",
+                         "decisions/subagent-model-cap.md": "# Subagent model cap\n\nOwner ruling. The table names each role model.\n",
+                         "debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.rev("origin/main")  # fetches
+        changed = sh(self.co, "git", "diff", "--name-only", "origin/main^1", "origin/main").split()
+        self.assertIn("docs/records.md", changed)
+        self.assertNotIn("docs/catalog.md", changed, changed)
+
+class RecordsHeal(RecordsEnv):
+    """The keep paths of the heal wait in confirm(): the third wait of a run, on the merge commit that heals the page. The
+    fake generator writes the page, so the heal is a real conflict on docs/records.md. Each push or red check fires on the
+    third wait only (len(host.waits) == 3). These pin keep paths that had no test: green on 392cc37, the code already keeps."""
+    def setUp(self):
+        super().setUp()
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
+    def heal_setup(self):
+        """A debt and a hand-written page on main; the head adds a debt. The head's rebuild commits one page, and the heal merges both."""
+        self.kinds_off()
+        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                "a debt and a hand-written page on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+
+    def on_heal_wait(self, action):
+        """Run action when the heal wait starts: the third wait, on the merge commit."""
+        self.host.on_wait = lambda: action() if len(self.host.waits) == 3 else None
+
+    def assert_kept(self, rc, out):
+        """The merge commit that heals the page stays on feat: no revert, no merge, lock free."""
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(self.host.waits), 3, self.host.waits)
+        self.assertIn("stays on feat", out)
+        self.assertNotIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0])
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
+        self.heal_setup()
+        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: gates: fail")]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("are not green", out)
+        self.assertIn("gates: fail", out)
+
+    def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("records page is stale", out)
+
+    def test_a_page_edit_landing_on_main_during_the_heal_wait_stops_the_second_heal(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"docs/records.md": "records\n- rival\n"}, "untooled page edit"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("conflicts again", out)
+
+    def test_a_non_page_conflict_landing_on_main_during_the_heal_wait_refuses(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Rival gap one")}, "untooled debt"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("does not merge cleanly", out)
+
+    def test_the_heal_commit_names_only_the_page_in_drops_lines(self):
+        self.heal_setup()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.rev("origin/main")  # fetches
+        body = sh(self.co, "git", "log", "-1", "--format=%B", "origin/main^2")  # the heal commit: the merge's second parent
+        drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
+        self.assertEqual(drops, [["docs/records.md"]], body)
+
+class MergeImport(unittest.TestCase):
+    """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
+    exits non-zero, with no traceback. Red on 392cc37: the import error is a traceback."""
+    def test_a_blocked_generator_import_stops_with_one_line(self):
+        root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        tool = os.path.join(root, "merge", "merge.py")
+        os.makedirs(os.path.dirname(tool))
+        shutil.copyfile(merge.__file__, tool)
+        put_shim(os.path.join(root, "bin", "gh"), "#!/bin/sh\necho gh-blocked >&2\nexit 1\n")  # a stray gh call fails here
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = os.path.join(root, "bin") + os.pathsep + old
+        self.addCleanup(os.environ.__setitem__, "PATH", old)
+        code = "import runpy, sys; sys.modules['hook_catalog'] = None; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+        r = subprocess.run([sys.executable, "-c", code, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertNotIn("Traceback", out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("merge: "), out)
+        self.assertRegex(lines[0], r"hook_catalog|records")
 
 class RecordsPageHome(unittest.TestCase):
     """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy.
