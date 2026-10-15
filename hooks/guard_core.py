@@ -119,9 +119,11 @@ def _split_segments_cached(cmd: str, powershell: bool):
 # character; a backtick escapes the next character outside quotes and inside `"..."`; `''` inside
 # `'...'` and `""` inside `"..."` are one literal quote; `<# ... #>` is a comment (state `<#`) and
 # `@"` or `@'` at a line's end opens a here-string that ends at `"@` or `'@` on a line's start
-# (state `@"` or `@'`). Quotes inside either span open nothing. An opener with no closer is a
-# parse PowerShell cannot finish, and the walk cannot tell where it ends: the rest reads BLIND,
-# with no quote, escape or comment, so every redirect and `;` after it stays visible.
+# (state `@"` or `@'`). Each opens only at a token start (`token_start`); mid-word it is text.
+# Quotes inside either span open nothing. An opener with no closer is a parse PowerShell cannot
+# finish, and the walk cannot tell where it ends: the rest reads BLIND, with no quote, escape or
+# comment, so every redirect and `;` after it stays visible. A `sh -c` script is bash text in any
+# call (PosixScript).
 BLIND = "?"
 HERE_OPEN = re.compile(r"@(['\"])[ \t]*\r?\n")
 # PowerShell opens `<#` or `@'` only at a token's start: mid-word (`a<#`, `foo@'`) each is text.
