@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep"]
-ALL = JOB_FLAGS + STEP_FLAGS
+ALL = JOB_FLAGS + STEP_FLAGS + ["mods"]  # the shell's ALL also holds mods (harness-scope.sh line 11)
 BASH = shutil.which("bash")
 
 
@@ -85,6 +85,11 @@ class Scope(unittest.TestCase):
     def test_guard_change_turns_the_guard_suites_on(self):
         got = run(["hooks/guard.py"])
         self.assertFlags(got, want_true=["gates_windows", "gates_macos", "guard", "sweep", "code"])
+        # Merged from test_the_guard_selector_and_its_harness_turn_the_guard_flag_on: the selector's test
+        # and mutation harness also turn `guard` on. Named failure: the guard suite runs in no job.
+        for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=["guard"])
 
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
@@ -117,7 +122,8 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["lint/check_record_slugs.py"]), want_true=["gates_windows", "gates_macos", "guard", "code"])
 
     def test_janitor_launcher_change_turns_on_the_install_suite(self):
-        self.assertFlags(run(["bin/claude-janitor"]), want_true=["gates_windows", "shell_macos"])
+        # `guard` too: the janitor launcher turns the guard suite on (merged from the guard-flag cases).
+        self.assertFlags(run(["bin/claude-janitor"]), want_true=["gates_windows", "shell_macos", "guard"])
 
     def test_silent_undo_checker_change_turns_on_the_merge_job(self):
         self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["gates_windows_merge"])
@@ -128,6 +134,9 @@ class Scope(unittest.TestCase):
     def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
         for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md", "lint/new.py"):
             self.assertFlags(run([p]), want_true=["gates_windows", "shell_macos"])
+        # Merged from test_a_new_file_under_a_landed_dir_turns_on_the_guard_suite. Named failure: review
+        # finding on #305. The guard suite reads this path; if `guard` stays off, cut F runs it in no job.
+        self.assertFlags(run(["lint/zz_new.py"]), want_true=["guard"])
 
     def test_a_modified_md_under_skills_turns_on_nothing(self):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
@@ -150,18 +159,6 @@ class Scope(unittest.TestCase):
     # Cut F: gates-windows-guard and gates-mutate-guard skip on the `guard` flag. The slice selector
     # (GUARD_TESTS) is read from hooks/test_guard.py, so an edit to that file must turn `guard` on,
     # or a pull request that changes the slice would run no guard job at all.
-    def test_the_guard_selector_and_its_harness_turn_the_guard_flag_on(self):
-        for p in ("hooks/test_guard.py", "hooks/mutate_guard.py", "hooks/guard.py"):
-            self.assertFlags(run([p]), want_true=["guard"])
-
-    # Review finding on #305: the guard suite reads these two paths, but the rules did not set `guard`,
-    # so after cut F a pull request touching them ran the guard suite in no job (false green).
-    def test_a_new_file_under_a_landed_dir_turns_on_the_guard_suite(self):
-        self.assertFlags(run(["lint/zz_new.py"]), want_true=["guard"])
-
-    def test_the_janitor_launcher_turns_on_the_guard_suite(self):
-        self.assertFlags(run(["bin/claude-janitor"]), want_true=["guard"])
-
     # Control: a docs-only path must keep `guard` off, or the new rules over-trigger (false red).
     def test_a_docs_only_path_keeps_the_guard_flag_off(self):
         for p in ("README.md", "decisions/some-record.md"):
@@ -212,9 +209,8 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"gates_windows", "gates_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows", "gates_macos", "code", "guard"})
 
-    # Mod tests run as a step of the `gates` job (Linux), gated on the `mods` flag. The flag is its
-    # own: today a mods/ path falls to the unmapped rule, which turns every flag on. ALL stays as it
-    # is, so the cases below carry the mods check, and a missing flag reads as a FAIL here.
+    # Mod tests run as a step of the `gates` job (Linux), gated on the `mods` flag. `mods` is in ALL, so
+    # every fail-safe case in the Scope class carries the mods check (S5b, a copy of those cases, is gone).
     def test_a_mods_path_sets_the_mods_flag(self):
         for p in ("mods/plain-diff/check.mjs", "mods/session-board/session-board.test.mjs"):
             with self.subTest(path=p):
@@ -224,26 +220,10 @@ class Scope(unittest.TestCase):
     def test_a_mods_only_diff_sets_no_other_flag(self):
         got = run(["mods/plain-diff/check.mjs"])
         self.assertEqual(got.get("mods"), "true", got)
-        self.assertFlags(got, want_false=ALL)
+        self.assertFlags(got, want_false=[n for n in ALL if n != "mods"])
 
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
-
-    def test_the_fail_safe_cases_set_the_mods_flag(self):
-        cases = {
-            "scope script": run([".github/scripts/harness-scope.sh"]),
-            "workflow": run([".github/workflows/gates.yml"]),
-            "unmapped path": run(["zz-unmapped/blob.bin"]),
-            "unreadable diff": run(["README.md"], base="f" * 40),
-            "empty base": run(["README.md"], base=""),
-            "push": run(["README.md"], event="push"),
-            "schedule": run(["README.md"], event="schedule"),
-            "dispatch": run(["README.md"], event="workflow_dispatch"),
-        }
-        for name, got in cases.items():
-            with self.subTest(case=name):
-                self.assertEqual(got.get("mods"), "true", got)
-
 
 if __name__ == "__main__":
     unittest.main()
