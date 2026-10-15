@@ -706,7 +706,7 @@ def case_good_write_path_judges_stops_1_6_11():
     check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
 
 
-# Row tables. A row is one case body from above, unchanged. A row that raises is red and names
+# Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
     for body in rows:

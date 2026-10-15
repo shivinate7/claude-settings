@@ -478,7 +478,7 @@ def log_keeps_growing_after_watcher_exits():
     return problems
 
 
-# Parity table. A row is one case body from above, unchanged, and keeps its label. A failing row
+# Parity table. A row is one case body from above, and keeps its label. A failing row
 # prints that label before its problem. A row that raises names itself too.
 @posix_case
 def table_parity_and_exit_codes():

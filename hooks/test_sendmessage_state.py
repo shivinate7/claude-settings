@@ -366,7 +366,7 @@ def case_idle_and_waiting_allow_with_no_model_call():
 
 
 # Busy receiver and a model FLAG. Each row: (row id, model answer, reason prefix the deny carries).
-# The blank-reason row reaches the default-reason branch, so it stays a row, not a duplicate.
+# The blank-reason row reaches the default-reason branch, which the model-reason row does not.
 BUSY_FLAG_ROWS = (
     ("busy + model FLAG: one deny carrying the model's reason", FLAG,
      "parallelism-no-mid-task-talk"),

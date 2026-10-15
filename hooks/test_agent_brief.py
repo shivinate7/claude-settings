@@ -243,8 +243,7 @@ def dispatch(case):
 
 
 # SHAPE: no case of its own. context_for() checks the one-line JSON shape on every "context"
-# case, and the scope rows (one per type) and the general row for a missing type use the same
-# inputs the six shape cases used to run.
+# case. The scope rows (one per type) and the general row for a missing type cover the same inputs.
 
 # RULES: each standing rule is in the context. The rule lines are the same for every type.
 RULES = [

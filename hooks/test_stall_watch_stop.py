@@ -883,7 +883,7 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     return problems
 
 
-# Row tables. Each row is one case body from above, unchanged, and keeps its S-label.
+# Row tables. Each row is one case body from above, and keeps its S-label.
 PREFIX_ROWS = (
     attachment_notice_for_longer_id_does_not_close_shorter_job,
     stop_result_for_longer_id_does_not_close_shorter_job,

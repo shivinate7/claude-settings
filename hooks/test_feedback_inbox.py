@@ -1468,7 +1468,7 @@ def case_judge_child_is_detached_hook_returns_first():
           and not judged_notes(block_items(cfg, sid, text)), captured_texts(cfg, sid))
 
 
-# Row tables. A row is one case body from above, unchanged. A row that raises is red and names
+# Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
     for body in rows:

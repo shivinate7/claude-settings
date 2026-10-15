@@ -621,7 +621,7 @@ def main():
           count(res, "pr", "list") == 0, why(res))
 
     # No watch and no gh call. Each row: (row id, tool payload, the PRs the stub holds).
-    # The row id prints on FAIL. The quoted, heredoc and comment rows below stay separate.
+    # The row id prints on FAIL. Quoted, heredoc and comment spellings are checked below.
     NO_WATCH_ROWS = (
         ("git push, only a draft PR", bash("git push origin hook-wave-2"), [pr(12, draft=True)]),
         ("git push, no PR for this branch (a ready PR on another branch)",
