@@ -28,6 +28,8 @@ Owner, 2026-10-11, and owner, 2026-10-15 (the pinned checkout):
    copy-mode-overwrites-no-backup.
 
 Kind: build
+Plan: decisions/merge-reinstalls-from-main.md#the-ruling (all)
+Home: merge/install_from_main.sh
 
 ## The incidents
 
