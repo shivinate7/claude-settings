@@ -2005,8 +2005,12 @@ pinned_wt1() {
   co="$work/pinned_wt1-main"; pin="$work/pinned_wt1-main-live"; cfg="$work/pinned_wt1-cfg"
   h=$(mktemp -d); h=$(realpwd "$h")
   make_checkout "$co" "# pinned_wt1 main"
+  force_main_branch "$co"
   git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
     || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  if [ "$(git -C "$pin" rev-parse HEAD)" != "$(git -C "$co" rev-parse refs/heads/main)" ]; then
+    bad "$name" "fixture: the pinned checkout is not at local main"; rm -rf "$h"; return
+  fi
   cp "$INSTALL_SH" "$pin/install.sh"
   for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
   out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
@@ -2141,6 +2145,70 @@ pinoff3() {
   fi
 }
 
+# ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the path <clone>-live is not enough. A linked
+# worktree at that path is allowed only when it is detached at the clone's local main commit.
+# pinlive1: a -live worktree on a lane branch is refused. pinlive2: a -live worktree detached at a
+# commit that is not main is refused. pinned_wt1 keeps the other side: detached at main passes.
+
+# pinlive_check NAME RC OUT CFG HOME PTR SNAP: a refusal exits non-zero, leaves the pointer and the
+# config dir listing unchanged, and writes nothing into the fake HOME.
+pinlive_check() {
+  why=""
+  [ "$2" -ne 0 ] || why="$why exit 0, want non-zero;"
+  [ "$(cat "$4/CLAUDE.md" 2>/dev/null)" = "$6" ] || why="$why pointer changed to [$(cat "$4/CLAUDE.md" 2>/dev/null)];"
+  [ "$(find "$4" | sort)" = "$7" ] || why="$why config dir changed;"
+  [ -z "$(ls -A "$5")" ] || why="$why fake HOME was written;"
+  if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why output: $3"; fi
+}
+
+pinlive1() {
+  name="pinlive1: install.sh run from <clone>-live on a lane branch is refused and writes nothing"
+  co="$work/pinlive1-main"; pin="$work/pinlive1-main-live"; cfg="$work/pinlive1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinlive1 main"
+  force_main_branch "$co"
+  git -C "$co" worktree add -q -b lane "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  if [ "$(git -C "$pin" symbolic-ref -q --short HEAD)" != lane ]; then
+    bad "$name" "fixture: the pinned path is not on branch lane"; rm -rf "$h"; return
+  fi
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  seed_pointer "$cfg" "$co"
+  ptr=$(cat "$cfg/CLAUDE.md"); snap=$(find "$cfg" | sort)
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pinlive_check "$name" "$rc" "$out" "$cfg" "$h" "$ptr" "$snap"
+  rm -rf "$h"
+}
+
+pinlive2() {
+  name="pinlive2: install.sh run from <clone>-live detached at a commit that is not main is refused and writes nothing"
+  co="$work/pinlive2-main"; pin="$work/pinlive2-main-live"; cfg="$work/pinlive2-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinlive2 main"
+  force_main_branch "$co"
+  git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  # The pin stays at the old main; main then moves on, as it does between a merge and the move.
+  printf '# pinlive2 second\n' >> "$co/CLAUDE.md"
+  if ! git -C "$co" commit -q -am second; then
+    bad "$name" "fixture: commit on main failed"; rm -rf "$h"; return
+  fi
+  if [ "$(git -C "$pin" rev-parse HEAD)" = "$(git -C "$co" rev-parse refs/heads/main)" ]; then
+    bad "$name" "fixture: the pinned checkout did not stay behind main"; rm -rf "$h"; return
+  fi
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  seed_pointer "$cfg" "$co"
+  ptr=$(cat "$cfg/CLAUDE.md"); snap=$(find "$cfg" | sort)
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pinlive_check "$name" "$rc" "$out" "$cfg" "$h" "$ptr" "$snap"
+  rm -rf "$h"
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2211,6 +2279,8 @@ run pinned_wt1
 run pinoff1
 run pinoff2
 run pinoff3
+run pinlive1
+run pinlive2
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
