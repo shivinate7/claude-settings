@@ -1,5 +1,8 @@
 # Agent-end reap stops what a finished agent left
 
+Kind: process
+Home: janitor/agent_end_reap.py
+
 This record is step 2 of the plan in `which-start-shapes-outlive-the-agent-on-windows`
 (start shapes that outlive a subagent on Windows; PR #144). That record measured the
 shapes. This record holds the fix. Governing records:
@@ -7,8 +10,8 @@ shapes. This record holds the fix. Governing records:
 `liveness-read-is-platform-specific-and-unreadable-is-not-death` (an unreadable read is
 not death).
 
-The goal: when a subagent ends, each process it left under its own worktree stops.
-Nothing else stops.
+The goal: when a subagent ends, each process it left under its own worktree stops, and
+that worktree is removed when Part 4 allows. Nothing else stops or is removed.
 
 ## Part 1. The guard refuses the three missed shapes
 
@@ -42,12 +45,11 @@ copy without the skip. janitor/mutate_sweep.py carries one mutant for it.
 
 ## Part 3. The reaper
 
-`janitor/agent_end_reap.py` is a hook. It reads one hook payload.
+`janitor/agent_end_reap.py` is a hook. It runs on SubagentStop only and reads one hook payload.
 
 - **SubagentStop** gives `agent_id`. The harness names the worktree `agent-<agent_id>`.
   The reaper looks for `<primary>/.claude/worktrees/agent-<agent_id>`. It finds the
   primary checkout from the payload `cwd` with `guard.primary_checkout`.
-- **WorktreeRemove** names no target. The reaper has no branch for it. See "Not wired" below.
 
 The target must have the shape `.claude/worktrees/<name>`. It must exist. It must not be
 a primary checkout. An agent id must match `[A-Za-z0-9_-]{1,64}`.
@@ -82,6 +84,42 @@ inside an ended agent's worktree, not only listeners.
 
 The guard's ownership change (owner ruling, 2026-10-10) changes the guard's kill rule
 only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
+
+## Part 4. The worktree is removed at agent end
+
+Owner ruling, 2026-10-15 (plan step 3). Status: decided, not built. Lane wt-reap builds it.
+Until that lane merges, the reaper stops processes and removes no worktree.
+
+Why. On 2026-10-15 the machine held 610 agent worktrees. The reaper stopped processes only.
+Removal fell to the session-end sweep. The sweep costs about 7.5 s per tree. Its budget is
+25 s, so it reaches about three trees a run. Debt `sweep-no-deadline-many-trees` tracks the gap.
+
+Rule. At each SubagentStop, the reaper removes two kinds of worktree:
+
+- the ending agent's own worktree, `agent-<agent_id>`;
+- each other finished agent's worktree that is idle 30 min or more.
+
+Idle is read as the sweep reads it (see "The sweep removes a finished agent worktree").
+A worktree is removed only when all of these hold:
+
+- it is clean;
+- it is pushed;
+- it is unlocked;
+- no process has a cwd inside it;
+- no live session uses it (the constraint in Part 3).
+
+A read that cannot tell keeps the worktree.
+
+Related, same ruling:
+
+- Session start warns when more than 50 agent worktrees exist (lane wt-reap).
+- Briefs stop leaving checkouts for the sweep. An agent leaves its worktree clean and
+  pushed, and agent end removes it. The builder and test-author agent definitions say so.
+- Sweep speed: one pass of git reads, a time limit, oldest first (lane sweep-fast).
+- Drain today's pile of 610 (plan step 5). The ruling names no method.
+
+Accepted cost: a resume of a finished agent fails once its worktree is gone. A fresh agent
+gets the old report instead.
 
 ## Reap timeout, 2026-10-10
 
@@ -133,16 +171,7 @@ The line holds the raw payload, the target, and each decision. The hook fields t
 docs leave open get measured from this log. The file keeps the last 200 lines (the cap
 in `guard-trims-from-the-audit`). The hook always exits 0.
 
-## Not wired: WorktreeRemove
-
-The hooks reference says that WorktreeRemove "Replaces default git behavior". A hook on
-that event would stop the harness from removing agent worktrees. So settings.json wires
-only SubagentStop. Read from docs, on 2026-09-26, unmeasured.
-
 ## The sweep removes a finished agent worktree
-
-Kind: process
-Home: janitor/test_sweep.py
 
 Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`)
 removes a finished agent's worktree in every repo. It ADDS to the removals of
@@ -221,5 +250,6 @@ gives 1 of 596 cases wrong, and that case is the only one. The full harness ran 
 - A payload in the log that disagrees with the fields above.
 - A subagent worktree name that is not `agent-<agent_id>`.
 - A server that a live agent needed, stopped by this reaper or the sweep.
+- A tree that Part 4 removes while it is dirty, unpushed, locked, or in use.
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A batch read, or a full run on about 1,300 pids, that takes 60 s or more.

@@ -92,9 +92,8 @@ Owner rulings, 2026-10-08:
   free disk.
 - The sweep lists entries under `<root>/.claude/worktrees/` that git does not
   register, as strays. It never deletes them.
-- The rule keeps git's admin-file idle time (1 hour), not folder mtime, and it
-  never calls a repository's WorktreeRemove hook (see "The sweep never runs
-  code a repository supplies").
+- The rule keeps git's admin-file idle time (1 hour), not folder mtime. It removes
+  a worktree with git. It never calls a repository's WorktreeRemove hook.
 
 ## A branch leaves "checked out" with its worktree, in the same run
 
