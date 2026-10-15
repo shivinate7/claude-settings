@@ -9394,7 +9394,9 @@ def wsl_script_tag_keeps_backslash_case():
     script keeps its backslashes with no PowerShell tool in play. Dropping that arm (guard_core
     318) makes shlex eat `C:\\tmp` to `C:tmp`. Lane swn-pwsh-escape, review round 2, item 3."""
     guard = _load_guard_module()
-    script_type = sys.modules["guard_core"].PowerShellScript
+    script_type = getattr(sys.modules["guard_core"], "PowerShellScript", None)
+    if script_type is None:   # a tree with no script tag fails this check, and does not crash the run
+        return False, "guard_core has no PowerShellScript tag"
     guard.POWERSHELL_CALL[0] = False
     try:
         tokens = guard.segment_tokens(script_type(r"cd C:\repo; git commit -F C:\tmp\msg.txt"))
@@ -9410,7 +9412,9 @@ def wsl_split_tag_keeps_backslash_case():
     180). Without that wrap the first segment reads with Bash rules: `C:\\x` loses its backslash.
     Lane swn-pwsh-escape, review round 2, item 3."""
     guard = _load_guard_module()
-    script_type = sys.modules["guard_core"].PowerShellScript
+    script_type = getattr(sys.modules["guard_core"], "PowerShellScript", None)
+    if script_type is None:   # a tree with no script tag fails this check, and does not crash the run
+        return False, "guard_core has no PowerShellScript tag"
     guard.POWERSHELL_CALL[0] = False
     try:
         segments = guard.split_segments(script_type(r"cd C:\x; echo y"))
