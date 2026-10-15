@@ -1888,32 +1888,45 @@ def case_j2_span_starts_at_the_third_last_owner_message():
 
 
 def case_j3_assistant_text_in_the_span_is_in_the_prompt_labeled_as_the_assistants():
-    name = "caseJ3 assistant text in the span, lead-in included: in the prompt, labeled as the assistant's"
+    name = "caseJ3 span: assistant text, relays and lead-in in the prompt in transcript order; assistant text labeled"
     if not need_module(name):
         return
     qs = [question(GOOD_Q, LABELS)]
-    for with_ask in (True, False):
-        tag = "with-ask" if with_ask else "no-ask"
-        records = [owner("J3-OWN-B the 3rd-last owner line."),
-                   assistant_text("J3-TXT-MID assistant text between owner lines.", "msg_j3m"),
-                   owner("J3-OWN-C the second-last owner line."),
-                   owner("J3-OWN-D the last owner line.")]
-        records += ask_turn("J3-LEADIN I will ask one thing before I change the retry.", qs,
-                            "msg_j3_" + tag, with_ask)
-        path = write_transcript("j3-" + tag, records)
+    lead_in = "J3-LEADIN I will ask one thing before I change the retry."
+    j3_owners = [owner("J3-OWN-B the 3rd-last owner line."),
+                 assistant_text("J3-TXT-MID assistant text between owner lines.", "msg_j3m"),
+                 owner("J3-OWN-C the second-last owner line."),
+                 owner("J3-OWN-D the last owner line.")]
+    j3_order = ("J3-OWN-B", "J3-TXT-MID", "J3-OWN-C", "J3-OWN-D", "J3-LEADIN")
+    rows = (
+        # Catches: assistant text or the lead-in reaches the judge unlabeled, or out of transcript order.
+        ("with ask", j3_owners + ask_turn(lead_in, qs, "msg_j3_with-ask", True),
+         ("J3-TXT-MID", "J3-LEADIN"), j3_order),
+        # Catches: the same, when the lead-in turn has no tool use.
+        ("no ask", j3_owners + ask_turn(lead_in, qs, "msg_j3_no-ask", False),
+         ("J3-TXT-MID", "J3-LEADIN"), j3_order),
+        # Catches: a relayed message reaches the judge out of order with the assistant text or the lead-in.
+        ("relay between assistant text and lead-in",
+         [owner("J8-OWN-B first."), assistant_text("J8-TXT-1 assistant text.", "msg_j8a"),
+          owner("J8-OWN-C second."), relayed("J8-RELAY-1 relayed text.", from_name="SRC-J8"),
+          owner("J8-OWN-D third.")] + ask_turn("J8-LEADIN lead-in text.", qs, "msg_j8b"),
+         (), ("J8-OWN-B", "J8-TXT-1", "J8-OWN-C", "J8-RELAY-1", "J8-OWN-D", "J8-LEADIN")),
+    )
+    for index, (label, records, labeled, order_markers) in enumerate(rows):
+        row = name + " (" + label + ")"
+        path = write_transcript("j3-row%d" % index, records)
         with model_stub(ALLOW) as stub:
             run_main(ask_payload(fresh_session("j3"), qs, path))
         prompt = prompt_of(stub)
-        check(name + " (" + tag + "): model called once", len(stub.prompts) == 1, len(stub.prompts))
-        for marker in ("J3-TXT-MID", "J3-LEADIN"):
-            check(name + " (" + tag + "): holds " + marker, marker in prompt, marker)
+        check(row + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+        for marker in labeled:
+            check(row + ": holds " + marker, marker in prompt, marker)
             above, own = label_parts(prompt, marker)
-            check(name + " (" + tag + "): " + marker + " labeled as the assistant's",
+            check(row + ": " + marker + " labeled as the assistant's",
                   ASSISTANT_WORD.search(above + "\n" + own) is not None, repr(above + " | " + own))
-        # Catches: owner and assistant text reach the judge out of transcript order.
-        order = [prompt.find(m) for m in ("J3-OWN-B", "J3-TXT-MID", "J3-OWN-C", "J3-OWN-D", "J3-LEADIN")]
-        check(name + " (" + tag + "): in transcript order", all(p >= 0 for p in order) and order == sorted(order),
-              order)
+        order = [prompt.find(m) for m in order_markers]
+        check(row + ": every item is in the prompt", all(p >= 0 for p in order), order)
+        check(row + ": in transcript order", all(p >= 0 for p in order) and order == sorted(order), order)
 
 
 def case_j5_relayed_messages_in_the_span_are_labeled_relayed_and_older_ones_left_out():
