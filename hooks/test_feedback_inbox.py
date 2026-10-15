@@ -1468,23 +1468,60 @@ def case_judge_child_is_detached_hook_returns_first():
           and not judged_notes(block_items(cfg, sid, text)), captured_texts(cfg, sid))
 
 
+# Row tables. A row is one case body from above, unchanged. A row that raises is red and names
+# itself, so it cannot hide behind its table.
+def run_rows(rows):
+    for body in rows:
+        try:
+            body()
+        except Exception as exc:
+            check("%s: case ran" % body.__name__, False, "%s: %s" % (type(exc).__name__, exc))
+
+
+def table_open_forms():
+    run_rows((case_open_survives_across_runs, case_opener_forms))
+
+
+def table_close_forms():
+    run_rows((case_fb_done_closes_and_is_not_captured, case_fb_done_forms_close_capture,
+              case_fb_done_prefix_closes_and_drops_the_rest))
+
+
+def table_quiet_gap():
+    run_rows((case_quiet_gap_closes_capture, case_quiet_gap_ignores_notices))
+
+
+def table_gate_handoff_drops():
+    run_rows((case_gate_open_item_missing_from_handoff_blocks,
+              case_gate_handoff_rewrite_that_drops_an_item_blocks,
+              case_gate_missing_handoff_counts_every_open_id_missing))
+
+
+def table_gate_scanner_text():
+    run_rows((case_gate_scanner_text_yields_no_phantom_block_or_item,
+              case_gate_scanner_text_with_real_items_passes_silently))
+
+
+def table_reorient_forms():
+    run_rows((case_reorient_lists_open_items_only, case_reorient_capture_open_line,
+              case_reorient_items_and_capture_line_together,
+              case_reorient_malformed_line_keeps_the_note,
+              case_reorient_nothing_when_no_open_items_and_no_marker))
+
+
 CASES = (
     case_closed_by_default,
     case_opener_captured_with_central_time,
-    case_opener_forms,
-    case_open_survives_across_runs,
-    case_fb_done_closes_and_is_not_captured,
-    case_fb_done_forms_close_capture,
+    table_open_forms,
+    table_close_forms,
     case_near_miss_closers_open_nothing_while_closed,
-    case_fb_done_prefix_closes_and_drops_the_rest,
     case_fb_done_prefix_opens_nothing_while_closed,
     case_fb_done_line_at_the_end_closes_in_the_same_message,
     case_same_message_close_keeps_the_old_controls,
     case_close_words_count_only_as_a_last_line,
     case_open_last_line_fb_done_starts_no_judge,
     case_notices_are_never_captured,
-    case_quiet_gap_closes_capture,
-    case_quiet_gap_ignores_notices,
+    table_quiet_gap,
     case_judge_runs_once_per_open_prompt_with_the_sonnet_id,
     case_judge_not_feedback_keeps_the_prompt_and_closes,
     case_judge_failure_keeps_capture_open_and_saves,
@@ -1500,22 +1537,15 @@ CASES = (
     case_gate_message_without_items_blocks_and_names_it,
     case_gate_item_without_kind_or_home_blocks,
     case_gate_malformed_item_line_blocks_and_names_it,
-    case_gate_open_item_missing_from_handoff_blocks,
+    table_gate_handoff_drops,
     case_gate_closed_item_is_not_required_in_handoff,
     case_gate_id_match_is_a_whole_token,
-    case_gate_handoff_rewrite_that_drops_an_item_blocks,
-    case_gate_missing_handoff_counts_every_open_id_missing,
-    case_gate_scanner_text_yields_no_phantom_block_or_item,
-    case_gate_scanner_text_with_real_items_passes_silently,
+    table_gate_scanner_text,
     case_gate_notes_heading_is_plain_text,
     case_gate_reminder_follows_capture_state,
     case_gate_unreadable_inbox_blocks_and_names_the_file,
     case_gate_reads_only_its_own_session,
-    case_reorient_lists_open_items_only,
-    case_reorient_capture_open_line,
-    case_reorient_items_and_capture_line_together,
-    case_reorient_malformed_line_keeps_the_note,
-    case_reorient_nothing_when_no_open_items_and_no_marker,
+    table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_judge_child_is_detached_hook_returns_first,  # last: it leaves a 5 s child running
 )
