@@ -236,13 +236,16 @@ def _resolve_vars(cmd: str) -> str:
 #  (a) the value of a named message flag: `git [-C dir] commit` -m, --message or -F, and
 #      `gh pr|issue create|edit` --title, --body, -t or -b;
 #  (b) a quoted argument of a pure printer (`echo`, `printf`, `cat`, `grep`, `wc`, `jq`).
-# Either is data only when its output runs nowhere: a pipe only into a printer or a
-# `python script.py`, and a write to a file only when every segment of the command is a printer or
+# Either is data only when its output runs nowhere: a pipe only into a printer (an interpreter as a
+# pipe target fails closed, as on main: it may run the text, and `python run.py` may read it), and
+# a write to a file only when every segment of the command is a printer or
 # a `cd`. A redirect target is never data. All other text stays in view. Each segment is judged
 # alone, so a leading `cd dir &&` or `Set-Location dir;` does not change the answer.
 # FAIL CLOSED. No text is data when the command holds, outside single quotes, a backtick, `$(`,
-# `$'`, `$"`, `<(`, `>(`, a backslash before a quote, or an unmated quote: the shell may then read
-# its quotes differently from the scanner. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
+# `$'`, `$"`, `<(`, `>(`, a backslash before a quote, an unmated quote, a `<#` (a PowerShell block
+# comment, which hides its quotes), or anywhere a smart quote U+2018 to U+201E (PowerShell reads it
+# as a quote, even inside single quotes): the shell may then read its quotes differently from the
+# scanner. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
 # holds no data: a background job, a call operator, a PowerShell group such as `(iex "...")`.
 # A word in view that holds a quote is read in whole: the text of each quote is its own words, so
 # `system("sh", "-c", "tee P")` shows its `tee P`.
@@ -257,8 +260,9 @@ _QUIET = _PRINTERS | {"cd", "set-location"}
 _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
 _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
-_PYTHON = frozenset(("python", "python3"))
-_UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(""")
+_UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
+# PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
+_SMART_QUOTES = frozenset("‘’‚‛“”„")
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
@@ -271,6 +275,8 @@ def _scan(segment: str):
     `\\"` in a JSON sample there is plain text."""
     plain, quote = [], ""
     for index, char in enumerate(segment):
+        if char in _SMART_QUOTES:   # also inside single quotes: PowerShell ends a string at one
+            return True, ""
         if quote == "'":
             quote = "" if char == "'" else quote
         elif _UNSAFE_MARK.match(segment, index):
@@ -293,38 +299,13 @@ def _is_redirect(word: str) -> bool:
     return bool(word) and set(word) <= _REDIRECT_CHARS
 
 
-_STDIN_FILES = {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "con"}   # operands that name stdin
-
-
-def _runs_a_file(args) -> bool:
-    """True for `python [-flags] script ...`: it runs a file and reads stdin as data. `-c`, `-m`,
-    `-i`, `-`, a stdin operand (`/dev/stdin`, `/dev/fd/0`, `/proc/self/fd/0`, `CON`, which Windows
-    matches in any case) and a flag not known here fail closed."""
-    args = iter(args)
-    for arg in args:
-        if not arg.startswith("-"):
-            return arg.lower() not in _STDIN_FILES
-        if arg == "-" or arg.startswith("--"):
-            return False
-        for place, letter in enumerate(arg[1:], 2):
-            if letter in "WX":   # takes a value: glued, or the next word
-                if place == len(arg):
-                    next(args, None)
-                break
-            if letter not in "BEIOsSuqv":
-                return False
-    return False
-
-
 def _kind(words, plain: str) -> str:
-    """'printer', 'message', 'python', 'cd' or '' for one segment."""
+    """'printer', 'message', 'cd' or '' for one segment."""
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
-    if name in _PYTHON:
-        return "python" if _runs_a_file(words[1:]) else ""
     if name == "git":
         index = 1
         while words[index:index + 1] == ["-C"]:
@@ -390,7 +371,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
             while last + 1 < len(kinds) and ends[last] == "|":
                 last += 1
             chain = range(number, last + 1)
-            runs_nowhere = all(kinds[k] in ("printer", "python") for k in chain[1:])
+            runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = _data_words(kinds[number], raw)
