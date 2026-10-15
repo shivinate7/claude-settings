@@ -3736,6 +3736,23 @@ sh("detached: a quoted mention of the shape prints text and starts nothing",
 sh("detached: a grep for Start-Job is not a call to it",
    'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
 
+# ---- a backslash before `&&`, the kill family (lane swn-pwsh-escape). In bash `\&` is a literal
+# `&`, and the second `&` starts a background job, so bash runs the taskkill after it. Round 2 made
+# `\&` text, and the split then never ends a segment at that lone `&`, so the kill is judged inside
+# one segment and allowed. The deny cases are RED on ce4ac8c and deny on a92d509, where the old split
+# cut at `&&`. The PowerShell case is a PIN: PowerShell has no such escape, so it denies on both.
+# The `\;` case is a CONTROL: bash reads `\;` as text, so taskkill is an argument of cd and runs
+# nothing. It allows on ce4ac8c and denies on a92d509, where the old split cut at the `;`.
+sh("kill: a bash cd with a backslash before && hides taskkill /IM, denies",
+   r"cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill", cwd=NOGIT)
+sh("kill: a bash cmd /c with a backslash before && hides taskkill /IM, denies",
+   r"cmd /c cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill", cwd=NOGIT)
+sh("kill: a PowerShell cmd /c with a backslash before && still denies taskkill /IM",
+   r"cmd /c cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill",
+   tool="PowerShell", cwd=NOGIT)
+sh("kill: a bash backslash before ; makes taskkill an argument of cd, allowed",
+   r"cd C:\x\; taskkill /F /IM node.exe", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
@@ -4158,6 +4175,22 @@ add("background-end: npm test -- --watch=false under run_in_background needs no 
 add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build-docs", run_in_background=True)
 
+# ---- a backslash before `&&` or `;`, the stream family (lane swn-pwsh-escape). The same cause as
+# the kill block: bash reads `\&` and `\;` as text, so the server after them is one segment and the
+# background-end check misses it. The bash `cd ... && npm run dev` and the bash `pwsh -c` forms are
+# RED on ce4ac8c and deny on a92d509. The PowerShell form is a PIN: it denies on both heads, so the
+# brief's PowerShell shape never reproduced. The live-stream rule reads a whole segment, so it is
+# not moved by the split; that is why the PowerShell `tail -f` cases stay green as well.
+add("background-end: a bash cd with a backslash before && hides npm run dev, denies",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command=r"cd C:\x\&& npm run dev", run_in_background=True)
+add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev, denies",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command=r'pwsh -c "cd C:\x\; npm run dev"', run_in_background=True)
+add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
+    command=r'cd "C:\x\"; npm run dev', run_in_background=True)
+
 
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
@@ -4512,6 +4545,31 @@ sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
 sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
    "(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
 
+# ---- a backslash before `;` or `&&`, the wsl family (lane swn-pwsh-escape). Round 2 made a bash
+# `\` escape the next character, so `\;` and `\&` are text to bash. A nested PowerShell or cmd
+# script is still read by Windows, where `\` is a path separator, so the command after `\;` or
+# `\&&` runs. The four deny cases are RED on ce4ac8c (allowed) and deny on a92d509. The PowerShell
+# form and the scanner cases are PINS that deny on both heads. The echo case is a CONTROL: bash
+# reads `echo a\; wsl` as one echo, so it allows on ce4ac8c and denies on a92d509.
+sh("wsl: a bash pwsh -c with a backslash path before ; hides wsl --shutdown, denies",
+   r'pwsh -c "cd C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash cd with a backslash before && hides wsl --shutdown, denies",
+   r"cd C:\x\&& wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash cmd /c in double quotes, a backslash before && hides wsl --shutdown, denies",
+   r'cmd /c "cd C:\x\&& wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener in an echo string does not hide wsl after a backslash before &&",
+   r'echo "# x"; cd C:\x\&& wsl --shutdown', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a PowerShell cd with a quoted backslash path before ; still denies wsl --shutdown",
+   r'cd "C:\x\"; wsl --shutdown', "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a lone apostrophe, then a backslash path before ; still denies wsl --shutdown",
+   r"echo don't; cd C:\x\; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener inside a single-quoted pwsh -c string still denies wsl --shutdown",
+   'pwsh -c "cd C:\\x\\; echo \'# x\'; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a multi-line pwsh -c string with a backslash before its newline denies wsl --shutdown",
+   "pwsh -c \"cd C:\\x\\\n; wsl --shutdown\"", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash backslash before ; is text, so echo a\\; wsl --shutdown is one echo, allowed",
+   r"echo a\; wsl --shutdown", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
@@ -4544,6 +4602,11 @@ sh("silent-write: a discarded proof of landing, stdout alone",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
    VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+# The backslash-semicolon control (lane swn-pwsh-escape). Round 2 reads `\;` as text, so this is one
+# commit with a silenced redirect. It is denied on ce4ac8c. On a92d509 it was ALLOWED, because the old
+# split cut `foo\` and the unparsable piece failed open. A repo cwd is needed, so this uses the default.
+sh("silent-write: a backslash before ; then a silenced commit redirect denies, default cwd",
+   VCS + " commit -m foo\\; >/dev/null", "deny", "silent-write")
 sh("silent-write: a tag silenced by a discarded stream, its own flag does not exist",
    VCS + " tag -a v1 -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write: a cherry-pick silenced by a discarded stream",
