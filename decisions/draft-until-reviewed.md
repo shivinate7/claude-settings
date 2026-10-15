@@ -47,7 +47,7 @@ A job skipped by `if:` reports as passing (skill ci-hygiene, step 19). A draft n
 because GitHub does not merge a draft. The GitHub docs say: "Draft pull requests cannot be merged."
 (https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests).
 Marking it ready fires `ready_for_review`. That run gets the same scoped range as a `synchronize`
-run (`.github/scripts/harness-scope.sh`, lines 13 to 14), not a full run.
+run (`.github/scripts/harness-scope.sh`, line 13), not a full run.
 Measured in decision main-branch-protection: main requires a PR (0 approvals). It blocks force
 pushes and deletion. It requires no status checks, exempts admins, and has no rulesets. So no
 check is required, and a skipped draft run blocks nothing.
