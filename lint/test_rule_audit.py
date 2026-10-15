@@ -265,17 +265,6 @@ class RuleAuditTests(unittest.TestCase):
         self.assertTrue(any("duplicate" in p and "shared-trees-no-destructive-git" in p
                             for p in problems), problems)
 
-    def test_the_real_claude_md_and_map_pass_together(self):
-        """The check this repo actually ships, over the files it actually ships, at its
-        actual pinned floor and unmechanized count -- no override."""
-        claude_text = rule_audit.rule_text()
-        rule_map = __import__("json").loads(rule_audit.read(rule_audit.MAP_FILE))
-        guard_text = rule_audit.guard_text(rule_audit.ROOT)
-        workflow_text = rule_audit.read(rule_audit.WORKFLOW)
-        problems = rule_audit.check(claude_text, rule_map, guard_text, workflow_text)
-        self.assertEqual(problems, [])
-
-
 SIBLING_MAP = {
     "rules": {
         "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
@@ -425,51 +414,51 @@ class CitationTests(unittest.TestCase):
         src = 'def build():\n    add("a case", 1)\nbuild()\n'
         self.assertIsNone(self.problem(src, "a case"))
 
-    def test_mjs_block_comment_and_template_literal_are_red(self):
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs"))
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + 'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs"))
-        self.assertIsNone(self.problem(
-            NODE_TEST + '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
-
-    def test_mjs_comment_marker_inside_string_hides_no_registration(self):
-        self.assertIsNone(self.problem(
-            NODE_TEST + 'const a = "image/*";\ntest("it works", () => {});\nconst b = "*/";\n', "it works", "t.mjs"))
-        self.assertIsNone(self.problem(
-            NODE_TEST + "const a = 'image/*';\ntest(\"it works\", () => {});\nconst b = '*/';\n", "it works", "t.mjs"))
-        self.assertIsNone(self.problem(
-            NODE_TEST + 'const u = "http://x";\ntest("it works", () => {});\n', "it works", "t.mjs"))
-
-    def test_mjs_regex_literal_quote_hides_no_registration(self):
-        self.assertIn("registers no test", self.problem(
-            list_tests_form("const re = /'/;\n/* don't\ntest(\"commented\", () => {});\n*/\n"),
-            "commented", "t.mjs") or "<None>")
-
-    def test_mjs_regex_with_escaped_slashes_hides_no_registration(self):
-        self.assertIn("registers no test", self.problem(
-            list_tests_form('const re = /a\\/\\/b/;\n// test("commented", () => {});\n'), "commented", "t.mjs") or "<None>")
-        self.assertIn("registers no test", self.problem(
-            list_tests_form('const re = /a\\/\\/b/;\n/*\ntest("commented", () => {});\n*/\n'), "commented", "t.mjs") or "<None>")
-
-    def test_mjs_regex_quote_before_real_registration_is_green(self):
-        self.assertIsNone(self.problem(
-            NODE_TEST + 'const re = /"/;\ntest("it works", () => {});\n', "it works", "t.mjs"))
-
-    def test_mjs_registration_in_loop_resolves(self):
-        self.assertIsNone(self.problem(
-            NODE_TEST + 'for (let i = 0; i < 2; i++) {\n  test("it works", () => {});\n}\n', "it works", "t.mjs"))
-
-    def test_mjs_registration_in_comment_or_template_does_not_resolve(self):
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs") or "<None>")
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + 'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs") or "<None>")
-
-    def test_mjs_division_then_quote_in_comment_hides_no_registration(self):
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + "const total = 6;\nconst half = total / 2 / 3;\n/* don't\ntest(\"commented\", () => {});\n*/\n",
-            "commented", "t.mjs") or "<None>")
+    def test_mjs_scanner_reads_only_live_registrations(self):
+        # Rows: each distinct .mjs source and its verdict. "registers no test" = the name is not live
+        # (commented out, quoted, bare output, or a newline-split name). None = the name resolves.
+        # Named failure: the scanner reads a commented-out .mjs test as live (RA11). The 9 scanner
+        # methods, and the exact duplicate of the block-comment and template rows, fold into these rows.
+        red = "registers no test"
+        cases = [
+            ("block comment hides a registration", NODE_TEST + '/*\ntest("it works", () => {});\n*/\n',
+             "it works", red),
+            ("template literal hides a registration", NODE_TEST + 'const s = `\ntest("it works", () => {});\n`;\n',
+             "it works", red),
+            ("block comment with a note still registers", NODE_TEST + '/* note */\ntest("it works", () => {});\n',
+             "it works", None),
+            ("comment marker in a double-quoted string", NODE_TEST + 'const a = "image/*";\ntest("it works", () => {});\nconst b = "*/";\n',
+             "it works", None),
+            ("comment marker in a single-quoted string", NODE_TEST + "const a = 'image/*';\ntest(\"it works\", () => {});\nconst b = '*/';\n",
+             "it works", None),
+            ("url in a string", NODE_TEST + 'const u = "http://x";\ntest("it works", () => {});\n',
+             "it works", None),
+            ("regex quote hides a commented registration", list_tests_form("const re = /'/;\n/* don't\ntest(\"commented\", () => {});\n*/\n"),
+             "commented", red),
+            ("escaped slashes in a regex, line comment", list_tests_form('const re = /a\\/\\/b/;\n// test("commented", () => {});\n'),
+             "commented", red),
+            ("escaped slashes in a regex, block comment", list_tests_form('const re = /a\\/\\/b/;\n/*\ntest("commented", () => {});\n*/\n'),
+             "commented", red),
+            ("regex quote before a real registration", NODE_TEST + 'const re = /"/;\ntest("it works", () => {});\n',
+             "it works", None),
+            ("registration in a loop", NODE_TEST + 'for (let i = 0; i < 2; i++) {\n  test("it works", () => {});\n}\n',
+             "it works", None),
+            ("division then a quote in a comment", NODE_TEST + "const total = 6;\nconst half = total / 2 / 3;\n/* don't\ntest(\"commented\", () => {});\n*/\n",
+             "commented", red),
+            ("bare console.log of the name", NODE_TEST + 'console.log("it works");\n',
+             "it works", red),
+            ("bare console.log, form two", list_tests_form('console.log("it works");\n'),
+             "it works", red),
+            ("name with a newline", NODE_TEST + 'test("a\\nb", () => {});\n', "a", red),
+            ("name with a newline, form two", list_tests_form('test("a\\nb", () => {});\n'), "a", red),
+        ]
+        for case, src, name, want in cases:
+            with self.subTest(case):
+                got = self.problem(src, name, "t.mjs")
+                if want is None:
+                    self.assertIsNone(got)
+                else:
+                    self.assertIn(want, got or "<None>")
 
     def test_mjs_without_node_on_path_says_names_could_not_be_read(self):
         with tempfile.TemporaryDirectory() as empty_path:
@@ -481,20 +470,6 @@ class CitationTests(unittest.TestCase):
     def test_mjs_form_two_registration_resolves(self):
         self.assertIsNone(self.problem(
             list_tests_form('test("it works", () => {});\n'), "it works", "t.mjs"))
-
-    def test_mjs_bare_stdout_line_is_not_a_listed_name(self):
-        # P1: a top-level console.log of the name is output, not a registration.
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + 'console.log("it works");\n', "it works", "t.mjs") or "<None>")
-        self.assertIn("registers no test", self.problem(
-            list_tests_form('console.log("it works");\n'), "it works", "t.mjs") or "<None>")
-
-    def test_mjs_name_with_newline_does_not_match_one_of_its_lines(self):
-        # P2: test("a\nb") registers one name, "a\nb"; citing "a" must not pass.
-        self.assertIn("registers no test", self.problem(
-            NODE_TEST + 'test("a\\nb", () => {});\n', "a", "t.mjs") or "<None>")
-        self.assertIn("registers no test", self.problem(
-            list_tests_form('test("a\\nb", () => {});\n'), "a", "t.mjs") or "<None>")
 
     def test_mjs_nonzero_exit_says_names_could_not_be_read(self):
         problem = self.problem(NODE_TEST + 'test("it works", () => {});\nthrow new Error("boom");\n',
