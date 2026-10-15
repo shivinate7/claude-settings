@@ -5546,6 +5546,16 @@ sh("env: r3-fed an eval $( ) heredoc with an env read in the body, denies",
 sh("env: r3-fed an eval backtick heredoc with an env read in the body, denies",
    "eval `cat <<EOF\ncat " + ENV + "\nEOF\n`", "deny", "env-file", cwd=PROJ)
 
+# ---- heredoc-quote (round 4, lane heredoc-one-step), env family. A delimiter with a backslash or a quote closes
+# at EOF, so the lane takes the body for text and drops it. The header writes the body to x.sh and `sh x.sh`
+# runs it on the same line, so bash runs the substitution. Main reads the delimiter as `E`, keeps the body in
+# view, and denies. RED ON THE LANE HEAD (allows), DENY ON MAIN (measured on 567231e).
+for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
+    for _form, _body in (("$( )", "$(cat " + ENV + ")"), ("backticks", "`cat " + ENV + "`")):
+        sh("env: heredoc-quote: %s delimiter, an env read in %s in the body that sh x.sh runs, denies"
+           % (_label, _form),
+           "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
+
 
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
