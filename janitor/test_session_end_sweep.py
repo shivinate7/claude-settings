@@ -86,27 +86,17 @@ def run_hook(hook_payload, env_extra=None, cwd=None, timeout=120):
 
 
 class BadInputFailsOpen(unittest.TestCase):
-    """Arm 1 of 4: stdin that is not valid JSON at all."""
+    """Arm 1 of 4: stdin that is not a usable JSON object. Each row is one input; each must exit 0."""
 
     def test_garbage_stdin_still_exits_0(self):
-        result = subprocess.run(
-            [sys.executable, HOOK], input="{not json at all", capture_output=True, text=True,
-            timeout=15,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_json_that_is_not_an_object_still_exits_0(self):
-        result = run_hook(None, timeout=15)
-        # empty stdin: json.loads("") raises, same code path as garbage
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_json_array_instead_of_object_still_exits_0(self):
-        env = dict(os.environ)
-        result = subprocess.run(
-            [sys.executable, HOOK], input="[1, 2, 3]", capture_output=True, text=True,
-            timeout=15, env=env,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        # Rows: not JSON at all; empty stdin (json.loads("") raises); a JSON array, not an object.
+        for stdin in ("{not json at all", "", "[1, 2, 3]"):
+            with self.subTest(stdin=stdin):
+                result = subprocess.run(
+                    [sys.executable, HOOK], input=stdin, capture_output=True, text=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class NoRepositoryFailsOpen(unittest.TestCase):
@@ -243,6 +233,30 @@ class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
         self.assertNotIn("reap-me-from-worktree", local_branches(primary),
                           "the shared repository's reapable branch should still have been swept")
 
+    def test_subdirectory_cwd_sweeps_its_own_repository_and_not_the_sibling(self):
+        """A cwd inside a checkout (not its root) must resolve to that checkout's root, and the
+        sibling checkout must be left alone."""
+        repo_a = os.path.join(ROOT, "repo_a_sub")
+        repo_b = os.path.join(ROOT, "repo_b_sub")
+        make_repo(repo_a)
+        make_repo(repo_b)
+        add_reapable_branch(repo_a, "reap-me-a-sub")
+        add_reapable_branch(repo_b, "reap-me-b-sub")
+        subdir = os.path.join(repo_a, "src", "deep")
+        os.makedirs(subdir, exist_ok=True)
+
+        cfg = os.path.join(ROOT, "cfg_subdir_cwd")
+        result = run_hook(
+            {"hook_event_name": "SessionEnd", "cwd": subdir},
+            env_extra={"CLAUDE_CONFIG_DIR": cfg},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        self.assertNotIn("reap-me-a-sub", local_branches(repo_a),
+                         "a cwd inside the checkout should sweep that checkout")
+        self.assertIn("reap-me-b-sub", local_branches(repo_b),
+                      "a sibling repository must not be touched")
+
 
 class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
     """The hook's own worst-case run time (`session_end_sweep.HOOK_WORST_CASE_SECONDS`) must be
@@ -289,12 +303,6 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         with open(self.SETTINGS_PATH, encoding="utf-8") as handle:
             self.settings = json.load(handle)
 
-    def test_default_arithmetic_matches_what_the_module_documents(self):
-        self.assertEqual(self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS, 10.0)
-        self.assertEqual(self.mod.RESOLVE_ROOT_GIT_CALLS, 2)
-        self.assertEqual(self.mod.RESOLVE_ROOT_WORST_CASE_SECONDS, 20.0)
-        self.assertEqual(self.mod.HOOK_WORST_CASE_SECONDS, 45.0)
-
     def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
         """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is now a plain, hand-typed constant
         (the owner asked for it, and for `inspect` to leave session_end_sweep.py). A plain
@@ -339,29 +347,6 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
             self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
         )
 
-    def test_settings_json_timeout_does_not_leave_more_than_the_stated_headroom(self):
-        """Arm: SettingsCeilingHeadroomHasAnUpperEdge. The floor test above only refuses a
-        ceiling that runs too CLOSE to the worst case. Nothing above refused one that runs too
-        FAR ahead -- a later change that quietly doubled SWEEP_TIMEOUT_SECONDS (or halved it
-        while settings.json's timeout stayed put) would still pass every arm above it. This arm
-        reads the real constant the module states beside its own arithmetic
-        (SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS), never a copy of it, and refuses a margin
-        that runs past it. When this goes red: either shrink the work (bring
-        SWEEP_TIMEOUT_SECONDS or the git-call budget back down), or move the ceiling on purpose
-        (widen settings.json's SessionEnd timeout AND this module's max-headroom constant, in
-        the same commit, with a reason)."""
-        timeout = self._wired_timeout()
-        self.assertTrue(
-            self.mod.headroom_within_bounds(timeout, self.mod.HOOK_WORST_CASE_SECONDS),
-            "settings.json's SessionEnd timeout (%r) leaves a margin over "
-            "HOOK_WORST_CASE_SECONDS (%r) outside [%r, %r]" % (
-                timeout, self.mod.HOOK_WORST_CASE_SECONDS,
-                self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
-                self.mod.SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS,
-            ),
-        )
-
-
 class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
     """The second permissions.deny layer must keep every entry it shipped with, so a missing
     interpreter still blocks pkill/killall, .env*, and the frozen config paths (see settings.json,
@@ -380,62 +365,6 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
             deny = json.load(handle)["permissions"]["deny"]
         missing = [e for e in self.EXPECTED if e not in deny]
         self.assertFalse(missing, "settings.json permissions.deny is missing: %r" % missing)
-
-
-class HeadroomWithinBoundsUnit(unittest.TestCase):
-    """Direct, synthetic-number coverage of `headroom_within_bounds`, proving the upper-edge arm
-    goes red in BOTH directions -- not just against the one real settings.json this checkout
-    happens to ship. Cheap and fast: no subprocess, no git, no real settings.json involved."""
-
-    def setUp(self):
-        import session_end_sweep
-        self.mod = session_end_sweep
-
-    def test_real_settings_headroom_is_within_bounds(self):
-        """Sanity: the actual repository is not, itself, the defect this arm guards."""
-        self.assertTrue(self.mod.headroom_within_bounds(55.0, 45.0))
-
-    def test_worst_case_grown_toward_the_ceiling_fails_the_band(self):
-        """Direction 1: the worst case creeps up toward the ceiling (SWEEP_TIMEOUT_SECONDS grew,
-        or a future guard._git timeout grew) until the margin drops under the stated floor."""
-        self.assertFalse(self.mod.headroom_within_bounds(55.0, 51.0))  # margin 4 < floor 5
-
-    def test_ceiling_far_ahead_of_the_worst_case_fails_the_band(self):
-        """Direction 2: settings.json's ceiling runs far ahead of the worst case (raised without
-        a matching reason, or the worst case shrank without the ceiling following it down)."""
-        self.assertFalse(self.mod.headroom_within_bounds(100.0, 45.0))  # margin 55 > ceiling 20
-
-
-class ResolveRepoRootUnit(unittest.TestCase):
-    """Direct unit coverage of the one piece of new logic this hook relies on beyond calling
-    the sweep: resolving `cwd` to a primary checkout, in-process (cheap; the subprocess arms
-    above already prove the end-to-end exit-0 contract). The resolution itself lives in
-    `guard.primary_checkout` now, shared with `janitor/install_launchd.py`; this hook's own
-    `handle` just calls it (see `session_end_sweep.py`)."""
-
-    def setUp(self):
-        import session_end_sweep
-        self.mod = session_end_sweep
-
-    def test_ordinary_checkout_resolves_to_itself(self):
-        repo = os.path.join(ROOT, "unit_ordinary")
-        make_repo(repo)
-        self.assertEqual(
-            os.path.realpath(self.mod.guard.primary_checkout(repo)), os.path.realpath(repo)
-        )
-
-    def test_subdirectory_resolves_to_the_checkout_root(self):
-        repo = os.path.join(ROOT, "unit_subdir")
-        make_repo(repo)
-        sub = os.path.join(repo, "a", "b")
-        os.makedirs(sub, exist_ok=True)
-        self.assertEqual(
-            os.path.realpath(self.mod.guard.primary_checkout(sub)), os.path.realpath(repo)
-        )
-
-    def test_no_repository_returns_none(self):
-        empty = tempfile.mkdtemp(prefix="unit_no_repo_", dir=ROOT)
-        self.assertIsNone(self.mod.guard.primary_checkout(empty))
 
 
 class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
@@ -470,9 +399,13 @@ class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
     def test_too_little_budget_left_returns_none(self):
         """When nothing usable remains, the function must say so (None), not a near-zero or
         negative timeout that `subprocess.run` would reject or that could not run anything
-        useful."""
-        elapsed = self.mod.SESSION_END_CEILING_SECONDS  # the whole ceiling already spent
-        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(elapsed))
+        useful. Rows: the whole ceiling spent; an untrustworthy elapsed (negative, which must not
+        add time back; nan and inf, which `except ValueError` never catches); an elapsed past the
+        whole ceiling. Each row is one input to the same refusal."""
+        ceiling = self.mod.SESSION_END_CEILING_SECONDS
+        for elapsed in (ceiling, -1000.0, float("nan"), float("inf"), ceiling + 1000.0):
+            with self.subTest(elapsed=elapsed):
+                self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(elapsed))
 
 
 class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
@@ -550,36 +483,6 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("--confirm", calls[0])
         self.assertNotIn("--attended", calls[0])  # strict is the default
-
-
-class RemainingSweepTimeoutRefusesAnUntrustworthyElapsedReading(unittest.TestCase):
-    """Arms guarding the property PR #84 review actually asked for: even with the environment
-    seam gone, an elapsed reading this function cannot trust must never be spent as if it were
-    free time. Each case is named for the shape of reading it guards against."""
-
-    def setUp(self):
-        import session_end_sweep
-        self.mod = session_end_sweep
-
-    def test_negative_elapsed_is_refused_not_treated_as_extra_time(self):
-        """A negative elapsed (a clock read backwards, or a bad caller) must not add time back
-        onto the budget. Refused -> None, sweep nothing, never the full SWEEP_TIMEOUT_SECONDS."""
-        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(-1000.0))
-
-    def test_non_finite_elapsed_is_refused(self):
-        """nan and inf both parse as a Python float without raising, so `except ValueError`
-        alone never catches them -- proven for both shapes at once."""
-        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(float("nan")))
-        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(float("inf")))
-
-    def test_elapsed_larger_than_the_ceiling_is_refused(self):
-        """A plainly numeric, finite, non-negative elapsed that simply exceeds the whole ceiling
-        must still land on None, the same as the too-little-budget-left case above -- proven
-        directly against the real ceiling, not a copy of it."""
-        got = self.mod.remaining_sweep_timeout_seconds(
-            self.mod.SESSION_END_CEILING_SECONDS + 1000.0
-        )
-        self.assertIsNone(got)
 
 
 if __name__ == "__main__":

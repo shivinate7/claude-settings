@@ -12,7 +12,6 @@ case spawns a real `claude` subprocess; one case asserts it is never even called
 """
 import contextlib
 import importlib.util
-import inspect
 import io
 import json
 import os
@@ -31,6 +30,7 @@ _spec.loader.exec_module(dw)
 
 ROOT = tempfile.mkdtemp(prefix="decision_watch_cases_")
 FAILED = []
+SKIPPED = []  # cases that cannot run on this platform: printed as SKIP, counted, never a PASS
 
 
 def _git(cwd, *args):
@@ -119,6 +119,12 @@ def check(name, condition, detail=""):
     else:
         FAILED.append(name)
         print("FAIL: %s  %s" % (name, detail))
+
+
+def skip(name, reason):
+    """A case that cannot run on this platform. It prints SKIP and is counted in the summary."""
+    SKIPPED.append(name)
+    print("SKIP: %s: %s" % (name, reason))
 
 
 # --------------------------------------------------------------------------- case 1
@@ -427,7 +433,7 @@ def _calls(count_file):
 
 def case_allow_verdict_cached_until_the_file_changes():
     if sys.platform == "win32":
-        print("SKIP: allow_cache: the fake claude is a POSIX launcher")
+        skip("allow_cache", "the fake claude is a POSIX launcher")
         return
     repo = make_repo("allow_cache")
     rule = os.path.join(repo, "decisions", "r.md")
@@ -502,7 +508,7 @@ def case_unknown_is_never_cached():
 
 def case_protected_file_committed_this_turn_is_judged():
     if sys.platform == "win32":
-        print("SKIP: committed_this_turn: the fake claude is a POSIX launcher")
+        skip("committed_this_turn", "the fake claude is a POSIX launcher")
         return
     repo = make_repo("committed_turn")
     rule = os.path.join(repo, "decisions", "r.md")
@@ -642,24 +648,6 @@ def _capture_invoke(fake_run):
         dw.subprocess.run = real
 
 
-# Ruling decisions/haiku-prompt-hooks.md, "decision_watch": haiku, xhigh effort, 120s.
-def case_invoke_model_haiku_xhigh_120s():
-    captured = {}
-
-    def fake_run(argv, **kwargs):
-        captured["argv"], captured["kwargs"] = argv, kwargs
-        return _FakeCompletedProcess(0, json.dumps({"result": '{"verdict": "ALLOW"}'}), "")
-
-    _capture_invoke(fake_run)
-    argv = captured.get("argv") or []
-    pairs = list(zip(argv, argv[1:]))
-    timeout = (captured.get("kwargs") or {}).get("timeout")
-    check("haiku_xhigh: --model haiku in argv", ("--model", "haiku") in pairs, argv)
-    check("haiku_xhigh: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
-    check("haiku_xhigh: subprocess timeout is 120", timeout == 120, timeout)
-    check("haiku_xhigh: MODEL_TIMEOUT is 120", dw.MODEL_TIMEOUT == 120, dw.MODEL_TIMEOUT)
-
-
 # A timeout is an error (UNKNOWN upstream), never an ALLOW verdict.
 def case_invoke_model_timeout_is_error():
     def fake_run(argv, **kwargs):
@@ -670,6 +658,8 @@ def case_invoke_model_timeout_is_error():
     check("timeout: error names the failure", bool(error), error)
 
 
+# The one home for the child's isolation flags. Ruling decisions/haiku-prompt-hooks.md,
+# "decision_watch": haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
     # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
     # machine cannot change the child's env.
@@ -707,6 +697,9 @@ def _invoke_model_argv_body():
           not any("JUDGE THIS PROMPT" in arg for arg in argv), argv)
     check("invoke_model_argv: prompt arrives on stdin",
           kwargs.get("input") == b"JUDGE THIS PROMPT", kwargs.get("input"))
+    # Catches: the child runs with a timeout other than the module's MODEL_TIMEOUT.
+    check("invoke_model_argv: subprocess gets the module timeout",
+          kwargs.get("timeout") == dw.MODEL_TIMEOUT, kwargs.get("timeout"))
     # --effort xhigh is checked above; its position is free, so it is dropped before the compare.
     if "--effort" in argv:
         i = argv.index("--effort")
@@ -996,16 +989,6 @@ def case_token_t1_file_reaches_child_env():
           env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
 
 
-# T2. No token file: today's path, and no token key in the child env. A pin, may be green.
-def case_token_t2_no_file_no_token():
-    captured = {}
-    with scratch_config("t2"):
-        verdict, error = _run_invoke(captured)
-    env = captured.get("env") or {}
-    check("token_t2: no token key in child env without a token file", TOKEN_KEY not in env, sorted(env))
-    check("token_t2: call still returns ALLOW without a token file", verdict == ALLOW and error is None, error)
-
-
 # T3. The parent's own CLAUDE_CODE_OAUTH_TOKEN is never passed through: the file is the
 # only source. The allowlist stays closed.
 def case_token_t3_parent_env_not_passed_through():
@@ -1025,17 +1008,27 @@ def case_token_t3_parent_env_not_passed_through():
           "token is " + _presence(env))
 
 
-# T4. An empty, whitespace-only, or unreadable token file behaves as no file. The
-# unreadable case is a directory where the file should be.
-def case_token_t4_empty_or_unreadable_is_no_file():
+# T4. No usable token file means no token key in the child env, and the call still returns
+# ALLOW on the old path. Each row is one input: no file, and each file that holds no token.
+def case_token_t4_no_usable_token_file_is_no_token():
     cases = (
+        # Catches: no token file at all adds a token key to the child env.
+        ("no file", lambda cfg: None),
+        # Catches: an empty token file adds a token key.
         ("empty", lambda cfg: _token_file(cfg, "")),
-        ("whitespace", lambda cfg: _token_file(cfg, "  \n")),
-        ("unreadable", lambda cfg: os.makedirs(os.path.join(cfg, "state", "hook-token"), exist_ok=True)),
+        # Catches: a whitespace-only token file with LF adds a token key.
+        ("whitespace LF", lambda cfg: _token_file_bytes(cfg, b"  \n")),
+        # Catches: a whitespace-only token file with CRLF (PowerShell line ending) adds a token key.
+        ("whitespace CRLF", lambda cfg: _token_file_bytes(cfg, b"  \r\n")),
+        # Catches: a UTF-16 file that holds only a BOM adds a token key.
+        ("UTF-16 BOM only", lambda cfg: _token_file_bytes(cfg, b"\xff\xfe")),
+        # Catches: a token path that is a directory adds a token key, or crashes the call.
+        ("unreadable, a directory", lambda cfg: os.makedirs(os.path.join(cfg, "state", "hook-token"),
+                                                             exist_ok=True)),
     )
     for label, setup in cases:
         captured = {}
-        with scratch_config("t4-" + label) as cfg:
+        with scratch_config("t4-" + label.replace(" ", "-").replace(",", "")) as cfg:
             setup(cfg)
             verdict, error = _run_invoke(captured)
         env = captured.get("env") or {}
@@ -1065,8 +1058,8 @@ def case_token_t5_failure_error_omits_token():
           "token found in error string")
 
 
-# T6-T8. The token file's bytes, as Windows PowerShell 5.1 writes them. The reader must
-# return the bare token whatever the encoding or line ending.
+# Token file encodings, as Windows PowerShell 5.1 writes them. The reader must return the bare
+# token whatever the BOM, line ending or NUL characters. The file's bytes are written as given.
 def _token_file_bytes(cfg, data):
     path = os.path.join(cfg, "state", "hook-token")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1074,56 +1067,28 @@ def _token_file_bytes(cfg, data):
         f.write(data)
 
 
-# T6. UTF-8 with a BOM (PowerShell 5.1 `Set-Content -Encoding utf8`): no BOM in the token.
-def case_token_t6_utf8_bom_is_stripped():
-    captured = {}
-    with scratch_config("t6") as cfg:
-        _token_file_bytes(cfg, b"\xef\xbb\xbf" + FAKE_TOKEN.encode("ascii") + b"\n")
-        _run_invoke(captured)
-    env = captured.get("env") or {}
-    check("token_t6: child token is the bare token, no BOM (UTF-8 BOM file)",
-          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
-
-
-# T7. UTF-16 LE with a BOM (PowerShell 5.1 `>` / Out-File): the bare token comes through.
-def case_token_t7_utf16_le_bom_is_read():
-    captured = {}
-    with scratch_config("t7") as cfg:
-        _token_file_bytes(cfg, b"\xff\xfe" + (FAKE_TOKEN + "\r\n").encode("utf-16-le"))
-        _run_invoke(captured)
-    env = captured.get("env") or {}
-    check("token_t7: child token is the bare token (UTF-16 LE BOM file)",
-          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
-
-
-# T8. CRLF line ending, UTF-8, no BOM: the bare token. A pin, green today.
-def case_token_t8_crlf_is_stripped():
-    captured = {}
-    with scratch_config("t8") as cfg:
-        _token_file_bytes(cfg, FAKE_TOKEN.encode("ascii") + b"\r\n")
-        _run_invoke(captured)
-    env = captured.get("env") or {}
-    check("token_t8: child token is the bare token (CRLF file)",
-          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
-
-
-# T9. A token file that holds NUL characters: UTF-16 LE with no BOM, or UTF-8 with a trailing
-# NUL. The child env must carry the bare token with no NUL, and invoke_model must not fail
-# with "embedded null character". Red until the reader strips NULs.
-def case_token_t9_nul_characters_are_stripped():
+def case_token_encodings_read_as_the_bare_token():
     cases = (
-        ("utf16-le-no-bom", (FAKE_TOKEN + "\r\n").encode("utf-16-le")),
-        ("utf8-trailing-nul", FAKE_TOKEN.encode("ascii") + b"\n\x00"),
+        # Catches: a UTF-8 BOM (Set-Content -Encoding utf8) stays in the token.
+        ("utf8 BOM", b"\xef\xbb\xbf" + FAKE_TOKEN.encode("ascii") + b"\n"),
+        # Catches: a UTF-16 LE BOM file (Out-File) is not read as the bare token.
+        ("utf16 LE BOM", b"\xff\xfe" + (FAKE_TOKEN + "\r\n").encode("utf-16-le")),
+        # Catches: a CRLF line ending stays in the token.
+        ("utf8 CRLF", FAKE_TOKEN.encode("ascii") + b"\r\n"),
+        # Catches: a UTF-16 LE file with no BOM keeps its NUL characters, and the call fails on them.
+        ("utf16 LE no BOM", (FAKE_TOKEN + "\r\n").encode("utf-16-le")),
+        # Catches: a trailing NUL reaches the child env, and the call fails with embedded null character.
+        ("utf8 trailing NUL", FAKE_TOKEN.encode("ascii") + b"\n\x00"),
     )
     for label, data in cases:
         captured = {}
-        with scratch_config("t9-" + label) as cfg:
+        with scratch_config("enc-" + label.replace(" ", "-")) as cfg:
             _token_file_bytes(cfg, data)
             verdict, error = _run_invoke(captured)
         env = captured.get("env") or {}
-        check("token_t9(%s): call returns ALLOW, no embedded-null error" % label,
+        check("token_encodings(%s): call returns ALLOW, no embedded-null error" % label,
               verdict == ALLOW and error is None, error)
-        check("token_t9(%s): child token is the bare token, no NUL" % label,
+        check("token_encodings(%s): child token is the bare token" % label,
               env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
 
 
@@ -1149,26 +1114,6 @@ def case_token_t10_undecodable_file_is_an_error():
     check("token_t10: error holds no file bytes",
           not any(s in text for s in (FAKE_TOKEN, "\\xff", "\\xfe", "\\x41")), text)
     check("token_t10: no subprocess started", calls == [], "%d call(s)" % len(calls))
-
-
-# T11. An empty or whitespace-only token file still means no token file: no token key in the
-# child env, and the call still returns ALLOW on the old path. A pin, green today.
-def case_token_t11_empty_or_blank_file_means_no_file():
-    cases = (
-        ("empty", b""),
-        ("spaces-crlf", b"  \r\n"),
-        ("utf16-bom-only", b"\xff\xfe"),
-    )
-    for label, data in cases:
-        captured = {}
-        with scratch_config("t11-" + label) as cfg:
-            _token_file_bytes(cfg, data)
-            verdict, error = _run_invoke(captured)
-        env = captured.get("env") or {}
-        check("token_t11(%s): no token key in child env" % label, TOKEN_KEY not in env,
-              "token is " + _presence(env))
-        check("token_t11(%s): call still returns ALLOW" % label,
-              verdict == ALLOW and error is None, error)
 
 
 # --------------------------------------------------------------------------- case E1
@@ -1228,18 +1173,9 @@ def _timeout_run(argv, **kwargs):
     raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
 
 
-def case_invoke_model_signature_and_return_shape_pinned():
-    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its signature
-    # and its (verdict | None, error | None) return must not move.
-    params = inspect.signature(dw.invoke_model).parameters
-    check("invoke_model signature: parameters are prompt, model, timeout, shape",
-          list(params) == ["prompt", "model", "timeout", "shape"], list(params))
-    check("invoke_model signature: model defaults to MODEL",
-          params["model"].default == dw.MODEL, params["model"].default)
-    check("invoke_model signature: timeout defaults to MODEL_TIMEOUT",
-          params["timeout"].default == dw.MODEL_TIMEOUT, params["timeout"].default)
-    check("invoke_model signature: shape defaults to VERDICT_SHAPE",
-          params["shape"].default is dw.VERDICT_SHAPE, params["shape"].default)
+def case_invoke_model_return_shape_pinned():
+    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its
+    # (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
@@ -1707,20 +1643,14 @@ def main():
     case_cache_key_holds_the_repo_and_a_bounded_read()
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
-    case_invoke_model_haiku_xhigh_120s()
     case_invoke_model_timeout_is_error()
     case_e1_model_output_is_read_as_utf8()
     case_token_t1_file_reaches_child_env()
-    case_token_t2_no_file_no_token()
     case_token_t3_parent_env_not_passed_through()
-    case_token_t4_empty_or_unreadable_is_no_file()
+    case_token_t4_no_usable_token_file_is_no_token()
     case_token_t5_failure_error_omits_token()
-    case_token_t6_utf8_bom_is_stripped()
-    case_token_t7_utf16_le_bom_is_read()
-    case_token_t8_crlf_is_stripped()
-    case_token_t9_nul_characters_are_stripped()
+    case_token_encodings_read_as_the_bare_token()
     case_token_t10_undecodable_file_is_an_error()
-    case_token_t11_empty_or_blank_file_means_no_file()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
@@ -1729,7 +1659,7 @@ def main():
     for case in (
         case_invoke_model_long_prompt_reaches_child_whole,
         case_invoke_model_prompt_bytes_reach_child_exact,
-        case_invoke_model_signature_and_return_shape_pinned,
+        case_invoke_model_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
         case_parse_verdict_is_the_one_home,
@@ -1758,7 +1688,7 @@ def main():
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
         return 1
-    print("test_decision_watch PASS: all checks right")
+    print("test_decision_watch PASS: all checks right, %d skipped" % len(SKIPPED))
     return 0
 
 

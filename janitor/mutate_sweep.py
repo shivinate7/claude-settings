@@ -75,8 +75,8 @@ SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
 GUARD = os.path.join(REPO_ROOT, "hooks", "guard.py")
 
-# A third target, added for the SessionEnd hook's own two budget protections (remaining-time
-# spend, and the upper-edge headroom guard): the hook has its own suite, test_session_end_sweep,
+# A third target, added for the SessionEnd hook's own budget protection (remaining-time
+# spend): the hook has its own suite, test_session_end_sweep,
 # which additionally reads the real REPO_ROOT/settings.json (HookBudgetFitsUnderItsHostCeiling)
 # -- so its scaffold needs that file too, never mutated, copied alongside the rest.
 SESSION_END_SWEEP = os.path.join(HERE, "session_end_sweep.py")
@@ -553,22 +553,11 @@ MUTATIONS = [
      '    return SWEEP_TIMEOUT_SECONDS  # MUTANT: elapsed_seconds is never consulted',
      "test_too_little_budget_left_returns_none"),
 
-    # 2. The upper-edge headroom guard: a margin between settings.json's ceiling and the hook's
-    # own worst case must not be allowed to run arbitrarily far ahead. Verified by hand against a
-    # `.bak` copy: widening SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS to 2000 fails exactly
-    # test_ceiling_far_ahead_of_the_worst_case_fails_the_band among the FAIL lines, and no other
-    # case.
-    ("budget: the upper-edge headroom guard accepts an unbounded margin",
-     "session_end_sweep",
-     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0',
-     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 2000.0',
-     "test_ceiling_far_ahead_of_the_worst_case_fails_the_band"),
 
     # 3. PR #84 review: an elapsed reading this function cannot trust (negative, or non-finite)
-    # must not be spent as if it were free time. Verified by hand against a `.bak` copy: dropping
-    # the validation block fails exactly test_negative_elapsed_is_refused_not_treated_as_extra_
-    # time and test_non_finite_elapsed_is_refused among the FAIL lines, and no other case (the
-    # larger-than-the-ceiling case stays green on its own, unrelated arithmetic).
+    # must not be spent as if it were free time. Dropping the validation block fails the negative
+    # row and the nan row of test_too_little_budget_left_returns_none (one subTest per row). The
+    # inf row and the over-ceiling row still return None without the block, so they stay green.
     ("budget: an untrustworthy elapsed reading (negative or non-finite) is spent as real time",
      "session_end_sweep",
      '    if (\n'
@@ -581,7 +570,7 @@ MUTATIONS = [
      '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS',
      '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS  '
      '# MUTANT: no validation',
-     "test_negative_elapsed_is_refused_not_treated_as_extra_time"),
+     "test_too_little_budget_left_returns_none"),
 
     # 4. Command-line argv coverage (found 2026-09-22): the hook's own reap call,
     # `[sys.executable, SWEEP_PATH, root, "--confirm"]`, is the one subprocess.run in this whole

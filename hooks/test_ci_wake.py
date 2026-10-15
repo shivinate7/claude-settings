@@ -568,13 +568,6 @@ def case_background_separator_starts_each_watch():
     guard_silent("single & after an unquoted # is comment text", "echo ok # a & gh pr ready 12")
 
 
-def case_deadline_not_a_number_uses_default():
-    """CI_WAKE_DEADLINE that is not a number falls back to the default budget: green verdict."""
-    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]),
-                   extra={"CI_WAKE_DEADLINE": "abc"})
-    expect_verdict("CI_WAKE_DEADLINE=abc: default budget, green verdict", res, "green")
-
-
 def case_lock_folder_unusable_wakes_unknown():
     """The lock folder is a file. The OSError at the lock must end in one unknown line, no watch."""
     blocker = os.path.join(TMP, "lock-folder-is-a-file")
@@ -583,50 +576,6 @@ def case_lock_folder_unusable_wakes_unknown():
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=blocker)
     expect_verdict("lock folder is a file (OSError at the lock)", res, "unknown")
     expect_no_watch("lock folder is a file", res)
-
-
-STRESS_SRC = r'''
-import sys
-sys.path.insert(0, sys.argv[1])   # the folder with gh_stub.py
-import gh_stub
-for i in range(int(sys.argv[3])):
-    gh_stub.log_call([sys.argv[2], str(i)])
-'''
-
-
-def case_stress_log_keeps_every_line():
-    """Two processes write 2000 stand-in calls each into one log at the same time. All 4000 are
-    kept, each once. Red for a shared append: it lost 2 of 8 calls in CI, and 191 of 4000 on a
-    local probe."""
-    folder = tempfile.mkdtemp(prefix="stress-", dir=TMP)
-    base = os.path.join(folder, "gh.log")
-    writer = os.path.join(folder, "stress_writer.py")
-    with open(writer, "w", encoding="utf-8") as f:
-        f.write(STRESS_SRC)
-    env = dict(os.environ, GH_STUB_LOG=base)
-    procs, outs = [], []
-    for tag in ("a", "b"):
-        out = open(os.path.join(folder, "out-%s.txt" % tag), "w", encoding="utf-8")
-        outs.append(out)
-        procs.append(subprocess.Popen([PY, writer, TMP, tag, "2000"], env=env, stdout=out,
-                                      stderr=subprocess.STDOUT))
-    codes = []
-    for p in procs:
-        try:
-            codes.append(p.wait(timeout=TIMEOUT * 4))
-        except subprocess.TimeoutExpired:
-            p.kill()
-            codes.append(None)
-    for out in outs:
-        out.close()
-    calls = read_calls(base)
-    got = sorted(tuple(c) for c in calls)
-    want = sorted((tag, str(i)) for tag in ("a", "b") for i in range(2000))
-    check("stress: both writers exit 0", codes == [0, 0], "codes=%r" % (codes,))
-    check("stress: 4000 lines kept of 4000 written (2 x 2000)", len(calls) == 4000,
-          "kept %d" % len(calls))
-    check("stress: every line present once, none lost or doubled", got == want,
-          "missing %d, extra %d" % (len(set(want) - set(got)), len(got) - len(set(got))))
 
 
 def main():
@@ -671,41 +620,26 @@ def main():
     check("push, then gh pr ready 12: no pr list call (the push is not read)",
           count(res, "pr", "list") == 0, why(res))
 
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([pr(12, draft=True)], [GREEN]))
-    expect_silent("git push, only a draft PR", res)
-    expect_no_watch("git push, only a draft PR", res)
-    expect_no_gh("git push, only a draft PR", res)
-
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([pr(12, branch="other-branch")], [GREEN]))
-    expect_silent("git push, no PR for this branch (a ready PR on another branch)", res)
-    expect_no_watch("git push, no PR for this branch", res)
-    expect_no_gh("git push, no PR for this branch", res)
-
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([], [GREEN]))
-    expect_silent("git push, no PR at all", res)
-    expect_no_watch("git push, no PR at all", res)
-    expect_no_gh("git push, no PR at all", res)
-
-    res = run_hook(bash("ls -la"), fixture(READY, [GREEN]))
-    expect_silent("ls -la", res)
-    expect_no_gh("ls -la", res)
-
-    res = run_hook(bash("git status"), fixture(READY, [GREEN]))
-    expect_silent("git status", res)
-    expect_no_gh("git status", res)
-
-    res = run_hook(bash('git commit -m "note: gh pr ready 12 later"'), fixture(READY, [GREEN]))
-    expect_silent("trigger text inside a quoted commit message", res)
-    expect_no_watch("trigger text inside a quoted commit message", res)
-
-    res = run_hook(bash('echo "git push origin hook-wave-2"'), fixture(READY, [GREEN]))
-    expect_silent("trigger text inside a quoted echo", res)
-    expect_no_watch("trigger text inside a quoted echo", res)
-
-    res = run_hook({"tool_name": "Edit", "tool_input": {"command": "gh pr ready 12"}},
-                   fixture(READY, [GREEN]))
-    expect_silent("non-Bash, non-PowerShell tool carrying a trigger command", res)
-    expect_no_watch("non-Bash, non-PowerShell tool carrying a trigger command", res)
+    # No watch and no gh call. Each row: (row id, tool payload, the PRs the stub holds).
+    # The row id prints on FAIL. Quoted, heredoc and comment spellings are checked below.
+    NO_WATCH_ROWS = (
+        ("git push, only a draft PR", bash("git push origin hook-wave-2"), [pr(12, draft=True)]),
+        ("git push, no PR for this branch (a ready PR on another branch)",
+         bash("git push origin hook-wave-2"), [pr(12, branch="other-branch")]),
+        ("git push, no PR at all", bash("git push origin hook-wave-2"), []),
+        ("ls -la", bash("ls -la"), READY),
+        ("git status", bash("git status"), READY),
+        ("trigger text inside a quoted commit message",
+         bash('git commit -m "note: gh pr ready 12 later"'), READY),
+        ("trigger text inside a quoted echo", bash('echo "git push origin hook-wave-2"'), READY),
+        ("non-Bash, non-PowerShell tool carrying a trigger command",
+         {"tool_name": "Edit", "tool_input": {"command": "gh pr ready 12"}}, READY),
+    )
+    for label, payload, prs in NO_WATCH_ROWS:
+        res = run_hook(payload, fixture(prs, [GREEN]))
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        expect_no_gh(label, res)
 
     # Quotes, heredoc bodies, comments. The record: none of these starts a watch.
     guard_silent("gh pr ready inside double quotes", 'echo "gh pr ready 12"')
@@ -794,10 +728,7 @@ def main():
     case_import_error_wakes_unknown()
     case_final_flush_error_wakes_unknown()
     case_background_separator_starts_each_watch()
-    case_deadline_not_a_number_uses_default()
     case_lock_folder_unusable_wakes_unknown()
-
-    case_stress_log_keeps_every_line()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))

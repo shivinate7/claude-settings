@@ -10,7 +10,7 @@ Every known gap is a debt. The repo keeps a debt store with one entry per debt. 
 
 A round-3 limit goes both under "Holes, named" and into a debt file.
 
-The rule is `roles-holes-are-debts`, placed after `roles-review-cap-three` (the three-round review cap). The cap rule stays as written.
+The rule is `roles-holes-are-debts`, placed after `roles-review-cap-three` (the three-round review cap).
 
 ## Why
 

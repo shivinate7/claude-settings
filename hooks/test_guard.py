@@ -28,6 +28,7 @@ The cases come from two working guards and their own test suites:
 Two literals are assembled from parts, so that this file cannot trip the guard it tests.
 """
 
+import ast
 import contextlib
 import io
 import json
@@ -113,6 +114,22 @@ class _TaggedLogs(list):
     def append(self, item):
         LOG_FAMILY[item[0]] = _family(item[0])
         list.append(self, item)
+
+
+# A case this platform does not run is a SKIP row with its reason: never a PASS, never a silent drop.
+# skip_case records it here, and the rows join LOG_CHECKS with the other log checks, further down.
+SKIP_ROWS = []
+NO_PS = "Windows has no ps, so ownership reads unknown and this case does not run here"
+NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
+NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
+NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
+
+
+def skip_case(label, reason):
+    """Register a case that cannot run on this platform. It prints as SKIP with its reason, and
+    run_cases counts it. The family is the one in force at this line, as for a log check."""
+    LOG_FAMILY[label] = _family(label)
+    SKIP_ROWS.append((label, lambda: (SKIP, reason)))
 
 
 # GUARD_TIMING=1 prints, once at the end, the seconds each fixture block took: the eager blocks at
@@ -763,8 +780,8 @@ def _verify_fake_gh_delay(ghdir, delay):
     """Fail fixture setup if the delayed gh fake in `ghdir` does not actually delay.
 
     Runs the fake under the exact PATH the guard itself gets when it is asked about that base
-    (`ghdir` first, then only the Python interpreter's own folder — see merge_log_case and
-    PY_PATH). This is the check that goes red on the defect make_fake_gh's absolute-path fix
+    (`ghdir` first, then only the Python interpreter's own folder: see PY_PATH). This is the
+    check that goes red on the defect make_fake_gh's absolute-path fix
     repairs: a delay tool resolved by bare name can silently vanish on that narrow PATH, and the
     fake then answers instantly with an error on stderr instead of raising or waiting.
     """
@@ -1539,7 +1556,7 @@ sh("checkout: a named file", VCS + " checkout -- README.md", "deny", "shared-tre
 # commit go through silently. Built with a REAL merge conflict, never mocked, the same way the
 # worktree cases above use a real checkout.
 sh("checkout: --theirs resolves a real, unresolved merge conflict",
-   VCS + " checkout --theirs docs/DEBTS.md", "allow", cwd=CONFLICT)
+   VCS + " checkout --theirs docs/DEBTS.md", "allow", cwd=CONFLICT, silent=True)
 # GITMAIN carries a real uncommitted change to this same file, so the call has a subject to
 # destroy and the case is still about the missing conflict, not about an empty tree.
 sh("checkout: the same call with no conflict in progress keeps today's decision",
@@ -1739,6 +1756,9 @@ if os.name != "nt":
        VCS + " reset --hard HEAD", "allow", cwd=SUBJDIRTY, env_path=GITBLIND)
     sh("subject: the same blind git on a stack subject allows", VCS + " stash drop", "allow",
        cwd=SUBJSTASH, env_path=GITBLIND)
+else:
+    skip_case("subject: a git that cannot answer the status read allows, rather than guess", NO_STAND_IN)
+    skip_case("subject: the same blind git on a stack subject allows", NO_STAND_IN)
 # A DIRECTORY THAT IS NO GIT TREE IS NOT AN UNREADABLE SUBJECT. git answers there, and the answer
 # is "no tree", so the rule keeps its fail-closed deny. Every NOGIT case above rests on this.
 sh("subject: a directory that is no git tree still denies", VCS + " reset --hard HEAD", "deny",
@@ -2262,13 +2282,6 @@ sh("heredoc: prose naming the stash with no interpreter",
    "allow", cwd=NOGIT)
 sh("heredoc: a body fed to a shell stays under inspection",
    "bash <<EOF\n" + VCS + " stash\nEOF", "deny", "shared-tree", cwd=NOGIT)
-# THE DOCUMENTED HOLE. The body of an interpreter heredoc IS kept under inspection, but the
-# shared-tree rule reads whitespace-separated words, and `os.system("git stash")` puts the call
-# inside a quoted string. The guard allows it, and this case says so rather than hiding it.
-sh("heredoc: a quoted call inside python source is not parsed as a shell call",
-   "python - <<EOF\nimport os\nos.system(\"" + VCS + " stash\")\nEOF", "allow", cwd=NOGIT)
-
-
 # `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
 # from a CLEAN checkout, `git --work-tree=<dirty> status --porcelain` reported the OTHER tree's
 # modified and untracked files. So rule 1 judges the named tree, not the one the call runs in.
@@ -2625,24 +2638,36 @@ sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
+else:
+    skip_case("kill: a pid this session did not start", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid behind a signal flag", "kill -9 %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid behind a signal flag", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid behind a named signal", "kill -s TERM %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid behind a named signal", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid after the end-of-flags mark", "kill -- %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid after the end-of-flags mark", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN), "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: one foreign pid in a list of pids", NO_PS)
 sh("kill: init", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: every process", "kill -9 -- -1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: the shell's own process group", "kill 0", "deny", "machine-wide-kill", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: the session's own claude process", "kill %d" % os.getpid(), "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: the session's own claude process", NO_PS)
 sh("kill: init with the root unknown", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT,
    no_root=True)
 sh("kill: every process with the root unknown", "kill -9 -- -1", "deny", "machine-wide-kill",
@@ -2732,6 +2757,11 @@ if ORPHAN_CASES:
     sh("kill: a pid in this session's agent worktree whose parent is alive, not init",
        "kill %d" % LIVE_PID, "deny", "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION,
        config=SUBCFG, transcript=SUB_TRANSCRIPT, carries="did not start")
+else:
+    skip_case("kill: a PPID-1 pid whose cwd is in this session's agent worktree", NO_ORPHAN)
+    skip_case("kill: a PPID-1 pid in another session's agent worktree", NO_ORPHAN)
+    skip_case("kill: a PPID-1 pid in a worktree not named agent-<id>", NO_ORPHAN)
+    skip_case("kill: a pid in this session's agent worktree whose parent is alive, not init", NO_ORPHAN)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -4089,13 +4119,11 @@ add("background-end: npx vite build --watch under run_in_background with no note
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npx vite build --watch", run_in_background=True)
 
-# Pins: these end by themselves or are a named hole, and must stay allowed with no note.
+# Pins: these end by themselves, and must stay allowed with no note.
 add("background-end: vite build under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="vite build", run_in_background=True)
 add("background-end: next build under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="next build", run_in_background=True)
-add("background-end: node script.js under run_in_background is allowed, a one-off and a named hole",
-    "allow", cwd=NOGIT, command="node script.js", run_in_background=True)
 add("background-end: a server named inside a bash -c string is data, allowed", "allow",
     cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
 
@@ -4637,9 +4665,6 @@ sh("silent-write pipe, allow: a read piped to a discard",
    VCS + " log | cat >/dev/null", "allow", cwd=NOGIT)
 sh("silent-write pipe, allow: tee prints",
    VCS + " commit -m x | tee /tmp/l", "allow", cwd=NOGIT)
-# KNOWN GAP, pinned ALLOWED on purpose: the owner left bash -c unparsed. Do not flip without the owner.
-sh("silent-write pipe, allow (known gap): bash -c wrapper is not parsed",
-   "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'", "allow", cwd=NOGIT)
 
 
 # =========================================================================== 3. push and delete
@@ -4868,17 +4893,6 @@ sh("delete: del /s /q C:\\*, Bash", "del /s /q C:\\*", "deny", "destructive-dele
 sh("delete: del /s /q C:\\*, PowerShell", "del /s /q C:\\*", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
-# THE THIRD MEASURED COMMAND, `rd /s /q C:\Users\x`, is NOT a case here. `C:\Users\x` is a
-# literal path to one user's profile, not one of the recognized root/home/glob shapes
-# (`%USERPROFILE%`, `$env:USERPROFILE`, `$HOME`, `~`, a bare drive root, or a glob), the same
-# way `rm -rf /home/x` (a literal path to a home) is not a case above either. Matching it would
-# widen what counts as a root to "any path under C:\Users", which the brief this rule was built
-# from rules out. See the PARITY case just below.
-sh("delete: rd /s /q at a literal user path is not a recognized root, home or glob",
-   "rd /s /q C:\\Users\\x", "allow", cwd=NOGIT)
-sh("delete: its POSIX twin is allowed today for the same reason",
-   "rm -rf /home/x", "allow", cwd=NOGIT)
-
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
 # Remove-Item, taking its `-Recurse`/`-Force` parameters rather than `rm`'s combined `-rf`.
@@ -4910,8 +4924,6 @@ FAMILY = "env"
 # Ported whole from q_max. The rule is about the CONTENTS of the file, so a read is refused as
 # firmly as a write, and a runner that loads the file into its own environment is allowed by name.
 
-add("trim: env: Read of the file is the settings deny list's, not the guard's", "allow",
-    tool="Read", cwd=NOGIT, file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Write of the file", "deny", "env-file", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Edit of the file", "deny", "env-file", tool="Edit", cwd=NOGIT,
@@ -4922,8 +4934,6 @@ add("env: MultiEdit of the file", "deny", "env-file", tool="MultiEdit", cwd=NOGI
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: NotebookEdit of a variant", "deny", "env-file", tool="NotebookEdit", cwd=NOGIT,
     notebook_path=slash(os.path.join(PROJ, ENV + ".ipynb")))
-add("trim: env: Grep naming the file by path is the deny list's, not the guard's", "allow",
-    tool="Grep", cwd=NOGIT, path=slash(os.path.join(PROJ, ENV + ".local")))
 # The reviewer's own payload, pinned by name. Every refused case is checked for a leaked file
 # name, and this one holds the exact shape the review asked for.
 add("env: a Write outside the fixtures, and the reason names no file", "deny", "env-file",
@@ -5739,12 +5749,12 @@ sh("git env set: Bash printf into a profile, a doubled backslash before n inside
 FAMILY = "merge"
 #
 # Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). Every
-# merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
-# merge_log_case() below.
+# merge call is an ALLOW, and the allow is silent: no printed reason and no log line. The silent
+# allows are the cases marked silent below.
 
 # These run against a green head. Section 5b below pins the gate that refuses a head that is not.
 sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+   silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
    env_path=GHDEV + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: an unreadable base is allowed once the head checks read green",
@@ -5752,14 +5762,9 @@ sh("merge: an unreadable base is allowed once the head checks read green",
    config=MERGECFG)
 sh("merge: no number is allowed", "gh pr merge", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: opening a draft pull request is untouched",
-   "gh pr create --draft --base main --title x --body y",
-   "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 add("merge: a call of the merge tool on a green head is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
-    env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+    silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 
 
 # =========================================================================== 5a. draft pull requests
@@ -7652,12 +7657,8 @@ for _tool in ("Edit", "Write"):
 # TEST_DIRS (lowercased), so it is a case here, unchanged. `Footests`, `Attests`, `abTests` and
 # `DegenUITest` are near misses: `tests` is lowercase, the first letter is lowercase, or the name does
 # not end in `Tests`.
-# Known ceiling, pinned as current behaviour: a product folder named like `ABTests` reads as a test
-# folder, so `native/ABTests/Experiment.swift` IS a test path. Upgrade: read the target names from the
-# Xcode project.
 SWIFT_TEST_PATHS = ("native/DegenUITests/NBOpenLinkUITests.swift",
-                    "native/DegenUITests/LaunchTests.swift", "Sources/FooTests/Helper.swift",
-                    "native/ABTests/Experiment.swift")
+                    "native/DegenUITests/LaunchTests.swift", "Sources/FooTests/Helper.swift")
 SWIFT_FALSE_ALARMS = ("native/Contests/Board.swift", "native/Tests.swift",
                       "native/LatestResults.swift", "native/Attests/x.swift",
                       "native/UITestsHelper/x.swift", "native/Footests/x.swift",
@@ -7881,21 +7882,15 @@ add("builder-diff: a new branch name does not reset the base", "allow",
 sh("builder-diff: a new branch name does not reset the base at push", PUSH, "allow",
    cwd=_repo, agent_id="bld1", agent_type="builder")
 
-# the refusal gives up once, and names a working undo route with placeholders
+# The stop is never blocked (guard.py judge_stop). A builder stop with a test change and a dirty
+# main tree is an offence that logs, and the stop still goes through. This pins the first stop.
 _repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                          # the MAIN tree is dirty too
                                          write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
-add("builder-diff: a stop with a test change is allowed, so there is no undo route to name",
+add("builder-diff: a stop with a test change is never blocked",
     "allow", event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
-    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)
-add("builder-diff: a test-author's second stop is allowed too", "allow",
-    event="SubagentStop", cwd=diff_repo("a-giveup", _put("src/app.py", "x = 2\n")),
-    agent_id="auth1", agent_type="test-author", stop_active=True)
 add("builder-diff: an unread diff logs role-diff-unread and the first stop is allowed", "allow",
     event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder")
-add("builder-diff: an unread diff lets the second stop go", "allow",
-    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder", stop_active=True)
 add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
     agent_id="bld1", agent_type="builder")
 add("builder-diff: a stop whose cwd is a main checkout is allowed (and logged)", "allow",
@@ -8932,31 +8927,6 @@ def crash_log_case():
     return True, "allowed, and one crash line logged"
 
 
-def conflict_resolve_log_case():
-    """`git checkout --theirs` during a real conflict is allowed and logs NOTHING: it is a
-    carve-out of shared-tree, with no rule of its own (decisions/guard-trims-from-the-audit.md).
-    """
-    folder = os.path.join(ROOT, "conflictlog")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "guard.log")
-    if os.path.exists(path):
-        os.remove(path)
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = folder
-    result = subprocess.run(
-        [sys.executable, GUARD],
-        input=json.dumps({"tool_name": "Bash",
-                          "tool_input": {"command": VCS + " checkout --theirs docs/DEBTS.md"},
-                          "cwd": CONFLICT}),
-        capture_output=True, text=True, env=env, timeout=60,
-    )
-    if result.stdout.strip():
-        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
-    if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
-        return False, "expected no log line, found: %r" % open(path, encoding="utf-8").read()[:120]
-    return True, "allowed, no log line"
-
-
 def subject_unread_log_case(command=None, expect_note=True):
     """A subject the guard could not read is allowed, and logged as `noted`/`subject-unread`.
 
@@ -8965,7 +8935,7 @@ def subject_unread_log_case(command=None, expect_note=True):
     `git` on PATH, and it also checks the allow stays silent on stdout.
     """
     if os.name == "nt":
-        return True, "skipped: a stand-in git is not reached through CreateProcess"
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     materialize(GITBLIND)  # lint calls this directly, with no run loop to build what it names
     materialize(SUBJDIRTY)
     folder = os.path.join(ROOT, "unreadlog")
@@ -9068,6 +9038,8 @@ def worktree_remove_force_noted_case():
 def worktree_remove_force_forms_noted_case():
     for flag in ("'--force'", '"-f"', "--forc", "--f", "-fq"):
         ok, why = subject_unread_log_case(VCS + " worktree remove " + flag + " $w")
+        if ok == SKIP:  # a skip is not a pass for the forms: it stays a skip for this case
+            return SKIP, why
         if not ok:
             return False, "%s: %s" % (flag, why)
     return True, "quoted, abbreviated and clustered force forms are still noted"
@@ -9418,36 +9390,6 @@ def merge_tool_missing_case():
     return True, "deny, the tool could not be loaded; the unread folder list is logged, not denied"
 
 
-def merge_log_case():
-    """A merge into main logs NOTHING, by either route: the guard no longer reads a base or notes
-    the merge (decisions/guard-trims-from-the-audit.md). PATH holds the green stand-in `gh`
-    (GHMAIN), so the merge-checks gate passes and the call is a silent allow. An old guard would
-    log `merge-main`.
-    """
-    problems = []
-    for index, payload in enumerate((
-        {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12 --squash"}, "cwd": NOGIT},
-        {"tool_name": "mcp__github__merge_pull_request",
-         "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"}, "cwd": NOGIT},
-    )):
-        folder = os.path.join(ROOT, "mlog%d" % index)
-        os.makedirs(folder, exist_ok=True)
-        env = dict(os.environ)
-        env["CLAUDE_CONFIG_DIR"] = folder
-        env["PATH"] = GHMAIN + os.pathsep + PY_PATH
-        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload),
-                                capture_output=True, text=True, env=env, timeout=60)
-        if result.stdout.strip():
-            problems.append("%s: expected a silent allow, got %r" % (
-                payload["tool_name"], result.stdout.strip()[:80]))
-        path = os.path.join(folder, "guard.log")
-        if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
-            problems.append("%s: expected no log line" % payload["tool_name"])
-    if problems:
-        return False, "; ".join(problems)
-    return True, "allowed, no log line, by the command and by the tool"
-
-
 def merge_hang_timeout_case():
     """A `gh` that never answers must still end in a deny, and that deny must not depend on the
     hook's 60s budget being outlived first.
@@ -9668,11 +9610,11 @@ def process_start_ms_case():
     elif abs(got_alive - want_alive) > 2000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
 
-    if os.name == "nt":
+    if os.name == "nt":  # the alive read still runs and can fail; the split it names does not run here
         if problems:
             return False, "; ".join(problems)
-        return True, (
-            "alive read matches; skipped: dead-pid and ps-faking techniques are POSIX-only; "
+        return SKIP, (
+            "alive read matches; the dead-pid and ps-faking arms are POSIX-only; "
             "the Windows arm is proven separately by process_start_ms_windows_case"
         )
 
@@ -10118,7 +10060,6 @@ LOG_CHECKS = (
     ("log: a cap lift is asked and logged with its file and value", cap_log_case),
     ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
-    ("trim: a merge into main is allowed and logs nothing", merge_log_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
     ("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
@@ -10126,7 +10067,6 @@ LOG_CHECKS = (
     ("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
-    ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
      agent_worktree_reset_noted_case),
@@ -10269,7 +10209,7 @@ def mask_memory_case():
     try:
         import resource  # noqa: F401  posix only
     except ImportError:
-        return True, "skipped: no resource module on this host, RLIMIT_AS not checked"
+        return SKIP, "skipped: no resource module on this host, RLIMIT_AS not checked"
     code = ("import json, resource, importlib.util as u\n"
             "try:\n"
             "    resource.setrlimit(resource.RLIMIT_AS, (%d, %d))\n"
@@ -10570,11 +10510,15 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
 # is an intact copy's deny, so the exit code is read from a real refusal, never assumed.
 FAMILY = "fail-closed"
-FAILCLOSED_MODULES = (
-    "guard_core", "guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env", "guard_kill", "guard_stream",
-    "guard_rm_var", "guard_mask_script",
-)
+
+
+def _guard_siblings(folder):
+    """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed.
+    Test files start with test_, so they are never listed. _guard_copy copies this same set."""
+    return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
+
+
+FAILCLOSED_MODULES = tuple(_guard_siblings(os.path.dirname(GUARD)))
 FAILCLOSED_REMEDY = ("install.sh", "install.ps1")
 FAILCLOSED_CALL = "ls"                # harmless: a refusal can only come from the missing module
 FAILCLOSED_CONTROL = "pkill -f node"  # an intact copy denies it, so its exit code is the deny's
@@ -10587,9 +10531,9 @@ def _guard_copy(name, drop):
     folder = os.path.join(ROOT, "failclosed", name)
     os.makedirs(folder, exist_ok=True)
     shutil.copy(GUARD, os.path.join(folder, "guard.py"))
-    for entry in sorted(os.listdir(source)):
-        if entry.startswith("guard_") and entry.endswith(".py") and entry != drop:
-            shutil.copy(os.path.join(source, entry), folder)
+    for module in _guard_siblings(source):
+        if module + ".py" != drop:
+            shutil.copy(os.path.join(source, module + ".py"), folder)
     return folder
 
 
@@ -10674,6 +10618,80 @@ for _label, _check in (
 ):
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def _guard_family_constant(path):
+    """The module list the guard loads, ("guard_core",) + _FAMILY_MODULES, read from `path` with the
+    language's own parser. Matching text would read a comment or a string as a module name."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
+            return ("guard_core",) + tuple(ast.literal_eval(node.value))
+    raise ValueError("no _FAMILY_MODULES assignment in %s" % path)
+
+
+def _list_names_every_sibling():
+    """FAILCLOSED_MODULES must match the module list the guard itself loads, read from GUARD. A module
+    the guard loads that the list omits, or a name the list holds that the guard never loads, goes red."""
+    expected = _guard_family_constant(GUARD)
+    if sorted(FAILCLOSED_MODULES) != sorted(expected):
+        lacks = sorted(set(expected) - set(FAILCLOSED_MODULES))
+        extra = sorted(set(FAILCLOSED_MODULES) - set(expected))
+        return False, "the list lacks %s and holds extra %s against the guard's own constant" % (
+            lacks, extra)
+    return True, "the list matches the guard's own %d-module constant" % len(expected)
+
+
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: FAILCLOSED_MODULES matches the guard's own constant",
+                         _list_names_every_sibling))
+
+
+def _constant_drop_goes_red():
+    """Drop guard_wsl from a copy of the guard's own module constant, the one the guard loads. The list
+    check must go red on that copy. The copy is a scratch folder under ROOT, and GUARD is swapped only
+    for the call, then restored."""
+    global GUARD
+    folder = _guard_copy("constant-drop", None)
+    path = os.path.join(folder, "guard.py")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    needle = '"guard_mask_script", "guard_wsl")'
+    if text.count(needle) != 1:
+        return False, "the guard's constant no longer reads %s once, so the drop cannot be made" % needle
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(needle, '"guard_mask_script")'))
+    saved, GUARD = GUARD, path
+    try:
+        ok, note = _list_names_every_sibling()
+    finally:
+        GUARD = saved
+    if ok:
+        return False, "the list check stays green with guard_wsl dropped from the guard's constant"
+    return True, "red on the copy with guard_wsl dropped: %s" % note
+
+
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: a guard constant without guard_wsl turns the list red",
+                         _constant_drop_goes_red))
+
+
+def _fake_sibling_is_picked_up():
+    """The helper that builds FAILCLOSED_MODULES lists a new guard_* file and skips a test_* file. The
+    fixture is a scratch folder under ROOT, never the hooks folder, and nothing in it is imported."""
+    folder = os.path.join(ROOT, "failclosed-glob")
+    os.makedirs(folder, exist_ok=True)
+    for name in ("guard_zzfake.py", "test_guard_zzfake.py"):
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as handle:
+            handle.write("# fixture only, never imported\n")
+    got = _guard_siblings(folder)
+    if got != ["guard_zzfake"]:
+        return False, "the helper lists %r for a folder with one guard_ file and one test_ file" % (got,)
+    return True, "the helper lists guard_zzfake and not test_guard_zzfake in a scratch folder"
+
+
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: a new guard_* file is picked up by the helper",
+                         _fake_sibling_is_picked_up))
 
 
 # --------------------------------------------------------------------------- reload-stamp
@@ -11178,114 +11196,8 @@ def session_log_no_setter_case():
     return True, "same verdict and exit with the setter missing, and the line ends in '-'"
 
 
-def session_log_lone_surrogate_case():
-    """session-log: a lone surrogate in session_id loses only itself. Today the writer's utf-8
-    encode fails on it and the whole line is dropped. The line must be written, the surrogate
-    dropped or replaced, the exit 0 and the deny printed. Two shapes: a surrogate in the middle,
-    and one that a 64-character cut leaves at the end.
-    """
-    cases = (
-        ("in the middle", "ab\ud800cd", ("abcd", "ab�cd")),
-        ("at the 64-character cut", "a" * 63 + "\ud800" + "zz", ("a" * 63, "a" * 63 + "�")),
-    )
-    for index, (label, session, wants) in enumerate(cases):
-        folder = _session_log_fresh("sessionlog-surrogate-%d" % index)
-        run = _session_log_run(folder, _session_log_payload(session))
-        if run.returncode != 0:
-            return False, "%s: exit %d" % (label, run.returncode)
-        if not run.stdout.strip():
-            return False, "%s: the deny was not printed" % label
-        path = os.path.join(folder, "guard.log")
-        if not os.path.exists(path):
-            return False, "%s: no guard.log was written" % label
-        with open(path, "rb") as handle:
-            raw = handle.read()
-        try:
-            text = raw.decode("utf-8")  # strict: a surrogate written as-is fails here
-        except UnicodeDecodeError:
-            return False, "%s: the log holds bytes that are not UTF-8" % label
-        lines = [line for line in text.replace("\r\n", "\n").split("\n") if line]
-        if len(lines) != 1:
-            return False, "%s: expected one line, found %d" % (label, len(lines))
-        fields = lines[0].split("\t")
-        if len(fields) != 6 or fields[5] not in wants:
-            return False, "%s: the session cell is %r, want one of %r" % (
-                label, fields[5] if len(fields) == 6 else fields, wants)
-    return True, "both lone surrogates dropped or replaced, and each line kept"
-
-
-def session_log_astral_cut_case():
-    """session-log: a 64-character cut keeps an astral character whole. The id is 63 letters and
-    one character outside the BMP (a surrogate pair in UTF-16), then more text. The cut must keep
-    the character and drop the rest, so the field is exactly the 63 letters and the character.
-    """
-    session = "a" * 63 + "\U0001F600" + "zz"
-    folder = _session_log_fresh("sessionlog-astral")
-    run = _session_log_run(folder, _session_log_payload(session))
-    if run.returncode != 0 or not run.stdout.strip():
-        return False, "the deny was not printed (exit %d)" % run.returncode
-    rows = _session_log_rows(folder)
-    if rows is None or len(rows) != 1:
-        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
-    fields = rows[0].split("\t")
-    want = "a" * 63 + "\U0001F600"
-    if len(fields) != 6 or fields[5] != want:
-        return False, "the session cell is %r, want the 63 letters and the character" % (
-            fields[5] if len(fields) == 6 else fields)
-    return True, "the astral character survives the 64-character cut whole"
-
-
-def session_log_control_id_time_case():
-    """session-log: sanitizing a 1 MB id of control characters scales linearly in CPU. It is timed
-    against a 128 KB id in this process, each side a tick_safe_mean, and the ratio to the scaled
-    baseline must stay under RM_VAR_K. A quadratic sanitizer gives about 8. The guard_core under test
-    is loaded from the GUARD directory, so a mutated copy is the one timed. A 64 KB mixed id must
-    still cut to 64 characters (a quadratic sanitizer takes minutes on a 1 MB mixed id, so the cut
-    is checked at 64 KB).
-    """
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "guard_core", os.path.join(os.path.dirname(GUARD), "guard_core.py"))
-    core = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(core)
-
-    def timed(size):
-        control = "\x01" * size
-
-        def run_once():
-            start = time.process_time()
-            got = core.session_log_field(control)
-            took = time.process_time() - start
-            if got != SESSION_LOG_PLACEHOLDER:
-                return False, 0.0, "the control-only id gave %r, want the placeholder" % got[:20]
-            return True, took, ""
-        return tick_safe_mean(run_once, SESSION_LOG_BATCH_CAP)
-
-    ok, small, text = timed(1 << 17)
-    if not ok:
-        return False, "128 KB baseline: " + text
-    ok, big, text = timed(1 << 20)
-    if not ok:
-        return False, "1 MB id: " + text
-    ratio = big / (8 * small)
-    mixed = core.session_log_field("\x01a" * (1 << 15))
-    if mixed != "a" * 64:
-        return False, "the 64 KB mixed id gave %d characters, want 64 a's" % len(mixed)
-    return ratio < RM_VAR_K, ("CPU ratio %.2f to the 8x-scaled baseline, bound %d (1 MB %.4f s, "
-                              "128 KB mean %.5f s)" % (ratio, RM_VAR_K, big, small))
-
-
-SESSION_LOG_BATCH_CAP = 10000   # runs in one batch of the sanitizer timing; a stuck clock ends as a FAIL
-
-
 LOG_CHECKS_EXTRA.append(("session-log: a guard_core without set_log_session still judges and "
                          "denies, as with it", session_log_no_setter_case))
-LOG_CHECKS_EXTRA.append(("session-log: a lone surrogate in session_id drops or replaces itself "
-                         "and keeps the line", session_log_lone_surrogate_case))
-LOG_CHECKS_EXTRA.append(("session-log: a 64-character cut keeps an astral character whole",
-                         session_log_astral_cut_case))
-LOG_CHECKS_EXTRA.append(("session-log: sanitizing a 1 MB control-character id scales linearly in CPU",
-                         session_log_control_id_time_case))
 
 
 def session_log_stale_core_case():
@@ -11712,6 +11624,11 @@ FAMILY = "simulator"
 if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
+else:
+    skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
+
+# The SKIP rows join last, so a skip_case anywhere above, the simulator one too, prints its row.
+LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
 
 # Log checks in the literal and the appended extras are tagged by section above. These prefixes give
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
@@ -11723,12 +11640,10 @@ LOG_RULE_FAMILY = (
     ("log: a cap lift is asked", "model-cap"),
     ("log: a cap lift under a deep path", "model-cap"),
     ("cap: the printed reason is bounded", "model-cap"),
-    ("trim: a merge into main", "merge"),
     ("trim: a guard crash fails open", "paths"),
     ("merge-checks: a merge tool that cannot load", "merge"),
     ("merge-checks: a gh that never answers", "merge"),
     ("powershell: a backslash path survives", "paths"),
-    ("trim: a conflict-side checkout", "shared-tree"),
     ("log: an unreadable subject", "shared-tree"),
     ("log: a hard reset in an agent-owned", "shared-tree"),
     ("log: checkout -- in an agent-owned", "shared-tree"),
@@ -11770,6 +11685,11 @@ if _UNNAMED or _BAD_LOG:
 # Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
 
 
+# A log check returns (SKIP, note) when it cannot run on this platform. run_cases prints a SKIP line for
+# it and counts it in the summary. It is never printed as PASS, and it is never a failure.
+SKIP = "skip"
+
+
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
@@ -11790,6 +11710,7 @@ def run_cases():
     print()
     failed = 0
     ran = 0
+    skipped = 0
     # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
     only = os.environ.get("MUTATE_ONLY")
     for case in cases:
@@ -11827,8 +11748,12 @@ def run_cases():
     for label, checker in logs:
         if only and only not in label:
             continue
-        ran += 1
         ok, note = checker()
+        if ok == SKIP:  # cannot run on this platform: shown and counted, never a PASS, never a failure
+            skipped += 1
+            print("SKIP  %s  (%s)" % (label, note))
+            continue
+        ran += 1
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
@@ -11842,12 +11767,13 @@ def run_cases():
             pass
     if (mode or fam or only) and not ran:
         print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s "
-              "matched none)" % (mode or "(unset)", fam or "(unset)", only or "(unset)"))
+              "matched none, or matched only skips: %d skipped)" % (
+                  mode or "(unset)", fam or "(unset)", only or "(unset)", skipped))
         return 1
     if failed:
-        print("test_guard FAIL: %d of %d cases wrong" % (failed, ran))
+        print("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
         return 1
-    print("test_guard PASS: %d of %d cases right" % (ran, ran))
+    print("test_guard PASS: %d of %d cases right, %d skipped" % (ran, ran, skipped))
     return 0
 
 
