@@ -6734,6 +6734,18 @@ sh("frozen shell: r2 cov, a multi-line commit message before a real write, denie
 sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# ROUND 3 (cap-ask-data review, item 4). A program piped into python that reads its program from stdin
+# runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
+# /proc/self/fd/0 and CON forms name the same stdin. Today guard_frozen.py _runs_a_file counts each one
+# as a script file and allows it, so these four are RED on the product. The `python -` twin is a GREEN pin.
+FROZEN_PY_WRITE = "import os; os.system('tee " + CFG_SETTINGS + " </dev/null')"
+sh("frozen stdin: a python program echoed into python -, writes the config settings, denies [r3 pin]",
+   "echo \"" + FROZEN_PY_WRITE + "\" | python -", "deny", "frozen-path", cwd=NOGIT)
+for _dev in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "CON"):
+    sh("frozen stdin: r3, a python program echoed into python " + _dev + ", writes the config settings, "
+       "denies [r3 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
+
 
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
@@ -6925,18 +6937,17 @@ sh("cap: an append onto a project settings file asks",
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
 
 # A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
-# so it is code, and it asks. Regression pin: passes on main and d7fb2f1, which both read it as code.
-sh("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, asks "
-   "[regression pin: passes on main and d7fb2f1]",
+# so it is code. The pipe chains it with the echo, so it denies (ask-alone).
+chained_ask("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, denies as a chained ask step",
    'echo "sed -i s/' + CAP_KEY + '=sonnet/' + CAP_KEY + '=' + OPUS + '/ ' + PROJ_SETTINGS + '" | sh',
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   cwd=NOGIT, carries=("subagent-model-cap",))
 
 # A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
 # must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
 # (rule building-scanner-respects-strings).
-sh("cap: a comment opener inside double quotes does not hide a redirect that writes the cap",
+chained_ask("cap: a comment opener inside double quotes does not hide a redirect that writes the cap, denies as a chained ask step",
    "echo \"# keep this line\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   cwd=NOGIT, carries=("subagent-model-cap",))
 sh("cap: a lone apostrophe inside double quotes does not hide a redirect that writes the cap",
    "printf \"it's %s\" '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
@@ -7002,39 +7013,40 @@ sh("cap data: a JSON payload naming a sed -i on a settings file with the cap key
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
    + CAP_KEY}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
 
-# ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asks, as main does.
+# ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asked, as main did.
+# Ask-alone chains the tee, cp and Out-File forms with a step, so those deny. The lone Set-Content asks.
 # Rule 8 reads the whole command for the cap key, so each write names it on its line. Only the value
 # is pinned: main names the path fragment after the space, and this guard names the whole path.
 CAP_SPACED = slash(os.path.join(ROOT, "my proj", ".claude", "settings.json"))
-sh("cap: a tee onto a quoted project settings path with a space asks [r1 red]",
+chained_ask("cap: a tee onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
    "printf '%s' '" + cap_settings(compact=True) + "' | tee \"" + CAP_SPACED + "\"",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a cp onto a quoted project settings path with a space asks [r1 red]",
+   cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap: a cp onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
    "printf '%s' '" + cap_settings(compact=True) + "' > /tmp/cap.json && cp /tmp/cap.json \""
    + CAP_SPACED + "\"",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   cwd=NOGIT, carries=("subagent-model-cap",))
 sh("cap: a PowerShell Set-Content onto a quoted project settings path with a space asks [r1 red]",
    "Set-Content -Path \"" + CAP_SPACED + "\" -Value '" + cap_settings(compact=True) + "'",
    "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a PowerShell Out-File onto a quoted project settings path with a space asks [r1 red]",
+chained_ask("cap: a PowerShell Out-File onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
    "'" + cap_settings(compact=True) + "' | Out-File -FilePath \"" + CAP_SPACED + "\"",
-   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
+   tool="PowerShell", cwd=NOGIT, carries=("subagent-model-cap",))
 
 # COVERAGE (review round 1, green on 9eeb1fc). On the cap side too: a comment opener, a multi-line quoted
 # string or a lone apostrophe must neither hide a redirect that writes the cap, nor turn quoted text that
 # names a write into one.
-sh("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov]",
+chained_ask("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
    "echo \"/* keep\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov]",
+   cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
    "echo '// keep' ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   cwd=NOGIT, carries=("subagent-model-cap",))
 sh("cap: a /* in a multi-line quoted string does not hide a redirect that writes the cap [r1 cov]",
    "printf '%s\n/* keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov]",
+chained_ask("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
    "echo don't ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   cwd=NOGIT, carries=("subagent-model-cap",))
 sh("cap data: a /* in double quotes naming a cat-write, piped to python, allows [r1 cov]",
    'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', "allow", cwd=NOGIT)
 sh("cap data: a // in single quotes naming a tee onto a settings file, piped to jq, allows [r1 cov]",
@@ -7092,8 +7104,8 @@ sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allo
    "cat > notes.md <<'DOC'\n" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\nDOC", "allow", cwd=NOGIT)
 
 # ROUND 2 COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
-sh("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, asks [r2 cov]",
-   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, "ask", "subagent-model-cap", cwd=NOGIT)
+chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask step [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("subagent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
