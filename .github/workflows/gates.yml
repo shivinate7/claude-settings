@@ -284,6 +284,9 @@ jobs:
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
+      - name: Scanner trap lint
+        run: node lint/test_scanner_traps.mjs
+
       - name: Record stamp action fixture suite
         shell: bash
         run: bash actions/stamp/test_action.sh
