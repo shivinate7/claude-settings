@@ -6,7 +6,7 @@ After review round 3, what does a change do when it still has open findings? It 
 
 ## Ruling
 
-Owner rulings, 2026-10-14, CDT. The owner's words, verbatim as given in the brief:
+Owner rulings, 2026-10-14, CDT. The owner's words, recorded as a gist:
 
 - 22:25: `i thought we established items that arent solved need to split from others that are to ensure ci is green and the merge isn't blocked, this is a good example where all my repos should have to hold this back from merging (nor work more on it till i come in to chime in and help unblock things`
 - 22:27: `change merges after third review if there are known gaps in that it's gotten better but just not perfect, if after the third round u still have a safety violation, you've not gotten better`
@@ -29,7 +29,7 @@ Two lanes passed review round 3 and still opened a safety hole that main did not
 - Lane `silent-write-narrow`. A nested PowerShell path ending in `\` hid the next command from the guard.
 - Lane `cap-ask-data`. `python /dev/stdin` let piped text write a protected file.
 
-Under the rule before this ruling, each lane merged on green after round 3, as a named limit. Each would have left the guards weaker than main.
+The rule before this ruling let each lane merge on green after round 3, as a named limit. Either merge would have left the guards weaker than main.
 
 Protected outcome: no merge leaves a guard weaker than main. No open gap stays out of sight.
 
