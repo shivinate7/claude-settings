@@ -120,7 +120,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual([l for l in lines if l.strip()][-1], "unreadable: 3")
         self.assertGreater(len(lines) - 1, fence[1])  # unreadable line comes after the fence
         # Old five-field lines (no session column) render byte-identical to the golden.
-        # Merged from test_old_only_output_is_byte_identical. Named failure: the stable table render.
+        # Named failure: the stable table render.
         self.assertEqual(glr.render(glr.summarize(OLD_ONLY, 7, NOW)), GOLDEN_OLD_ONLY)
 
 
@@ -281,7 +281,7 @@ class SessionColumnReadTests(unittest.TestCase):
             "merge-main": {"deny": 0, "ask": 1, "noted": 0},
         })
         self.assertEqual(s["other"], [lines[3]])  # the reverted line, verbatim, once
-        # Merged from SessionBySessionTests: the same lines through the CLI. The session value is a
+        # The same lines through the CLI. The session value is a
         # label in the by-session table too. Named failure: a session id spelled "deny" counted as a decision.
         cli_now = datetime.now()
         cli = [
@@ -758,9 +758,9 @@ class FixedDecisionTests(unittest.TestCase):
         s = glr.summarize(self.LINES, 7, NOW)
         self.assertEqual(s["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 2})
         self.assertEqual(s["by_rule"]["STE-fallback"], {"deny": 0, "ask": 0, "noted": 1})
-        # Merged from test_fixed_is_never_a_verbatim_other_line: a fixed line is never an other line.
+        # A fixed line is never an other line.
         self.assertEqual(s["other"], [])
-        # Merged from test_session_filter_keeps_only_that_sessions_fixed_lines: the session filter
+        # The session filter
         # keeps only that session's fixed lines. Named failure: a fixed line lost or moved to another session.
         one = glr.summarize(self.LINES, 7, NOW, SID)
         self.assertEqual(one["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 1})

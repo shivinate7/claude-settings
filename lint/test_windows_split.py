@@ -300,13 +300,13 @@ class WindowsSplit(unittest.TestCase):
     def test_each_suite_runs_exactly_once(self):
         bad = [p for p in placement_problems(self.text) if "times" in p]
         self.assertEqual(bad, [])
-        # Merged from test_the_mutation_harness_has_its_own_linux_job: the mutation harness is placed
+        # The mutation harness is placed
         # once in its own job. Named failure: a harness dropped or doubled, so mutants go unrun.
         self.assertEqual(mutate_problems(self.text), [])
 
     def test_scope_job_gates_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
-        # Merged from test_the_cut_f_jobs_skip_on_the_guard_flag: the guard and mutate jobs skip on the
+        # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
         jobs = all_jobs(self.text)
         for name in (GUARD_JOB, MUTATE_JOB):
@@ -378,7 +378,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_gates_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
-        # Merged from test_checker_sees_a_guard_family_in_gates: the red proof. The checker flags a
+        # The red proof: the checker flags a
         # guard family set in gates. Named failure: a guard family runs in gates and CI goes green.
         bad = [p for p in guard_problems(self.text + "\n# GUARD_FAMILY=shared-tree\n") if "GUARD_FAMILY" in p]
         self.assertTrue(bad)
@@ -692,8 +692,7 @@ class CiCoverage(unittest.TestCase):
         self.assertEqual(missing, [], "no run step in gates.yml names: " + ", ".join(missing))
 
     def test_a_comment_line_is_not_a_run(self):
-        # Rows: a comment line (kept), a trailing comment and a comment line inside a block (merged
-        # from test_a_trailing_comment and test_a_comment_line_inside_a_block). Named failure: a
+        # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
         # commented-out suite counted as run, so CI looks covered when it is not.
         cases = [
             ("comment line", "      - run: echo\n      # run: python3 lint/test_x.py\n"),
@@ -709,8 +708,8 @@ class CiCoverage(unittest.TestCase):
         self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
 
     def test_a_lone_quote_does_not_hide_a_run(self):
-        # Rows: a lone quote in a run keeps the run (kept), and a lone quote in a step name is not a
-        # run (merged from test_a_lone_quote_in_a_name). Named failure: a quote hides a suite or fakes one.
+        # Rows: a lone quote in a run keeps the run, and a lone quote in a step name is not a run.
+        # Named failure: a quote hides a suite or fakes one.
         cases = [
             ("quote in a run", "      - run: echo don't && python3 lint/test_x.py\n", True),
             ("quote in a name", "      - name: Don't skip lint/test_x.py\n", False),
@@ -736,8 +735,8 @@ class CiCoverage(unittest.TestCase):
         self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
 
     def test_a_chomping_block_indicator_is_a_block(self):
-        # Heads "| # c" and ">- # c" are merged from test_a_block_indicator_with_a_trailing_comment_is_a_block:
-        # a trailing comment after the indicator still opens a block. Named failure: a block run is missed.
+        # Heads "| # c" and ">- # c": a trailing comment after the indicator still opens a block.
+        # Named failure: a block run is missed.
         for head in ("|-", ">-", "|+", "| # c", ">- # c"):
             with self.subTest(head=head):
                 text = "      - run: %s\n          echo start\n          python3 lint/test_x.py\n" % head

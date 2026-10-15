@@ -137,8 +137,8 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(mem_unknown, 0)
 
     def test_02_missing_cwd_counts_as_unknown_never_not_found(self):
-        # Rows: no cwd anywhere in the transcript (test_02), and a cwd that is not a git repo
-        # (merged test_08). Named failure: a wrong count reads as "lost", never as not-found.
+        # Rows: no cwd anywhere in the transcript (test_02), and a cwd that is not a git repo.
+        # Named failure: a wrong count reads as "lost", never as not-found.
         not_a_repo = os.path.join(self.tmp.name, "plain-dir")
         os.makedirs(not_a_repo, exist_ok=True)
         cases = [
@@ -231,7 +231,7 @@ class RulingCensusTests(unittest.TestCase):
                     "scratchpad_writes", "ruling_lines", "process_only_lines",
                     "reach_found", "reach_not_found", "unknown"):
             self.assertIn(key, out["total"])
-        # Merged from test_06: an empty root still prints a zero TOTAL in table mode.
+        # An empty root still prints a zero TOTAL in table mode.
         # Named failure: an empty root crashes the census instead of printing its total.
         empty_root = os.path.join(self.tmp.name, "no-such-root")
         empty = subprocess.run(
@@ -323,7 +323,7 @@ class RulingCensusTests(unittest.TestCase):
 
     def test_12b_tool_use_input_not_an_object_counts_unknown_not_crash(self):
         # Rows: an `input` that is a list (test_12b: must not crash the census with AttributeError on
-        # `inp.get(...)`), and a `file_path` that is a list (merged test_12). Both are skipped and
+        # `inp.get(...)`), and a `file_path` that is a list. Both are skipped and
         # counted as unknown. Named failure: a malformed tool use crashes the census or counts as a write.
         cases = [
             ("input not an object", "proj_bad_input", ["not", "an", "object"]),
@@ -376,7 +376,7 @@ class RulingCensusTests(unittest.TestCase):
     # ---------------------------------------------------------- fix 3: scratchpad is writes only
 
     def test_14_bash_touching_scratchpad_is_not_counted(self):
-        # Rows: a Bash command (test_14) and a Read of a scratchpad path (merged test_16).
+        # Rows: a Bash command (test_14) and a Read of a scratchpad path.
         # Named failure: a read of a scratchpad counted as a scratchpad write.
         cases = [
             ("bash", "proj_bash_scratchpad",
@@ -448,7 +448,7 @@ class RulingCensusTests(unittest.TestCase):
 
     def test_18_root_via_symlink_file_path_via_real_path_still_matches(self):
         # Rows: the root through the symlink with the file path real (test_18), and the mirror
-        # with the root real and the file path through the symlink (merged test_19).
+        # with the root real and the file path through the symlink.
         # Named failure: a memory write is missed when the root and file path are spelled differently.
         cases = [
             ("root via link, file via real", "real_projects", "link_projects", "proj_symlink", "real"),
@@ -582,7 +582,7 @@ class RulingCensusTests(unittest.TestCase):
         self.assertTrue(row["answer"].endswith(ruling_census.SAMPLE_CUT_MARK))
         self.assertEqual(len(row["answer"]),
                           ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
-        # Merged from test_24: cap_text cuts a long field to the cap plus the mark, keeps a short one.
+        # cap_text cuts a long field to the cap plus the mark, keeps a short one.
         # Named failure: a long answer printed whole, or a short one cut.
         self.assertEqual(len(ruling_census.cap_text("x" * 2500)),
                          ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))

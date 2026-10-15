@@ -85,7 +85,7 @@ class Scope(unittest.TestCase):
     def test_guard_change_turns_the_guard_suites_on(self):
         got = run(["hooks/guard.py"])
         self.assertFlags(got, want_true=["gates_windows", "gates_macos", "guard", "sweep", "code"])
-        # Merged from test_the_guard_selector_and_its_harness_turn_the_guard_flag_on: the selector's test
+        # The selector's test
         # and mutation harness also turn `guard` on. Named failure: the guard suite runs in no job.
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
             with self.subTest(path=p):
@@ -122,7 +122,7 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["lint/check_record_slugs.py"]), want_true=["gates_windows", "gates_macos", "guard", "code"])
 
     def test_janitor_launcher_change_turns_on_the_install_suite(self):
-        # `guard` too: the janitor launcher turns the guard suite on (merged from the guard-flag cases).
+        # `guard` too: the janitor launcher turns the guard suite on.
         self.assertFlags(run(["bin/claude-janitor"]), want_true=["gates_windows", "shell_macos", "guard"])
 
     def test_silent_undo_checker_change_turns_on_the_merge_job(self):
@@ -134,7 +134,7 @@ class Scope(unittest.TestCase):
     def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
         for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md", "lint/new.py"):
             self.assertFlags(run([p]), want_true=["gates_windows", "shell_macos"])
-        # Merged from test_a_new_file_under_a_landed_dir_turns_on_the_guard_suite. Named failure: review
+        # Named failure: review
         # finding on #305. The guard suite reads this path; if `guard` stays off, cut F runs it in no job.
         self.assertFlags(run(["lint/zz_new.py"]), want_true=["guard"])
 
@@ -210,7 +210,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows", "gates_macos", "code", "guard"})
 
     # Mod tests run as a step of the `gates` job (Linux), gated on the `mods` flag. `mods` is in ALL, so
-    # every fail-safe case in the Scope class carries the mods check (S5b, a copy of those cases, is gone).
+    # every fail-safe case in the Scope class carries the mods check.
     def test_a_mods_path_sets_the_mods_flag(self):
         for p in ("mods/plain-diff/check.mjs", "mods/session-board/session-board.test.mjs"):
             with self.subTest(path=p):

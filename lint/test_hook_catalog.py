@@ -253,7 +253,7 @@ class RealRepo(unittest.TestCase):
         missing, extra = want - got, got - want
         problems = ["missing row: %r" % (k,) for k in missing] + ["stale row: %r" % (k,) for k in extra]
         self.assertFalse(problems, "\n".join(problems))
-        # Merged from test_r2: each prompt judge has a judge row keyed by its first sentence.
+        # Each prompt judge has a judge row keyed by its first sentence.
         # Named failure: a judge row that lost its key, so the page hides which judge runs.
         judge_page = page_rows(self.page())
         problems, seen = [], 0
@@ -481,7 +481,7 @@ class Fixtures(unittest.TestCase):
                             "tw")
 
     def test_f9_skill_without_description_fails(self):
-        # Rows: no description key (f9), an empty value (merged f10), a comment-only value (merged f21).
+        # Rows: no description key, an empty value, a comment-only value.
         # Named failure: a skill with no usable description passes the page check.
         cases = [
             ("no key", "---\nname: alpha\n---\n\nBody.\n"),

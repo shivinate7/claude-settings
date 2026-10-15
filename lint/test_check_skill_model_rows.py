@@ -237,14 +237,14 @@ class Fences(unittest.TestCase):
                 code, out = run(files)
                 self.assertEqual(code, 1, out)
                 self.assertIn("alpha", out)
-        # Merged from test_rows_in_a_fence_do_not_count: a row inside a plain fence does not count.
+        # A row inside a plain fence does not count.
         with self.subTest(case="rows in a fence"):
             files = skills("alpha", "beta")
             files[RECORD] = record([row("beta")], extra="```text\n%s\n```\n" % row("alpha"))
             code, out = run(files)
             self.assertEqual(code, 1, out)
             self.assertIn("alpha", out)
-        # Merged from test_longer_closer_closes_the_fence: a longer closer closes the fence (green).
+        # A longer closer closes the fence (green).
         for label, pattern in {
             "3-backtick fence, 4-backtick closer": "```text\n%s\n````\n%s\n",
             "3-tilde fence, 4-tilde closer": "~~~text\n%s\n~~~~\n%s\n",
@@ -262,13 +262,13 @@ class Fences(unittest.TestCase):
         code, out = run(files)
         self.assertEqual(code, 1, out)
         self.assertIn("alpha", out)
-        # Merged from test_comment_closed_on_its_own_line_hides_nothing: "<!-- note -->" closes on its line.
+        # "<!-- note -->" closes on its line.
         with self.subTest(case="comment closed on its line"):
             files = skills("alpha")
             files[RECORD] = record([], extra="intro <!-- note --> text\n%s\n" % row("alpha"))
             code, out = run(files)
             self.assertEqual(code, 0, out)
-        # Merged from test_comment_opener_in_code_span_or_fence_is_plain_text: a lone opener in a code span
+        # A lone opener in a code span
         # or a fence opens nothing.
         with self.subTest(case="opener in a code span or fence"):
             files = skills("alpha", "beta")
@@ -278,14 +278,14 @@ class Fences(unittest.TestCase):
             files[RECORD] = record([row("alpha", PHRASE + " `<!-- open`")], extra=extra)
             code, out = run(files)
             self.assertEqual(code, 0, out)
-        # Merged from test_rows_in_a_multi_line_html_comment_do_not_count: a row inside a multi-line comment.
+        # A row inside a multi-line comment.
         with self.subTest(case="rows in a multi-line html comment"):
             files = skills("alpha", "beta")
             files[RECORD] = record([row("beta")], extra="<!--\n%s\n-->\n" % row("alpha"))
             code, out = run(files)
             self.assertEqual(code, 1, out)
             self.assertIn("alpha", out)
-        # Merged from test_scanner_markers_in_row_text_do_not_hide_later_rows: markers in row text hide nothing.
+        # Markers in row text hide nothing.
         with self.subTest(case="scanner markers in row text"):
             files = skills("alpha", "beta", "gamma")
             files[RECORD] = record(

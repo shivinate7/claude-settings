@@ -417,8 +417,7 @@ class CitationTests(unittest.TestCase):
     def test_mjs_scanner_reads_only_live_registrations(self):
         # Rows: each distinct .mjs source and its verdict. "registers no test" = the name is not live
         # (commented out, quoted, bare output, or a newline-split name). None = the name resolves.
-        # Named failure: the scanner reads a commented-out .mjs test as live (RA11). The 9 scanner
-        # methods, and the exact duplicate of the block-comment and template rows, fold into these rows.
+        # Named failure: the scanner reads a commented-out .mjs test as live.
         red = "registers no test"
         cases = [
             ("block comment hides a registration", NODE_TEST + '/*\ntest("it works", () => {});\n*/\n',

@@ -161,7 +161,7 @@ class RulingKindTests(unittest.TestCase):
             ("Kind: build\nPlan: plans/missing.md#phase-1-the-sweep (mac)", "plans/missing.md"),
             ("Kind: build\nPlan: plans/build-plan.md#phase-9-nothing (mac)", "phase-9-nothing"),
             ("Kind: build\nPlan: %s" % L1, "phase-1-the-sweep"),  # no platform label
-            # Merged from test_platform_none_or_empty_fails: a platform label that is none or empty.
+            # A platform label that is none or empty.
             ("Kind: build\nPlan: %s (none)" % L1, "plan"),
             ("Kind: build\nPlan: %s (None)" % L1, "plan"),
             ("Kind: build\nPlan: %s ()" % L1, "plan"),
@@ -232,7 +232,7 @@ class RulingKindTests(unittest.TestCase):
     def test_plan_file_passed_in_is_ignored_and_default_folder_is_decisions_only(self):
         # The plan has no Kind line. It passes only because the lint does not check it.
         self.assert_passes(PLAN)
-        # Merged from test_default_leaves_docs_decisions_unchecked: without --dir only decisions/ is
+        # Without --dir only decisions/ is
         # checked, so a nested docs/decisions record passes. Named failure: the default check spreads
         # into docs/ and fails records that claude-settings never meant to check.
         self.css_plan()
@@ -423,8 +423,8 @@ class RulingKindTests(unittest.TestCase):
 
     def test_dir_that_names_no_usable_folder_fails(self):
         # Rows: no usable folder (decision, docs/decisions-old, ., "", Decisions), and a name that is a
-        # file (CLAUDE.md, decisions/x.md, merged from test_dir_that_names_a_file_fails). The diff-mode
-        # case stays in test_dir_that_names_no_usable_folder_fails_in_the_diff. Named failure: a bad
+        # file (CLAUDE.md, decisions/x.md). The diff-mode
+        # case is in test_dir_that_names_no_usable_folder_fails_in_the_diff. Named failure: a bad
         # --dir passes the lint instead of failing closed.
         self.put("decisions/x.md", record(BUILD_OK))
         self.put(REC, record(BUILD_OK))
