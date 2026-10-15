@@ -4570,6 +4570,39 @@ sh("wsl: a multi-line pwsh -c string with a backslash before its newline denies 
 sh("wsl: a bash backslash before ; is text, so echo a\\; wsl --shutdown is one echo, allowed",
    r"echo a\; wsl --shutdown", "allow", cwd=NOGIT)
 
+# ---- a nested PowerShell script, the wsl family (lane swn-pwsh-escape, review round 1). The iex and
+# Invoke-Expression arms of nested_script return PowerShell text, but split_segments clears
+# POWERSHELL_CALL before its caller reads the segments. segment_tokens then reads that text with bash
+# rules: the `\;` is text, so wsl --shutdown after it is an argument of echo. RED on 15bd278, deny on
+# 9d7533c. The kill and stream forms of these shapes allow on 9d7533c too, so they are not here.
+# The comment-opener shape below is RED on 15bd278. The lone-apostrophe and line-break shapes are PINS:
+# they deny on both heads, and a fix must keep them so.
+PWSH_IEX_SHAPES = (
+    ("iex with escaped double quotes", r'iex \"echo C:\x\; %s\"'),
+    ("iex with single quotes", r"iex 'echo C:\x\; %s'"),
+    ("Invoke-Expression with single quotes", r"Invoke-Expression 'echo C:\x\; %s'"),
+    ("iex with the path in single quotes", r"iex 'C:\x\; %s'"),
+)
+for _name, _inner in PWSH_IEX_SHAPES:
+    sh("wsl: a bash pwsh -c with %s hides wsl --shutdown after a backslash path, denies" % _name,
+       'pwsh -c "%s"' % (_inner % "wsl --shutdown"), "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener in quotes in a nested iex, then a backslash path, denies wsl --shutdown",
+   r'''pwsh -c "iex \"echo '# x' C:\x\; wsl --shutdown\""''', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a lone apostrophe in a nested iex, then a backslash path, denies wsl --shutdown",
+   r'''pwsh -c "iex \"echo don't C:\x\; wsl --shutdown\""''', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a line break in a nested iex, after a backslash path, denies wsl --shutdown",
+   r'pwsh -c "iex \"echo C:\x' + "\\" + "\n" + r'; wsl --shutdown\""', "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+# KEEP GREEN. Bash reads each escaped `\;` or `\&` as text, so these allow, and a fix must keep them so.
+sh("wsl: a bash -c with a backslash before ; keeps echo one command, allowed",
+   r"bash -c 'echo C:\x\; wsl --shutdown'", "allow", cwd=NOGIT)
+sh("wsl: a sed script with a backslash before & is text, allowed",
+   r"sed 's/a/\&/g'", "allow", cwd=NOGIT)
+sh("wsl: a sed script with a backslash before & and a trigger word after it, allowed",
+   r"sed 's/a/\& wsl --shutdown/g' notes.txt", "allow", cwd=NOGIT)
+sh("wsl: a find -exec with a backslash before ; is text, allowed",
+   r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
