@@ -1703,6 +1703,13 @@ sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it 
 sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the outer shell",
    "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
+# ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
+# the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
+# deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
+# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
+   "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",
@@ -1836,6 +1843,11 @@ sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "as
    "shared-tree", cwd=GITWT)
 sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+# DATA, NOT A DISCARD. The same class as the model-cap data cases: a reset named inside a JSON payload
+# piped to python runs nothing in the lane, so it allows. Pinned, not red: this one passes today.
+sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
+   + "' | python hooks/guard.py", "allow", cwd=GITWT)
 # Chained with the cd, the ask step denies (ask-alone). The reset alone, by -C, is the line above.
 chained_ask("worktree: a cd into the worktree, then the reset, denies as a chained ask step, from the shared checkout",
             "cd " + slash(GITWT) + " && " + VCS + " reset --hard", cwd=GITMAIN)
@@ -2233,6 +2245,34 @@ sh("heredoc: prose naming the stash with no interpreter",
    "allow", cwd=NOGIT)
 sh("heredoc: a body fed to a shell stays under inspection",
    "bash <<EOF\n" + VCS + " stash\nEOF", "deny", "shared-tree", cwd=NOGIT)
+# A DENY IN A PYTHON BODY STILL DENIES, one command or not (owner ruling 2026-10-14 22:25). The delimiter
+# `E-F` is read as the whole word. HEREDOC_HEADER reads `E` alone, so the cat case below holds no closer:
+# its body runs to the end, is dropped, and the stash after it is never judged. RED TODAY: that cat case.
+sh("heredoc: a stash push in a python body still denies, in one command",
+   "python3 - <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
+sh("heredoc: a python heredoc with the delimiter E-F, then a stash push, still denies",
+   "python3 - <<E-F\nx = 1\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
+sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
+   "cat <<E-F\nx\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
+   carries="stash stack")
+
+
+# ---- r1-hd (review round 1), shared-tree family. H1: a python body under a backslash, single-quoted or
+# double-quoted delimiter, closed at EOF, then a stash push. The python body stays in view, so both heads deny.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a stash push, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\n" + VCS + " stash push -u -m lane", "deny", "shared-tree",
+       cwd=GITWT, carries="stash stack")
+# H2: a cat heredoc piped to a shell, closer EOF-X. The stash push is in the body, which the shell runs.
+# RED ON THE LANE HEAD: the body is dropped and the push is hidden. DENY ON MAIN: main closes at EOF.
+for _shell in ("sh", "bash"):
+    sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a stash push in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + VCS + " stash push -u -m lane\nEOF-X", "deny", "shared-tree",
+       cwd=GITWT, carries="stash stack")
+
+
 # `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
 # from a CLEAN checkout, `git --work-tree=<dirty> status --porcelain` reported the OTHER tree's
 # modified and untracked files. So rule 1 judges the named tree, not the one the call runs in.
@@ -2385,6 +2425,11 @@ sh("worktree prune: a stale record asks, never denies",
 sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
+# DATA, NOT A PRUNE. A prune named inside a JSON payload piped to python, at the same stale record,
+# changes no record, so it allows. Pinned, not red: this one passes today.
+sh("worktree prune data: a prune named in a JSON payload piped to python, at a stale record, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " worktree prune"}})
+   + "' | python hooks/guard.py", "allow", cwd=WTPRUNE)
 
 # SYMLINKS ARE NOT WORK (owner ruling 2026-10-11). Git lists an untracked symlink as a file, so
 # `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
@@ -3562,6 +3607,112 @@ sh("detached: a grep for Start-Job is not a call to it",
    'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
 
 
+# A MACHINE-WIDE KILL IN A ONE-COMMAND PYTHON BODY STILL DENIES (owner ruling 2026-10-14 22:25): the
+# body is one step, and the kill is a deny, which wins over any ask step in the same command.
+sh("heredoc: a machine-wide kill in a python body still denies, in one command",
+   "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
+
+
+# ---- r1-hd (review round 1), kill family. H1: a python body under a backslash, single-quoted or
+# double-quoted delimiter, closed at EOF, then a kill. Both heads deny: the python body stays in view.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a kill, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
+# H2: a cat heredoc piped to a shell, closer EOF-X. The kill is in the body, which the shell runs.
+# RED ON THE LANE HEAD: the body is dropped. DENY ON MAIN: main closes at EOF, so the kill reads as a line.
+for _shell in ("sh", "bash"):
+    sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a kill in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\npkill -f node\nEOF-X", "deny", "machine-wide-kill", cwd=PROJ)
+# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a kill in its body.
+sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
+   "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
+
+# ---- r2-hd (review round 2), kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
+# backticks, or on a line that feeds eval, source, `.` or xargs, reads as a shell body. Each form names a
+# delimiter main misreads (`'EOF-1'`, `\EOF`, `E-F`), so main keeps the body in view and denies. The lane
+# head reads the delimiter as bash does, drops the body, and allows. RED ON THE LANE HEAD, DENY ON MAIN.
+# Measured on main (4112319): main denies every payload of these three forms.
+R2_FORMS = (
+    ("source with <( ), an escaped delimiter", "source <(cat <<\\EOF\nBODY\nEOF\n)"),
+    ("a heredoc piped to xargs", "cat <<'EOF-1' | xargs -I{} sh -c '{}'\nBODY\nEOF-1"),
+    ("eval with backticks", "eval `cat <<'EOF-1'\nBODY\nEOF-1\n`"),
+)
+# Measured on main: the `eval "$( )"` form is denied for its env and cap payloads, but main ALLOWS its kill, so
+# this form runs for env and cap only. The `. <(cat <<E-F)` form is left out: main allows all three of its
+# payloads. Both gaps are ones main already has (reported, not regressions).
+R2_EVAL_FORM = ("eval with $( )", "eval \"$(cat <<'EOF-1'\nBODY\nEOF-1\n)\"")
+for _label, _form in R2_FORMS:
+    sh("heredoc: r2-hd a kill in the body of a heredoc in %s, denies" % _label,
+       _form.replace("BODY", "pkill -f node"), "deny", "machine-wide-kill", cwd=PROJ)
+# SCANNERS (building-scanner-respects-strings), r2-hd. A hash inside double quotes is text, so the header
+# after it is still a header. A lone apostrophe in a body line is text, so the kill after it is in a body.
+sh("heredoc: r2-hd a hash inside double quotes, then a source heredoc with a kill in the body, denies",
+   'echo "a # b" && source <(cat <<\\EOF\npkill -f node\nEOF\n)', "deny", "machine-wide-kill", cwd=PROJ)
+sh("heredoc: r2-hd a lone apostrophe in the body of a source heredoc, then a kill, denies",
+   "source <(cat <<\\EOF\necho don't\npkill -f node\nEOF\n)", "deny", "machine-wide-kill", cwd=PROJ)
+
+# ---- r3-bd (try 3, the bandaid), kill family. A shell runs each body. Main keeps it in view: its header is one it
+# cannot read (`'EOF-1'`, `\EOF`), or it reads a shorter word that a stray line closes on (`EOF-1` as `EOF`, `"E"OF`
+# as `E`). Head without the bandaid drops the body, so each allows. Each denies on main too.
+R3_KILL = "pkill -f node"
+for _label, _form in (
+        ("a write then sh, delimiter 'EOF-1'",
+         "cat <<'EOF-1' > x.sh && sh x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1"),
+        ("a write, then sh on the next line, delimiter 'EOF-1'",
+         "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+        ("a tee, then bash, delimiter 'EOF-1'",
+         "cat <<'EOF-1' | tee x.sh; bash x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1"),
+        ("python3 on a backslash delimiter",
+         "cat <<\\EOF | python3 -\n" + R3_KILL + "\nEOF"),
+        ("a write then sh, unquoted EOF-1",
+         "cat <<EOF-1 > x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+        ("a write then sh, delimiter \"E\"OF",
+         'cat <<"E"OF > x.sh\necho hi\nE\n' + R3_KILL + "\nEOF\nsh x.sh"),
+        ("a lone apostrophe in the body, then a write and sh",
+         "cat <<'EOF-1' > x.sh\necho don't\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+):
+    sh("heredoc r3-bd: a kill in the body of %s, denies" % _label, _form, "deny", "machine-wide-kill", cwd=PROJ)
+
+# ---- r3-fed (try 3, `_FED_SHELL`), kill family. eval, source and `.` run a heredoc that a `<( )`, `$( )` or
+# backtick reads, and bash executes its body. The plain delimiter is one no bandaid reads, so main allows these (a
+# hole main lacks, not a parity pin). Head denies. Removing _FED_SHELL turns each red. Not pinned: `source $( )`
+# and `. ` backticks (the output is a file name, so no body runs) and the quoted `"$( )"` kill (allowed on head
+# and main; see the eval form in the r2-hd block above).
+for _label, _form in (
+        ("source <( )", "source <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+        ("dot <( )", ". <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+        ("eval backticks", "eval `cat <<EOF\n" + R3_KILL + "\nEOF\n`"),
+        ("unquoted eval $( )", "eval $(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+):
+    sh("heredoc r3-fed: a kill in the body of a heredoc that %s runs, denies" % _label, _form,
+       "deny", "machine-wide-kill", cwd=PROJ)
+
+# ---- heredoc-hole (round 3, lane heredoc-one-step). Two heredocs in one command. The FIRST delimiter is one that
+# main reads SHORT: `E-F` and `"E"OF` and `E'OF'` as `E`, `EOF-1`, `EOF.1` and `EOF{` as `EOF`. Main closes the first body
+# at a line the second body holds, so the payload lands outside every body and main denies it. The lane reads each
+# delimiter whole, keeps the payload in the second body, and that body is a `cat <<EOF2 > x.sh` that `sh x.sh` runs.
+# The lane allows it. Main denies only by that misread: one such body alone allows on main too. So each case is RED on
+# the lane head and DENY on origin/main. One case per delimiter shape. The payload is a kill or a wsl shutdown.
+HOLE_WSL = "wsl" + " --shutdown"
+for _label, _open, _close, _mw in (
+        ("E-F", "E-F", "E-F", "E"),
+        ("E'OF'", "E'OF'", "EOF", "E"),
+        ("EOF{", "EOF{", "EOF{", "EOF"),
+):
+    sh("heredoc-hole: delimiter %s, a kill in the second body that sh runs, denies" % _label,
+       "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + R3_KILL + "\nEOF2\nsh x.sh",
+       "deny", "machine-wide-kill", cwd=PROJ)
+FAMILY = "wsl"
+for _label, _open, _close, _mw in (
+        ("EOF-1", "EOF-1", "EOF-1", "EOF"),
+        ('"E"OF', '"E"OF', "EOF", "E"),
+        ("EOF.1", "EOF.1", "EOF.1", "EOF"),
+):
+    sh("heredoc-hole: delimiter %s, a wsl shutdown in the second body that sh runs, denies" % _label,
+       "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + HOLE_WSL + "\nEOF2\nsh x.sh",
+       "deny", "wsl-allow-list", cwd=NOGIT)
+
+
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
 #
@@ -4590,6 +4741,11 @@ push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
+# DATA, NOT A PUSH. A forced push to the default branch named inside a JSON payload piped to python
+# runs nothing, so it allows. Pinned, not red: this one passes today.
+sh("push: a JSON payload naming a forced push to main, piped to python, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " push --force origin main"}})
+   + "' | python hooks/guard.py", "allow", cwd=PUSHMAIN)
 sh("false alarm: --force quoted in a commit message",
    VCS + ' commit -m "never git push --force here"', "allow", cwd=PUSHFEAT)
 sh("false alarm: --force quoted in an echo", 'echo "git push --force"', "allow", cwd=PUSHFEAT)
@@ -5149,6 +5305,41 @@ for _cmd in (
 sh("guard-command-position: playwright, two heredoc headers on one line write the export",
    "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+
+# ---- r1-hd (review round 1), env family. The same H1 and H2 shapes as the kill and shared-tree
+# sections, with a read of the environment file in place of the kill or the stash push.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("env: r1-hd a python heredoc, %s delimiter closed at EOF, then an env read, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\ncat " + ENV, "deny", "env-file", cwd=PROJ)
+for _shell in ("sh", "bash"):
+    sh("env: r1-hd a cat heredoc piped to %s, closer EOF-X, an env read in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\ncat " + ENV + "\nEOF-X", "deny", "env-file", cwd=PROJ)
+
+# ---- r2-hd (review round 2), env family. The forms of the kill section, with an env read in the body.
+for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
+    sh("env: r2-hd a heredoc in %s, an env read in the body, denies" % _label,
+       _form.replace("BODY", "cat " + ENV), "deny", "env-file", cwd=PROJ)
+
+# ---- r3-bd and r3-fed (try 3), env family. A body with an env read, under a stray `EOF` line, denies as on main.
+# The eval `$( )` and eval backtick forms run their body as code, so an env read there denies too. Main allows the
+# two eval forms (a hole main lacks). Removing _FED_SHELL turns them red.
+sh("env: r3-bd a body with an env read after a stray EOF line, written then sh, denies as on main",
+   "cat <<'EOF-1' > x.sh && sh x.sh\nEOF\ncat " + ENV + "\nEOF-1", "deny", "env-file", cwd=PROJ)
+sh("env: r3-fed an eval $( ) heredoc with an env read in the body, denies",
+   'eval "$(cat <<EOF\ncat ' + ENV + '\nEOF\n)"', "deny", "env-file", cwd=PROJ)
+sh("env: r3-fed an eval backtick heredoc with an env read in the body, denies",
+   "eval `cat <<EOF\ncat " + ENV + "\nEOF\n`", "deny", "env-file", cwd=PROJ)
+
+# ---- heredoc-quote (round 4, lane heredoc-one-step), env family. A delimiter with a backslash or a quote closes
+# at EOF, so the lane takes the body for text and drops it. The header writes the body to x.sh and `sh x.sh`
+# runs it on the same line, so bash runs the substitution. Main reads the delimiter as `E`, keeps the body in
+# view, and denies. RED ON THE LANE HEAD (allows), DENY ON MAIN (measured on 567231e).
+for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
+    for _form, _body in (("$( )", "$(cat " + ENV + ")"), ("backticks", "`cat " + ENV + "`")):
+        sh("env: heredoc-quote: %s delimiter, an env read in %s in the body that sh x.sh runs, denies"
+           % (_label, _form),
+           "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
+
 
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
@@ -6232,6 +6423,16 @@ sh("frozen: searching for the path name and writing the results elsewhere",
 sh("frozen: a heredoc writing prose that names the environment file",
    "cat > notes.md <<'DOC'\nThe guard refuses any command naming " + ENV + ".\nDOC", "allow",
    cwd=NOGIT)
+# THE QUOTED SIBLING of the model-cap data cases. The same _shell_write_hit reads a frozen path inside
+# a quoted echo as a write. A quoted path piped into a pure printer is data, and allows (the wc pin
+# below). Piped into an interpreter it denies: an interpreter may run the text, so a pipe into one
+# fails closed, as main does (cap-ask-fix review round 1, the orchestrator's design call). A real
+# cat-write onto that file stays denied.
+sh("frozen data: a quoted cat-write onto the config settings, piped to python, denies "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a real cat-write onto the config settings stays denied",
+   "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -6286,6 +6487,289 @@ sh("frozen: a leftover token is not a key to the shared-tree rule",
    "GIT_DISCARD_OK=1 " + VCS + " restore src", "deny", "shared-tree", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the push rule",
    "GIT_DISCARD_OK=1 " + VCS + " push --force", "deny", "force-push", cwd=PUSHFEAT)
+
+
+# THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
+# shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes. They pass on
+# main, which reads every quoted word as code, and they guard a future regression of the data reading.
+# The commit message is the allow shape that reading made data. A heredoc body fed to an interpreter
+# is code, not data: it stays in view, so a shell write it names denies (review round 1, F5).
+sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
+   "[regression pin: passes on main and d7fb2f1]",
+   'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: an iex of a Set-Content onto the config settings denies "
+   "[regression pin: passes on main and d7fb2f1]",
+   'iex "Set-Content -Path ' + CFG_SETTINGS + ' -Value x"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
+   "[new allow: red on main, passes on d7fb2f1]",
+   VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
+sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fed to python, denies "
+   "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
+   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
+
+# ROUND 1 RED (cap-ask-data review). The narrowing reads a quoted word as data, and a word that starts
+# plain as code. Each shape below is a real write. Each DENIES, as main does, and each is red on 9eeb1fc.
+# The F5 pins are the orchestrator's call, not a parity claim with main.
+for _n, _c in (
+    ("a quoted sh name", '"sh" -c "cat > ' + CFG_SETTINGS + '"'),
+    ("a shell named by a variable", '$SHELL -c "cat > ' + CFG_SETTINGS + '"'),
+    ("a quoted path to bash.exe with a space",
+     '"/c/Program Files/Git/bin/bash.exe" -c "cat > ' + CFG_SETTINGS + '"'),
+    ("env -S splitting a shell command", 'env -S \'sh -c "cat > ' + CFG_SETTINGS + '"\''),
+    ("flock running a shell command", 'flock /tmp/l -c "cat > ' + CFG_SETTINGS + '"'),
+    ("script running a shell command", 'script -qc "cat > ' + CFG_SETTINGS + '" /dev/null'),
+):
+    sh("frozen shell: F1, " + _n + ", writes the config settings, denies [r1 red]", _c, "deny",
+       "frozen-path", cwd=NOGIT)
+sh("frozen shell: F1, a PowerShell scriptblock built from a string, denies [r1 red]",
+   '[scriptblock]::Create("Set-Content -Path ' + CFG_SETTINGS + ' -Value 1").Invoke()',
+   "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+for _n, _c in (
+    ("bash -c with an ANSI-C quoted command", "bash -c $'cat > " + CFG_SETTINGS + "'"),
+    ("bash -c with a quote that closes mid-word", "bash -c x'; cat > " + CFG_SETTINGS + "'"),
+    ("an ANSI-C escaped quote before a write", "echo $'\\'' ; cat > " + CFG_SETTINGS + " ; echo 'x'"),
+):
+    sh("frozen shell: F2, " + _n + ", denies [r1 red]", _c, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F3, a PowerShell backtick before a quote, denies [r1 red]",
+   'Write-Output x`"; Set-Content -Path ' + CFG_SETTINGS + ' -Value 1; "b"',
+   "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: F5, a perl heredoc whose body runs a shell write, denies "
+   "[r1 red, orchestrator call]",
+   "perl <<'EOF'\nsystem(\"sh\", \"-c\", \"cat > " + CFG_SETTINGS + "\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F5, a python3 heredoc whose body runs an os.system tee, denies "
+   "[r1 red, orchestrator call]",
+   "python3 <<'EOF'\nimport os\nos.system(\"tee " + CFG_SETTINGS + " < /dev/null\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+
+# COVERAGE (review round 1, green on 9eeb1fc). A comment opener, a multi-line quoted string or a lone
+# apostrophe must neither hide a real write after it, nor turn quoted text that names a write into one.
+sh("frozen shell: a # in double quotes does not hide a real write after it, denies [r1 cov]",
+   'echo "# keep" && cat > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a /* in double quotes does not hide a real write after it, denies [r1 cov]",
+   'echo "/* keep" ; cat > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a // in single quotes does not hide a real write after it, denies [r1 cov]",
+   "echo '// keep' ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a # in a multi-line quoted string does not hide a real write after it, denies "
+   "[r1 cov]",
+   "printf 'one\n# two' ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone apostrophe in text does not hide a real write after it, denies [r1 cov]",
+   "echo don't ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone apostrophe, a line break, then a real write, denies [r1 cov]",
+   "echo don't\ncat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: a /* in double quotes naming a cat-write, piped to python, denies "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   'echo "/* cat > ' + CFG_SETTINGS + '" | python hooks/guard.py', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: a // in a multi-line double-quoted string naming a cat-write allows [r1 cov]",
+   'printf "%s\n// cat > ' + CFG_SETTINGS + '" x > notes.txt', "allow", cwd=NOGIT)
+sh("frozen data: a multi-line commit message with a # naming a cat-write allows [r1 cov]",
+   VCS + ' commit -m "line one\n# cat > ' + CFG_SETTINGS + '"', "allow", cwd=NOGIT)
+
+# ROUND 2 RED (cap-ask-data, try 3, review option A). A command that runs its argument as a shell is
+# code, even when the outer command is git, gh, rg, sort or python. Each shape writes the frozen path,
+# so each DENIES, as main does. Red on 6895ae0: the outer command read as a data reader, so its
+# quoted argument stayed data.
+for _n, _c in (
+    ("a git -c alias that runs the write", "git -c alias.w='!cat > " + CFG_SETTINGS + "' w"),
+    ("a git submodule foreach that runs the write", "git submodule foreach 'cat > " + CFG_SETTINGS + "'"),
+    ("a git rebase -x that runs the write", "git rebase -x 'cat > " + CFG_SETTINGS + "' HEAD"),
+    ("a gh alias that runs the write", "gh alias set --shell w 'cat > " + CFG_SETTINGS + "'"),
+    ("a git difftool extcmd that runs the write", "git difftool --extcmd 'cat > " + CFG_SETTINGS + "'"),
+    ("a git bisect run under sh -c", "git bisect run sh -c 'cat > " + CFG_SETTINGS + "'"),
+    ("an rg --pre that runs the write", "rg --pre 'sh -c \"cat > " + CFG_SETTINGS + "\"' x f"),
+    ("a sort compress-program that runs the write",
+     "sort --compress-program='sh -c \"cat > " + CFG_SETTINGS + "\"' f"),
+    ("python -W, then an os.system tee",
+     "python -W ignore -c \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("python -X dev, then an os.system tee",
+     "python -X dev -c \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("python -Bc, then an os.system tee",
+     "python -Bc \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("a process substitution that runs the write", "cat <(sh -c \"cat > " + CFG_SETTINGS + "\")"),
+):
+    sh("frozen shell: r2, " + _n + ", writes the config settings, denies [r2 red]", _c, "deny",
+       "frozen-path", cwd=NOGIT)
+sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
+   "denies [r2 red]",
+   "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: r2, a # in a quoted git argument does not hide a write run by sh -c, denies [r2 red]",
+   "git submodule foreach \"echo '# keep' && cat > " + CFG_SETTINGS + "\"", "deny", "frozen-path",
+   cwd=NOGIT)
+
+# ROUND 2 GREEN PINS (cap-ask-data, try 3). Quoted text is data as the value of a named message flag,
+# and as the input of a pure printer whose output runs nowhere. Each names the frozen path and allows.
+sh("frozen data: r2, a gh pr create body naming a cat-write onto the config settings, allows [r2 pin]",
+   "gh pr create --draft --title \"note\" --body \"cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a gh issue create body naming a cat-write onto the config settings, allows [r2 pin]",
+   "gh issue create --title \"note\" --body \"cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, an echo naming a cat-write onto the config settings, piped to wc, allows [r2 pin]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | wc -l", "allow", cwd=NOGIT)
+sh("frozen data: r2, an add then a commit naming a cat-write onto the config settings, allows [r2 pin]",
+   VCS + " add x && " + VCS + " commit -m \"note: cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a cd then a commit naming a cat-write onto the config settings, allows [r2 pin]",
+   "cd docs && " + VCS + " commit -m \"note: cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a heredoc to notes.md naming a cat-write onto the config settings, allows [r2 pin]",
+   "cat > notes.md <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+
+# ROUND 2 COVERAGE (green on 6895ae0). A multi-line quoted string or an apostrophe must not hide a real
+# write that follows it, under the new reading of a message flag.
+sh("frozen shell: r2 cov, a multi-line commit message before a real write, denies [r2 cov]",
+   VCS + " commit -m \"line one\n# two\" ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
+# ROUND 3 (cap-ask-data review, item 4). A program piped into python that reads its program from stdin
+# runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
+# /proc/self/fd/0 and CON forms name the same stdin, and on 8a83d89 each denies (_STDIN_FILES names
+# it). The `python -` twin is a GREEN pin, and the four are GREEN pins too.
+FROZEN_PY_WRITE = "import os; os.system('tee " + CFG_SETTINGS + " </dev/null')"
+sh("frozen stdin: a python program echoed into python -, writes the config settings, denies [r3 pin]",
+   "echo \"" + FROZEN_PY_WRITE + "\" | python -", "deny", "frozen-path", cwd=NOGIT)
+for _dev in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "CON"):
+    sh("frozen stdin: r3, a python program echoed into python " + _dev + ", writes the config settings, "
+       "denies [r3 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
+
+# CAP-ASK-FIX REVIEW ROUND 1: F1 to F4 are holes the branch allowed. Each is a frozen write that reaches
+# the guard as data, so each case names the form in its name. Each case DENIES, and each denies on main.
+# A pipe into an interpreter fails closed, the orchestrator's design call. (The F-letters here are this
+# lane's, not the cap-ask-data F1 to F5 above.)
+#
+# F1: `_runs_a_file` compared raw words, so a quoted, empty, escaped or variable operand read as a
+# script file, and the text piped into it became data.
+for _name, _arg in (
+    ("a quoted dash", '"-"'),
+    ("an empty quote then a dash", '""-'),
+    ("a backslash-escaped dash", "\\-"),
+    ("an unset variable", '"$X"'),
+    ("a quoted stdin path", '"/dev/stdin"'),
+):
+    sh("frozen stdin: fix F1, a python program piped into python " + _name + " (" + _arg + "), writes the "
+       "config settings, denies [cap-ask-fix r1 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _arg, "deny", "frozen-path", cwd=NOGIT)
+# F2: `python FILE` was a data sink, so text piped into a script file allowed. The text came from an
+# echo, from a git commit message, from a gh body, or from a file on a descriptor.
+sh("frozen data: fix F2, an echo of a cat-write piped to python run.py, denies [cap-ask-fix r1 red]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python run.py", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, a git commit message naming a cat-write piped to python run.py, denies "
+   "[cap-ask-fix r1 red]",
+   VCS + " commit -m \"cat > " + CFG_SETTINGS + "\" | python run.py", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, a gh pr create body naming a cat-write piped to python run.py, denies "
+   "[cap-ask-fix r1 red]",
+   "gh pr create --draft --title \"note\" --body \"cat > " + CFG_SETTINGS + "\" | python run.py",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, an echo of a cat-write piped to python on descriptor 3, read from run.py, "
+   "denies [cap-ask-fix r1 red]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python /dev/fd/3 3<run.py", "deny", "frozen-path", cwd=NOGIT)
+# F3: `_STDIN_FILES` named four stdin spellings and missed four more: a double slash, a doubled zero,
+# and a thread-self path. Each is stdin, so each denies.
+for _dev in ("/proc/thread-self/fd/0", "//dev/stdin", "/dev/fd/00", "/proc/self/fd/00"):
+    sh("frozen stdin: fix F3, a python program piped into python " + _dev + ", writes the config settings, "
+       "denies [cap-ask-fix r1 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
+# F4: the PowerShell tool reads U+201C and U+201D as double quotes, and reads the text of a `<# #>` block
+# comment as nothing. The guard reads the smart quotes as plain text, so an ASCII quote pair around a
+# Set-Content is data to it. A comment's ASCII quotes can pair the same way, with no smart quote at all.
+# Each shape is a Set-Content that PowerShell runs and the branch reads as echo data. Each DENIES, and
+# each is allowed on 8a83d89 and denied on main.
+_F4_WRITE = "Set-Content -Path " + CFG_SETTINGS + " -Value 1"
+sh("frozen shell: fix F4, an echo whose smart-quoted argument holds a Set-Content onto the config settings, "
+   "denies [cap-ask-fix r1 red]",
+   "echo “ \"; " + _F4_WRITE + "; echo \" ”", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: fix F4, an echo with a smart close after x, then a Set-Content, then an echo of y, "
+   "denies [cap-ask-fix r1 red]",
+   "echo “x\"; " + _F4_WRITE + "; echo \"y”", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs them, so a Set-Content "
+   "between two echoes is echo data, denies [cap-ask-fix r1 red]",
+   "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+
+# ================================================================ 6a-2. cap-ask-fix review round 2 (frozen)
+# Three holes the branch allowed. Each is a frozen write the guard reads as text, so each case names
+# its hole. Each DENIES. Main denies each one too, except the H2 `${F@P}` shape, which main allows as
+# well. The cap-key twins of H2 and H3 are in the model-cap section below.
+#
+# H1: `_words_of` cuts a word at each quote, so a frozen path with a quote inside it reads as two
+# words, and neither word is a frozen path. One case per writer in hooks/, then one per folder.
+# H2: `printf` is a printer, so its quoted text is data. The text still runs: through `eval`, `bash -c`,
+# a bare `$D`, or a `${F@P}` prompt expansion, which runs the `$(...)` inside its value.
+# H3: `_name` reads only the basename of a command word. A function, a local script or a PATH entry
+# named `cat` reads as the printer `cat`, so the text piped into it is data, and the function runs it.
+R2_HOOK_SQ = slash(os.path.join(CFG, "hooks")) + "/'g.py'"        # the path with a quote pair in it
+R2_HOOK_DQ = '"' + slash(os.path.join(CFG, "hooks")) + '/"g.py'   # the same, with the pair double-quoted
+R2_WRITE = "echo 1 > " + CFG_SETTINGS                             # a frozen write, held as text
+R2_PS_WRITE = "Set-Content -Path " + CFG_SETTINGS + " -Value 1"
+
+
+def r2_printf_forms(write):
+    """H2: a printf stores `write` in a variable, and each form runs the variable."""
+    return (
+        ("eval", "printf -v D '%s' '" + write + "'; eval \"$D\""),
+        ("bash -c", "printf -v D '%s' '" + write + "'; bash -c \"$D\""),
+        ("a bare $D", "printf -v D '%s' '" + write + "'; $D"),
+        ("the ${F@P} prompt expansion",
+         "printf -v F '%s' '$(" + write + ")'; echo \"${F@P}\""),
+    )
+
+
+def r2_function_forms(write):
+    """H3: a command named `cat` that runs its input, or a local `cat`, takes the piped text."""
+    return (
+        ("a shell function named cat", "cat() { sh; }; echo '" + write + "' | cat"),
+        ("a function declared with the function keyword",
+         "function cat { sh; }; echo '" + write + "' | cat"),
+        ("a local script named cat", "echo '" + write + "' | ./cat"),
+        ("a PATH entry named cat", "PATH=./b:$PATH; echo '" + write + "' | cat"),
+    )
+
+
+for _writer, _command in (
+    ("cp", "cp a " + R2_HOOK_SQ),
+    ("echo redirect", "echo x > " + R2_HOOK_DQ),
+    ("tee", "echo x | tee " + R2_HOOK_SQ),
+    ("rm", "rm " + R2_HOOK_SQ),
+    ("mv", "mv a " + R2_HOOK_SQ),
+    ("sed -i", "sed -i 's/x/y/' " + R2_HOOK_SQ),
+    ("install", "install a " + R2_HOOK_SQ),
+):
+    sh("frozen path: fix H1, " + _writer + " onto a hook path with a quote in it denies "
+       "[cap-ask-fix r2 red]", _command, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen path: fix H1, Set-Content onto a hook path with a quote in it denies [cap-ask-fix r2 red]",
+   "Set-Content -Path " + R2_HOOK_SQ + " -Value 1", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+for _folder, _name in (("lint", "prose.py"), ("state", "entry.json"), ("agents", "builder.md"),
+                       ("bin", "merge.py"), ("output-styles", "shiv.md")):
+    sh("frozen path: fix H1, cp a " + _folder + " file with a quote in its name denies "
+       "[cap-ask-fix r2 red]", "cp a " + slash(os.path.join(CFG, _folder)) + "/'" + _name + "'",
+       "deny", "frozen-path", cwd=NOGIT)
+
+for _how, _command in r2_printf_forms(R2_WRITE):
+    sh("frozen shell: fix H2, printf stores a frozen write and " + _how + " runs it, denies "
+       "[cap-ask-fix r2 red]", _command, "deny", "frozen-path", cwd=NOGIT)
+for _how, _command in r2_function_forms(R2_WRITE):
+    sh("frozen shell: fix H3, " + _how + " takes the piped frozen write, denies [cap-ask-fix r2 red]",
+       _command, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: fix H3, Set-Alias maps echo to iex, a Set-Content onto the config settings denies "
+   "[cap-ask-fix r2 red]", "Set-Alias echo iex; echo '" + R2_PS_WRITE + "'", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+
+# THE FIVE GREEN PINS of this lane (the false-alarm win of round 2). Each names a frozen path or a
+# settings copy in text a reader or a message carries, and each stays allowed.
+sh("frozen pin: grep -n of a hooks file allows [cap-ask-fix r2 pin]",
+   "grep -n \"tee\" " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen pin: jq of the settings file allows [cap-ask-fix r2 pin]",
+   "jq . " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: git commit -m naming a hooks path allows [cap-ask-fix r2 pin]",
+   VCS + " commit -m \"edit " + CFG_HOOK + "\"", "allow", cwd=NOGIT)
+sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
+   "echo \"cp a " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
+sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
+   "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -6477,6 +6961,25 @@ sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
 
+# A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
+# so it is code. The pipe chains it with the echo, so it denies (ask-alone).
+chained_ask("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, denies as a chained ask step",
+   'echo "sed -i s/' + CAP_KEY + '=sonnet/' + CAP_KEY + '=' + OPUS + '/ ' + PROJ_SETTINGS + '" | sh',
+   cwd=NOGIT, carries=("subagent-model-cap",))
+
+# A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
+# must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
+# (rule building-scanner-respects-strings).
+chained_ask("cap: a comment opener inside double quotes does not hide a redirect that writes the cap, denies as a chained ask step",
+   "echo \"# keep this line\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   cwd=NOGIT, carries=("subagent-model-cap",))
+sh("cap: a lone apostrophe inside double quotes does not hide a redirect that writes the cap",
+   "printf \"it's %s\" '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a comment opener in a multi-line quoted string does not hide a redirect that writes the cap",
+   "printf '%s\n# keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+
 # RULE ORDER. The config directory's own settings keep rule 7's deny, which stands ahead of rule 8,
 # so the cap content never turns that wall into a prompt.
 add("cap: the config settings stay denied, never asked", "deny", "frozen-path", tool="Write",
@@ -6503,6 +7006,93 @@ sh("cap: a grep for the variable in a settings file is not a write",
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
+# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
+# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view (review round 1,
+# F5). So is text piped into an interpreter: the interpreter may run it, so a pipe into one fails closed,
+# as main does (cap-ask-fix review round 1). Incident 2026-10-14: a reviewer's probe piped a JSON tool-call
+# sample holding a cap write into `python hooks/guard.py`, and the owner was asked to approve a call that
+# wrote nothing. The branch allowed that shape; under the design call it denies again, as main does. Whether
+# that friction is acceptable is the owner's call, not the test's. Each case names the write the way a
+# probe would: the path, a redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
+sh("cap data: a grep naming a cat-write onto a settings file with the cap key allows",
+   "grep -n \"cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" docs/notes.md", "allow", cwd=NOGIT)
+sh("cap data: an echo naming a tee onto a settings file, piped to wc, allows",
+   "echo 'tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | wc -l", "allow", cwd=NOGIT)
+chained_ask("cap data: an && inside double quotes naming a cat-write, piped to python, denies as a chained ask step "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"ok && cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+chained_ask("cap data: a comment opener inside double quotes naming a cat-write, piped to python, denies as a "
+   "chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"# cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+sh("cap data: a lone apostrophe inside double quotes naming a cat-write, piped to jq, allows",
+   "echo \"don't cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | jq .", "allow", cwd=NOGIT)
+chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to python, denies as a chained ask "
+   "step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
+   "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
+   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask step "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf '%s' '" + json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > " + PROJ_LOCAL
+   + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+chained_ask("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, "
+   "denies as a chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
+   + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("subagent-model-cap",))
+
+# ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asked, as main did.
+# Ask-alone chains the tee, cp and Out-File forms with a step, so those deny. The lone Set-Content asks.
+# Rule 8 reads the whole command for the cap key, so each write names it on its line. Only the value
+# is pinned: main names the path fragment after the space, and this guard names the whole path.
+CAP_SPACED = slash(os.path.join(ROOT, "my proj", ".claude", "settings.json"))
+chained_ask("cap: a tee onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+   "printf '%s' '" + cap_settings(compact=True) + "' | tee \"" + CAP_SPACED + "\"",
+   cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap: a cp onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+   "printf '%s' '" + cap_settings(compact=True) + "' > /tmp/cap.json && cp /tmp/cap.json \""
+   + CAP_SPACED + "\"",
+   cwd=NOGIT, carries=("subagent-model-cap",))
+sh("cap: a PowerShell Set-Content onto a quoted project settings path with a space asks [r1 red]",
+   "Set-Content -Path \"" + CAP_SPACED + "\" -Value '" + cap_settings(compact=True) + "'",
+   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
+chained_ask("cap: a PowerShell Out-File onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+   "'" + cap_settings(compact=True) + "' | Out-File -FilePath \"" + CAP_SPACED + "\"",
+   tool="PowerShell", cwd=NOGIT, carries=("subagent-model-cap",))
+
+# COVERAGE (review round 1, green on 9eeb1fc). On the cap side too: a comment opener, a multi-line quoted
+# string or a lone apostrophe must neither hide a redirect that writes the cap, nor turn quoted text that
+# names a write into one.
+chained_ask("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+   "echo \"/* keep\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+   "echo '// keep' ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   cwd=NOGIT, carries=("subagent-model-cap",))
+sh("cap: a /* in a multi-line quoted string does not hide a redirect that writes the cap [r1 cov]",
+   "printf '%s\n/* keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+chained_ask("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+   "echo don't ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap data: a /* in double quotes naming a cat-write, piped to python, denies as a chained ask step "
+   "[r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', cwd=NOGIT,
+   carries=("subagent-model-cap",))
+sh("cap data: a // in single quotes naming a tee onto a settings file, piped to jq, allows [r1 cov]",
+   "echo '// tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | jq .", "allow", cwd=NOGIT)
+chained_ask("cap data: a // in a multi-line quoted string naming a cat-write, piped to python, denies as a chained "
+   "ask step [r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf 'a note\n// cat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+
 # FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
 # wrong type, and a payload with no tool name at all: each allows the call.
 add("cap: a content field that is not a string allows", "allow", tool="Write", cwd=NOGIT,
@@ -6514,6 +7104,78 @@ add("cap: an edit list holding something other than an object allows", "allow", 
 add("cap: a payload with no tool name allows", "allow",
     raw=json.dumps({"tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}))
 
+
+# ROUND 2 RED (cap-ask-data, try 3, review option A). The hidden-shell shapes that write the cap ASK, as
+# main does. Each names the project local settings file and the cap key. Red on 6895ae0: the outer
+# command read as a data reader, so the write inside its argument was never seen.
+_CAP_WRITE = CAP_KEY + "=" + OPUS + " > " + PROJ_LOCAL
+for _n, _c in (
+    ("a git -c alias that runs the write", "git -c alias.w='!echo " + _CAP_WRITE + "' w"),
+    ("a git submodule foreach that runs the write", "git submodule foreach 'echo " + _CAP_WRITE + "'"),
+    ("an rg --pre that runs the write", "rg --pre 'sh -c \"echo " + _CAP_WRITE + "\"' x f"),
+    ("python -W, then an os.system echo",
+     "python -W ignore -c \"import os; os.system('echo " + _CAP_WRITE + "')\""),
+    ("a process substitution that runs the write", "cat <(sh -c \"echo " + _CAP_WRITE + "\")"),
+):
+    sh("cap shell: r2, " + _n + ", writes the cap to a project settings file, asks [r2 red]", _c, "ask",
+       "subagent-model-cap", cwd=NOGIT)
+sh("cap shell: r2, a PowerShell iex inside Write-Output sets the cap in a project settings file, asks "
+   "[r2 red]",
+   "Write-Output (iex \"Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS + "\")",
+   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT)
+sh("cap shell: r2, a # in a quoted git argument does not hide a cap write run by sh -c, asks [r2 red]",
+   "git submodule foreach \"echo '# keep' && echo " + _CAP_WRITE + "\"", "ask", "subagent-model-cap",
+   cwd=NOGIT)
+
+# ROUND 2 GREEN PINS (cap-ask-data, try 3). The cap key named inside a message flag or a pure printer is
+# data. Each names the cap key and a write, and allows, as the incident shapes did.
+sh("cap data: r2, a git commit message naming the cap key and a cat-write, allows [r2 pin]",
+   VCS + " commit -m \"note: " + CAP_KEY + ", cat > " + PROJ_LOCAL + " is refused\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a gh pr create body naming the cap key and a cat-write, allows [r2 pin]",
+   "gh pr create --draft --title \"cap note\" --body \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + " is refused\"",
+   "allow", cwd=NOGIT)
+sh("cap data: r2, an add then a commit naming the cap key and a cat-write, allows [r2 pin]",
+   VCS + " add x && " + VCS + " commit -m \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a cd then a commit naming the cap key and a cat-write, allows [r2 pin]",
+   "cd docs && " + VCS + " commit -m \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allows [r2 pin]",
+   "cat > notes.md <<'DOC'\n" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\nDOC", "allow", cwd=NOGIT)
+
+# ROUND 2 COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
+chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask step [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("subagent-model-cap",))
+
+# ROUND 2, THE CAP-KEY TWINS of H2 and H3 (cap-ask-fix r2). The same shapes, with a cap write held as text.
+# Each shape chains the write with a second step, so the guard DENIES it as ask-alone, never asks. Main
+# measures the same deny for each eval, bash -c, bare $D and H3 shape (a PowerShell Set-Alias too). Main
+# ALLOWS the ${F@P} shape, so that one is red on main as well as on the branch.
+R2_CAP_WRITE = "echo " + CAP_KEY + "=" + OPUS + " > " + PROJ_SETTINGS
+R2_CAP_PS = "Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS
+for _how, _command in r2_printf_forms(R2_CAP_WRITE):
+    chained_ask("cap shell: fix H2, printf stores a cap write and " + _how + " runs it, denies as a chained "
+                "ask step [cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+for _how, _command in r2_function_forms(R2_CAP_WRITE):
+    chained_ask("cap shell: fix H3, " + _how + " takes the piped cap write, denies as a chained ask step "
+                "[cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the cap into a project local "
+            "settings file denies as a chained ask step [cap-ask-fix r2 red]",
+            "Set-Alias echo iex; echo '" + R2_CAP_PS + "'", tool="PowerShell", cwd=NOGIT,
+            carries=("subagent-model-cap",))
+
+# ROUND 3 HOLE (cap-ask-hole). A shell wrapper (bash -c, sh -c, eval) that writes the cap to a project
+# local settings file through an ANSI-C quoted ($'...') path is allowed on the lane head. Main asks.
+# With a quote pair ahead of the write, main denies it as a chained ask step. Each is red on the lane
+# head (allow). A pwsh -c shape did not reproduce: the lane asks or denies every pwsh -c cap write tried.
+# The key and the path are built from pieces here.
+R3_CAP_LINE = CAP_KEY + "=" + OPUS + " > $'" + PROJ_LOCAL + "'"
+for _n in ("bash -c", "sh -c", "eval"):
+    sh("cap shell: hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
+       "[cap-ask-hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "subagent-model-cap",
+       cwd=NOGIT, carries=(OPUS,))
+    chained_ask("cap shell: hole r3, " + _n + " runs a quote pair then the cap write to an ANSI-C path, "
+                "denies as a chained ask step [cap-ask-hole r3 red]",
+                _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
+                carries=("subagent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
@@ -6726,6 +7388,168 @@ sh("ask-alone: a single & inside a quoted URL beside the cap write is one step, 
    "ask", "subagent-model-cap", cwd=PROJ)
 sh("ask-alone: an escaped double quote around a single & is one step, so it asks",
    'echo "' + CAP_KEY + '=v \\" & \\"" > settings.local.json', "ask", "subagent-model-cap", cwd=PROJ)
+
+
+# =========================================================================== 6d. an interpreter heredoc is one step
+FAMILY = "ask-alone"
+#
+# OWNER RULING (2026-10-14 22:25): an inline interpreter script, a `python - <<PY`, `node`, `perl` or
+# `ruby` heredoc, is ONE step, so one command holding an ask step asks once, as a lone ask step does.
+# count_steps counts every body line as a step today, so the same command denies. RED TODAY, by
+# design: the one-command heredocs with an ask step in the body (the first block). GREEN TODAY, by
+# design: the pins below it. A chain before or after the heredoc, a pipe after the header, two
+# interpreter heredocs, and a bash or `ssh host "bash -s"` body still count more than one step. A deny
+# in a body still wins (the shared-tree and kill sections hold those cases).
+LANE_STASH = VCS + " stash push -u -m lane"
+FORCE_PUSH = VCS + " push --force origin HEAD:main"
+
+sh("ask-alone: a one-command python heredoc holding a prune asks, not denies",
+   "python3 - <<'PY'\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command python heredoc with a print line and a prune asks once",
+   "python3 - <<'PY'\nprint(1)\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command node heredoc holding a prune asks, not denies",
+   "node <<'JS'\n" + PRUNE + "\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command perl heredoc holding a prune asks, not denies",
+   "perl <<'PL'\n" + PRUNE + "\nPL", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command ruby heredoc holding a prune asks, not denies",
+   "ruby <<'RB'\n" + PRUNE + "\nRB", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a one-command python heredoc holding a forced push asks, not denies",
+   "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
+sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
+   "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
+sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "subagent-model-cap", cwd=PROJ)
+
+# Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
+# multi-line template literal inside the body. None of them hides the prune or adds a step.
+sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
+   "python3 - <<'PY'\n# don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a // line with a lone apostrophe in a python body holds no quote, so the prune asks",
+   "python3 - <<'PY'\n// don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a /* opener in a python body opens no quote, so the prune asks",
+   "python3 - <<'PY'\n/* x */\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a lone apostrophe in plain python body text, then the prune, asks",
+   "python3 - <<'PY'\ndon't stop\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune inside a multi-line node template literal asks, not denies",
+   "node <<'JS'\nconst s = `\n" + PRUNE + "\n`;\nJS", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a python body that holds a shell prune only as a # comment is no step, so it allows",
+   "python3 - <<'PY'\n# " + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
+
+# The delimiter `E-F` is read as the whole word. Today HEREDOC_HEADER reads `E` alone, so this asks
+# nothing, and the first case is RED. The second and third are the pins that a misread would break.
+sh("ask-alone: a one-command python heredoc with the delimiter E-F, holding a prune, asks",
+   "python3 - <<E-F\n" + PRUNE + "\nE-F", "ask", "shared-tree", cwd=WTPRUNE)
+chained_prune("ask-alone: a whole-word delimiter E-F, a python body, then a prune, still denies",
+              "python3 - <<E-F\nprint(1)\nE-F\n" + PRUNE)
+
+# PINS, GREEN TODAY: each is more than one step, so the prune denies as a chained ask step.
+chained_prune("ask-alone: a chain before a python heredoc holding a prune still denies",
+              "echo hi && python3 - <<'PY'\n" + PRUNE + "\nPY")
+chained_prune("ask-alone: a python heredoc holding a prune, then echo, still denies",
+              "python3 - <<'PY'\n" + PRUNE + "\nPY\necho x")
+chained_prune("ask-alone: a python heredoc header with a trailing pipe to tee still denies",
+              "python3 - <<'PY' | tee out.txt\n" + PRUNE + "\nPY")
+chained_prune("ask-alone: a bash heredoc body holding a prune still counts each line, so it denies",
+              "bash <<'SH'\n" + PRUNE + "\nSH")
+chained_prune("ask-alone: an ssh bash -s heredoc body holding a prune still counts each line",
+              'ssh host "bash -s" <<\'SH\'\n' + PRUNE + "\nSH")
+chained_prune("ask-alone: two python heredocs, a prune in the first, still deny as two steps",
+              "python3 - <<'A'\n" + PRUNE + "\nA\npython3 - <<'B'\nprint(1)\nB")
+chained_prune("ask-alone: a python heredoc holding a prune, then a bash heredoc, still denies",
+              "python3 - <<'PY'\n" + PRUNE + "\nPY\nbash <<'SH'\necho x\nSH")
+chained_prune("ask-alone: a bash heredoc holding a prune, then a python heredoc, still denies",
+              "bash <<'SH'\n" + PRUNE + "\nSH\npython3 - <<'PY'\nprint(1)\nPY")
+chained_prune("ask-alone: a python header in quoted echo text is no heredoc, so the prune after it denies",
+              'echo "python <<EOF"\n' + PRUNE)
+deny_beats("ask-alone: a python body holding a prune and a stash push denies as the stash push",
+           "python3 - <<'PY'\n" + PRUNE + "\n" + LANE_STASH + "\nPY", "shared-tree", cwd=GITWT,
+           carries="stash stack")
+
+
+# ---- r1-hd (review round 1), ask-alone family. Each case is red on the lane head unless it says so.
+#
+# H1. A delimiter with a backslash or a quote closes at the word bash reads: `E\OF`, `E'OF'` and `"E"OF`
+# are all `EOF`. The header reads the raw word, so the body never closes. The count drops the body and asks.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    chained_prune("ask-alone: r1-hd a python heredoc, %s delimiter closed at EOF, then a prune, denies" % _label,
+                  "python3 - <<" + _open + "\nx\nEOF\n" + PRUNE)
+
+# H2. A header that pipes into a shell counts as a shell body. Its closer is EOF-X, so the EOF line in the
+# body closes nothing, and the prune in the body is a step.
+for _shell in ("sh", "bash"):
+    chained_prune("ask-alone: r1-hd a cat heredoc piped to %s, closer EOF-X, a prune in the body, denies" % _shell,
+                  "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + PRUNE + "\nEOF-X")
+
+# AN UNCLOSED BODY. Bash reads every line to the end of input, so every line is a step.
+chained_prune("ask-alone: r1-hd a python heredoc with no closer, a prune after it, denies",
+              "python3 - <<'PY'\nprint(1)\n" + PRUNE)
+
+# THE OWED GREEN CASE. Two prune lines in one python body are one step, so the command asks once.
+sh("ask-alone: r1-hd two prune lines in one python body ask once, not deny",
+   "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+
+# SCANNERS (building-scanner-respects-strings): a comment with a lone apostrophe, a lone apostrophe in
+# body text, a header shape inside quoted text, and a multi-line template literal.
+sh("ask-alone: r1-hd a comment with a lone apostrophe after a python header asks once for the prune",
+   "python3 - <<'PY' # don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+chained_prune("ask-alone: r1-hd a lone apostrophe in a python body under a backslash delimiter, then a prune, denies",
+              "python3 - <<E\\OF\nDon't\nEOF\n" + PRUNE)
+chained_prune("ask-alone: r1-hd a header shape inside a double-quoted echo, then a prune, denies",
+              'echo "# <<EOF-X | sh"\n' + PRUNE)
+chained_prune("ask-alone: r1-hd a template literal in a node body closed at E'OF', then a prune, denies",
+              "node <<E'OF'\nconst s = `\nEOF\n" + PRUNE)
+sh("ask-alone: r1-hd a prune in a node template literal under a backslash delimiter asks once",
+   "node <<E\\OF\nconst s = `\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+
+# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a prune in its body.
+chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the body, denies (red on main too)",
+              "cat <<EOF | sh\n" + PRUNE + "\nEOF")
+
+# ---- r2-hd (review round 2), ask-alone family. Each case is red on the lane head unless it says so.
+#
+# ITEM 1. settle_ask strips the bodies a second time, on text the first strip already cut. A stray line equal
+# to a delimiter (the lone EOF) then opens a phantom body that holds the ask step, so the count drops to one
+# and the command asks. Main counts the stripped text once, and denies. RED ON THE LANE HEAD (asks).
+chained_ask("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a cap write, denies",
+            "cat <<EOF\nbody line\nEOF\n" + CAP_PLAIN + "\nEOF", cwd=PROJ, carries=CAP_STEP)
+chained_prune("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a prune, denies",
+              "cat <<EOF\nbody line\nEOF\n" + PRUNE + "\nEOF")
+
+# ITEM 2, the ask payload. The forms of the kill section, with a cap write in the body: one ask step.
+for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
+    chained_ask("ask-alone: r2-hd a heredoc in %s, a cap write in the body, denies" % _label,
+                _form.replace("BODY", CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
+
+# SCANNER PIN (building-scanner-respects-strings), GREEN ON THE LANE HEAD. A node body holds a template literal
+# across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one step, so it asks
+# once. MAIN DENIES BY DESIGN: the one-step ruling is the lane's, and main counts each body line.
+sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
+   "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+
+
+# ---- r3-bd (try 3, the bandaid), ask-alone family. A prune or a push delete in a body that main keeps in view is a
+# second step on main, so the command denies as a chained ask. Without the bandaid the body drops and the command
+# allows or asks alone. The scanner shapes (a comment opener in quotes, a lone apostrophe, a template literal) are
+# pinned here too, so the walk is judged on each.
+chained_prune("ask-alone: r3-bd a prune after a stray EOF line, written then sh on the next line, denies",
+              "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a stray EOF line, piped to tee, then bash, denies",
+              "cat <<'EOF-1' | tee x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nbash x.sh")
+chained_prune("ask-alone: r3-bd a prune on a backslash delimiter piped to python3, denies",
+              "cat <<\\EOF | python3 -\necho hi\n" + PRUNE + "\nEOF")
+chained_prune("ask-alone: r3-bd a prune on an unquoted EOF-1 that main reads as EOF, denies",
+              "cat <<EOF-1 > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a comment opener in quotes on the header, denies",
+              'echo "a # b" && cat <<\'EOF-1\' > x.sh\necho hi\nEOF\n' + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a lone apostrophe in a body comment, denies",
+              "cat <<'EOF-1' > x.sh\n# don't\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune inside a multi-line template literal in the body, denies",
+              "cat <<'EOF-1' > x.sh\nconst s = `\nEOF\n" + PRUNE + "\n`;\nEOF-1\nsh x.sh")
+# The push-delete path reads the same walk. The verdict here does not turn on the run dir, so this pins the walk
+# through the body, not a `cd`: the body holds the cd and the push, and the push asks on main.
+chained_ask("ask-alone: r3-bd a body with a cd and a push delete of main, written then sh, denies",
+            "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(PUSHMAIN) + "\ngit push origin :main\nEOF-1\nsh x.sh",
+            cwd=PUSHFEAT)
 
 
 # =========================================================================== ordinary work
