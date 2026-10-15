@@ -7280,6 +7280,21 @@ chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the
             "Set-Alias echo iex; echo '" + R2_CAP_PS + "'", tool="PowerShell", cwd=NOGIT,
             carries=("subagent-model-cap",))
 
+# ROUND 3 HOLE (cap-ask-hole). A shell wrapper (bash -c, sh -c, eval) that writes the cap to a project
+# local settings file through an ANSI-C quoted ($'...') path is allowed on the lane head. Main asks.
+# With a quote pair ahead of the write, main denies it as a chained ask step. Each is red on the lane
+# head (allow). A pwsh -c shape did not reproduce: the lane asks or denies every pwsh -c cap write tried.
+# The key and the path are built from pieces here.
+R3_CAP_LINE = CAP_KEY + "=" + OPUS + " > $'" + PROJ_LOCAL + "'"
+for _n in ("bash -c", "sh -c", "eval"):
+    sh("cap shell: hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
+       "[cap-ask-hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "subagent-model-cap",
+       cwd=NOGIT, carries=(OPUS,))
+    chained_ask("cap shell: hole r3, " + _n + " runs a quote pair then the cap write to an ANSI-C path, "
+                "denies as a chained ask step [cap-ask-hole r3 red]",
+                _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
+                carries=("subagent-model-cap",))
+
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
 #
