@@ -1,19 +1,33 @@
-# guard.log is read weekly
+# guard.log is read daily, by a note
 
 ## The question
 
 `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. Who reads it,
 and what does it say?
 
-## The ruling, 2026-10-11
+## The ruling, 2026-10-13
 
 `lint/guard_log_report.py` reads it. It prints three tables: deny, ask and noted counts by
-rule; denies per day; and every other row, such as `reverted`, verbatim. Run it at the start of
-each audit session, and once a week:
+rule; denies per day; and every other row, such as `reverted`, verbatim. For detail, run it:
 
 ```
 python lint/guard_log_report.py --days 7
 ```
+
+`hooks/daily_note.py` runs the checks. It is a SessionStart hook under the `startup` matcher.
+The first start on a Central day runs the checks and writes the done-today stamp,
+`daily-note.stamp` in the config dir. A later start that day prints nothing. The note is silent
+unless a check fails. It prints one line per failed check, and each line names the reader by its
+absolute path, built from the hook's own folder.
+
+The window is the days since the stamp, the stamp day through the day before today, at most 7
+days. A day with no session start keeps its lines for the next start. With no stamp, the window is
+the day before today. The checks:
+
+- a `crash` line in the window: a guard hook crashed.
+- an `STE-fallback` line whose matched field ends `fallback=crash`.
+- an `STE-unchecked` line: the lint could not run, so those writes are unknown.
+- a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
 
 The session is the last field. A missing field or `-` means unknown session. The reader has
 `--session <id>` and `--by-session`.
@@ -75,70 +89,18 @@ What the matched text says:
 
 - The log holds the matched text, not the outcome. It cannot say whether a deny was right. A
   hand-graded sample is the next measurement. None exists yet.
-- Nothing runs the reader on a schedule. A session runs it by hand.
+- The note reads only the failures above. A rule that never fires, or fires for the wrong
+  reason, shows only in the reader's tables, read by hand.
+- The note has no volume check. A count jump over a 7-day baseline fired on 6 of 14 real days from
+  growth in use alone. A volume change shows only in the reader's tables.
+- The note runs on `startup`, not on `resume`. A session that only resumes, day after day, runs no
+  note.
 - One machine per log. The Mac's log (9,537 lines on 2026-10-11) is a second reading, not in
   this table.
 
 ## Holes, named
 
-Review ended at the three-round cap with no blocker open. The guard no longer crashes when
-`guard_core` lacks `set_log_session` (a blocker found in round 1): same verdict and exit code,
-no traceback.
-
-- **Reader edit selects extra CI.** An edit to `lint/guard_log_report.py` selects
-  `gates_windows_merge` and the `guard` suite, as well as `code`. Neither reads guard.log, so
-  the cost is CI time. It ships for the macOS and Windows runs of the `decision_watch` tests,
-  which `gates_macos` and `gates_windows_rest` give. Those two also select on this edit.
-- **Install skew.** A new `hooks/guard_core.py` writes six fields. An old
-  `hooks/decision_watch.py` (main, before this PR) skips every line whose field count is not
-  five, so it drops every unread note. `install.sh` lands both files from one source, so only
-  a partial copy, such as a Windows file copy, can split them.
-- **One-reader test gaps.** `OneReaderTests` flags only a literal `.split("\t")` call in
-  `hooks/*.py` and `lint/*.py` files that name guard.log. A `partition`, `re.split`, `csv`, a
-  split on a variable, or a reader in `merge/`, `janitor/` or `bin/` passes. Risk is low. The
-  test names its one allowed fallback (`gate-hooks-fail-closed`: an unread note must not vanish).
-- **Session name read by `globals()`.** `record` in `hooks/guard_core.py` reads
-  `_log_session` with `globals().get`. The module always defines that name, so the absent
-  branch cannot run in production. A stale `guard_core.py` runs its own old `record`, which
-  writes five fields. Test `session_log_stale_core_case` proves the code path, not the real
-  skew in the install hole above.
-- **Pipe or backtick in a session id.** A `|` splits its cell in the `--by-session` table.
-  Control characters are stripped, so an id cannot add a line. A backtick is not stripped, so
-  it could close the fence in the verbatim `other` rows. The fault is display only: counts use
-  the raw id.
-- **Seven or more fields.** The reader reads `session` as field 6, and `matched` as field 5
-  plus the later fields. The `decision_watch` fallback reads `matched` as field 5 only. The
-  line gets a seventh field only through the `tool` field, which is not folded. Not every
-  caller of `tool` was checked for a tab. `log_cut` folds tabs out of `matched`, and the
-  session cell strips control characters.
-- **Stalled disk.** The gate prints its answer before the log write. A log write that stalls can
-  still delay process exit. The hook timeout then lets the call through, as the old lint timeout
-  did.
-- **Logging off with no marker.** A missing `hooks/guard_core.py`, or an older one without
-  `set_log_session`, turns STE logging off. No marker line is written. The reader then prints
-  empty tables, which read as no events.
-- **Lines lost on Windows.** A plain append from many processes is not atomic on Windows.
-  Measured before the lock: a line was lost in 1 round of 12, each round with 20 processes
-  calling `record`. A lost line can drop an owner note: `collect_unread` in
-  `hooks/decision_watch.py` names unread subjects from `noted` and `subject-unread` lines.
-  Now `record()` in `hooks/guard_core.py` locks each write: msvcrt on Windows, fcntl on POSIX.
-  It retries only on contention (BlockingIOError, errno 13, EAGAIN, EDEADLK 36), for up to
-  `LOG_LOCK_WAIT`, 2 s. After 2 s of contention it writes without the lock. Any other lock error
-  writes at once, without the lock and without a wait. So a line can still be lost under a slow
-  holder, or on a lock error. Tests in `lint/test_gates.py`: in `SteGateLogTests`,
-  `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (every platform) and
-  `test_19b_parallel_gates_write_exactly_one_whole_line_each` (exactly 20 lines); in
-  `GuardLogAppendRaceTests`, `test_lock_error_that_is_not_contention_returns_at_once`.
-- **Crash path writes without the lock.** When `guard_core` fails to load, `hooks/guard.py`
-  lines 253-254 write guard.log with no lock. A line from that path can still be lost to a
-  concurrent writer.
-- **Rewrite, then failed lint.** The fixer rewrites the text, then the lint cannot run. The
-  rewrite still lands. The log holds `STE-unchecked` and no `fixed` line.
-- **Closed stdout pipe.** If the reader closes stdout early, the STE gate raises at its flush in
-  `answer()`, before the log call. Measured on Windows: `OSError` Errno 22, 21 stderr lines, exit
-  120, and no log line. On POSIX the error is `BrokenPipeError`, not measured. md_sweep catches the
-  same error in its own try, not measured. It ships because the exit code is unchanged and a
-  closed pipe means that the host has already gone.
+Debts: `guard-log-extra-ci` (an edit to the reader selects the Windows merge and guard suites), `guard-log-install-skew` (a six-field core and an old reader drop each other's lines), `guard-log-one-reader-gaps` (the one-reader test misses other split forms), `guard-log-session-id-fence` (a pipe or backtick in a session id breaks the table), `guard-log-tool-field-tab` (a tab in the tool field can add a seventh field), `guard-log-off-silent` (STE logging is disabled with no marker), `guard-log-lines-lost` (a guard.log line can be lost on Windows), `ste-rewrite-unchecked-lands` (an unchecked rewrite still lands), `ste-gate-closed-pipe-no-log` (a closed stdout pipe ends the STE gate with no log line), `guard-timeout-fails-open` (a stalled or slow guard lets the call through).
 
 ## What reopens it
 

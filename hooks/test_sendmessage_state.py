@@ -11,14 +11,17 @@ its exit code, stdout and stderr. Two fakes sit under it:
 - `claude -p` (the model). A sitecustomize.py on the child's PYTHONPATH wraps subprocess.run, as
   hooks/test_reply_judge.py does, and answers `claude -p` with the JSON envelope that
   decision_watch.invoke_model parses. The real invoke_model runs on each canned answer.
-- `claude agents --json`. The reader is a node child of the hook, so it meets a `claude` launcher
-  on PATH: claude.cmd on Windows, a sh script elsewhere. The launcher runs fake_claude.py, which
-  prints the canned rows and records the call.
+- The reader stub (STUB_READER). Every hook run points the hook's pointer checkout at a temp clone
+  whose receiver-state.mjs is that stub. Real node runs it. The stub reads the rows file the case
+  wrote and prints the state with the repo's lib.mjs, so the rows-to-state mapping is real. Only the
+  `claude agents --json` read is stubbed, and a stub failure prints unseen, as the real reader does.
+  fake_claude.py's agents branch is now unused. The claude launcher stays on PATH for the model call.
 Every claude call is recorded, so "no model call" is read from the record, not assumed.
 CLAUDE_CONFIG_DIR is a fresh temp folder: no real pointer file or token is read.
 
 Canary: every hook run must leave a `loaded` file (the sitecustomize ran) and, when the hook
-reaches the board, exactly one agents call. Without them, a "no model call" pass proves nothing.
+reaches the reader, exactly one stub call naming the peer, with no agents call. Without them, a
+"no model call" pass proves nothing.
 
 Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run instead. Its
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
@@ -31,6 +34,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +47,10 @@ PEER, OTHER = "peer", "other"
 SID_A, SID_B = "ses00001", "ses00002"
 ALLOW = '{"ok": true}'
 FLAG = '{"ok": false, "reason": "parallelism-no-mid-task-talk: send only what changes the work."}'
+READER_SECONDS = 3  # the hook's READER_TIMEOUT in the timed cases, set by TIMED_HOOK
+WALL_LIMIT = READER_SECONDS + 10  # a margin over the set timeout, not a tight absolute bound
+HOLD_MS = 30000  # the held child outlives WALL_LIMIT, so a held pipe fails the bound
+HARNESS_CAP = HOLD_MS // 1000 + 30  # this run's own cap, so a hang ends as a FAIL line
 
 STUB_SITE = r'''
 import json, os, subprocess
@@ -79,6 +87,61 @@ else:
 '''
 
 
+# The reader stub: real node runs it in place of hooks/mods/session-board/hooks/receiver-state.mjs.
+# idle or waiting prints that word. hang sleeps with no child. hold starts a child that keeps this
+# process's stdout open, then sleeps; the hook's kill of this process leaves that pipe held.
+STUB_READER = r'''
+import { spawn } from "node:child_process";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const dir = process.env.SM_READER_DIR;
+const mode = process.env.SM_READER_MODE;
+const holdMs = Number(process.env.SM_READER_HOLD_MS || "30000");
+appendFileSync(join(dir, "reader.jsonl"), JSON.stringify({ argv: process.argv.slice(2) }) + "\n");
+function report(word) {
+    writeFileSync(join(dir, "word.txt"), word);  // written before the answer, so a crash leaves no word
+    process.stdout.write(word + "\n");
+}
+if (mode === "idle" || mode === "waiting") {
+    report(mode);
+} else if (mode === "board") {
+    // Only the claude board read is stubbed. The rows-to-state step is the repo's lib.mjs.
+    if (process.env.SM_AGENTS_FAIL) {
+        report("unseen");  // a failed board read prints unseen, as receiver-state.mjs does
+    } else {
+        const lib = await import(pathToFileURL(process.env.SM_LIB_PATH).href);
+        report(lib.receiverState(lib.parseAgentsJson(readFileSync(process.env.SM_AGENTS_FILE, "utf8")), process.argv[2]));
+    }
+} else {
+    if (mode === "hold") {
+        // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
+        // cmd.exe child does; a node child with inherited stdio does not, and the pipe closes at the kill.
+        const secs = Math.ceil(holdMs / 1000);
+        const stdio = ["ignore", "inherit", "inherit"];
+        const child = process.platform === "win32"
+            ? spawn("cmd.exe", ["/d", "/c", "ping -n " + (secs + 1) + " 127.0.0.1 > nul"], { stdio, windowsHide: true })
+            : spawn("sh", ["-c", "sleep " + secs], { stdio });
+        child.on("spawn", () => writeFileSync(join(dir, "held.flag"), "1"));
+        child.on("error", () => {});
+    }
+    setTimeout(() => {}, holdMs + 5000);  // exits by itself if nothing kills it
+}
+'''
+
+# Runs the hook with READER_TIMEOUT set to a short test value. The product reads that module global
+# at call time, so a fix that changes how the reader is run still meets this seam.
+TIMED_HOOK = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sendmessage_state_timed", %r)
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+hook.READER_TIMEOUT = %r
+sys.exit(hook.main())
+'''
+
+
 def check(name, ok, detail=""):
     if ok:
         print("ok   " + name)
@@ -101,17 +164,31 @@ def write_launchers():
         f.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
 
 
+def argv_lines(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line)["argv"] for line in f if line.strip()]
+
+
+def read_text(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 class Run:
-    def __init__(self, proc, base):
+    def __init__(self, proc, base, elapsed):
         self.code = proc.returncode
         self.out = proc.stdout or ""
         self.err = proc.stderr or ""
+        self.elapsed = elapsed
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
-        self.calls = []
-        record = os.path.join(base, "calls.jsonl")
-        if os.path.exists(record):
-            with open(record, encoding="utf-8") as f:
-                self.calls = [json.loads(line)["argv"] for line in f if line.strip()]
+        self.held = os.path.exists(os.path.join(base, "held.flag"))
+        self.word = read_text(os.path.join(base, "word.txt"))  # the state the stub printed, if it got that far
+        self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
+        self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
         self.model_calls = [a for a in self.calls if "-p" in a]
         self.agents_calls = [a for a in self.calls if a[:2] == ["agents", "--json"]]
 
@@ -122,15 +199,30 @@ class Run:
         return json.loads(self.out)["hookSpecificOutput"]
 
     def reached_board(self):
-        return self.loaded and len(self.agents_calls) == 1
+        """The hook asked the stub reader once, about PEER, and no claude board read ran."""
+        return self.loaded and self.reader_calls == [[PEER]] and not self.agents_calls
 
 
 def detail(r):
-    return "code=%s out=%r err=%r model=%d agents=%d loaded=%s" % (
-        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls), r.loaded)
+    return "code=%s out=%r err=%r model=%d agents=%d reader=%d word=%r loaded=%s wall=%.1fs" % (
+        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls),
+        len(r.reader_calls), r.word, r.loaded, r.elapsed)
 
 
-def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False):
+def point_reader_at_stub(cfg, base):
+    """Point the hook's pointer checkout (guard_pointer.pointer_checkout) at a temp clone whose
+    receiver-state.mjs is STUB_READER. find_reader then returns the stub, and node runs it."""
+    clone = os.path.join(base, "clone")
+    reader = os.path.join(clone, "mods", "session-board", "hooks", "receiver-state.mjs")
+    os.makedirs(os.path.dirname(reader))
+    with open(reader, "w", encoding="utf-8") as f:
+        f.write(STUB_READER)
+    with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8") as f:
+        f.write("@%s/CLAUDE.md\n" % clone.replace("\\", "/"))
+
+
+def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
+             reader_mode="board", reader_seconds=None, cap=120):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -152,9 +244,18 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
         env["SM_MODEL_FAIL"] = "1"
     if agents_fail:
         env["SM_AGENTS_FAIL"] = "1"
-    proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=120)
-    return Run(proc, base)
+    script = HOOK
+    point_reader_at_stub(cfg, base)  # every run: no case reaches the real reader
+    env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS),
+                "SM_LIB_PATH": os.path.join(os.path.dirname(HERE), "mods", "session-board", "hooks", "lib.mjs")})
+    if reader_seconds is not None:
+        script = os.path.join(base, "hook_timed.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(TIMED_HOOK % (HOOK, reader_seconds))
+    started = time.monotonic()
+    proc = subprocess.run([sys.executable, script], input=stdin_text, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env, timeout=cap)
+    return Run(proc, base, time.monotonic() - started)
 
 
 def hook_input(to=PEER, message="Status: the step is done, no change for you."):
@@ -237,10 +338,14 @@ def case_find_reader():
 # ---- the hook, run as a child with the harness's stdin shape
 
 def case_idle_and_waiting_allow_with_no_model_call():
+    # The stub reader answers the word, so no claude board read runs. Its record shows it was asked
+    # about PEER. Allow and unseen look the same here; the no-model check is what a mutant that sends
+    # idle to the model turns red.
     for status in ("idle", "waiting"):
-        r = run_hook(hook_input(), rows=[row(SID_A, PEER, status)])
+        r = run_hook(hook_input(), reader_mode=status)
         check("%s receiver: allow, no model call, no output" % status,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reached_board(), detail(r))
+              r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and not r.agents_calls
+              and r.loaded and r.reader_calls == [[PEER]], detail(r))
 
 
 def case_busy_blocks_when_the_model_flags():
@@ -255,7 +360,7 @@ def case_busy_blocks_when_the_model_flags():
 def case_busy_allows_when_the_model_does_not_flag():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=ALLOW)
     check("busy + model ok: allow, one model call, no deny",
-          r.code == 0 and r.out == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
+          r.code == 0 and r.out == "" and r.err == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
 
 
 def case_busy_flag_with_blank_reason_gets_the_default_reason():
@@ -264,7 +369,7 @@ def case_busy_flag_with_blank_reason_gets_the_default_reason():
     d = r.deny()
     check("busy + FLAG with a blank reason: deny with the default reason",
           r.code == 0 and d is not None and d.get("permissionDecisionReason", "").startswith(
-              "parallelism-no-mid-task-talk"), detail(r))
+              "parallelism-no-mid-task-talk") and r.reached_board(), detail(r))
 
 
 def case_unseen_receivers_allow_with_no_model_call():
@@ -273,13 +378,18 @@ def case_unseen_receivers_allow_with_no_model_call():
         ("a duplicate name", [row(SID_A, PEER, "busy"), row(SID_B, PEER, "idle")]),
         ("an unknown status", [row(SID_A, PEER, "running")]),
     ]
+    # The rows-to-state step is the real lib.mjs, so each row shape must come out unseen there.
+    # The word check catches a stub that crashed: the hook would then read unseen for the wrong reason.
     for label, rows in cases:
         r = run_hook(hook_input(), rows=rows)
         check("unseen (%s): allow, no model call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reached_board(), detail(r))
+              r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
+              and r.word == "unseen", detail(r))
+    # SM_AGENTS_FAIL: the stub stands in for a failed claude read, and prints unseen as the real reader does.
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], agents_fail=True)
     check("unseen (agents list fails): allow, no model call",
-          r.code == 0 and r.out == "" and not r.model_calls and r.loaded, detail(r))
+          r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
+          and r.word == "unseen", detail(r))
 
 
 def case_malformed_input_fails_open_with_no_deny():
@@ -290,17 +400,48 @@ def case_malformed_input_fails_open_with_no_deny():
         ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}'),
     ):
         r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-        check("malformed input (%s): exit 0, no deny, no model call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls, detail(r))
+        check("malformed input (%s): exit 0, no deny, no model call, no reader call" % label,
+              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == [], detail(r))
+
+
+def case_reader_timeout_allows_with_one_plain_line():
+    # A reader that hangs with no child, under the short timeout: a real kill, not a fake. The board
+    # would say busy and the model would flag, so a timeout that reached the model shows as a deny.
+    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG,
+                 reader_mode="hang", reader_seconds=READER_SECONDS)
+    lines = r.err.strip().splitlines()
+    check("reader times out: exit 0, no deny, no model call, one plain board-timeout line",
+          r.code == 0 and r.out == "" and not r.model_calls and r.loaded and len(lines) == 1
+          and "board read timed out" in lines[0] and "TimeoutExpired" not in r.err and "Command" not in r.err,
+          detail(r))
+
+
+def case_reader_that_holds_the_pipe_returns_in_bound():
+    # The reader's child keeps stdout open after the kill. On Windows, subprocess.run then waits on
+    # that pipe with no bound, so the hook returns late. POSIX waits on the reader alone, so this case
+    # is expected to pass there. The limit is a margin over the set timeout, not a tight bound.
+    try:
+        r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)
+    except subprocess.TimeoutExpired:
+        check("reader holds the pipe: hook returns before the harness cap", False,
+              "still running after %d s" % HARNESS_CAP)
+        return
+    check("reader holds the pipe: its child started, so the pipe is really held",
+          r.held and len(r.reader_calls) == 1, detail(r))
+    check("reader holds the pipe: hook returns within %d s for a %d s reader timeout" % (WALL_LIMIT, READER_SECONDS),
+          r.elapsed <= WALL_LIMIT, detail(r))
+    check("reader holds the pipe: exit 0, no deny, no model call, board-timeout line",
+          r.code == 0 and r.out == "" and not r.model_calls and "board read timed out" in r.err, detail(r))
 
 
 def case_model_failures_fail_open_with_no_deny():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG, model_fail=True)
     check("busy + model exits non-zero: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1, detail(r))
+          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
+          and r.reached_board(), detail(r))
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer='{"verdict": "FLAG"}')
     check("busy + off-shape model answer: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err, detail(r))
+          r.code == 0 and r.out == "" and "failed open" in r.err and r.reached_board(), detail(r))
 
 
 def case_model_row_names_the_call():
@@ -336,6 +477,8 @@ def case_hook_runs():
     case_unseen_receivers_allow_with_no_model_call()
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()
+    case_reader_timeout_allows_with_one_plain_line()
+    case_reader_that_holds_the_pipe_returns_in_bound()
 
 
 if __name__ == "__main__":

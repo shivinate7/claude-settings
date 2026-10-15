@@ -26,8 +26,21 @@ Owner rulings, 2026-10-08:
   owner sees at a glance whether the goal was read right.
 - A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`.
   It reads the owner's last messages from `transcript_path`. It asks a model whether the
-  `Goal:` line matches those messages, and whether each option serves that goal. It
-  also asks whether an option that serves the goal better is missing.
+  `Goal:` line matches those messages. It asks six things in all:
+  1. Does the `Goal:` line match the goal?
+  2. Does each option serve the goal?
+  3. Is an option that serves the goal better missing?
+  4. Can the owner answer from the box alone, with every id, code or name explained in words?
+  5. Does the question point at anything the box does not show? Examples: an earlier
+     message, a time that refers to an earlier message, or "item 4".
+  6. Does each option say what the owner gains and what the owner loses, as a change for
+     the owner and not for a record (rule `style-option-says-effect`)?
+- Owner ruling, 2026-10-14: a question must be plain, in every repo. The model judge asks all
+  six, in this one hook, with no separate pre-check. A FLAG on any ask denies, and the judge's
+  reason goes to the session. Incidents, 2026-10-14: three questions passed and the owner could
+  not use them. Two named ids, a branch, a sha and a key with no words, and one pointed at
+  messages the box does not hold. The third offered a false choice.
+  It left out the better option.
 - The model call reuses `invoke_model` from `hooks/decision_watch.py`. The model is Haiku
   at effort `xhigh`.
 - `invoke_model` starts a second `claude` program. That program does not share the app's
@@ -102,28 +115,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Rounds 2 and 3 of the question-outcome review and round 3 of judge-cap-off. Each stays open.
-
-- A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
-  Problem-first order. The order check reads that line first, so it passes. Presence passes
-  too, on the later plain `Goal:` line.
-- `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as
-  Problem lines. Each passes presence only with a second plain `Problem:` line, and then
-  passes the order check even before `Goal:`.
-- A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
-  is correct: the question breaks Goal first. The free pass lets the retry through.
-- Question text and option labels reach the judge prompt with no fence and no defang
-  (`hooks/question_outcome.py` near line 385). An asker can forge an Owner block there. Low
-  risk: the asker already writes the Goal line. Debt: `question-text-not-defanged`.
-- The defang matches the exact fence tokens only, so `<<<end>>>` and `<<< END>>>` pass
-  unchanged. Whether the judge reads them as fences is unmeasured. Debt:
-  `question-text-not-defanged`.
-- The cut-mark reserve stays when no owner message can be cut, so the prompt can go up to 36
-  chars over PROMPT_MAX. The hook then says the check did not run. Practically unreachable.
-  Debt: `judge-cut-mark-reserve-over`.
-- That PROMPT_MAX fits the model's context is unmeasured for token-dense text. Over the
-  context, the model call fails and the hook says the check did not run. Debt:
-  `model-clip-unmeasured`.
+Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `question-text-not-defanged` (question text and option labels reach the judge with no fence, and `<<< END>>>` forms pass), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text). `question-preface-punctuation` (a punctuation-led preface line before Goal is denied, and the free pass then lets the retry through).
 
 Kind: process
 Home: hooks/question_outcome.py

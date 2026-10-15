@@ -20,10 +20,7 @@ On 2026-10-13 the owner tested `plain-diff` and `session-board` in the Windows d
 
 ## Holes, named
 
-- macOS is untested for all four mods.
-- The marketplace source has no `ref` pin. It follows the default branch. A bad merge to main reaches every machine at its next plugin refresh. Review and CI on main are the only guard.
-- A mod loads only in a session that starts after the change. A running session keeps its old mod set.
-- Unmeasured: how often the app refreshes a marketplace, and whether it refreshes while a session is open.
+Debts: `mods-macos-untested` (macOS is untested for all four mods), `mods-marketplace-no-ref-pin` (the source follows the default branch, with no ref pin), `mods-refresh-cadence-unmeasured` (the refresh interval and open-session behavior are unmeasured). `mods-load-needs-new-session` (a mod loads only in a session that starts after the change, and a running session keeps its old mod set).
 
 Kind: process
 Home: settings.json

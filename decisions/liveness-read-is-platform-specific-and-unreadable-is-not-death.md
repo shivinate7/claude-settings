@@ -78,12 +78,7 @@ kernel's own process-creation time. A correct read can fall outside a
 
 ## Holes, named
 
-This repository has no Windows machine to run the Windows arm on. The arm's
-own branching logic is proven with a stubbed `ctypes.windll` in
-`hooks/test_guard.py`, not with a real kernel32 call. That covers error 87
-versus error 5 versus a valid handle. A green Windows CI job is still the
-read that proves this arm against the real platform. That job lands in a
-parallel change to this same Windows-parity sequence.
+Debts: `liveness-windows-arm-unproven` (the Windows arm is proven only with a stubbed `ctypes.windll`, and the Windows CI job that proves it lands in a parallel change).
 
 ## Two more holes closed: path spelling and clock direction
 
@@ -148,3 +143,7 @@ An unreadable subject there already allows the git command through. It
 logs `noted`/`subject-unread`, the same path any other unreadable subject
 takes. No test there needed a change. Only the janitor's automated SWEEP
 did. It must decide alone, with nobody to log a note for.
+
+Kind: build
+Plan: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md#the-fix (all)
+Home: hooks/guard.py

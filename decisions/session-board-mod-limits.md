@@ -89,23 +89,13 @@ Three review rounds. The fix commits are 23b7ee7, a7a0e00 and 50e55bd. Blockers 
 
 ## Holes, named
 
-Each hole ships under the three-round review cap.
+Debts: `sb-pane-untested` (pane draw), `sb-prompt-turn-end` (turn end in a prompt), `sb-hook-order-unproven` (hook order), `sb-auto-approve-unseen` (auto-approve). `sb-host-calls-unbounded` (host calls), `sb-ghost-row-race` (clear or resume), `sb-safe-stop-origin` (origin check), `sb-config-folder-guess` (config folder). `sb-backoff-cap` (back-off cap), `sb-glob-path-names` (folder names), `sb-agents-json-cost` (agents cost), `sb-filter-driver-runs` (filter drivers). `sb-store-not-shared` (store sharing), `sb-process-desktop-unknown` (process call), `sb-command-turn-unknown` (command turn), `plain-diff-secret-file-names` (secret names).
 
-- The pane draw is untested in the desktop app. Example: a press on a row does not open its detail view. Why it ships: only the app or a terminal draws the pane.
-- The permission signal is a tool check that returns "ask". Turn end during a prompt is unknown. Example: a turn ends while a prompt is still open. Why it ships: headless mode cannot test it.
-- The host hook order is untested. The mod assumes that the host runs the permission check inside `next()`. Example: a permission label outlasts its tool call. Why it ships: a headless run did not confirm the order.
-- An auto-approve mode can answer an "ask" with no person present. The mod cannot tell this apart. Example: a "permission" label shows during a call that no person answers. Why it ships: the mod has no mode check.
-- Running servers and background tasks are not part of update-ready. Example: a session with a dev server reads "ready". Why it ships: the five conditions are the owner's definition.
-- The 100 ms wait does not bound every host call. At session start, `$.session.repo()` and `$.command.register()` are awaited with no bound. At session end, the store deletes are unbounded. On clear or resume, `$.session.repo()` is unbounded too. Example: a slow store delete holds the session end. Why it ships: unmeasured.
-- The clear or resume race can leave a ghost row. The end hook deletes the records before it marks the old id as retired. A beat that writes in that gap leaves the old entry. Example: a beat fires between the deletes and the mark. Why it ships: the gap is narrow, and the 2-minute rule hides the row. A held write that lands later is removed when it lands.
-- The origin check is a block-list. An unclassified origin still runs `/safe-stop`. Example: a command from "unclassified". Why it ships: the desktop app can send "unclassified". The check does not prove that a person typed the command.
-- The config folder is a guess. A drive-letter USERPROFILE means Windows. Under Git Bash, HOME may be `/c/Users/x`, which a Windows program cannot use. That form is avoided only when USERPROFILE holds a drive letter. Other MSYS forms are not handled. Example: no USERPROFILE, and HOME is `/c/Users/x`. Why it ships: `CLAUDE_CONFIG_DIR` overrides it.
-- A quick git read resets the back-off. A repo whose read takes over 5 s stays unknown. Example: a status read of 6 s. Reads then run up to 5 minutes apart, and the row reads unknown. Why it ships: a larger cap is unmeasured.
-- Grep and Glob paths that look like a file name show by name. Example: a folder named `v1.2`. Why it ships: the file system check is not built.
-- `claude agents --json` runs on each board refresh. Example: a very large session list. Why it ships: its cost is unmeasured.
-- A filter driver named in repo git config can run during `git status`. The mod sets `core.fsmonitor=false`, but it does not disable filter drivers. Example: a clean filter with a matching `.gitattributes` entry. Why it ships: the driver needs repo config that the user already trusts.
-- The cost figure from `$.session.usage()` is shown nowhere. Why it ships: the figure was unreliable.
-- The store is per plugin and per config folder. Sessions loaded another way, or under another config folder, do not show. Example: a `--plugin-dir` run writes `session-board_inline-<hash>.json`. Why it ships: the host names the file. Whether the app and the terminal share one store is unknown.
-- The API notes `$.process` as CLI only. If it fails in the desktop app, no session reads ready, and the `claude agents` seed is missing. Example: the board shows store entries alone. Why it ships: the desktop app is untested.
-- It is unknown whether a prompt sent from a command starts a turn in the app. Example: `/safe-stop` reports "queued", and no turn starts. Why it ships: untested in the app.
-- The secret name rule misses some names. Example: `terraform.tfstate` shows by name. The same gap is in `plain-diff-mod-limits` (the plain-diff secret filter). Why it ships: the name list holds only the names known so far.
+## Named limits
+
+- Running servers and background tasks are not part of update-ready. The five conditions are the owner's definition.
+- The cost figure from `$.session.usage()` is shown nowhere. The figure was unreliable.
+
+Kind: build
+Plan: decisions/session-board-mod-limits.md#the-ruling (all)
+Home: mods/session-board/hooks/lib.mjs
