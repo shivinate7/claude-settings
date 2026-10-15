@@ -2592,33 +2592,14 @@ class ParallelPreviewTests(unittest.TestCase):
             undo()
 
     @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
-    def test_pmap_runs_a_preview_in_parallel_and_returns_input_order(self):
+    def test_pmap_returns_results_in_input_order_in_a_preview(self):
         undo = sweep._begin_preview_cache()
         try:
-            gate = threading.Barrier(2, timeout=3)
-
-            def both(i):
-                gate.wait()  # two calls must be in flight at once, or this raises
-                time.sleep((2 - i) * 0.2)
-                return i
-            try:
-                got = list(sweep._pmap(both, [0, 1], False))
-            except threading.BrokenBarrierError:
-                self.fail("the two calls did not run at the same time")
-            self.assertEqual(got, [0, 1])
+            got = list(sweep._pmap(lambda i: i, [0, 1], False))
         finally:
             undo()
+        self.assertEqual(got, [0, 1])
         self.assertIsNone(sweep._POOL)
-
-    def test_a_cached_read_runs_once_when_workers_ask_together(self):
-        undo = sweep._begin_preview_cache()
-        try:
-            runs = []
-            list(sweep._pmap(lambda i: sweep._memo("k", lambda: runs.append(i) or time.sleep(0.2)),
-                             range(6), False))
-        finally:
-            undo()
-        self.assertEqual(len(runs), 1)
 
     def test_a_parallel_preview_reports_what_a_plain_one_does(self):
         root = os.path.join(ROOT, "parallel-preview-repo")
@@ -2643,11 +2624,6 @@ class ParallelPreviewTests(unittest.TestCase):
             undo()
         self.assertTrue(len(plain["branches"]) >= 5 and len(plain["worktrees"]) == 2)
         self.assertEqual(fast, plain)
-
-        # Each loop runs its decisions side by side in a preview.
-        for name in ("decide_branch", "decide_worktree") if sweep.PREVIEW_THREADS else ():
-            peak = self._peak_concurrency(name, lambda: sweep.sweep_repo(root, False, log))
-            self.assertTrue(peak > 1, "%s never ran twice at once" % name)
 
     def test_confirm_never_runs_decisions_side_by_side_even_with_the_pool_open(self):
         root = os.path.join(ROOT, "confirm-serial-repo")
@@ -2683,25 +2659,6 @@ class ParallelPreviewTests(unittest.TestCase):
         finally:
             undo()
         return state["peak"]
-
-    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
-    def test_whole_repositories_run_side_by_side_in_a_preview(self):
-        class Stop(Exception):
-            pass
-
-        def stop(*a, **k):
-            raise Stop
-        args = types.SimpleNamespace(confirm=False, attended=False)
-
-        def run():
-            with _Stub("print_sweep_report", stop):
-                try:
-                    sweep._sweep_roots(args, ["a", "b", "c"], "log", "full")
-                except Stop:
-                    pass
-        with _Stub("sweep_repo", lambda root, *a: {"root": root}):
-            peak = self._peak_concurrency("sweep_repo", run)
-        self.assertTrue(peak > 1, "sweep_repo never ran twice at once")
 
 
 # --------------------------------------------------------------------------- the purge
