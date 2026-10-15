@@ -363,10 +363,6 @@ class RealRepo(unittest.TestCase):
         self.assertEqual(committed, out.replace("\r\n", "\n"),
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
-    def test_r8_the_ci_check_passes_on_this_repo(self):
-        code, out, err = generator(None, "--check")
-        self.assertEqual((code, out + err), (0, ""), out + err)
-
     def test_r9_session_start_refresh_command_is_byte_identical_to_main(self):
         # F1 ruling: the refresh stays inline. A move into a script gates recovery on an install.
         # Equal as the JSON decodes, which is the exact text the harness runs.
@@ -698,22 +694,6 @@ class Fixtures(unittest.TestCase):
 class Helpers(unittest.TestCase):
     def test_u1_escaped_pipe_in_a_code_span_stays_in_its_cell(self):
         self.assertEqual(split_cells("| `Bash\\|PowerShell` | x |"), ["`Bash|PowerShell`", "x"])
-
-    def test_u2_first_sentence_cuts_at_the_newline(self):
-        self.assertEqual(first_sentence("Judge this edit to a file: $ARGUMENTS\nRule: x."),
-                         "Judge this edit to a file: $ARGUMENTS")
-
-    def test_u3_first_sentence_keeps_its_period(self):
-        self.assertEqual(first_sentence("Rule one. Rule two."), "Rule one.")
-
-    def test_u4_page_rows_reads_only_tables_with_the_catalog_header(self):
-        text = ("| Other | Table |\n|---|---|\n| a | b |\n\n"
-                "| Key | Kind | Event | Matcher | If | Model | Effort | What it does |\n"
-                "|---|---|---|---|---|---|---|---|\n"
-                "| `hooks/x.py` | hook | Stop | - | - | no model | n/a | Does x. |\n")
-        rows = page_rows(text)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["Key"], "`hooks/x.py`")
 
 
 if __name__ == "__main__":

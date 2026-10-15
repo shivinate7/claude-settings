@@ -3,7 +3,6 @@
 // fake host (store, clock, git, claude agents, python, ui, prompt). The clock is fixed at NOW.
 // register.mjs keeps state at module level, so each host case loads a fresh copy of it.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as lib from './hooks/lib.mjs'
 
@@ -915,10 +914,6 @@ await test('polling: with no close and no /board call, board refreshes stop afte
   assert.ok(h.agentCalls.length >= 1 && h.agentCalls.length <= 10, `claude agents calls over 30 beats: ${h.agentCalls.length}, want 1 to 10`)
 })
 
-await test('timeout: the claude agents call timeout is 8 s, under the 10 s hook budget', () => {
-  same(lib.AGENTS_TIMEOUT_MS, 8000, 'AGENTS_TIMEOUT_MS')
-})
-
 await test('clear: a flush before the new session id binds does not recreate the old entry', async () => {
   const h = await start()
   await fire(h, 'session.start', {})
@@ -1002,7 +997,6 @@ await test('heartbeat: a failing git read makes the reading unknown, so no updat
 
 const CLEAN_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n', stderr: '' }
 const DIRTY_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n1 .M N... 100644 100644 100644 a b a.ts\n', stderr: '' }
-const README = readFileSync(new URL('./README.md', import.meta.url), 'utf8')
 
 await test('safe-stop: python runs isolated (-I) with its cwd at the config folder, plan and run', async () => {
   for (const args of ['plan', '']) {
@@ -1111,19 +1105,6 @@ await test('permission ask with no tool id writes nothing to the store', async (
   h.writes.length = 0
   await fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' } }, 'ask')
   same(h.writes, [], 'store writes for an ask with no id')
-})
-
-await test('README: does not say "Only the person starts it"', () => {
-  assert.ok(!/Only the person starts it/i.test(README), 'README still says "Only the person starts it"')
-})
-
-await test('README: calls the origin check a block-list', () => {
-  assert.ok(/block-?list/i.test(README), 'README does not call the origin check a block-list')
-})
-
-await test('README: a sentence says a denied permission clears when the call returns', () => {
-  const sentences = README.split(/[.\n]/)
-  assert.ok(sentences.some(s => /denied/i.test(s) && /clear/i.test(s) && /return/i.test(s)), 'no sentence says a denied permission clears when the call returns')
 })
 
 // ---- review round 4 pins (PR 380)

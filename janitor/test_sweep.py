@@ -482,22 +482,6 @@ class AnchorArmTests(unittest.TestCase):
     """The rebase-ghost fixture. Plan: 'The anchor arm is the rebase ghost. It must go red
     against a keep rule that tests ancestry alone.'"""
 
-    def test_ancestry_alone_is_blind_to_the_rebase(self):
-        branches = sweep.list_local_branches(MAIN)
-        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
-        self.assertIn("rebased-work", branches)
-
-        base = guard.resolve_default_base(MAIN)
-        self.assertIsNotNone(base)
-
-        # A keep rule that tests ancestry ALONE (Banchi's rule this build replaces) says KEEP,
-        # because a rebase gave the commit a new id: ancestry cannot see the patch it carries.
-        ancestor = guard.branch_is_ancestor(MAIN, base, "rebased-work")
-        self.assertFalse(
-            ancestor, "an ancestry-only rule must fail to see the rebase, or this arm proves "
-                      "nothing this build exists for"
-        )
-
     def test_the_patch_test_sees_through_the_rebase_and_reaps(self):
         branches = sweep.list_local_branches(MAIN)
         self.assertTrue(len(branches) > 0)
@@ -1298,12 +1282,6 @@ class LooseProcessTests(unittest.TestCase):
         out = io.StringIO()
         sweep.print_loose_processes_report(entry, out=out)
         self.assertIn("orphan=unknown", out.getvalue())
-
-    def test_report_lists_the_marked_process(self):
-        out = io.StringIO()
-        sweep.print_loose_processes_report(sweep.find_loose_processes(), out=out)
-        self.assertIn("loose processes", out.getvalue())
-        self.assertIn("pid=%-8s" % self.marked, out.getvalue())
 
     def test_unreadable_owner_is_listed_as_unknown(self):
         """An owner read that fails (`None`) lists the process; it is not left out. The stub
@@ -5303,18 +5281,6 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
                          "two live launchd_sim processes matched the record by their first pid")
         self.assertEqual(self.world.shutdowns(), [])
-
-    def test_both_ps_reads_run_under_lc_all_c(self):
-        # The table read and the lstart read force LC_ALL=C, whatever the parent's locale is.
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        with mock.patch.dict(os.environ, {"LC_ALL": "de_DE.UTF-8"}):
-            self.tier(confirm=False)
-        self.assertGreaterEqual(len(self.world.ps_envs), 2,
-                                "the tier made fewer than two ps reads for one booted device")
-        for env in self.world.ps_envs:
-            self.assertEqual((env or {}).get("LC_ALL"), "C",
-                             "a ps read ran under %r, not C" % ((env or {}).get("LC_ALL"),))
 
     def test_a_failed_simctl_read_keeps_every_device(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],

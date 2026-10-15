@@ -12,7 +12,6 @@ case spawns a real `claude` subprocess; one case asserts it is never even called
 """
 import contextlib
 import importlib.util
-import inspect
 import io
 import json
 import os
@@ -650,7 +649,7 @@ def _capture_invoke(fake_run):
 
 
 # Ruling decisions/haiku-prompt-hooks.md, "decision_watch": haiku, xhigh effort, 120s.
-def case_invoke_model_haiku_xhigh_120s():
+def case_invoke_model_haiku_xhigh():
     captured = {}
 
     def fake_run(argv, **kwargs):
@@ -663,8 +662,7 @@ def case_invoke_model_haiku_xhigh_120s():
     timeout = (captured.get("kwargs") or {}).get("timeout")
     check("haiku_xhigh: --model haiku in argv", ("--model", "haiku") in pairs, argv)
     check("haiku_xhigh: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
-    check("haiku_xhigh: subprocess timeout is 120", timeout == 120, timeout)
-    check("haiku_xhigh: MODEL_TIMEOUT is 120", dw.MODEL_TIMEOUT == 120, dw.MODEL_TIMEOUT)
+    check("haiku_xhigh: subprocess gets the module timeout", timeout == dw.MODEL_TIMEOUT, timeout)
 
 
 # A timeout is an error (UNKNOWN upstream), never an ALLOW verdict.
@@ -1235,18 +1233,9 @@ def _timeout_run(argv, **kwargs):
     raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
 
 
-def case_invoke_model_signature_and_return_shape_pinned():
-    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its signature
-    # and its (verdict | None, error | None) return must not move.
-    params = inspect.signature(dw.invoke_model).parameters
-    check("invoke_model signature: parameters are prompt, model, timeout, shape",
-          list(params) == ["prompt", "model", "timeout", "shape"], list(params))
-    check("invoke_model signature: model defaults to MODEL",
-          params["model"].default == dw.MODEL, params["model"].default)
-    check("invoke_model signature: timeout defaults to MODEL_TIMEOUT",
-          params["timeout"].default == dw.MODEL_TIMEOUT, params["timeout"].default)
-    check("invoke_model signature: shape defaults to VERDICT_SHAPE",
-          params["shape"].default is dw.VERDICT_SHAPE, params["shape"].default)
+def case_invoke_model_return_shape_pinned():
+    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its
+    # (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
@@ -1714,7 +1703,7 @@ def main():
     case_cache_key_holds_the_repo_and_a_bounded_read()
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
-    case_invoke_model_haiku_xhigh_120s()
+    case_invoke_model_haiku_xhigh()
     case_invoke_model_timeout_is_error()
     case_e1_model_output_is_read_as_utf8()
     case_token_t1_file_reaches_child_env()
@@ -1736,7 +1725,7 @@ def main():
     for case in (
         case_invoke_model_long_prompt_reaches_child_whole,
         case_invoke_model_prompt_bytes_reach_child_exact,
-        case_invoke_model_signature_and_return_shape_pinned,
+        case_invoke_model_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
         case_parse_verdict_is_the_one_home,

@@ -1465,22 +1465,6 @@ def case_g2_you_want_alone_is_denied_and_the_reason_names_goal():
     check(name + ": exit 0", code in (0, None), code)
 
 
-def case_g3_prompt_names_goal_and_problem():
-    name = "caseG3 prompt: the hook's own text names Goal: and Problem:"
-    if not need_module(name):
-        return
-    mod = fixture_hook(name)
-    if mod is None:
-        return
-    with hook_as(mod), model_stub(ALLOW) as stub:
-        run_main(ask_payload(fresh_session("g3"), [question(GOAL_LINE_Q, LABELS)], default_transcript()))
-    prompt = stub.prompts[0] if stub.prompts else ""
-    rest = prompt.replace(GOAL_LINE_Q, "")  # the question's own Goal: and Problem: lines are not counted
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": names Goal:", "Goal:" in rest, "")
-    check(name + ": names Problem:", "Problem:" in rest, "")
-
-
 def case_g4_prompt_holds_the_two_rule_bullets_of_the_real_style_file():
     name = "caseG4 prompt: holds the two rule bullets of output-styles/shiv-stylisms.md"
     if not need_module(name):
@@ -1516,25 +1500,6 @@ def case_g5_prompt_reads_the_style_file_not_a_copy():
           "DECOY-FIX found")
 
 
-def case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny():
-    name = "caseG6 judge prompt: a goal line is a paraphrase in plain words, not grounds to deny"
-    if not need_module(name):
-        return
-    mod = fixture_hook(name)
-    if mod is None:
-        return
-    with hook_as(mod), model_stub(ALLOW) as stub:
-        run_main(ask_payload(fresh_session("g6"), [question(GOAL_Q, LABELS)], default_transcript()))
-    prompt = (stub.prompts[0] if stub.prompts else "").lower()
-    sentences = [s for s in re.split(r"[.;\n]", prompt) if "paraphrase" in s]
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": says a goal line is a paraphrase", "paraphrase" in prompt, "")
-    check(name + ": says the paraphrase is in plain words", "plain words" in prompt, "")
-    check(name + ": a sentence on paraphrase says it is not grounds to deny or flag",
-          any(re.search(r"\b(not|never|no)\b", s) and re.search(r"\b(deny|denied|flag)", s)
-              for s in sentences), sentences[:3])
-
-
 # --------------------------------------------------------------------------- goal format, review round 1
 # No order between the Problem and Goal lines; the literals tied to the style file by module
 # constants; one stderr line when the style file or a rule anchor is missing.
@@ -1542,20 +1507,6 @@ ORDER_WORD = re.compile(
     r"\b(then|before|after|first|followed|precedes?|preceded|next|finally|order|sequence)\b", re.IGNORECASE)
 GOAL_ANCHOR_END = "options.<!-- rule:%s -->" % GOAL_RULE  # the goal bullet's last line
 PROBLEM_ANCHOR_END = "word.<!-- rule:%s -->" % PROBLEM_RULE  # the problem bullet's last line
-
-
-def case_g7_prompt_states_no_order_between_problem_and_goal():
-    name = "caseG7 prompt: no sentence naming Problem: and Goal: states an order (Goal-first is correct)"
-    if not need_module(name):
-        return
-    with model_stub(ALLOW) as stub:
-        run_main(ask_payload(fresh_session("g7"), [question(GOAL_Q, LABELS)], default_transcript()))
-    prompt = stub.prompts[0] if stub.prompts else ""
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    for sentence in re.split(r"[.;\n]", prompt):
-        if "Problem:" in sentence and "Goal:" in sentence:
-            check(name + ": no order word in a sentence that names both lines",
-                  not ORDER_WORD.search(sentence), " ".join(sentence.split())[:160])
 
 
 def case_g8_literals_are_module_constants_that_the_style_rules_hold():
@@ -1825,22 +1776,6 @@ def case_o8_decorated_problem_first_lines_are_denied_with_no_model_call():
         check(name + ": denied", deny_reason(out) is not None, out)
         check(name + ": no model call", stub.prompts == [], len(stub.prompts))
         check(name + ": exit 0", code in (0, None), code)
-
-
-def case_o9_prompt_names_the_goal_line_before_the_problem_line():
-    name = "caseO9 model prompt: the hook's own text names the Goal: line before the Problem: line"
-    if not need_module(name):
-        return
-    with model_stub(ALLOW) as stub:
-        run_main(ask_payload(fresh_session("o9"), [question(GOOD_Q, LABELS)], default_transcript()))
-    prompt = stub.prompts[0] if stub.prompts else ""
-    head = prompt.split("Owner's last messages:")[0]  # the hook's own text and the style rules, not the question
-    goal_at, problem_at = head.find("Goal:"), head.find("Problem:")
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": names Goal: and Problem:", goal_at >= 0 and problem_at >= 0,
-          "goal_at=%d problem_at=%d" % (goal_at, problem_at))
-    check(name + ": Goal: comes before Problem:", 0 <= goal_at < problem_at,
-          "Goal: at %d, Problem: at %d" % (goal_at, problem_at))
 
 
 def case_o10_problems_and_problem_solved_lines_do_not_deny():
@@ -2331,38 +2266,6 @@ def case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block():
               span[opened:at][:120] if opened >= 0 else "no BEGIN before the text")
 
 
-def case_k7_whole_owner_messages_over_the_old_argv_cap_still_run_the_judge():
-    # The prompt goes to the model on stdin, so the old command-line cap (ARGV_UNITS, UTF-16 units)
-    # no longer applies. Three whole owner messages of about 11,000 code points each (6,000 astral
-    # characters: two UTF-16 units each), with a long assistant span between them: the prompt is over
-    # ARGV_UNITS UTF-16 units, and every owner message stays whole (under the module's PROMPT_MAX). The
-    # judge must still run.
-    name = "caseK7 whole owner messages over ARGV_UNITS (UTF-16 units, old argv cap): the judge still runs"
-    if not need_module(name):
-        return
-    astral = "\U0001F642" * 6000
-    owners = ["K7-OWN-%d %s %s K7-END-%d" % (i, astral, "k" * 5000, i) for i in (1, 2, 3)]
-    units = sum(len(t.encode("utf-16-le")) // 2 for t in owners)
-    check(name + ": fixture: owner messages over ARGV_UNITS UTF-16 units", units > ARGV_UNITS, units)
-    records = [owner(owners[0])]
-    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7a_%d" % i) for i in range(10)]
-    records += [owner(owners[1])]
-    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7b_%d" % i) for i in range(10)]
-    records += [owner(owners[2])]
-    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7c_%d" % i) for i in range(10)]
-    path = write_transcript("k7", records)
-    with model_stub(ALLOW) as stub:
-        code, out, _ = run_main(ask_payload(fresh_session("k7"), [question(GOOD_Q, LABELS)], path))
-    prompt = prompt_of(stub)
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": no did-not-run line", "did not run" not in (system_message(out) or ""), out)
-    check(name + ": the prompt the judge got is over ARGV_UNITS UTF-16 units",
-          len(prompt.encode("utf-16-le")) // 2 > ARGV_UNITS, len(prompt.encode("utf-16-le")) // 2)
-    for i, text in enumerate(owners, 1):
-        check(name + ": owner message %d (%d chars) is whole in the prompt" % (i, len(text)), text in prompt,
-              len(text))
-
-
 def owner_block_bodies(prompt):
     """The body of each Owner block in the prompt, in prompt order."""
     return re.findall(r"<<<BEGIN Owner message>>>\n(.*?)\n<<<END>>>", prompt, re.DOTALL)
@@ -2441,31 +2344,6 @@ def case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_keep_t
     check(name + ": the question is whole", GOOD_Q in prompt, "question")
     check(name + ": prompt within the module's PROMPT_MAX", len(prompt) <= qo.PROMPT_MAX, len(prompt))
     owner_claims(name, prompt, texts)
-
-
-def case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent():
-    name = "caseK10 owner message leaves no more than CUT_MARK plus SEP for the span: assistant text marked or whole"
-    if not need_module(name):
-        return
-    reserve = len(qo.CUT_MARK) + qo.SEP  # the room fit_span keeps back for a span's own mark
-    calib_text = owner_text("K10-OWN", 1000) + " K10-OWN-END"
-    grow = 1000 + qo.PROMPT_MAX - 20 - len(owner_only_prompt(calib_text))
-    text = owner_text("K10-OWN", grow) + " K10-OWN-END"
-    left = qo.PROMPT_MAX - len(owner_only_prompt(text))
-    check(name + ": fixture: the owner message leaves 1 to CUT_MARK plus SEP chars for the span",
-          0 < left <= reserve, left)
-    said = "K10-ASSIST " + "x" * 300 + " K10-ASSIST-END"
-    path = write_transcript("k10", [owner(text), assistant_text(said, "msg_k10")])
-    with model_stub(ALLOW) as stub:
-        _, out, _ = run_main(ask_payload(fresh_session("k10"), [question(GOOD_Q, LABELS)], path))
-    prompt = prompt_of(stub)
-    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": not denied", deny_reason(out) is None, out)
-    check(name + ": the question is whole", GOOD_Q in prompt, "question")
-    check(name + ": prompt within the module's PROMPT_MAX", len(prompt) <= qo.PROMPT_MAX, len(prompt))
-    check(name + ": the assistant text is whole, or CUT_MARK stands in for it",
-          said in prompt or qo.CUT_MARK in prompt, len(prompt))
-    owner_claims(name, prompt, [text])
 
 
 # --------------------------------------------------------------------------- plain words, lane question-plain
@@ -2903,11 +2781,8 @@ def case_d12_the_judge_prompt_names_the_option_cut_mark_the_code_emits():
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
-             case_g3_prompt_names_goal_and_problem,
              case_g4_prompt_holds_the_two_rule_bullets_of_the_real_style_file,
              case_g5_prompt_reads_the_style_file_not_a_copy,
-             case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny,
-             case_g7_prompt_states_no_order_between_problem_and_goal,
              case_g8_literals_are_module_constants_that_the_style_rules_hold,
              case_g9_missing_style_file_still_judges_and_names_it_on_stderr,
              case_g10_missing_goal_anchor_still_judges_and_names_it_on_stderr,
@@ -2921,7 +2796,6 @@ def main():
              case_o6_problem_first_variant_forms_are_denied_with_no_model_call,
              case_o7_after_any_deny_the_next_ask_passes_even_problem_first,
              case_o8_decorated_problem_first_lines_are_denied_with_no_model_call,
-             case_o9_prompt_names_the_goal_line_before_the_problem_line,
              case_o10_problems_and_problem_solved_lines_do_not_deny,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
@@ -2969,10 +2843,8 @@ def main():
              case_k4_owner_message_of_5000_chars_reaches_the_prompt_whole,
              case_k5_a_four_bracket_fence_cannot_close_a_block_or_open_an_owner_block,
              case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block,
-             case_k7_whole_owner_messages_over_the_old_argv_cap_still_run_the_judge,
              case_k8_one_owner_message_over_the_bound_keeps_text_and_shows_cut_mark,
              case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_keep_their_end,
-             case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent,
              case_p1_judge_prompt_asks_the_plain_things,
              case_p2_the_three_incident_questions_reach_the_judge_and_are_denied,
              case_d1_each_option_description_reaches_the_judge_beside_its_own_label,

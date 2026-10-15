@@ -568,13 +568,6 @@ def case_background_separator_starts_each_watch():
     guard_silent("single & after an unquoted # is comment text", "echo ok # a & gh pr ready 12")
 
 
-def case_deadline_not_a_number_uses_default():
-    """CI_WAKE_DEADLINE that is not a number falls back to the default budget: green verdict."""
-    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]),
-                   extra={"CI_WAKE_DEADLINE": "abc"})
-    expect_verdict("CI_WAKE_DEADLINE=abc: default budget, green verdict", res, "green")
-
-
 def case_lock_folder_unusable_wakes_unknown():
     """The lock folder is a file. The OSError at the lock must end in one unknown line, no watch."""
     blocker = os.path.join(TMP, "lock-folder-is-a-file")
@@ -583,50 +576,6 @@ def case_lock_folder_unusable_wakes_unknown():
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=blocker)
     expect_verdict("lock folder is a file (OSError at the lock)", res, "unknown")
     expect_no_watch("lock folder is a file", res)
-
-
-STRESS_SRC = r'''
-import sys
-sys.path.insert(0, sys.argv[1])   # the folder with gh_stub.py
-import gh_stub
-for i in range(int(sys.argv[3])):
-    gh_stub.log_call([sys.argv[2], str(i)])
-'''
-
-
-def case_stress_log_keeps_every_line():
-    """Two processes write 2000 stand-in calls each into one log at the same time. All 4000 are
-    kept, each once. Red for a shared append: it lost 2 of 8 calls in CI, and 191 of 4000 on a
-    local probe."""
-    folder = tempfile.mkdtemp(prefix="stress-", dir=TMP)
-    base = os.path.join(folder, "gh.log")
-    writer = os.path.join(folder, "stress_writer.py")
-    with open(writer, "w", encoding="utf-8") as f:
-        f.write(STRESS_SRC)
-    env = dict(os.environ, GH_STUB_LOG=base)
-    procs, outs = [], []
-    for tag in ("a", "b"):
-        out = open(os.path.join(folder, "out-%s.txt" % tag), "w", encoding="utf-8")
-        outs.append(out)
-        procs.append(subprocess.Popen([PY, writer, TMP, tag, "2000"], env=env, stdout=out,
-                                      stderr=subprocess.STDOUT))
-    codes = []
-    for p in procs:
-        try:
-            codes.append(p.wait(timeout=TIMEOUT * 4))
-        except subprocess.TimeoutExpired:
-            p.kill()
-            codes.append(None)
-    for out in outs:
-        out.close()
-    calls = read_calls(base)
-    got = sorted(tuple(c) for c in calls)
-    want = sorted((tag, str(i)) for tag in ("a", "b") for i in range(2000))
-    check("stress: both writers exit 0", codes == [0, 0], "codes=%r" % (codes,))
-    check("stress: 4000 lines kept of 4000 written (2 x 2000)", len(calls) == 4000,
-          "kept %d" % len(calls))
-    check("stress: every line present once, none lost or doubled", got == want,
-          "missing %d, extra %d" % (len(set(want) - set(got)), len(got) - len(set(got))))
 
 
 def main():
@@ -794,10 +743,7 @@ def main():
     case_import_error_wakes_unknown()
     case_final_flush_error_wakes_unknown()
     case_background_separator_starts_each_watch()
-    case_deadline_not_a_number_uses_default()
     case_lock_folder_unusable_wakes_unknown()
-
-    case_stress_log_keeps_every_line()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))

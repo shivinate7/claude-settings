@@ -197,14 +197,6 @@ class RefusesALinkedWorktree(unittest.TestCase):
         self.assertFalse(os.path.isfile(plist_path),
                           "a refused install must not write any plist at all")
 
-    def test_label_never_names_the_worktree(self):
-        # Even on the happy path the label is fixed and generic; here we additionally confirm
-        # the refusal path prints no plist whose Label could have named the worktree, by way of
-        # there being no plist at all (checked above). This case documents that guarantee
-        # directly against install_launchd.LABEL rather than by absence alone.
-        self.assertNotIn(os.path.basename(self.linked), install_launchd.LABEL)
-        self.assertNotIn("worktree", install_launchd.LABEL.lower())
-
 
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""

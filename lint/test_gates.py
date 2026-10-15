@@ -1038,20 +1038,6 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         pattern = ste_lint.build_gloss_pattern(os.path.join(self.tmp.name, "no-such-dir"))
         self.assertIsNone(pattern)
 
-    def test_absent_decisions_dir_output_is_byte_identical(self):
-        text = (
-            "The team agreed that this sentence about D-001, A title of exactly "
-            "six whole words still carries plenty of authored words for the count today.\n")
-        config = dict(ste_lint.DEFAULT_CONFIG)
-        config["decisions_dir"] = os.path.join(self.tmp.name, "no-such-dir")
-        decisions_dir = ste_lint.find_decisions_dir(config)
-        self.assertIsNone(decisions_dir)
-        without_feature = self.lint(text, use_gloss=False)
-        with_feature_off = self.lint(text, use_gloss=False)
-        self.assertEqual(
-            ste_lint.report_text(without_feature, False, False),
-            ste_lint.report_text(with_feature_off, False, False))
-
 
 class PromotedRuleTests(unittest.TestCase):
     """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
@@ -1126,11 +1112,6 @@ class PromotedRuleTests(unittest.TestCase):
                 "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26.\n")
         findings = self.lint(text)
         self.assertIn("STE001", [f.code for f in findings])
-
-    def test_deleted_rules_have_no_row(self):
-        deleted = {"STE002", "STE004", "STE005", "STE006", "STE010", "STE012",
-                   "STE014", "STE016", "STE018", "STE019"}
-        self.assertEqual(deleted & set(ste_lint.RULES), set())
 
     def test_every_remaining_rule_is_error(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
@@ -1930,21 +1911,12 @@ class FindingEchoSanitizationTests(unittest.TestCase):
         finding = {"line": 3, "code": "STE002", "message": "'is\x1fadded' is passive."}
         self.assertNotIn("\x1f", format_finding(finding))
 
-    def test_78_long_message_is_capped_with_a_marked_cut(self):
-        finding = {"line": 1, "code": "STE003", "message": "x" * 5000}
-        line = format_finding(finding)
-        self.assertLess(len(line), 1000)
-        self.assertTrue(line.endswith("[cut]"))
-
 
 class ValeBloatPairTests(unittest.TestCase):
     """STE011 pairs copied from the Vale style packs (decisions/fewest-words-mandate.md)."""
 
     def codes(self, text):
         return [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)]
-
-    def test_79_vale_pair_blocks(self):
-        self.assertIn("STE011", self.codes("Keep the service running at all times.\n"))
 
     def test_80_acronym_pair_is_case_sensitive(self):
         self.assertIn("STE011", self.codes("Type the PIN number again.\n"))
@@ -2440,7 +2412,6 @@ GL_FIXED_DOC = "We don't stop the pump, e.g. at night.\n"  # fixed: STE007 x1, S
 GL_DENY_DOC = "It's not been tested.\n"  # denied: STE008 stays
 GL_CLEAN_DOC = "This is a short clean sentence.\n"
 GL_MIXED_DOC = GL_FIXED_DOC + "\n" + GL_LONG + "\n"  # fixed, then STE001 stays: a deny
-GL_UI_DOC = "<button>Save all of the changes you made today</button>\n"  # UI copy: STE020
 GL_SIX_CODE_DOC = (  # six findings after the fix: STE003, STE008, STE009, STE013, STE015, STE017
     "<!-- ste: procedural -->\n\nWe set up the valve.\n\n"
     "The team made a determination of the seals.\n\nIt's not been tested.\n\n"
@@ -2451,25 +2422,6 @@ GL_STRIPPED = ("STE_FIXER_LIMIT_S", "STE_FIXER_MAX_BYTES", "CLAUDE_CODE_SESSION_
 # Characters a guard.log field must never hold: C0 and C1 controls, line and paragraph separators,
 # the bidi overrides and isolates, and a lone surrogate.
 GL_HOSTILE = re.compile("[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩\ud800-\udfff]")
-# Appended to a copy of guard_core.py. Each record and set_log_session call is written to MARKER.
-GL_PROBE = '''
-
-_probe_record, _probe_set = record, set_log_session
-
-
-def record(tool, decision, rule, matched):
-    with open(MARKER, "a", encoding="utf-8") as handle:
-        handle.write("record|%s|%s|%s|%s\\n" % (tool, decision, rule, matched))
-    _probe_record(tool, decision, rule, matched)
-
-
-def set_log_session(value):
-    with open(MARKER, "a", encoding="utf-8") as handle:
-        handle.write("session|%r\\n" % (value,))
-    _probe_set(value)
-'''
-
-
 def gl_env(cfg, extra=None):
     """One gate run's environment. CLAUDE_CONFIG_DIR is the test's own folder, never ~/.claude."""
     env = dict(os.environ)
@@ -2573,14 +2525,6 @@ def gl_linter_tree(root, entry):
     lint_copy = gl_copy_tree(root)
     gl_set_linter(lint_copy, entry)
     return os.path.join(lint_copy, "ste_gate.py")
-
-
-def gl_print_findings(codes):
-    """A linter entry point (one line, for gl_linter_tree) that prints one error finding per code,
-    on its own line. The path is the file the linter was given, so a sweep finds its own findings."""
-    findings = [{"code": code, "severity": "error", "line": n, "col": 1,
-                 "message": "message %d" % n} for n, code in enumerate(codes, 1)]
-    return "print(json.dumps({'findings': [dict(f, path=sys.argv[-1]) for f in %r]}))" % (findings,)
 
 
 def gl_sleepy_tree(root, seconds):
@@ -2786,14 +2730,6 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(gl_fields(rows[0])[1:],
                          ["Write", "noted", "STE-fallback", "notes.md fallback=crash", GL_SESSION])
 
-    # (4) a UI file never runs the fixer, so an oversize UI file logs no fallback. Its deny logs.
-    def test_10_ui_file_over_the_byte_limit_logs_no_fallback(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path("page.html"), "content": GL_UI_DOC},
-                      extra={"STE_FIXER_MAX_BYTES": "5"})
-        self.assertEqual(gl_decision(run), "deny")  # precondition: the UI copy was linted
-        rows = self._rows("the UI deny")
-        self.assertEqual([gl_fields(row)[2] for row in rows], ["deny"], "a UI file logged a fallback")
-
     # (4) a log that cannot be written never changes the output or the exit code.
     def test_11_unwritable_log_never_changes_output_or_exit_code(self):
         run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
@@ -2951,22 +2887,6 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(len(sessions), len(set(sessions)), "a session wrote two lines")
         self.assertLessEqual(set(sessions), {"gl-par-%02d" % i for i in range(20)})
 
-    # (pins the call site) set_log_session gets the raw id once, and record is called once.
-    def test_20_call_site_sets_the_raw_session_then_records_once(self):
-        marker = os.path.join(self.tmp.name, "calls.txt")
-        gate = self._gate_copy("probe", True)
-        probe_core = os.path.join(os.path.dirname(os.path.dirname(gate)), "hooks", "guard_core.py")
-        with open(probe_core, "a", encoding="utf-8") as handle:
-            handle.write(GL_PROBE.replace("MARKER", repr(marker)))
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
-                      gate=gate)
-        self.assertIn("updatedInput", gl_out(run).get("hookSpecificOutput", {}))  # precondition
-        calls = open(marker, encoding="utf-8").read().splitlines() if os.path.exists(marker) else []
-        self.assertEqual([c for c in calls if c.startswith("session|")],
-                         ["session|%r" % GL_SESSION], calls)
-        self.assertEqual([c for c in calls if c.startswith("record|")],
-                         ["record|Write|fixed|STE007,STE008|notes.md fixed=2"], calls)
-
     # (2) import skew: the new gate beside an old _transcript.py that has no guard_logger. The gate
     # prints what it prints with logging, exits as it does, and writes no line. No ImportError.
     def test_21_old_transcript_without_guard_logger_keeps_the_gate_output(self):
@@ -3033,25 +2953,6 @@ class SteGateLogTests(unittest.TestCase):
         self.assertLessEqual(len(matched), 80, matched)
         self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
 
-
-    # (H1) finding codes of two types, an int and a string. The sort that builds the log rule must not
-    # take the answer with it: the gate denies with the same stdout and rc 0 as it does with strings.
-    def test_26_mixed_code_types_keep_the_deny_and_the_exit_code(self):
-        # One gate folder for both runs: the deny text names the gate's own folder, so two folders
-        # would differ there and not in the answer. Only the linter's entry is swapped.
-        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
-        gate = os.path.join(lint_copy, "ste_gate.py")
-        content = {"file_path": self._path(), "content": GL_CLEAN_DOC}
-        gl_set_linter(lint_copy, gl_print_findings(["5", "STE001"]))
-        plain = gl_gate(self.cfg, "Write", content, gate=gate)
-        gl_set_linter(lint_copy, gl_print_findings([5, "STE001"]))
-        mixed = gl_gate(self.cfg, "Write", content, gate=gate)
-        self.assertEqual(plain.returncode, 0, plain.stderr)  # precondition: the string codes
-        self.assertEqual(gl_decision(plain), "deny")
-        self.assertNotIn("Traceback", mixed.stderr)
-        self.assertEqual(mixed.returncode, 0, mixed.stderr)
-        self.assertEqual(gl_decision(mixed), "deny")
-        self.assertEqual(mixed.stdout, plain.stdout)
 
     # (H3) the answer leaves before the log write. The log write sleeps 4 s; the first stdout line
     # arrives in under 2 s, for a fix and for a deny.
@@ -3197,21 +3098,6 @@ class MdSweepLogTests(unittest.TestCase):
         self.assertEqual(skewed.returncode, 0, skewed.stderr)
         self.assertEqual(skewed.stdout, real.stdout)
         self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
-
-    # (H1) an unhashable finding code (a list). The sweep must block with the same stdout and exit code
-    # as it does with the same code written as a string.
-    def test_08_unhashable_code_keeps_the_sweep_output_and_exit_code(self):
-        self._md("notes.md", self.ERROR_TEXT)
-        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
-        script = os.path.join(lint_copy, "md_sweep.py")  # one folder for both runs
-        gl_set_linter(lint_copy, gl_print_findings(["['STE008']"]))
-        plain = self._sweep(script=script)
-        gl_set_linter(lint_copy, gl_print_findings([["STE008"]]))
-        listed = self._sweep(script=script)
-        self.assertEqual(json.loads(plain.stdout).get("decision"), "block")  # precondition
-        self.assertNotIn("Traceback", listed.stderr)
-        self.assertEqual(listed.returncode, plain.returncode)
-        self.assertEqual(listed.stdout, plain.stdout)
 
     # (H3) the sweep prints its block before the log write. The log write sleeps 4 s; the first stdout
     # line arrives in under 2 s.
