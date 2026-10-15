@@ -456,6 +456,76 @@ try {
 } finally {
     Remove-Item -Recurse -Force $PwRoot -ErrorAction SilentlyContinue
 }
+
+# ---- linkfallback1: a refused New-Item link falls back to mklink, and the link is made, not a copy ----
+# Measured 2026-10-15 15:20 CDT on the owner's machine, Windows PowerShell 5.1, not elevated: a
+# New-Item -ItemType SymbolicLink throws UnauthorizedAccessException (FullyQualifiedErrorId
+# NewItemSymbolicLinkElevationRequired), and `cmd /c mklink` makes a SymbolicLink. This case needs
+# no admin and no product seam. It loads New-Link from install.ps1 and shadows New-Item in this
+# process, so the link call is refused every time, as it is for an account without the symlink
+# right. Every other New-Item call still reaches the cmdlet. Install-File copies only when New-Link
+# throws, so a link here is the link path. New-Link is the one home for every symlink try.
+# Red now: New-Link throws on the refused call, so Install-File would copy. A probe skips the case
+# when mklink cannot make a symlink on this account; that is unknown, never red.
+$LfTmp  = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-linkfallback-" + [guid]::NewGuid().ToString('N'))
+$lfDDst = Join-Path $LfTmp 'dest-dir'
+$lfPrevForce = $env:CLAUDE_SETTINGS_FORCE_COPY
+New-Item -ItemType Directory -Force -Path $LfTmp | Out-Null
+try {
+    $lfProbeT = Join-Path $LfTmp 'probe-target.txt'
+    $lfProbeL = Join-Path $LfTmp 'probe-link.txt'
+    Set-Content -Path $lfProbeT -Value 'p' -Encoding utf8
+    cmd /c mklink "$lfProbeL" "$lfProbeT" | Out-Null
+    $lfMkExit = $LASTEXITCODE
+    $lfProbeI = Get-Item -LiteralPath $lfProbeL -Force -ErrorAction SilentlyContinue
+    $lfProbeOk = ($lfMkExit -eq 0) -and [bool]$lfProbeI -and ($lfProbeI.LinkType -eq 'SymbolicLink')
+
+    if (-not $lfProbeOk) {
+        Write-Host "SKIP: linkfallback1: mklink cannot make a symlink on this account (needs Developer Mode or elevation)"
+    } else {
+        # Load every function definition in install.ps1 this file has not defined yet. Definitions
+        # only: install.ps1's top-level code does not run, and the quiet Log above stays in place.
+        $lfAst = [System.Management.Automation.Language.Parser]::ParseInput($Source, [ref]$null, [ref]$null)
+        foreach ($lfFn in $lfAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+            if (-not (Test-Path -LiteralPath ('Function:\' + $lfFn.Name))) { Invoke-Expression $lfFn.Extent.Text }
+        }
+
+        $lfSrc  = Join-Path $LfTmp 'src-file.txt'
+        $lfDest = Join-Path $LfTmp 'dest-file.txt'
+        $lfDir  = Join-Path $LfTmp 'src-dir'
+        Set-Content -Path $lfSrc -Value 'v1' -Encoding utf8
+        New-Item -ItemType Directory -Force -Path $lfDir | Out-Null
+        $env:CLAUDE_SETTINGS_FORCE_COPY = $null   # New-Link must reach the New-Item call, not the forced-copy throw
+
+        # Refuse the link call the way the cmdlet does on a non-elevated account (measured above).
+        function New-Item {
+            if ("$args" -match 'SymbolicLink') {
+                throw [System.UnauthorizedAccessException]::new('Administrator privilege required for this operation.')
+            }
+            Microsoft.PowerShell.Management\New-Item @args
+        }
+        $lfErrF = $null
+        $lfErrD = $null
+        try { New-Link $lfDest $lfSrc } catch { $lfErrF = $_.Exception.Message }
+        try { New-Link $lfDDst $lfDir } catch { $lfErrD = $_.Exception.Message }
+        Remove-Item Function:\New-Item
+
+        $lfF = Get-Item -LiteralPath $lfDest -Force -ErrorAction SilentlyContinue
+        $lfD = Get-Item -LiteralPath $lfDDst -Force -ErrorAction SilentlyContinue
+        Check "linkfallback1: file: New-Link links when New-Item's link call is refused and mklink works" ((-not $lfErrF) -and [bool]$lfF -and ($lfF.LinkType -eq 'SymbolicLink'))
+        Check "linkfallback1: file: the link targets the source file" ([bool]$lfF -and (([string]($lfF.Target | Select-Object -First 1)) -eq $lfSrc))
+        Check "linkfallback1: directory: New-Link links the directory, not a copy (mklink /D)" ((-not $lfErrD) -and [bool]$lfD -and ($lfD.LinkType -eq 'SymbolicLink') -and $lfD.PSIsContainer)
+        if ($lfErrF) { Write-Host "  linkfallback1 file error: $lfErrF" }
+        if ($lfErrD) { Write-Host "  linkfallback1 directory error: $lfErrD" }
+    }
+} finally {
+    if (Test-Path 'Function:\New-Item') { Remove-Item Function:\New-Item }
+    $env:CLAUDE_SETTINGS_FORCE_COPY = $lfPrevForce
+    # A directory link goes by IO.Directory.Delete: a recursive delete can enter a link's target.
+    $lfDi = Get-Item -LiteralPath $lfDDst -Force -ErrorAction SilentlyContinue
+    if ($lfDi -and $lfDi.LinkType) { [IO.Directory]::Delete($lfDDst) }
+    Remove-Item -Recurse -Force $LfTmp -ErrorAction SilentlyContinue
+}
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
     Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
@@ -465,6 +535,7 @@ try {
     Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinnedps1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinnedwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------

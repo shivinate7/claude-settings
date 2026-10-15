@@ -2015,6 +2015,132 @@ pinned_wt1() {
   rm -rf "$h"
 }
 
+# ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the ~/.claude links point at <clone>-live,
+# a detached worktree at main's commit. session_start.sh must not print an off-main line for that
+# checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
+# origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
+# commit behind main prints exactly one off-main line, and it names the pin. pinoff3: a full clone
+# (not a worktree) detached at main's commit prints no off-main line.
+# Each case checks its own fixture first, so a broken setup never reads as a hook result.
+
+# pin_fixture TAG BEHIND AT KIND: a bare origin on main, a clone whose main is one commit past its
+# first commit, origin/main BEHIND commits past that main, and a pin at main (AT=main) or at the
+# commit before it (AT=old). KIND=worktree makes the pin a linked worktree, KIND=clone a full clone.
+# Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
+pin_fixture() {
+  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_msg=""
+  pf_co="$work/$pf_tag-clone"; pf_pin="$work/$pf_tag-clone-live"
+  pf_cfg="$work/$pf_tag-cfg"; pf_bare="$work/$pf_tag-origin.git"; pf_extra="$work/$pf_tag-extra"
+  git init -q --bare "$pf_bare"
+  git -C "$pf_bare" symbolic-ref HEAD refs/heads/main
+  make_checkout "$pf_co" "# $pf_tag content" "$pf_bare"
+  force_main_branch "$pf_co"
+  printf '# %s second\n' "$pf_tag" >> "$pf_co/CLAUDE.md"
+  if ! ( cd "$pf_co" && git add CLAUDE.md && git commit -q -m second && git push -q origin main ); then
+    pf_msg="clone setup failed"; return 1
+  fi
+  pf_main=$(git -C "$pf_co" rev-parse HEAD)
+  pf_old=$(git -C "$pf_co" rev-parse HEAD~1)
+  if [ "$pf_behind" -gt 0 ]; then
+    git clone -q "$pf_bare" "$pf_extra" || { pf_msg="clone to advance origin failed"; return 1; }
+    i=1
+    while [ "$i" -le "$pf_behind" ]; do
+      if ! ( cd "$pf_extra" && git config user.email t@example.com && git config user.name t \
+          && echo "e$i" >> extra.txt && git add extra.txt && git commit -q -m "extra$i" ); then
+        pf_msg="extra commit $i failed"; return 1
+      fi
+      i=$((i + 1))
+    done
+    ( cd "$pf_extra" && git push -q origin main ) || { pf_msg="push to origin failed"; return 1; }
+  fi
+  behind_built=$(git -C "$pf_bare" rev-list --count "$pf_main..main")
+  if [ "$behind_built" != "$pf_behind" ]; then
+    pf_msg="origin/main is $behind_built commits past the clone's main, wanted $pf_behind"; return 1
+  fi
+  if [ "$pf_at" = old ]; then pf_commit="$pf_old"; else pf_commit="$pf_main"; fi
+  if [ "$pf_kind" = clone ]; then
+    git clone -q "$pf_bare" "$pf_pin" && git -C "$pf_pin" checkout -q --detach "$pf_commit" \
+      || { pf_msg="full clone pin failed"; return 1; }
+    [ -d "$pf_pin/.git" ] || { pf_msg="pin is not a full clone"; return 1; }
+  else
+    git -C "$pf_co" worktree add -q --detach "$pf_pin" "$pf_commit" \
+      || { pf_msg="git worktree add failed"; return 1; }
+    [ -f "$pf_pin/.git" ] || { pf_msg="pin is not a linked worktree"; return 1; }
+  fi
+  pf_head=$(git -C "$pf_pin" rev-parse HEAD 2>/dev/null)
+  if [ "$pf_head" != "$pf_commit" ]; then pf_msg="pin HEAD $pf_head is not $pf_commit"; return 1; fi
+  if git -C "$pf_pin" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    pf_msg="pin is on a branch, not detached"; return 1
+  fi
+  mkdir -p "$pf_cfg"
+  printf '@%s/CLAUDE.md\n' "$pf_pin" > "$pf_cfg/CLAUDE.md"
+  return 0
+}
+
+pinoff1() {
+  name="pinoff1: pinned worktree at main's commit, origin/main 2 ahead: one freshness line, no off-main line"
+  if ! pin_fixture pinoff1 2 main worktree; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff1.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff1.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+  stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "0" ]; then
+    bad "$name" "false off-main line for a checkout at main's commit: $out"
+  elif [ "$stale_lines" != "1" ]; then
+    bad "$name" "expected one freshness line, got $stale_lines: $out"
+  else
+    ok "$name"
+  fi
+}
+
+pinoff2() {
+  name="pinoff2: pinned worktree one commit behind main: exactly one off-main line, naming the pin"
+  if ! pin_fixture pinoff2 0 old worktree; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff2.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff2.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+  named_lines=$(printf '%s\n' "$out" | grep 'not main' | grep -c 'clone-live')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "1" ]; then
+    bad "$name" "expected exactly one off-main line, got $off_lines: $out"
+  elif [ "$named_lines" != "1" ]; then
+    bad "$name" "the off-main line does not name the pinned checkout: $out"
+  else
+    ok "$name"
+  fi
+}
+
+pinoff3() {
+  name="pinoff3: full clone detached at main's commit: no off-main line"
+  if ! pin_fixture pinoff3 0 main clone; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff3.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff3.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "0" ]; then
+    bad "$name" "false off-main line for a detached clone at main's commit: $out"
+  else
+    ok "$name"
+  fi
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2082,6 +2208,9 @@ run refuse_wt2
 run keep_wt1
 run keep_plain1
 run pinned_wt1
+run pinoff1
+run pinoff2
+run pinoff3
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
