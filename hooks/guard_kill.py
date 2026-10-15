@@ -12,7 +12,7 @@ import sys
 from guard_core import (
     QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
-    POWERSHELL_CALL, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
+    POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
@@ -646,7 +646,8 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
             if _assigned_var(token, watch) and not install:
                 return word + " " + _assigned_var(token, watch)
     cmd_flag = next((n for n, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
-    script = " ".join(rest[cmd_flag + 1:]) if word in CMD_EXE_NAMES and cmd_flag is not None \
+    script = PowerShellScript(" ".join(rest[cmd_flag + 1:])) \
+        if word in CMD_EXE_NAMES and cmd_flag is not None \
         else None
     if script is None:
         script = npx_script or (" ".join(rest) if word == "eval" else (

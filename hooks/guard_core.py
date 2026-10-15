@@ -82,6 +82,13 @@ def basename(token: str) -> str:
     return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
 
+class PowerShellScript(str):
+    """A script that pwsh or `cmd /c` reads, not bash. `split_segments` cuts it with PowerShell's
+    rules, where a backslash is a path character, so a path that ends in one hides no `;` or `&&`.
+    Every producer of such a script (`_pwsh_script`, a `cmd /c` tail) returns this type, so no
+    caller picks the reading."""
+
+
 @functools.lru_cache(maxsize=8)
 def _split_segments_cached(cmd: str, powershell: bool):
     # powershell is part of the key: split_segments reads POWERSHELL_CALL[0] too
@@ -156,6 +163,12 @@ def split_segments(cmd: str, ends=None):
     `ends`, when a list, gets what closed each segment (`|`, `||`, `&&`, `;`, newline, or '' for
     the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
+    if isinstance(cmd, PowerShellScript) and not POWERSHELL_CALL[0]:
+        POWERSHELL_CALL[0] = True   # a pwsh or cmd script under a Bash call: read it as PowerShell
+        try:
+            return split_segments(str(cmd), ends)
+        finally:
+            POWERSHELL_CALL[0] = False
     if ends is None:   # the same command is split by many rules: split it once
         return list(_split_segments_cached(cmd, POWERSHELL_CALL[0]))
     segments, open_quote, shaped = _split_reading(cmd, ends, False)
@@ -203,6 +216,14 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             width, quote = quote_advance(cmd, index, "")
             current.append(cmd[index:index + width])
             index += width
+            # Escaped ampersand, then `&`: the pair is a literal `&`, and the second `&` is bash's
+            # own background operator, which ends the command. `&&` and `&>` are read as they stand.
+            if (cmd[index - 2:index] == "\\&" and cmd[index:index + 1] == "&"
+                    and cmd[index + 1:index + 2] not in ("&", ">")):
+                segments.append("".join(current))
+                ends is None or ends.append("&")
+                current = []
+                index += 1
             continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
@@ -1841,7 +1862,7 @@ def _pwsh_script(tokens) -> str:
     """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
     for at, tok in enumerate(tokens[:-1]):
         if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
-            return " ".join(tokens[at + 1:])
+            return PowerShellScript(" ".join(tokens[at + 1:]))
     return ""
 
 
@@ -1870,7 +1891,7 @@ def nested_script(tokens) -> str:
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word in CMD_EXE_NAMES:
         flag = next((i for i, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
-        return "" if flag is None else " ".join(rest[flag + 1:])
+        return "" if flag is None else PowerShellScript(" ".join(rest[flag + 1:]))
     if word in ("iex", "invoke-expression", "eval"):
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
