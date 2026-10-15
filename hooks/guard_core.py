@@ -423,15 +423,18 @@ _WORD_PART = re.compile(r"""\\(.)|'([^']*)'|"((?:\\.|[^"\\])*)"|(.)""", re.S)
 
 
 def heredoc_delimiter(word: str):
-    """Return (quote, delimiter): the word as bash reads it. `quote` is "'" when any part of the
-    word is quoted or escaped (the body is then text, no substitution runs), else ''."""
+    """Return (quote, delimiter): the delimiter as bash reads it. `quote` is "'" when the word STARTS
+    with a quoted or escaped part (the body is then text), else ''. A quote later in the word
+    (a backslash or a quote after the first character) still dequotes the delimiter but leaves `quote` empty, so the body stays
+    code to every reader: the same reading main gives it. Bash itself reads such a body as text; a
+    body written to a file and run (`> x.sh && sh x.sh`) is the act this keeps denied."""
     quote = ""
     out = []
-    for escaped, single, double, plain in _WORD_PART.findall(word):
+    for position, (escaped, single, double, plain) in enumerate(_WORD_PART.findall(word)):
         if plain:
             out.append(plain)
             continue
-        quote = "'"
+        quote = "'" if position == 0 else quote
         if single or double:
             out.append(re.sub(r"\\([$`\"\\])", r"\1", double) if double else single)
         else:
