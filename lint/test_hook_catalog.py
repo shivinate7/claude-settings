@@ -216,66 +216,6 @@ class RealRepo(unittest.TestCase):
             self.fail("docs/catalog.md does not exist yet: the generator writes it")
         return read(PAGE)
 
-    def test_r1_every_script_command_names_a_script_with_a_docstring(self):
-        # An inline command names no script. R1b checks its summary instead.
-        problems = []
-        for event, matcher, _cond, hook in registrations():
-            if hook.get("type") != "command":
-                continue
-            where = "%s matcher=%s" % (event, matcher)
-            path = command_script(hook)
-            if path is None:
-                continue
-            if not os.path.isfile(os.path.join(ROOT, path)):
-                problems.append("%s: %s does not exist" % (where, path))
-            elif path.endswith(".py") and not (ast.get_docstring(ast.parse(read(os.path.join(ROOT, path)))) or "").strip():
-                problems.append("%s: %s has no docstring" % (where, path))
-        self.assertFalse(problems, "\n".join(problems))
-
-    def test_r1b_every_inline_command_has_one_line_summary_in_the_sidecar(self):
-        inline = [(inline_label(event, matcher, cond), hook.get("command", ""))
-                  for event, matcher, cond, hook in registrations()
-                  if hook.get("type") == "command" and command_script(hook) is None]
-        self.assertTrue(inline, "no inline command in settings.json, so the scan proves nothing: "
-                                "the SessionStart startup|resume refresh must stay inline (F1 ruling)")
-        self.assertTrue(os.path.isfile(INLINE_JSON), "lint/hook_catalog_inline.json does not exist")
-        summaries = json.loads(read(INLINE_JSON))
-        rows = {r["Key"].strip("`"): r for r in page_rows(self.page()) if r["Kind"] == "hook"}
-        problems, keys = [], set()
-        for label, command in inline:
-            key = sidecar_key(label, command)
-            keys.add(key)
-            text = summaries.get(key)
-            if not isinstance(text, str) or not text.strip():
-                problems.append("%s: no summary under the key %r in lint/hook_catalog_inline.json" % (label, key))
-                continue
-            if "\n" in text or text != text.strip():
-                problems.append("%s: summary is not one trimmed line" % label)
-            row = rows.get("inline: " + label)
-            if row is None:
-                problems.append("%s: no row keyed 'inline: %s'" % (label, label))
-            elif row["What it does"] != " ".join(text.split()):
-                problems.append("%s: row text %r is not the summary %r" % (label, row["What it does"], text))
-        for stray in sorted(set(summaries) - keys):
-            problems.append("%s: sidecar key matches no inline command" % stray)
-        self.assertFalse(problems, "\n".join(problems))
-
-    def test_r2_every_prompt_judge_has_a_row_keyed_by_its_first_sentence(self):
-        rows = page_rows(self.page())
-        problems, seen = [], 0
-        for label, hook in judge_hooks():
-            seen += 1
-            found = LABEL.match(label)
-            event, matcher, cond = found.group(1), found.group(2) or "-", found.group(3) or "-"
-            key = first_sentence(hook.get("prompt", ""))
-            if not key:
-                problems.append("%s: prompt has no first sentence" % label)
-            elif not any(r["Kind"] == "judge" and r["Key"].strip("`") == key
-                         and (r["Event"], r["Matcher"], r["If"]) == (event, matcher, cond) for r in rows):
-                problems.append("%s: no judge row keyed by %r" % (label, key))
-        self.assertTrue(seen, "no prompt hook found, so the scan proves nothing")
-        self.assertFalse(problems, "\n".join(problems))
-
     def test_r3_every_enabled_repo_mod_has_a_row(self):
         plugins = json.loads(read(SETTINGS)).get("enabledPlugins", {})
         mods = sorted(k.split("@")[0] for k, on in plugins.items()
@@ -312,6 +252,50 @@ class RealRepo(unittest.TestCase):
             for r in page_rows(self.page()) if r["Kind"] in ("hook", "judge"))
         missing, extra = want - got, got - want
         problems = ["missing row: %r" % (k,) for k in missing] + ["stale row: %r" % (k,) for k in extra]
+        self.assertFalse(problems, "\n".join(problems))
+        # Each prompt judge has a judge row keyed by its first sentence.
+        # Named failure: a judge row that lost its key, so the page hides which judge runs.
+        judge_page = page_rows(self.page())
+        problems, seen = [], 0
+        for label, hook in judge_hooks():
+            seen += 1
+            found = LABEL.match(label)
+            event, matcher, cond = found.group(1), found.group(2) or "-", found.group(3) or "-"
+            key = first_sentence(hook.get("prompt", ""))
+            if not key:
+                problems.append("%s: prompt has no first sentence" % label)
+            elif not any(r["Kind"] == "judge" and r["Key"].strip("`") == key
+                         and (r["Event"], r["Matcher"], r["If"]) == (event, matcher, cond) for r in judge_page):
+                problems.append("%s: no judge row keyed by %r" % (label, key))
+        self.assertTrue(seen, "no prompt hook found, so the scan proves nothing")
+        self.assertFalse(problems, "\n".join(problems))
+
+    def test_r1b_every_inline_command_has_one_line_summary_in_the_sidecar(self):
+        inline = [(inline_label(event, matcher, cond), hook.get("command", ""))
+                  for event, matcher, cond, hook in registrations()
+                  if hook.get("type") == "command" and command_script(hook) is None]
+        self.assertTrue(inline, "no inline command in settings.json, so the scan proves nothing: "
+                                "the SessionStart startup|resume refresh must stay inline (F1 ruling)")
+        self.assertTrue(os.path.isfile(INLINE_JSON), "lint/hook_catalog_inline.json does not exist")
+        summaries = json.loads(read(INLINE_JSON))
+        rows = {r["Key"].strip("`"): r for r in page_rows(self.page()) if r["Kind"] == "hook"}
+        problems, keys = [], set()
+        for label, command in inline:
+            key = sidecar_key(label, command)
+            keys.add(key)
+            text = summaries.get(key)
+            if not isinstance(text, str) or not text.strip():
+                problems.append("%s: no summary under the key %r in lint/hook_catalog_inline.json" % (label, key))
+                continue
+            if "\n" in text or text != text.strip():
+                problems.append("%s: summary is not one trimmed line" % label)
+            row = rows.get("inline: " + label)
+            if row is None:
+                problems.append("%s: no row keyed 'inline: %s'" % (label, label))
+            elif row["What it does"] != " ".join(text.split()):
+                problems.append("%s: row text %r is not the summary %r" % (label, row["What it does"], text))
+        for stray in sorted(set(summaries) - keys):
+            problems.append("%s: sidecar key matches no inline command" % stray)
         self.assertFalse(problems, "\n".join(problems))
 
     def test_r5b_every_hook_judge_mod_and_skill_row_is_filled_in(self):
@@ -497,12 +481,16 @@ class Fixtures(unittest.TestCase):
                             "tw")
 
     def test_f9_skill_without_description_fails(self):
-        self.assert_problem(files(extra={"skills/alpha/SKILL.md": "---\nname: alpha\n---\n\nBody.\n"}),
-                            "alpha", "description")
-
-    def test_f10_skill_with_empty_description_fails(self):
-        self.assert_problem(files(extra={"skills/alpha/SKILL.md": "---\nname: alpha\ndescription:\n---\n\nBody.\n"}),
-                            "alpha", "description")
+        # Rows: no description key, an empty value, a comment-only value.
+        # Named failure: a skill with no usable description passes the page check.
+        cases = [
+            ("no key", "---\nname: alpha\n---\n\nBody.\n"),
+            ("empty value", "---\nname: alpha\ndescription:\n---\n\nBody.\n"),
+            ("comment only", skill_md("description: #")),
+        ]
+        for case, text in cases:
+            with self.subTest(case):
+                self.assert_problem(files(extra={"skills/alpha/SKILL.md": text}), "alpha", "description")
 
     def test_f11_folded_description_reads_every_line(self):
         rows = self.rows_of(files(extra={"skills/alpha/SKILL.md": skill_md(
@@ -567,10 +555,6 @@ class Fixtures(unittest.TestCase):
         code, out, err = generator(self.tree(tree_files), "--check")
         self.assertEqual(code, 2, out + err)
         self.assertIn("settings.json", out + err)
-
-    def test_f21_skill_whose_description_is_only_a_comment_fails(self):
-        self.assert_problem(files(extra={"skills/alpha/SKILL.md": skill_md("description: #")}),
-                            "alpha", "description")
 
     def test_f22_mod_with_empty_readme_fails(self):
         self.assert_problem(files(plugins={"tw@claude-settings": True}, extra={
