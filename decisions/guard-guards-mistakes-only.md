@@ -16,7 +16,8 @@ Owner ruling, 2026-10-15 15:47 CDT. The owner's answer: "Guard against Claude's 
 - A form whose only use is to evade the guard is out of scope. It is not a hole.
 
 Trigger: in review round 1 of lane ask-alone-bc, the form `export GIT_SSH_COMMAND='<cmd>' && <ask step>`
-was found to ask where main denies. The owner ruled such crafted forms out of scope.
+was found to ask where main denies. The owner ruled such crafted forms out of scope. He chose "mistakes only" with this exact
+example in front of him.
 
 ## Why
 
@@ -52,9 +53,10 @@ Out of scope (not a hole):
 
 ## Effect on other records
 
-This ruling narrows the word "safety hole" in `hold-unsafe-after-round-3` (the hold rule for a
-change's net safety value). Under this ruling a hole counts only when Claude could write the act by
-mistake or from a misread task. That record still uses the wider definition. It is not yet rewritten.
+This ruling narrows the word "safety hole". Under this ruling a hole counts only when Claude could
+write the act by mistake or from a misread task. The rule `roles-review-cap-three`,
+`hold-unsafe-after-round-3` (the hold rule for a change's net safety value) and
+`stop-guardrail-became-a-command-hook` are rewritten to match.
 
 Kind: process
 Home: rule:roles-review-cap-three

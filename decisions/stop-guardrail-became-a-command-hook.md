@@ -49,7 +49,9 @@ grants at the time. A reviewer found this. An injected instruction in a
 diff could drive that nested, fully-tooled call to spend a granted
 permission. It could then fold what it read into the `why` field this
 hook prints back to the parent session. An injection and exfiltration
-channel, inside the guard built to catch that exact class of thing.
+channel, inside the hook itself. The fix closed it because the hook spends
+permissions. Per `guard-guards-mistakes-only` (guards stop Claude's
+mistakes, not an attacker), this hook is not built to stop injection.
 
 **The tool flag.** A second pass asked whether `--allowedTools ""`
 actually blocks every tool, rather than trusting the flag. `claude
