@@ -3774,6 +3774,30 @@ for _shell in ("sh", "bash"):
 sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
    "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
 
+# ---- r2-hd (review round 2), kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
+# backticks, or on a line that feeds eval, source, `.` or xargs, reads as a shell body. Each form names a
+# delimiter main misreads (`'EOF-1'`, `\EOF`, `E-F`), so main keeps the body in view and denies. The lane
+# head reads the delimiter as bash does, drops the body, and allows. RED ON THE LANE HEAD, DENY ON MAIN.
+# Measured on main (4112319): main denies every payload of these three forms.
+R2_FORMS = (
+    ("source with <( ), an escaped delimiter", "source <(cat <<\\EOF\nBODY\nEOF\n)"),
+    ("a heredoc piped to xargs", "cat <<'EOF-1' | xargs -I{} sh -c '{}'\nBODY\nEOF-1"),
+    ("eval with backticks", "eval `cat <<'EOF-1'\nBODY\nEOF-1\n`"),
+)
+# Measured on main: the `eval "$( )"` form is denied for its env and cap payloads, but main ALLOWS its kill, so
+# this form runs for env and cap only. The `. <(cat <<E-F)` form is left out: main allows all three of its
+# payloads. Both gaps are ones main already has (reported, not regressions).
+R2_EVAL_FORM = ("eval with $( )", "eval \"$(cat <<'EOF-1'\nBODY\nEOF-1\n)\"")
+for _label, _form in R2_FORMS:
+    sh("heredoc: r2-hd a kill in the body of a heredoc in %s, denies" % _label,
+       _form.replace("BODY", "pkill -f node"), "deny", "machine-wide-kill", cwd=PROJ)
+# SCANNERS (building-scanner-respects-strings), r2-hd. A hash inside double quotes is text, so the header
+# after it is still a header. A lone apostrophe in a body line is text, so the kill after it is in a body.
+sh("heredoc: r2-hd a hash inside double quotes, then a source heredoc with a kill in the body, denies",
+   'echo "a # b" && source <(cat <<\\EOF\npkill -f node\nEOF\n)', "deny", "machine-wide-kill", cwd=PROJ)
+sh("heredoc: r2-hd a lone apostrophe in the body of a source heredoc, then a kill, denies",
+   "source <(cat <<\\EOF\necho don't\npkill -f node\nEOF\n)", "deny", "machine-wide-kill", cwd=PROJ)
+
 
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
@@ -5426,6 +5450,11 @@ for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("doub
 for _shell in ("sh", "bash"):
     sh("env: r1-hd a cat heredoc piped to %s, closer EOF-X, an env read in the body, denies" % _shell,
        "cat <<EOF-X | " + _shell + "\nx\nEOF\ncat " + ENV + "\nEOF-X", "deny", "env-file", cwd=PROJ)
+
+# ---- r2-hd (review round 2), env family. The forms of the kill section, with an env read in the body.
+for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
+    sh("env: r2-hd a heredoc in %s, an env read in the body, denies" % _label,
+       _form.replace("BODY", "cat " + ENV), "deny", "env-file", cwd=PROJ)
 
 
 # =========================================================================== git env set
@@ -7188,6 +7217,27 @@ sh("ask-alone: r1-hd a prune in a node template literal under a backslash delimi
 # PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a prune in its body.
 chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the body, denies (red on main too)",
               "cat <<EOF | sh\n" + PRUNE + "\nEOF")
+
+# ---- r2-hd (review round 2), ask-alone family. Each case is red on the lane head unless it says so.
+#
+# ITEM 1. settle_ask strips the bodies a second time, on text the first strip already cut. A stray line equal
+# to a delimiter (the lone EOF) then opens a phantom body that holds the ask step, so the count drops to one
+# and the command asks. Main counts the stripped text once, and denies. RED ON THE LANE HEAD (asks).
+chained_ask("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a cap write, denies",
+            "cat <<EOF\nbody line\nEOF\n" + CAP_PLAIN + "\nEOF", cwd=PROJ, carries=CAP_STEP)
+chained_prune("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a prune, denies",
+              "cat <<EOF\nbody line\nEOF\n" + PRUNE + "\nEOF")
+
+# ITEM 2, the ask payload. The forms of the kill section, with a cap write in the body: one ask step.
+for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
+    chained_ask("ask-alone: r2-hd a heredoc in %s, a cap write in the body, denies" % _label,
+                _form.replace("BODY", CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
+
+# SCANNER PIN (building-scanner-respects-strings), GREEN ON THE LANE HEAD. A node body holds a template literal
+# across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one step, so it asks
+# once. MAIN DENIES BY DESIGN: the one-step ruling is the lane's, and main counts each body line.
+sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
+   "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
 
 
 # =========================================================================== ordinary work
