@@ -13,13 +13,14 @@ Owner ruling, 2026-10-15 12:00 CDT. The owner's words:
 
 The rule that follows:
 
-- After round 3, the round-3 reviewer judges the change's net safety value against main: holes closed against holes opened, weighted by harm. The judgment is semantic.
+- After round 3, the round-3 reviewer judges the change's net safety value against main: holes closed against holes opened, weighted by expected harm. The judgment is semantic.
 - Positive net value merges on green. Every open finding becomes a named limit and a debt.
 - Zero or negative net value is held. It is dropped from the batch, so the rest merges green. It is parked: it gets no fix lane and no more work until the owner decides.
 - The owner's word can allow work on a held change. A merge still needs positive net value.
-- A held change that is also red gets no red-CI split.
+- Owner ruling, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split.
 - The red-CI split in `review-cap-red-ci` (red CI is split, not a hole) still applies to changes that are not held.
 - A safety hole is a guard, gate or check that lets through an act that main refuses or asks about.
+- A main refusal that the change turns into an ask is a hole opened. A main ask that the change turns into a refusal is a hole closed.
 
 ## Why
 
