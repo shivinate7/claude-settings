@@ -1604,8 +1604,9 @@ def settle_ask(tool: str, stripped: str) -> None:
     if not PENDING_ASK:
         return
     rule, reason, matched, step = PENDING_ASK[0]
-    if count_steps(stripped) - harmless_steps(stripped) > 1:
-        refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
+    if count_steps(stripped) > 1:
+        if count_steps(stripped) - harmless_steps(stripped) > 1:
+            refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
     refuse(tool, "ask", rule, reason, matched)
 
 
