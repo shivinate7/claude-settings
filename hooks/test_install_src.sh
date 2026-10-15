@@ -1993,6 +1993,26 @@ keep_plain1() {
   rm -rf "$h"
 }
 
+# ---- pinned_wt1: install.sh run from the pinned checkout is not refused -----------------------
+# Owner ruling 2026-10-15: the linked-worktree refusal allows exactly <clone>-live. The pinned
+# checkout is a linked worktree on a detached HEAD at main's commit, at that path. Red while the
+# guard refuses every linked worktree. refuse_wt1 keeps the other side: any other linked worktree
+# is still refused.
+pinned_wt1() {
+  name="pinned_wt1: install.sh run from the pinned checkout <clone>-live is not refused"
+  co="$work/pinned_wt1-main"; pin="$work/pinned_wt1-main-live"; cfg="$work/pinned_wt1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinned_wt1 main"
+  git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$pin"
+  rm -rf "$h"
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2059,6 +2079,7 @@ run refuse_wt1
 run refuse_wt2
 run keep_wt1
 run keep_plain1
+run pinned_wt1
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

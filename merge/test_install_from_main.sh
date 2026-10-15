@@ -1,21 +1,26 @@
 #!/bin/sh
-# Cases for merge/install_from_main.sh, the afterMerge helper. It finds the worktree that
-# holds refs/heads/main and runs that tree's install.sh. Shell script, following the layout
-# of hooks/test_install_src.sh: named cases, each isolated, a pass/fail line per case, and a
-# summary exit code.
+# Cases for merge/install_from_main.sh, the afterMerge helper. Owner ruling 2026-10-15 (record
+# merge-reinstalls-from-main, "The ruling"): the links in ~/.claude point at one pinned checkout,
+# a worktree of the clone on a detached HEAD at main's commit, at the sibling path <clone>-live.
+# The helper moves that checkout to main, then runs its install from there (Windows: install.ps1).
+# Shell script, following the layout of hooks/test_install_src.sh: named cases, each isolated, a
+# pass/fail line per case, a SKIP line for a case this host cannot run, and a summary exit code.
 #
 # Run it from the repository root:
 #
 #   sh merge/test_install_from_main.sh [case ...]   # names given: run only those cases
 #
-# Every case builds its own temp git repos. The main tree is on branch main, and its
-# install.sh is a stub. The linked worktree is on branch feature, and its install.sh is a
-# different stub. Each stub writes its own directory to its own marker file, so a case can
-# see which install.sh ran. HOME and CLAUDE_CONFIG_DIR point into the temp dir, so the real
-# ~/.claude is never touched. INSTALL_FROM_MAIN_UNDER_TEST lets a case point at another copy
-# of the script.
+# Every case builds its own temp git repos. The clone is $d/clone on branch main, the caller is a
+# linked worktree at $d/linked, and the pinned checkout is $d/clone-live. The installers are marker
+# stubs, except cases 8 and 9, which run the real install.sh. Each stub writes a marker file into
+# its own folder, so a case can see which tree ran it. HOME and CLAUDE_CONFIG_DIR point into the
+# temp dir, so the real ~/.claude is never touched. INSTALL_FROM_MAIN_UNDER_TEST lets a case point
+# at another copy of the script.
 
 set -u
+
+# A git hook may export these. The fixtures must not inherit them.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
@@ -24,9 +29,11 @@ case "$SCRIPT" in /*) ;; *) SCRIPT="$PWD/$SCRIPT" ;; esac
 
 PASS=0
 FAIL=0
+SKIP=0
 
 ok() { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
+skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
 
 # Canonicalize: on macOS, mktemp -d returns /var/folders/..., where /var is a symlink to
 # /private/var. git reports worktree paths in resolved form, so every path built here goes
@@ -37,198 +44,13 @@ work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
-# Write an install.sh stub to $1. It records its own directory in marker file $2, then exits
-# with $STUB_EXIT (default 0). The directory comes from $0, so the marker names the tree the
-# script really ran from, not the caller's working directory.
-make_stub() {
-  cat > "$1" <<EOF
-#!/bin/sh
-cd "\$(dirname "\$0")" && pwd -P > "$2"
-exit "\${STUB_EXIT:-0}"
-EOF
-}
-
-# Build a main tree at $1 whose first branch is $5 (default main), and a linked worktree at
-# $2 on branch feature. Each tree commits its own stub. $3 is the main stub's marker, $4 the
-# linked stub's marker.
-make_pair() {
-  main="$1"; linked="$2"; mark_main="$3"; mark_linked="$4"; first="${5:-main}"
-  mkdir -p "$main"
-  ( cd "$main" && git init -q -b "$first" && git config user.email t@example.com && git config user.name t )
-  make_stub "$main/install.sh" "$mark_main"
-  ( cd "$main" && git add install.sh && git commit -q -m init )
-  ( cd "$main" && git worktree add -q -b feature "$linked" )
-  make_stub "$linked/install.sh" "$mark_linked"
-  ( cd "$linked" && git add install.sh && git commit -q -m stub )
-}
-
-# Run the script with cwd $1. Extra arguments $2... are KEY=VALUE pairs for env. Sets $out
-# (stdout and stderr together) and $rc. HOME and CLAUDE_CONFIG_DIR come from $h.
-run_from() {
-  dir="$1"; shift
-  ( cd "$dir" && env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" "$@" bash "$SCRIPT" ) > "$work/run.out" 2> "$work/run.err"
-  rc=$?
-  outs=$(cat "$work/run.out")
-  errs=$(cat "$work/run.err")
-  out=$(cat "$work/run.out" "$work/run.err")
-}
-
-# ---- Case 1: run from a linked worktree -> main tree's install.sh runs, caller's does not --
-case1() {
-  name="case1: run from a linked worktree runs the main tree's install.sh, not the caller's"
-  d="$work/case1"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
-  run_from "$d/linked"
-
-  if [ $rc -ne 0 ]; then
-    bad "$name" "script exited $rc: $out"
-  elif [ "$(cat "$d/mark-main" 2>/dev/null)" != "$(realpwd "$d/main")" ]; then
-    bad "$name" "main tree install.sh did not run: $out"
-  elif [ -e "$d/mark-linked" ]; then
-    bad "$name" "the calling worktree's install.sh ran"
-  else
-    ok "$name"
-  fi
-}
-
-# ---- Case 2: run from the main tree itself -> main tree's install.sh runs, once -----------
-case2() {
-  name="case2: run from the main tree runs the main tree's install.sh, not the linked one"
-  d="$work/case2"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
-  run_from "$d/main"
-
-  if [ $rc -ne 0 ]; then
-    bad "$name" "script exited $rc: $out"
-  elif [ "$(cat "$d/mark-main" 2>/dev/null)" != "$(realpwd "$d/main")" ]; then
-    bad "$name" "main tree install.sh did not run: $out"
-  elif [ -e "$d/mark-linked" ]; then
-    bad "$name" "the linked worktree's install.sh ran"
-  else
-    ok "$name"
-  fi
-}
-
-# ---- Case 3: no worktree holds main (the branch exists, unchecked-out) -> one stderr line ----
-# Owner ruling 2026-10-11: this fails loudly. One line on stderr says install.sh was not run and
-# names `git switch main`. The exit is non-zero, so the merge tool reports FAILED. No install.sh
-# runs. Nothing goes to stdout.
-case3() {
-  name="case3: no worktree holds main prints one stderr line naming git switch main, exits non-zero"
-  d="$work/case3"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
-  # Move the main tree off main. The branch main still exists, but no worktree holds it.
-  ( cd "$d/main" && git checkout -q -b trunk )
-  run_from "$d/linked"
-  lines=$(printf '%s\n' "$errs" | grep -c .)
-
-  if [ $rc -eq 0 ]; then
-    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
-  elif [ -n "$outs" ]; then
-    bad "$name" "text went to stdout, expected stderr only: $outs"
-  elif [ "$lines" -ne 1 ]; then
-    bad "$name" "expected one stderr line, got $lines: $errs"
-  else
-    case "$errs" in
-      *"install.sh"*"not run"*"git switch main"*) ;;
-      *) bad "$name" "stderr does not say install.sh was not run and name git switch main: $errs"; return ;;
-    esac
-    if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
-      bad "$name" "an install.sh ran although no worktree holds main"
-    else
-      ok "$name"
-    fi
-  fi
-}
-
-# ---- Case 4: no branch named main anywhere -> one stderr line, exit non-zero ----------
-# Same ruling as case 3: non-zero exit, one stderr line naming `git switch main`, no install.sh run.
-case4() {
-  name="case4: no branch named main at all prints one stderr line naming git switch main, exits non-zero"
-  d="$work/case4"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked" trunk
-  run_from "$d/linked"
-  lines=$(printf '%s\n' "$errs" | grep -c .)
-
-  if [ $rc -eq 0 ]; then
-    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
-  elif [ -n "$outs" ]; then
-    bad "$name" "text went to stdout, expected stderr only: $outs"
-  elif [ "$lines" -ne 1 ]; then
-    bad "$name" "expected one stderr line, got $lines: $errs"
-  else
-    case "$errs" in
-      *"install.sh"*"not run"*"git switch main"*) ;;
-      *) bad "$name" "stderr does not say install.sh was not run and name git switch main: $errs"; return ;;
-    esac
-    if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
-      bad "$name" "an install.sh ran although no branch named main exists"
-    else
-      ok "$name"
-    fi
-  fi
-}
-
-# ---- Case 5: main tree's install.sh exits non-zero -> script exits with that code ---------
-case5() {
-  name="case5: a failing main install.sh makes the script exit with the same code"
-  d="$work/case5"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
-  run_from "$d/linked" STUB_EXIT=7
-
-  if [ "$rc" -ne 7 ]; then
-    bad "$name" "expected exit 7, got $rc: $out"
-  elif [ "$(cat "$d/mark-main" 2>/dev/null)" != "$(realpwd "$d/main")" ]; then
-    bad "$name" "main tree install.sh did not run, so the code proves nothing: $out"
-  elif [ -e "$d/mark-linked" ]; then
-    bad "$name" "the calling worktree's install.sh ran"
-  else
-    ok "$name"
-  fi
-}
-
-# ---- Case 6: main tree path has a space -> still found and run ---------------------------
-case6() {
-  name="case6: a main tree path with a space is found and its install.sh runs"
-  d="$work/case6"; h="$d/home"; mkdir -p "$h"
-  make_pair "$d/main tree" "$d/linked" "$d/mark-main" "$d/mark-linked"
-  run_from "$d/linked"
-
-  if [ $rc -ne 0 ]; then
-    bad "$name" "script exited $rc: $out"
-  elif [ "$(cat "$d/mark-main" 2>/dev/null)" != "$(realpwd "$d/main tree")" ]; then
-    bad "$name" "main tree install.sh did not run: $out"
-  elif [ -e "$d/mark-linked" ]; then
-    bad "$name" "the calling worktree's install.sh ran"
-  else
-    ok "$name"
-  fi
-}
-
-# ---- Live pin: owner ruling 2026-10-15, record merge-reinstalls-from-main ("The ruling") ----
-# The links in ~/.claude point at one pinned checkout: a worktree of the clone, on a detached
-# HEAD at main's commit, at the sibling path <clone>-live. The helper moves that checkout to
-# the new main, then runs the install from it. Cases 7-11 build a fake clone at $d/clone, a
-# caller worktree at $d/linked, and the pinned checkout at $d/clone-live.
-# Stub cases (7, 10, 11) commit marker installers, so no real install runs. Cases 8 and 9 run
-# the real install.sh. Cases 7-10 shim uname to Linux, so the helper takes its POSIX path on
-# Git Bash. Case 11 uses the real uname.
-
-SKIP=0
-skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
-
-# install.sh links into CLAUDE_CONFIG_DIR. Git Bash makes real links only with
-# winsymlinks:nativestrict, and only when the account may create them. Probe once.
-printf x > "$work/probe-src"
-LINKS_OK=no
-if MSYS=winsymlinks:nativestrict ln -s "$work/probe-src" "$work/probe-link" 2>/dev/null \
-   && [ -L "$work/probe-link" ]; then LINKS_OK=yes; fi
-
-# Marker installers for a clone at $1. Each writes a marker file into its own folder.
+# Marker installers for a clone at $1. install.sh writes ran-sh.txt into its own folder, then
+# exits with $STUB_EXIT (default 0). install.ps1 writes ran-ps1.txt into its own folder.
 stub_installers() {
   cat > "$1/install.sh" <<'EOF'
 #!/bin/sh
 printf ran > "$(dirname "$0")/ran-sh.txt"
+exit "${STUB_EXIT:-0}"
 EOF
   cat > "$1/install.ps1" <<'EOF'
 Set-Content -Path (Join-Path $PSScriptRoot 'ran-ps1.txt') -Value 'ran'
@@ -267,6 +89,11 @@ live_clone() {
   git -C "$1" commit -q -m init
 }
 
+# pin_at_main CLONE: a pinned checkout at CLONE-live, detached at main's commit.
+pin_at_main() {
+  git -C "$1" worktree add -q --detach "$1-live" "$(git -C "$1" rev-parse main)"
+}
+
 # A uname that reports Linux, in dir $1. The helper takes its POSIX path only on Linux.
 make_shim() {
   mkdir -p "$1"
@@ -275,7 +102,7 @@ make_shim() {
 }
 
 # Run the helper with cwd $1 and HOME $h. Sets rc, outs (stdout), errs (stderr), out (both).
-# SHIM, when set, goes first on PATH.
+# SHIM, when set, goes first on PATH. MSYS makes install.sh's ln create real links here.
 run_live() {
   ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" MSYS=winsymlinks:nativestrict \
       PATH="${SHIM:+$SHIM:}$PATH" bash "$SCRIPT" ) > "$work/run.out" 2> "$work/run.err"
@@ -283,6 +110,155 @@ run_live() {
   outs=$(cat "$work/run.out")
   errs=$(cat "$work/run.err")
   out=$(cat "$work/run.out" "$work/run.err")
+}
+
+# Probe for real symlinks once. install.sh links into CLAUDE_CONFIG_DIR, so case 8 needs them.
+printf x > "$work/probe-src"
+LINKS_OK=no
+if MSYS=winsymlinks:nativestrict ln -s "$work/probe-src" "$work/probe-link" 2>/dev/null \
+   && [ -L "$work/probe-link" ]; then LINKS_OK=yes; fi
+
+# ---- Case 1: run from a linked worktree -> the pinned checkout's install runs ---------------
+case1() {
+  name="case1: run from a linked worktree runs the install from the pinned checkout, not the clone or the caller"
+  d="$work/case1"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout: $out"
+  elif [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+    bad "$name" "install ran from the clone or from the calling worktree"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 2: run from the clone itself -> the pinned checkout's install runs, not the clone's --
+case2() {
+  name="case2: run from the clone runs the install from the pinned checkout, not the clone itself"
+  d="$work/case2"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  run_live "$d/clone"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout: $out"
+  elif [ -e "$d/clone/ran-sh.txt" ]; then
+    bad "$name" "install ran from the clone"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 3: no worktree holds main, but the branch exists -> pinned moves, install runs --
+# The helper reads main's commit from the branch, so it does not need a worktree on main. The
+# pinned checkout moves to the new main, and the install runs from it.
+case3() {
+  name="case3: no worktree holds main, the pinned checkout still moves to main's commit and the install runs"
+  d="$work/case3"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b feature "$d/linked"
+  printf 'feature\n' > "$d/linked/feature.txt"
+  git -C "$d/linked" add feature.txt
+  git -C "$d/linked" commit -q -m feature
+  c1=$(git -C "$d/linked" rev-parse HEAD)
+  git -C "$d/clone" switch -q -c trunk
+  git -C "$d/clone" branch -q -f main "$c1"
+  run_live "$d/linked"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" != "$c1" ]; then
+    bad "$name" "pinned checkout is not at main's commit $c1: $out"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout: $out"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 4: no branch named main -> one stderr line naming the pinned path, exit non-zero ---
+# The pinned checkout cannot move, so the helper fails loudly. The line must say the install did
+# not run and name the pinned path. It must not name `git switch main`: that remedy is retired.
+case4() {
+  name="case4: no branch named main prints one stderr line naming the pinned path, exits non-zero, runs no install"
+  d="$work/case4"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  git -C "$d/clone" switch -q -c trunk
+  git -C "$d/clone" branch -q -D main
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+  lines=$(printf '%s\n' "$errs" | grep -c .)
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
+  elif [ -n "$outs" ]; then
+    bad "$name" "text went to stdout, expected stderr only: $outs"
+  elif [ "$lines" -ne 1 ]; then
+    bad "$name" "expected one stderr line, got $lines: $errs"
+  else
+    case "$errs" in
+      *"git switch main"*) bad "$name" "stderr still names the retired remedy git switch main: $errs"; return ;;
+      *"not run"*"clone-live"*) ;;
+      *) bad "$name" "stderr line does not say the install did not run and name the pinned path: $errs"; return ;;
+    esac
+    if [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+      bad "$name" "an install ran although no branch named main exists"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
+# ---- Case 5: the pinned checkout's install exits non-zero -> script exits with that code ----
+case5() {
+  name="case5: a failing install from the pinned checkout makes the script exit with the same code"
+  d="$work/case5"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  STUB_EXIT=7
+  export STUB_EXIT
+  run_live "$d/linked"
+  unset STUB_EXIT
+
+  if [ "$rc" -ne 7 ]; then
+    bad "$name" "expected exit 7, got $rc: $out"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout, so the code proves nothing: $out"
+  elif [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+    bad "$name" "install ran from the clone or from the calling worktree"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 6: a clone path with a space -> the pinned checkout is found and its install runs --
+case6() {
+  name="case6: a clone path with a space: the pinned checkout is found and its install runs"
+  d="$work/case6"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/main tree" stub
+  pin_at_main "$d/main tree"
+  git -C "$d/main tree" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ ! -f "$d/main tree-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout: $out"
+  elif [ -e "$d/main tree/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+    bad "$name" "install ran from the clone or from the calling worktree"
+  else
+    ok "$name"
+  fi
 }
 
 # ---- Case 7: a merge moves main -> the pinned checkout moves to main's commit, detached ----
@@ -379,6 +355,8 @@ case9() {
 }
 
 # ---- Case 10: the pinned path cannot be moved -> one stderr line, non-zero, no install -----
+# A plain directory sits at the pinned path, so no move can make it a worktree at main. The
+# helper must not delete it. The line must say the install did not run and name the pinned path.
 case10() {
   name="case10: a pinned path that cannot be moved prints one stderr line, exits non-zero, runs no install"
   d="$work/case10"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
@@ -409,6 +387,9 @@ case10() {
 }
 
 # ---- Case 11: Windows -> the after-merge step runs install.ps1, not the pointer ----------
+# No pinned checkout exists. The helper runs install.ps1, which makes the pinned checkout. A stub
+# cannot make it, so this case checks only that install.ps1 ran, from the clone or the pinned
+# checkout. install.test.ps1 (pinnedps1) checks that the real install.ps1 makes it.
 case11() {
   name="case11: on Windows the after-merge step runs install.ps1, not the pointer"
   case "$(uname)" in
@@ -424,8 +405,8 @@ case11() {
     bad "$name" "script exited $rc: $out"
   elif printf '%s\n' "$out" | grep -q 'by hand'; then
     bad "$name" "printed the pointer instead of running install.ps1: $out"
-  elif [ ! -f "$d/clone-live/ran-ps1.txt" ]; then
-    bad "$name" "install.ps1 did not run from the pinned checkout: $out"
+  elif [ ! -f "$d/clone-live/ran-ps1.txt" ] && [ ! -f "$d/clone/ran-ps1.txt" ]; then
+    bad "$name" "install.ps1 did not run: $out"
   else
     ok "$name"
   fi

@@ -379,6 +379,83 @@ try {
 } finally {
     Remove-Item -Recurse -Force $KwRoot -ErrorAction SilentlyContinue
 }
+# ---- pinnedps1 / pinnedwt1: the pinned checkout at <clone>-live --------------------------------
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the links in ~\.claude point at one pinned
+# checkout, a worktree of the clone on a detached HEAD at main's commit, at the sibling path
+# <clone>-live. pinnedps1: with none present, install.ps1 run from the clone makes it at main's
+# commit, and the config CLAUDE.md pointer names it. pinnedwt1: the linked-worktree guard lets
+# install.ps1 run from that path, and from no other linked worktree (refusewt1 keeps that side).
+# Red now: the installer makes no pinned checkout, points the pointer at the clone, and refuses
+# every linked worktree. Each run is a child host with a fake USERPROFILE, a fake CLAUDE_CONFIG_DIR
+# and the throwaway PATH key, as envkey1 does.
+
+# New-PinFixture ROOT: a git clone at ROOT\clone on branch main, with one commit that holds
+# install.ps1, CLAUDE.md, settings.json, landed-dirs.txt and one skill. Returns the clone path.
+function New-PinFixture([string]$Root) {
+    $main = Join-Path $Root 'clone'
+    New-Item -ItemType Directory -Force -Path $main | Out-Null
+    Set-Content -Path (Join-Path $main 'CLAUDE.md') -Value '# pinned fixture content' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'landed-dirs.txt') -Value 'skills' -Encoding utf8
+    $sk = Join-Path $main 'skills\sample-skill'
+    New-Item -ItemType Directory -Force -Path $sk | Out-Null
+    Set-Content -Path (Join-Path $sk 'SKILL.md') -Value 'v1' -Encoding utf8
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $main 'install.ps1')
+    git -C $main init -q -b main | Out-Null
+    git -C $main add -A | Out-Null
+    git -C $main -c user.email=t@example.com -c user.name=t commit -q -m init | Out-Null
+    return $main
+}
+
+$PnRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinnedps1-" + [guid]::NewGuid().ToString('N'))
+$PnHome = Join-Path $PnRoot 'home'
+$PnCfg  = Join-Path $PnRoot 'claude'
+$PnLogs = Join-Path $PnRoot 'logs'
+New-Item -ItemType Directory -Force -Path $PnHome, $PnLogs | Out-Null
+try {
+    $pnMain = New-PinFixture $PnRoot
+    $pnPin  = $pnMain + '-live'
+    $pnHead = (& git -C $pnMain rev-parse HEAD).Trim()
+    $pnRes  = Invoke-InstallProc (Join-Path $pnMain 'install.ps1') $PnCfg $PnHome $PnLogs
+    $pnWant = '@' + ($pnPin -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+    $pnPtr  = Join-Path $PnCfg 'CLAUDE.md'
+    $pnGot  = if (Test-Path -LiteralPath $pnPtr) { [IO.File]::ReadAllText($pnPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
+    $pnHere = Test-Path -LiteralPath $pnPin
+    $pnAt   = if ($pnHere) { (& git -C $pnPin rev-parse HEAD).Trim() } else { '' }
+    $pnRef  = if ($pnHere) { (& git -C $pnPin rev-parse --symbolic-full-name HEAD).Trim() } else { '' }
+    Check "pinnedps1: install.ps1 run from the clone exits 0" ($pnRes.Exit -eq 0)
+    Check "pinnedps1: it makes a pinned checkout at <clone>-live" $pnHere
+    Check "pinnedps1: the pinned checkout is at main's commit" ($pnAt -eq $pnHead)
+    Check "pinnedps1: the pinned checkout is on a detached HEAD" ($pnRef -eq 'HEAD')
+    Check "pinnedps1: the config CLAUDE.md pointer names the pinned checkout" ($pnGot -eq $pnWant)
+    if ($pnRes.Exit -ne 0) { Write-Host "  pinnedps1 output: $($pnRes.Text)" }
+} finally {
+    Remove-Item -Recurse -Force $PnRoot -ErrorAction SilentlyContinue
+}
+
+$PwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinnedwt-" + [guid]::NewGuid().ToString('N'))
+$PwHome = Join-Path $PwRoot 'home'
+$PwCfg  = Join-Path $PwRoot 'claude'
+$PwLogs = Join-Path $PwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $PwHome, $PwLogs | Out-Null
+try {
+    $pwMain = New-PinFixture $PwRoot
+    $pwPin  = $pwMain + '-live'
+    git -C $pwMain worktree add -q --detach $pwPin | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAIL: pinnedwt1 fixture: git worktree add failed"; $Failed++
+    } else {
+        $pwRes  = Invoke-InstallProc (Join-Path $pwPin 'install.ps1') $PwCfg $PwHome $PwLogs
+        $pwWant = '@' + ($pwPin -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+        $pwPtr  = Join-Path $PwCfg 'CLAUDE.md'
+        $pwGot  = if (Test-Path -LiteralPath $pwPtr) { [IO.File]::ReadAllText($pwPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
+        Check "pinnedwt1: install.ps1 run from <clone>-live is not refused and exits 0" ($pwRes.Exit -eq 0)
+        Check "pinnedwt1: that run points the config CLAUDE.md at the pinned checkout" ($pwGot -eq $pwWant)
+        if ($pwRes.Exit -ne 0) { Write-Host "  pinnedwt1 output: $($pwRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $PwRoot -ErrorAction SilentlyContinue
+}
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
     Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
@@ -386,6 +463,8 @@ try {
     Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
     Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
     Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedps1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedwt1: install.ps1 runs only on Windows"
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
