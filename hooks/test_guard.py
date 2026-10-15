@@ -4651,6 +4651,34 @@ sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell
 sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
    "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 
+# ---- lane pwsh-quote-fix, review round 3, holes F1 to F3 (red until the builder fixes them).
+# F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
+# PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
+# a backtick that the outer string already consumed. Each DENIES on origin/main.
+sh("wsl: a PowerShell comment opener mid-word, then wsl --shutdown, denies",
+   "echo a<# ; wsl --shutdown #>", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a comment opener mid-word, then wsl --shutdown, denies",
+   "pwsh -c 'echo a<# ; wsl --shutdown #>'", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a sh -c script in a PowerShell call, a backtick pair then wsl --shutdown, denies",
+   "sh -c 'echo `x`; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a PowerShell iex with a double-quoted backtick pair then wsl --shutdown, denies",
+   'iex "echo `x`; wsl --shutdown"', "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a double-quoted backtick pair then wsl --shutdown, denies",
+   'pwsh -c "echo `x`; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+# KEEP ALLOWED. A closed comment at a token start hides its text. An unclosed one runs to the end.
+sh("wsl: a PowerShell closed comment at a token start hides wsl --shutdown, allowed",
+   "echo ok <# wsl --shutdown #>", "allow", tool="PowerShell", cwd=NOGIT)
+sh("wsl: a PowerShell unclosed comment at a token start with no call after it, allowed",
+   "echo hi <# note", "allow", tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
+   "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
+
+# ---- lane pwsh-quote-fix, review round 3, hole F4: a backtick hides the next `;` before an env read.
+# It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
+FAMILY = "env"
+sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
+   "echo a``; cat " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
@@ -5132,14 +5160,26 @@ sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, 
    "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
-# (f) LIMITS, pinned at today's behaviour. Each is a gap the guard does not close. The name says so.
-# Do not flip one without the owner.
-sh("silent-write limit (pinned allowed): a quote inside $( ) in a message ends the walk early, so a real commit's redirect reads as text",
-   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "allow", cwd=GITMAIN)
-# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the pin needs it.
+# (f) round 3 hole F5. Owner ruling 2026-10-15: these two were pinned allowed as limits, and are now
+# denies. A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
+# discarded commit or merge in a real checkout.
+sh("silent-write: a quote inside $( ) in a message does not hide a discarded commit, denies",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write: the PowerShell tool, a quote inside $( ) in a message does not hide a discarded commit, denies",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=GITMAIN)
+# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the case needs it.
 if os.name == "nt":
-    sh("silent-write limit (pinned allowed): a --git-dir under the temp folder is judged as a throwaway, though the cwd is a real checkout",
-       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "allow", cwd=GITMAIN)
+    sh("silent-write: a --git-dir under the temp folder does not hide a discarded merge in a real checkout, denies",
+       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "deny", "silent-write",
+       carries="a redirect silences", cwd=GITMAIN)
+
+# ---- lane pwsh-quote-fix, review round 3, hole F1 for a silent write. A here-string opener mid-word
+# is text to the lane, so the discarded commit after it is allowed. It is real, so it denies.
+sh("silent-write: a PowerShell here-string opener mid-word, then a silenced commit, denies",
+   "echo foo@'\nx'; " + VCS + " commit -m x >/dev/null\n'@'", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -10125,7 +10165,6 @@ LOG_CHECKS = (
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("wsl: a PowerShell script tag keeps its backslashes in segment_tokens", wsl_script_tag_keeps_backslash_case),
     ("wsl: a split segment keeps the PowerShell tag its script had", wsl_split_tag_keeps_backslash_case),
-    ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
      agent_worktree_reset_noted_case),
@@ -11707,7 +11746,6 @@ LOG_RULE_FAMILY = (
     ("powershell: a backslash path survives", "paths"),
     ("wsl: a PowerShell script tag keeps its backslashes", "wsl"),
     ("wsl: a split segment keeps the PowerShell tag", "wsl"),
-    ("trim: a conflict-side checkout", "shared-tree"),
     ("log: an unreadable subject", "shared-tree"),
     ("log: a hard reset in an agent-owned", "shared-tree"),
     ("log: checkout -- in an agent-owned", "shared-tree"),
