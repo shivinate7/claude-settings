@@ -1490,7 +1490,8 @@ def step_up_hit(tool: str, tool_input) -> str:
 # `git worktree prune` chained with two more steps sent the whole command to the owner as one
 # permission prompt). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
-# `;`, `|`, a newline, a leading `cd`) is denied, and the same step alone asks as before. The deny
+# `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
+# harmless lead or tail (harmless_steps, below). The deny
 # names the step by its kind, never its text. Only the first ask step is held: it is the one that
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, step)], at most one
@@ -1543,11 +1544,67 @@ def count_steps(text: str) -> int:
     return steps
 
 
+# THE HARMLESS ADDITIONS (owner ruling 2026-10-15, decision ask-steps-run-alone). Two forms are no
+# extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
+# After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
+# read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
+# and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution or a `&` in
+# the segment makes it a step. Only a run of them at the head and a run at the tail count.
+UNSAFE_TEXT = re.compile(r"[<>`&]|\$\(|\$\{")
+ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
+
+
+def harmless_lead(tokens: list, end: str) -> bool:
+    word, args = tokens[0].lower(), tokens[1:]
+    if word == "cd" and end == "&&":
+        return len(args) == 1 or (len(args) == 2 and args[0] in ("-P", "-L"))
+    if word == "export" and end == "&&":
+        return bool(args) and all(ASSIGN_WORD.match(arg) for arg in args)
+    if word == "set-location" and end == ";":
+        return len(args) == 1 or (len(args) == 2 and args[0].lower() in ("-path", "-literalpath"))
+    return False
+
+
+def harmless_tail(tokens: list, before: str) -> bool:
+    word, args = tokens[0].lower(), tokens[1:]
+    if word in ("tail", "head") and before == "|":
+        return (len(args) == 1 and bool(COUNT_ARG.match(args[0]))) or (
+            len(args) == 2 and args[0] == "-n" and args[1].isdigit())
+    if word == "out-null" and before == "|":
+        return not args
+    return (word, before) in (("echo", "&&"), ("write-host", ";"))
+
+
+def harmless_steps(text: str) -> int:
+    """How many segments of `text` are a harmless lead or tail around the ask step. A segment that
+    does not read as one form counts as a step, and the first and last are never both read as the
+    ask step, so at least one segment stays."""
+    ends = []
+    segments = split_segments(text, ends)
+    count = len(segments)
+
+    def plain(index: int):
+        segment = segments[index]
+        if UNSAFE_TEXT.search(segment):
+            return None
+        tokens = segment_tokens(segment)
+        return tokens or None
+
+    head = 0
+    while head < count - 1 and (tokens := plain(head)) and harmless_lead(tokens, ends[head]):
+        head += 1
+    tail = count
+    while tail > head + 1 and (tokens := plain(tail - 1)) and harmless_tail(tokens, ends[tail - 2]):
+        tail -= 1
+    return head + count - tail
+
+
 def settle_ask(tool: str, stripped: str) -> None:
     if not PENDING_ASK:
         return
     rule, reason, matched, step = PENDING_ASK[0]
-    if count_steps(stripped) > 1:
+    if count_steps(stripped) - harmless_steps(stripped) > 1:
         refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
     refuse(tool, "ask", rule, reason, matched)
 

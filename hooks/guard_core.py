@@ -660,10 +660,11 @@ GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
 
 
 def _segment_cd_target(tokens):
-    """Return the path a tokenized segment's `cd` would take, or None when it names none, or
-    when the segment's command word is not `cd`."""
+    """Return the path a tokenized segment's `cd` or PowerShell `Set-Location` would take, or None
+    when it names none, or when the segment's command word is neither. The aliases `sl`, `chdir`
+    and `Push-Location` are not read (owner ruling 2026-10-15 names only `Set-Location`)."""
     index = resolve_command(tokens)
-    if index is None or basename(tokens[index]) != "cd":
+    if index is None or basename(tokens[index]) not in ("cd", "set-location"):
         return None
     for token in tokens[index + 1:]:
         if token.startswith("-"):
