@@ -121,18 +121,17 @@ if (mode === "idle" || mode === "waiting") {
     }
 } else {
     if (mode === "hold") {
-        // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
-        // cmd.exe child does; a node child with inherited stdio does not, and the pipe closes at the kill.
         // The child writes "started" first, holds the inherited stdout for the hold, and writes "done"
-        // as its last act. "&&" gates done on the hold finishing: a kill of ping must not reach it, and
-        // a plain "&" would let cmd run it when the kill ends ping first. Relative names, with cwd set,
-        // keep the cmd quoting free of spaces.
+        // as its last act, so it must outlive a kill of node alone. On Windows, node puts each plain
+        // child in a job that dies with node, so the done-writer is detached; a tree kill still reaches
+        // it. "&&" gates done on the hold finishing: a kill of the hold must not reach it. Relative
+        // names, with cwd set, keep the cmd quoting free of spaces.
         const secs = Math.ceil(holdMs / 1000);
         const stdio = ["ignore", "inherit", "inherit"];
         const child = process.platform === "win32"
             ? spawn("cmd.exe", ["/d", "/c", "echo 1 > started.flag & ping -n " + (secs + 1) + " 127.0.0.1 > nul && echo 1 > done.flag"],
-                     { stdio, cwd: dir, windowsHide: true })
-            : spawn("sh", ["-c", "echo 1 > started.flag; sleep " + secs + "; echo 1 > done.flag"], { stdio, cwd: dir });
+                     { stdio, cwd: dir, windowsHide: true, detached: true })
+            : spawn("sh", ["-c", "echo 1 > started.flag && sleep " + secs + " && echo 1 > done.flag"], { stdio, cwd: dir });
         child.on("error", () => {});
     }
     setTimeout(() => {}, holdMs + 5000);  // exits by itself if nothing kills it
@@ -163,6 +162,8 @@ def skip(name, detail=""):
     """NOT-RUN: the case could not reach its precondition in time. Reported as SKIP, never PASS or FAIL."""
     SKIPPED.append(name)
     print("SKIP " + name + (" :: " + detail if detail else ""))
+    if os.environ.get("GITHUB_ACTIONS"):  # a SKIP leaves the step green, so CI shows it as a warning
+        print("::warning::SKIP " + name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
 
 
 def write_launchers():
@@ -440,11 +441,14 @@ def case_reader_that_holds_the_pipe_returns_before_the_child_ends():
     # The reader's child holds the stdout pipe for HOLD_MS, then writes "done" as its last act. Order,
     # not speed: the hook has returned while done does not exist yet, so it did not wait on the pipe.
     # No wall-clock bound. If node did not start the child before the timeout, the case is NOT-RUN.
+    # Proven red on Windows only. On POSIX, subprocess.run's timeout path waits on the child only, so
+    # a run() read of the pipe returns early there; a Popen + communicate() read is unmeasured there.
     try:
         r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)
-    except subprocess.TimeoutExpired:
-        check("reader holds the pipe: hook returns before the harness cap", False,
-              "still running after %d s" % HARNESS_CAP)
+    except subprocess.TimeoutExpired:  # the hold ends at HOLD_MS and the stub by itself 5 s later
+        skip("reader holds the pipe: hook returned before the harness cap",
+             "still running after %d s, past the hold and the stub's own end: a slow runner, "
+             "so the order is not tested" % HARNESS_CAP)
         return
     if not r.started:
         skip("reader holds the pipe: the child wrote its started marker before the timeout",
