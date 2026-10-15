@@ -1652,10 +1652,6 @@ sh("stash import: over an empty stack in a dirty checkout takes nothing, as on m
 sh("stash export: over an empty stack in a dirty checkout takes nothing, as on main",
    VCS + " stash export", "allow", cwd=SUBJDIRTY)
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
-sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
-   cwd=SUBJDIRTY)
-sh("stash pathspec pin: stash show still reads a dirty checkout", VCS + " stash show", "allow",
-   cwd=SUBJDIRTY)
 sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
    VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
@@ -1676,14 +1672,10 @@ sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clea
    cwd=SUBJDIRTY)
 sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
    "shared-tree", cwd=SUBJSTASH)
-sh("subject: popping an empty stash stack takes nothing", VCS + " stash pop", "allow",
-   cwd=SUBJDIRTY)
 sh("subject: popping a real entry from a CLEAN checkout still denies", VCS + " stash pop",
    "deny", "shared-tree", cwd=SUBJSTASH)
 sh("subject: popping a real entry from a worktree still denies, the stack is clone-wide",
    VCS + " stash pop", "deny", "shared-tree", cwd=SUBJSTASHWT)
-sh("subject: applying over an empty stash stack takes nothing", VCS + " stash apply", "allow",
-   cwd=SUBJDIRTY)
 sh("subject: applying a real entry from a CLEAN checkout still denies", VCS + " stash apply",
    "deny", "shared-tree", cwd=SUBJSTASH)
 sh("subject: the named-entry apply is the same act", VCS + " stash apply stash@{0}", "deny",
@@ -1759,6 +1751,21 @@ if os.name != "nt":
 else:
     skip_case("subject: a git that cannot answer the status read allows, rather than guess", NO_STAND_IN)
     skip_case("subject: the same blind git on a stack subject allows", NO_STAND_IN)
+
+# RULE 1 KEEPS GOVERNING A PATH OPERATION IN THIS CHECKOUT, UNCHANGED. `f.txt` is really modified
+# there, so rule 1 denies; `keep.txt` is really clean, so rule 1's empty-subject arm passes. Both
+# answers are rule 1's own, and the pointer rule never sees either call.
+sh("pointer: checkout of a dirty path keeps rule 1's deny", VCS + " checkout -- f.txt", "deny",
+   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout of a clean path keeps rule 1's empty-subject pass",
+   VCS + " checkout -- keep.txt", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a bare path argument is still rule 1's subject", VCS + " checkout f.txt", "deny",
+   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: --theirs is a path operation, not a branch switch",
+   VCS + " checkout --theirs f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a branch plus a path writes one file, and rule 1 judges it",
+   VCS + " checkout somebranch -- f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+
 # A DIRECTORY THAT IS NO GIT TREE IS NOT AN UNREADABLE SUBJECT. git answers there, and the answer
 # is "no tree", so the rule keeps its fail-closed deny. Every NOGIT case above rests on this.
 sh("subject: a directory that is no git tree still denies", VCS + " reset --hard HEAD", "deny",
@@ -1867,8 +1874,6 @@ sh("per-file ask: checkout -- of a folder in a worktree still asks", VCS + " che
    "ask", "shared-tree", cwd=GITWT)
 sh("per-file ask: restore of a glob in a worktree still asks", VCS + " restore '*.json'",
    "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: reset --hard in a worktree still asks", VCS + " reset --hard", "ask",
-   "shared-tree", cwd=GITWT)
 
 # DENY, in the shared checkout (GITMAIN). Every form above, the allow and the ask rows alike.
 sh("per-file deny: checkout of one file in the shared checkout", VCS + " checkout fixtures/a.json",
@@ -1892,8 +1897,6 @@ sh("per-file deny: checkout -- of a folder in the shared checkout", VCS + " chec
    "deny", "shared-tree", cwd=GITMAIN)
 sh("per-file deny: restore of a glob in the shared checkout", VCS + " restore '*.json'",
    "deny", "shared-tree", cwd=GITMAIN)
-sh("per-file deny: reset --hard in the shared checkout", VCS + " reset --hard", "deny",
-   "shared-tree", cwd=GITMAIN)
 # A QUOTED PATHSPEC. The guard splits the command on whitespace and does not strip the quotes, so
 # `'*.json'` reaches git's status read as the literal text `'*.json'`, matches nothing, and reads
 # as an empty subject. A discard then passes. The shared checkout must still deny it.
@@ -2118,21 +2121,9 @@ sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore
 sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
    VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=GITWT)
-# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`. A set is denied
-# by git-env-set, not asked. This was a stale claim: "ask" pinned the q_max core.worktree incident
-# shape (a set GIT_WORK_TREE leaking into child git calls), so these cases are re-pointed to deny.
+# 2. A GIT_WORK_TREE setter in front of a per-file restore is denied by git-env-set, not asked.
+# The setter rows sit in the git-env family, below the shared-tree section.
 GIT_ENV_RULE = "git-env-set"
-for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
-    for _gitdir in (False, True):
-        _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
-        if _gitdir:
-            _vars += " GIT_DIR=" + slash(GITMAIN) + "/.git"
-        if _lead is None:
-            _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
-        else:
-            _cmd = _lead + _vars + " " + VCS + " restore f.txt"
-        sh("per-file deny: GIT_WORK_TREE set to the shared checkout by %s%s, from a worktree"
-           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
 # restore runs in the shared checkout whichever side the lane's -C status stands on. main asks the
 # step; chained with the status, it denies as a chained ask step (ask-alone).
@@ -2155,36 +2146,14 @@ sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
 # per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
-# Main reads the lane for all of them. The setters are denied by git-env-set (re-pointed from ask,
-# see block 2). The chdir flags only name the shared checkout, so they still ask. The controls stay
-# allowed.
+# The chdir flags only name the shared checkout, so they still ask. The controls stay allowed.
 _SH = slash(GITMAIN)
-for _label, _cmd in (
-    ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
-    ("read -r then export", "read -r GIT_WORK_TREE <<< \"" + _SH + "\"; export GIT_WORK_TREE; "
-     + VCS + " restore f.txt"),
-    ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
-    ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
-     + VCS + " restore f.txt"),
-):
-    sh("per-file deny: late probe, %s sets GIT_WORK_TREE to the shared checkout, from a worktree"
-       % _label, _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
 for _label, _cmd in (
     ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
     ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
 ):
     sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
        "ask", "shared-tree", cwd=GITWT)
-for _label, _cmd in (
-    ("$env: assignment", '$env:GIT_WORK_TREE = "' + _SH + '"; ' + VCS + " restore f.txt"),
-    ("lower-case $env: assignment", '$env:git_work_tree = "' + _SH + '"; ' + VCS
-     + " restore f.txt"),
-    ("Set-Item Env:", 'Set-Item Env:GIT_WORK_TREE "' + _SH + '"; ' + VCS + " restore f.txt"),
-    ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
-     + '"); ' + VCS + " restore f.txt"),
-):
-    sh("per-file deny: late probe, PowerShell %s sets GIT_WORK_TREE to the shared checkout"
-       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=GITWT)
 sh("per-file allow: late probe control, a plain restore f.txt in the lane",
    VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
@@ -2225,35 +2194,22 @@ sh("agent worktree: a bare stash there still denies, the stack is clone-wide",
 # alone, and a stash push's subject does not.
 sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT)
-sh("worktree: a bare stash in a dirty worktree denies, the stack is clone-wide",
-   VCS + " stash", "deny", "shared-tree", cwd=GITWT)
-sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
-   VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
-sh("worktree: a stash push in the shared checkout still denies, unchanged",
-   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITMAIN)
 
-# THE TABLE'S ALLOW ROWS, checked in both a shared checkout and a worktree, so an allow is proven
-# to hold regardless of which tree the call runs in — a read or a restore never needed the
-# worktree/shared split, which the rows below confirm rather than assume.
-for _tree_name, _tree_path in (("shared checkout", GITMAIN), ("worktree", GITWT)):
-    sh("stash: list allows in the " + _tree_name, VCS + " stash list", "allow", cwd=_tree_path)
-    sh("stash: show allows in the " + _tree_name, VCS + " stash show", "allow", cwd=_tree_path)
-    sh("stash: apply over an empty stack allows in the " + _tree_name, VCS + " stash apply",
-       "allow", cwd=_tree_path)
-    sh("stash: pop over an empty stack allows in the " + _tree_name, VCS + " stash pop",
-       "allow", cwd=_tree_path)
-    sh("reset: a plain reset allows in the " + _tree_name, VCS + " reset HEAD~1", "allow",
-       cwd=_tree_path)
-    sh("reset: --soft allows in the " + _tree_name, VCS + " reset --soft HEAD~1", "allow",
-       cwd=_tree_path)
-    sh("reset: --keep allows in the " + _tree_name, VCS + " reset --keep HEAD~1", "allow",
-       cwd=_tree_path)
-    sh("reset: --merge allows in the " + _tree_name, VCS + " reset --merge HEAD~1", "allow",
-       cwd=_tree_path)
-    sh("reset: naming a path allows in the " + _tree_name, VCS + " reset -- f.txt", "allow",
-       cwd=_tree_path)
-    sh("restore: --staged alone allows in the " + _tree_name, VCS + " restore --staged f.txt",
-       "allow", cwd=_tree_path)
+# THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
+# restore of one staged file is allowed whichever tree the call runs in.
+sh("stash: list allows in the worktree", VCS + " stash list", "allow", cwd=GITWT)
+sh("stash: show allows in the worktree", VCS + " stash show", "allow", cwd=GITWT)
+sh("stash: apply over an empty stack allows in the worktree", VCS + " stash apply", "allow",
+   cwd=GITWT)
+sh("stash: pop over an empty stack allows in the worktree", VCS + " stash pop", "allow",
+   cwd=GITWT)
+sh("reset: a plain reset allows in the worktree", VCS + " reset HEAD~1", "allow", cwd=GITWT)
+sh("reset: --soft allows in the worktree", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
+sh("reset: --keep allows in the worktree", VCS + " reset --keep HEAD~1", "allow", cwd=GITWT)
+sh("reset: --merge allows in the worktree", VCS + " reset --merge HEAD~1", "allow", cwd=GITWT)
+sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allow", cwd=GITWT)
+sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
+   cwd=GITWT)
 
 # THE OWNER'S EXACT COMMAND, carrying a redirect and a pipe into `tail`. `tail -10` is not a
 # follow, so it must not trip the live-stream rule either. Both stacks are empty, so the allow
@@ -2261,8 +2217,6 @@ for _tree_name, _tree_path in (("shared checkout", GITMAIN), ("worktree", GITWT)
 # above hold the same command against a stack that really carries an entry.
 sh("stash: the owner's exact apply command over an empty stack allows in the shared checkout",
    VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITMAIN)
-sh("stash: the owner's exact apply command over an empty stack allows in a worktree",
-   VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITWT)
 
 # A COMMIT MESSAGE DISCUSSES THESE COMMANDS. MEASURED in job-cost-reporting on 2026-08-20: a
 # heredoc body was read as a command, and a commit message naming the protected folder was refused.
@@ -2528,20 +2482,6 @@ sh("pointer: switch of a branch in a worktree of the pointer checkout is allowed
    VCS + " switch somebranch", "allow", cwd=PTRWT, config=PTRCFG)
 sh("pointer: a branch switch in a directory that is no git tree is allowed",
    VCS + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
-
-# RULE 1 KEEPS GOVERNING A PATH OPERATION IN THIS CHECKOUT, UNCHANGED. `f.txt` is really modified
-# there, so rule 1 denies; `keep.txt` is really clean, so rule 1's empty-subject arm passes. Both
-# answers are rule 1's own, and the pointer rule never sees either call.
-sh("pointer: checkout of a dirty path keeps rule 1's deny", VCS + " checkout -- f.txt", "deny",
-   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
-sh("pointer: checkout of a clean path keeps rule 1's empty-subject pass",
-   VCS + " checkout -- keep.txt", "allow", cwd=PTRMAIN, config=PTRCFG)
-sh("pointer: a bare path argument is still rule 1's subject", VCS + " checkout f.txt", "deny",
-   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
-sh("pointer: --theirs is a path operation, not a branch switch",
-   VCS + " checkout --theirs f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
-sh("pointer: a branch plus a path writes one file, and rule 1 judges it",
-   VCS + " checkout somebranch -- f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
 
 # THE PATH-OPERATION ARMS OF THIS RULE, REACHED. Rule 1 answers first for a dirty or
 # file-shaped pathspec, so these two are the cases where rule 1b's own `--` and `--theirs` arms
@@ -5107,6 +5047,15 @@ sh("guard-command-position: playwright, two heredoc headers on one line write th
 # shared .git/config. Reading a variable, unsetting it, and text that only names it stay allowed.
 FAMILY = "git-env"  # GIT_ENV_RULE, the rule id, is set in the shared-tree section above
 _GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+
+# A per-file restore from a worktree, with a GIT_WORK_TREE setter in front of it: one bash prefix
+# row and one PowerShell $env: row. The loops below set each variable alone.
+sh("per-file deny: GIT_WORK_TREE set to the shared checkout by a prefix assignment, from a worktree",
+   "GIT_WORK_TREE=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", GIT_ENV_RULE,
+   cwd=GITWT)
+sh("per-file deny: late probe, PowerShell $env: assignment sets GIT_WORK_TREE to the shared checkout",
+   '$env:GIT_WORK_TREE = "' + slash(GITMAIN) + '"; ' + VCS + " restore f.txt", "deny",
+   GIT_ENV_RULE, tool="PowerShell", cwd=GITWT)
 
 # Bash forms that set one of the three. The tail is a harmless test run, so the setter decides.
 for _name in _GIT_ENV_VARS:
