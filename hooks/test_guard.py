@@ -2276,6 +2276,20 @@ sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
    carries="stash stack")
 
 
+# ---- r1-hd (review round 1), shared-tree family. H1: a python body under a backslash, single-quoted or
+# double-quoted delimiter, closed at EOF, then a stash push. The python body stays in view, so both heads deny.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a stash push, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\n" + VCS + " stash push -u -m lane", "deny", "shared-tree",
+       cwd=GITWT, carries="stash stack")
+# H2: a cat heredoc piped to a shell, closer EOF-X. The stash push is in the body, which the shell runs.
+# RED ON THE LANE HEAD: the body is dropped and the push is hidden. DENY ON MAIN: main closes at EOF.
+for _shell in ("sh", "bash"):
+    sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a stash push in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + VCS + " stash push -u -m lane\nEOF-X", "deny", "shared-tree",
+       cwd=GITWT, carries="stash stack")
+
+
 # `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
 # from a CLEAN checkout, `git --work-tree=<dirty> status --porcelain` reported the OTHER tree's
 # modified and untracked files. So rule 1 judges the named tree, not the one the call runs in.
@@ -3744,6 +3758,21 @@ sh("detached: a grep for Start-Job is not a call to it",
 # body is one step, and the kill is a deny, which wins over any ask step in the same command.
 sh("heredoc: a machine-wide kill in a python body still denies, in one command",
    "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
+
+
+# ---- r1-hd (review round 1), kill family. H1: a python body under a backslash, single-quoted or
+# double-quoted delimiter, closed at EOF, then a kill. Both heads deny: the python body stays in view.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a kill, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
+# H2: a cat heredoc piped to a shell, closer EOF-X. The kill is in the body, which the shell runs.
+# RED ON THE LANE HEAD: the body is dropped. DENY ON MAIN: main closes at EOF, so the kill reads as a line.
+for _shell in ("sh", "bash"):
+    sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a kill in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\npkill -f node\nEOF-X", "deny", "machine-wide-kill", cwd=PROJ)
+# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a kill in its body.
+sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
+   "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
 
 
 # =========================================================================== 2c. live streams
@@ -5388,6 +5417,16 @@ for _cmd in (
 sh("guard-command-position: playwright, two heredoc headers on one line write the export",
    "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+
+# ---- r1-hd (review round 1), env family. The same H1 and H2 shapes as the kill and shared-tree
+# sections, with a read of the environment file in place of the kill or the stash push.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    sh("env: r1-hd a python heredoc, %s delimiter closed at EOF, then an env read, denies" % _label,
+       "python3 - <<" + _open + "\nx\nEOF\ncat " + ENV, "deny", "env-file", cwd=PROJ)
+for _shell in ("sh", "bash"):
+    sh("env: r1-hd a cat heredoc piped to %s, closer EOF-X, an env read in the body, denies" % _shell,
+       "cat <<EOF-X | " + _shell + "\nx\nEOF\ncat " + ENV + "\nEOF-X", "deny", "env-file", cwd=PROJ)
+
 
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
@@ -7109,6 +7148,46 @@ chained_prune("ask-alone: a python header in quoted echo text is no heredoc, so 
 deny_beats("ask-alone: a python body holding a prune and a stash push denies as the stash push",
            "python3 - <<'PY'\n" + PRUNE + "\n" + LANE_STASH + "\nPY", "shared-tree", cwd=GITWT,
            carries="stash stack")
+
+
+# ---- r1-hd (review round 1), ask-alone family. Each case is red on the lane head unless it says so.
+#
+# H1. A delimiter with a backslash or a quote closes at the word bash reads: `E\OF`, `E'OF'` and `"E"OF`
+# are all `EOF`. The header reads the raw word, so the body never closes. The count drops the body and asks.
+for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
+    chained_prune("ask-alone: r1-hd a python heredoc, %s delimiter closed at EOF, then a prune, denies" % _label,
+                  "python3 - <<" + _open + "\nx\nEOF\n" + PRUNE)
+
+# H2. A header that pipes into a shell counts as a shell body. Its closer is EOF-X, so the EOF line in the
+# body closes nothing, and the prune in the body is a step.
+for _shell in ("sh", "bash"):
+    chained_prune("ask-alone: r1-hd a cat heredoc piped to %s, closer EOF-X, a prune in the body, denies" % _shell,
+                  "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + PRUNE + "\nEOF-X")
+
+# AN UNCLOSED BODY. Bash reads every line to the end of input, so every line is a step.
+chained_prune("ask-alone: r1-hd a python heredoc with no closer, a prune after it, denies",
+              "python3 - <<'PY'\nprint(1)\n" + PRUNE)
+
+# THE OWED GREEN CASE. Two prune lines in one python body are one step, so the command asks once.
+sh("ask-alone: r1-hd two prune lines in one python body ask once, not deny",
+   "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+
+# SCANNERS (building-scanner-respects-strings): a comment with a lone apostrophe, a lone apostrophe in
+# body text, a header shape inside quoted text, and a multi-line template literal.
+sh("ask-alone: r1-hd a comment with a lone apostrophe after a python header asks once for the prune",
+   "python3 - <<'PY' # don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
+chained_prune("ask-alone: r1-hd a lone apostrophe in a python body under a backslash delimiter, then a prune, denies",
+              "python3 - <<E\\OF\nDon't\nEOF\n" + PRUNE)
+chained_prune("ask-alone: r1-hd a header shape inside a double-quoted echo, then a prune, denies",
+              'echo "# <<EOF-X | sh"\n' + PRUNE)
+chained_prune("ask-alone: r1-hd a template literal in a node body closed at E'OF', then a prune, denies",
+              "node <<E'OF'\nconst s = `\nEOF\n" + PRUNE)
+sh("ask-alone: r1-hd a prune in a node template literal under a backslash delimiter asks once",
+   "node <<E\\OF\nconst s = `\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+
+# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a prune in its body.
+chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the body, denies (red on main too)",
+              "cat <<EOF | sh\n" + PRUNE + "\nEOF")
 
 
 # =========================================================================== ordinary work
