@@ -4,9 +4,6 @@
 The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
 PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
-The gate runs apply_fixes (ste_gate.py) on a Markdown write, then denies what remains. The golden set
-and the safety cases pin the fixer output and its unsafe patterns.
-
     python lint/test_ste_autofix.py -v
 """
 import glob
@@ -578,8 +575,7 @@ class ReviewRound1GateTests(_GateCase):
 # pass today and hold a failure class the fix must keep.
 
 # F1: an adverb between the form and a perfect verb. No follower in the table, so the fixer never rewrites it.
-# Rows: never, and not, now, only, also, always. Each starts with a follower word, so a missing trailing
-# word boundary in _fixable changes its row. just and still start with no follower, so they are not rows.
+# Rows: never, plus five that start with a follower word (not, now, only, also, always); dropping `\b` from `_fixable` changes each one's It's row.
 ADVERBS = ["never", "always", "also", "now", "only", "not"]
 
 
