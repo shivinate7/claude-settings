@@ -288,7 +288,7 @@ def owner_messages(path):
     return [text for kind, _, text in _scan(path) if kind == "owner"]
 
 
-FENCE_TOKEN = re.compile(r"<{3,}(?=BEGIN|END)")  # any run of 3+ "<" before BEGIN or END
+FENCE_TOKEN = re.compile(r"<{3,}(?=\s*(?:BEGIN|END))")  # any run of 3+ "<" before BEGIN or END, spaces allowed
 
 
 def _defang(s, one_line=False):
@@ -503,14 +503,22 @@ def _deny(reason):
                                   "permissionDecisionReason": reason}})
 
 
+OPTION_PART_CAP = 300  # chars of one option's label, description or preview; a longer one is cut
+OPTION_CUT = " [cut]"
+
+
 def _options(q):
     """One line per option for the judge: label, then its description and preview when it has them.
     Check (6) asks what each option gains and loses, and the description holds that. Every part is
-    defanged, so no option text can forge a fence."""
-    def line(o):
-        parts = [_defang(str(o.get(k) or ""), one_line=True) for k in ("label", "description", "preview")]
-        return " - ".join(p for p in parts if p)
-    return [line(o) for o in q.get("options") or [] if isinstance(o, dict)]
+    defanged and capped, so no option text can forge a fence or crowd out the owner's messages.
+    Each line is one line, so the "\n" between options is the only option boundary."""
+    def part(o, k):
+        t = _defang(str(o.get(k) or ""), one_line=True)
+        return t[:OPTION_PART_CAP] + OPTION_CUT if len(t) > OPTION_PART_CAP else t
+    opts = q.get("options")
+    opts = opts if isinstance(opts, list) else []  # a malformed options value is no options: the ask is not judged
+    return [" - ".join(t for t in (part(o, k) for k in ("label", "description", "preview")) if t)
+            for o in opts if isinstance(o, dict)]
 
 
 def _did_not_run(why):
@@ -530,7 +538,7 @@ def main():
         _did_not_run("the deny state could not be cleared, so the question was not judged.")
     if passed:
         sys.exit(0)  # the retry after a deny passes, whatever its text
-    todo = [(str(q.get("question", "")), _options(q)) for q in questions]
+    todo = [(_defang(str(q.get("question", ""))), _options(q)) for q in questions]
     todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
     absent = [(t, [lab for lab, rx in ((GOAL_LABEL, GOAL_LINE), (PROBLEM_LABEL, PROBLEM_LINE))
                    if not rx.search(t)]) for t, _ in todo]
@@ -559,7 +567,7 @@ def main():
         entries = []
     if not any(kind == "owner" for kind, _, _ in entries):
         _did_not_run("no owner messages readable.")
-    body = "\n\n".join("Question: %s\nOptions: %s" % (t, " | ".join(ls)) for t, ls in todo)
+    body = "\n\n".join("Question: %s\nOptions: %s" % (t, "\n".join(ls)) for t, ls in todo)
     rules = _style_rules()
     rules = "Question rules, from the style file:\n%s\n\n" % rules if rules else ""
     cwd = hook.get("cwd")
