@@ -4,9 +4,8 @@
 The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
 PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
-Written test-first. On the current code the gate has no fixer, so the gate cases are red, and
-apply_fixes has the unsafe patterns named in the golden set. Safety cases that already pass are
-regression guards, not red proof.
+The gate runs apply_fixes (ste_gate.py) on a Markdown write, then denies what remains. The golden set
+and the safety cases pin the fixer output and its unsafe patterns.
 
     python lint/test_ste_autofix.py -v
 """
@@ -386,7 +385,7 @@ class UiFileTests(_GateCase):
 class ReviewRound1FixerTests(unittest.TestCase):
     """apply_fixes on Markdown text: links, quotes, fences, front matter, English."""
 
-    # F1 links keep their URL, also when a quote wraps the link (folded in from the quoted-link case).
+    # F1 links keep their URL.
     def test_r1_f1_link_url_kept(self):
         inp = "See [the guide](https://a.example/g) and it's done.\n"
         out = ste_lint.apply_fixes(inp)[0]
@@ -409,7 +408,7 @@ class ReviewRound1FixerTests(unittest.TestCase):
         out = ste_lint.apply_fixes("See <https://x.y> and it's done.\n")[0]
         self.assertIn("<https://x.y>", out)
 
-    # F2 quoted code and quoted links survive
+    # F2 quoted code survives
     def test_r1_f2_quoted_code_kept(self):
         inp = 'He said "run `x`" and don\'t stop.\n'
         out = ste_lint.apply_fixes(inp)[0]
@@ -449,7 +448,7 @@ class ReviewRound1FixerTests(unittest.TestCase):
     def test_r1_guard_crlf_kept(self):
         self.assertEqual(ste_lint.apply_fixes("We don't stop.\r\nWe don't stop.\r\n")[0],
                          "We do not stop.\r\nWe do not stop.\r\n")
-        # A final Latin abbreviation on a CRLF line: every line keeps its CRLF, none mixed (folded in).
+        # A final Latin abbreviation on a CRLF line: every line keeps its CRLF, none mixed.
         self.assertEqual(ste_lint.apply_fixes("Use tools, e.g.\r\nWe don't stop.\r\n")[0],
                          "Use tools, for example.\r\nWe do not stop.\r\n")
 
@@ -466,7 +465,7 @@ class ReviewRound1FixerTests(unittest.TestCase):
 AMBIGUOUS_FORMS = [
     ("youd", "You'd finished the job.\n"),
     ("wed", "We'd finished the job.\n"),
-    # Ambiguous 'd with no fixable follower. The golden row g22 held the same sentence, so it is folded in here.
+    # Ambiguous 'd with no fixable follower: the fixer must leave it unchanged.
     ("theyd", "They'd finished the work.\n"),
     ("hed", "He'd finished the job.\n"),
     ("shed", "She'd finished the job.\n"),
@@ -475,7 +474,7 @@ AMBIGUOUS_FORMS = [
     ("hes", "He's finished the check.\n"),
     ("shes", "She's finished the check.\n"),
     ("whats", "What's been done?\n"),
-    # Ambiguous 's before been: the fixer must leave it unchanged. Folded in from test_r1_f4_its_been_unchanged.
+    # Ambiguous 's before been: the fixer must leave it unchanged.
     ("its", "It's been tested.\n"),
 ]
 
@@ -520,7 +519,6 @@ class ReviewRound1GateTests(_GateCase):
         self.assertNotIn("updatedInput", out)
 
     # F4 an ambiguous contraction is denied, not rewritten; front matter is never rewritten.
-    # An adverb before been ("It is not been") takes this same branch: folded in from its own test.
     def test_r1_f4_gate_its_been_denied_not_rewritten(self):
         out = hso(self._pre("Write", {"file_path": self._path("its.md"),
                                       "content": "It's been tested.\n"}))
@@ -580,8 +578,9 @@ class ReviewRound1GateTests(_GateCase):
 # pass today and hold a failure class the fix must keep.
 
 # F1: an adverb between the form and a perfect verb. No follower in the table, so the fixer never rewrites it.
-# Only never is a row. The other seven adverbs (always, also, just, still, now, only, not) reach the same branch.
-ADVERBS = ["never"]
+# Rows: never, and not, now, only, also, always. Each starts with a follower word, so a missing trailing
+# word boundary in _fixable changes its row. just and still start with no follower, so they are not rows.
+ADVERBS = ["never", "always", "also", "now", "only", "not"]
 
 
 class ReviewRound2FixerTests(unittest.TestCase):
@@ -661,6 +660,12 @@ class ReviewRound2GateTests(_GateCase):
         return env
 
     # F1 the gate does not rewrite an adverb-perfect form; it still denies
+    def test_r2_f1_gate_its_not_been_denied_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("adv1.md"),
+                                      "content": "It's not been tested.\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
     def test_r2_f1_gate_theres_always_been_denied_not_rewritten(self):
         out = hso(self._pre("Write", {"file_path": self._path("adv2.md"),
                                       "content": "There's always been a way.\n"}))
@@ -675,8 +680,7 @@ class ReviewRound2GateTests(_GateCase):
         self.assertNotIn("updatedInput", out)
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertIn("STE008", out["permissionDecisionReason"])
-        # Default ceiling, env unset: a payload just over 262144 bytes skips the fixer. Folded in from the
-        # 1.5 MB case. Its wall-clock limit is dropped: a timing check, not the outcome.
+        # Default ceiling, env unset: a payload just over 262144 bytes skips the fixer.
         big = "a. " * 87380 + "We don't stop.\n"
         self.assertGreater(len(big.encode("utf-8")), 262144)
         run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Write",
@@ -722,8 +726,7 @@ class ReviewRound3RawStdinTests(_GateCase):
         return subprocess.run([sys.executable, STE_GATE], input=raw, capture_output=True,
                               timeout=15, env=env)
 
-    # Accented, CJK and emoji text, with CRLF, through the gate's raw stdin: exact bytes. Same branch as the
-    # ASCII-path multibyte case and the gate CRLF write case, which are folded in here.
+    # Accented, CJK and emoji text, with CRLF, through the gate's raw stdin: exact bytes.
     def test_r3_blocker_raw_utf8_stdin_write_byte_exact(self):
         content ="We use it e.g. café 日本語 😀 here.\r\nWe don't stop.\r\n"
         run = self._run_raw({"hook_event_name": "PreToolUse", "tool_name": "Write",

@@ -785,7 +785,7 @@ class CallBound(unittest.TestCase):
         self.assertEqual([len(x[2]) for x in found20], [20])
         self.assertEqual([len(x[2]) for x in found5], [5])
         self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
-        # An absolute bound too: a constant overhead of four probes passes the difference above (folded in).
+        # An absolute bound too: a constant overhead of four probes passes the difference above.
         self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
 
     def test_own_lines_cost_the_same_at_20_as_at_5(self):
@@ -812,8 +812,8 @@ class Scanner(unittest.TestCase):
 
 
 class NulLine(unittest.TestCase):
-    """A UTF-16 file puts a NUL byte in every line. git cannot take a NUL in an argument, so branch_only
-    raised ValueError and aborted the whole check. A read that fails counts the line (branch_only docstring)."""
+    """A UTF-16 file puts a NUL byte in every line. The line main added and the merge dropped is a FAIL, not a crash.
+    A failed read counts the line: branch_only_lines returns set() on Unknown, so the line is never clear."""
 
     def test_a_utf16_line_main_added_and_the_merge_dropped_is_a_fail(self):
         r = base_repo()
@@ -836,7 +836,7 @@ class NulLine(unittest.TestCase):
             code = C.main(["--repo", r.dir, "--upstream", "origin/main"])
         self.assertEqual(code, 1, out.getvalue())
         self.assertIn("FAIL", out.getvalue())
-        # A failed read counts the line, so it is never clear (folded in from the IntegrationBase bad-revision case).
+        # A failed read counts the line, so it is never clear.
         self.assertFalse(C.branch_only(r.dir, "HEAD", ["nosuchrev"], "wide.txt", "x", ["HEAD"]))
 
 
@@ -874,7 +874,7 @@ class BlobReads(unittest.TestCase):
         b = C.Blobs(r.dir)
         try:
             self.assertEqual(b.get("HEAD", "lint/with space.txt").split(), ["spaced", "text"])
-            # A missing path reads as empty: the "missing" reply, a different branch (folded in from the missing-path case).
+            # A missing path reads as empty: the "missing" reply, a different branch.
             self.assertEqual(b.get("HEAD", "lint/no such.py"), "")
         finally:
             b.close()
@@ -1054,8 +1054,7 @@ class SharedLineRead(unittest.TestCase):
         self.assertEqual(self.outcome(r, claim)[0], [])
 
     def test_a_lane_that_edits_the_file_and_a_failed_read_is_never_a_drop(self):
-        # Row comment: a failed read of the merge file is never a drop. The no-edit variant was removed: it never
-        # reads the file (hits 0), so its fault never ran. The clean no-edit outcome stays in the green case above.
+        # A failed read of the merge file is never a drop.
         r, merged, claim = self.build(lane_edits=True)
         clean = self.outcome(r, merged)
         self.assertNotIsInstance(clean, C.Unknown)
@@ -1322,7 +1321,7 @@ class DropsLinesHint(unittest.TestCase):
         got, text = self.said()
         self.assertEqual(got, [])
         self.assertEqual(self.r.notes, ["ALLOWED app.txt: the owner wants Card back"])
-        # The CLI on the same repo: exit 0, the ALLOWED line, no hint (folded in from the main-level case).
+        # The CLI on the same repo: exit 0, the ALLOWED line, no hint.
         rc, out = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
         self.assertEqual(rc, 0)
         self.assertIn("ALLOWED app.txt", out)
@@ -1330,7 +1329,7 @@ class DropsLinesHint(unittest.TestCase):
 
     def test_a_trailer_with_no_reason_keeps_the_finding_and_gets_no_hint(self):
         """git returns it, so placement is right: the missing reason is the fault, and a placement hint would be wrong.
-        Rows: a bare path with and without Co-Authored-By below it (Debt19 folded in), and an empty value (folded in)."""
+        Rows: a bare path with and without Co-Authored-By below it, and an empty value."""
         for msg in ("Bring Card back\n\nDrops-lines: app.txt\n%s" % self.CO,
                     "Bring Card back\n\nDrops-lines: app.txt",
                     "Bring Card back\n\nDrops-lines:\n%s" % self.CO):
@@ -1423,7 +1422,7 @@ class DropsLinesHint(unittest.TestCase):
         return BodyReadFails()
 
     def test_main_and_the_merge_tool_still_refuse_with_the_finding_when_the_hint_read_fails(self):
-        """The hint read fails. main still exits 1 with the finding, and the merge tool still refuses (folded in)."""
+        """The hint read fails. main still exits 1 with the finding, and the merge tool still refuses."""
         import merge
         fault = self.misplaced_repo_with_a_failing_hint_read()
         with fault.armed():
@@ -1432,8 +1431,10 @@ class DropsLinesHint(unittest.TestCase):
         self.assertEqual(rc, 1, text)
         self.assertIn("FAIL", text)
         self.assertIn("app.txt", text)
+        before = fault.hits
         with fault.armed(), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
             merge.undo_check(self.r.dir, "origin/main")
+        self.assertGreater(fault.hits, before, "the faulted read never ran on the merge leg")
         self.assertIn("app.txt", str(cm.exception))
 
     def test_the_unknown_override_does_not_excuse_a_finding_when_the_hint_read_fails(self):
