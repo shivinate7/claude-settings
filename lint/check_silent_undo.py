@@ -34,8 +34,10 @@ import collections
 import difflib
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
@@ -486,6 +488,30 @@ def resolve_upstream(cwd, upstream):
     raise Unknown("no %s here, nothing to compare against" % upstream)
 
 
+def generated_page(cwd, head, paths):
+    """(page path, True when head's copy equals what the generator, lint/hook_catalog.py, writes for head's tree).
+    Such a page is derived, so a finding on it needs no trailer. Any other difference in the page is still a finding.
+    The generator runs only when `paths`, the paths with a finding, holds its page."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hook_catalog as gen
+    if gen.RECORDS_PAGE not in paths:
+        return gen.RECORDS_PAGE, False
+    page = blob(cwd, head, gen.RECORDS_PAGE)
+    tmp = tempfile.mkdtemp(prefix="undo-gen-")
+    wt, root = os.path.join(tmp, "wt"), gen.ROOT
+    try:
+        git(cwd, "worktree", "add", "-q", "--detach", wt, head)
+        gen.ROOT = wt
+        want, problems = gen.render_records()
+        return gen.RECORDS_PAGE, bool(page) and not problems and page == want
+    except gen.Unreadable:
+        return gen.RECORDS_PAGE, False
+    finally:
+        gen.ROOT = root
+        git(cwd, "worktree", "remove", "--force", wt, ok=(0, 128))
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check(cwd, upstream, head, default=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
@@ -516,6 +542,9 @@ def check(cwd, upstream, head, default=None):
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
+    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok})
+    if same:
+        ok = dict(ok, **{page: "the page is the generator's output for the head"})
     bad, notes = judge(items, ok)
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
