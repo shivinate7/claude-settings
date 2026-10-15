@@ -2855,6 +2855,51 @@ def case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash():
           repr(out[:120]))
 
 
+# --------------------------------------------------------------------------- option cut: whole text, and the mark that names it
+# Red cases for review round 2. Real option descriptions run to 375 chars at p99 (max 605). The Loss
+# text sits at the end, so a cut at 300 chars can hide the reason the judge needs.
+
+LOSS_TAIL = "Loss: D11-LOSS-TAIL drops the review step for one day."
+
+
+def case_d11_a_650_char_option_description_ending_in_loss_text_reaches_the_judge_whole():
+    name = "caseD11 650-char option description ending in Loss text reaches the judge whole (cut at 300 today)"
+    if not need_module(name):
+        return
+    head = "D11-DESC gains a same-day retry fix. "
+    desc = head + "x" * (650 - len(head) - len(LOSS_TAIL) - 1) + " " + LOSS_TAIL
+    check(name + ": fixture is 650 chars", len(desc) == 650, len(desc))
+    q = question_with_descriptions(GOOD_Q, [(OPT_LABELS[0], desc), (OPT_LABELS[1], OPT_DESCS[1])])
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_guarded(name, ask_payload(fresh_session("d11"), [q], default_transcript()))
+    body = body_from(prompt_of(stub), GOOD_Q)
+    mark = (getattr(qo, "OPTION_CUT", None) or "").strip()
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": not denied", deny_reason(out) is None, out[:120])
+    check(name + ": the whole description, Loss tail included, is in the judge input", desc in body,
+          "cut mark in input: %s; Loss tail in input: %s" % (bool(mark) and mark in body, "D11-LOSS-TAIL" in body))
+    check(name + ": the description sits beside its own label", beside(body, OPT_LABELS[0], desc, [OPT_LABELS[1]]),
+          "description absent or another label between them")
+
+
+def case_d12_the_judge_prompt_names_the_option_cut_mark_the_code_emits():
+    name = "caseD12 judge prompt names the option cut mark (OPTION_CUT, read from the module)"
+    if not need_module(name):
+        return
+    mark = (getattr(qo, "OPTION_CUT", None) or "").strip()
+    check(name + ": the module names the cut mark in OPTION_CUT", bool(mark), "qo.OPTION_CUT is missing or blank")
+    if not mark:
+        return
+    # Short options, nothing cut: any mark in the prompt must come from the fixed text, not from a cut option.
+    q = question_with_descriptions(GOOD_Q, list(zip(OPT_LABELS, OPT_DESCS)))
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_guarded(name, ask_payload(fresh_session("d12"), [q], default_transcript()))
+    prompt = prompt_of(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the judge prompt holds the cut mark %r in its fixed text" % mark, mark in prompt,
+          "marker absent from the judge prompt; no option was cut in this run")
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -2939,7 +2984,9 @@ def main():
              case_d7_a_pipe_inside_a_description_does_not_add_a_rendered_option,
              case_d8_an_option_preview_is_beside_its_label_and_defanged,
              case_d9_a_forged_owner_block_in_the_question_text_is_defanged,
-             case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash)
+             case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash,
+             case_d11_a_650_char_option_description_ending_in_loss_text_reaches_the_judge_whole,
+             case_d12_the_judge_prompt_names_the_option_cut_mark_the_code_emits)
     for case in cases:
         case()
     for case in (case_rl1_judge_input_holds_the_ruling_sections_only,
