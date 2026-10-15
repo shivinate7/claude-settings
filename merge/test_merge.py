@@ -850,6 +850,12 @@ class Unlock(Env):
     def test_unlock_with_no_lock_is_fine(self):
         self.assertEqual(self.run_merge("--unlock")[0], 0)
 
+    def test_unlock_of_a_missing_ref_says_so_and_never_says_the_lock_was_removed(self):  # round 2: the ref is absent, nothing was removed
+        rc, out = self.run_merge("--unlock", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertNotRegex(out, r"lock on main removed")
+        self.assertRegex(out, r"(?i)no (merge )?lock|not found|does not exist|nothing to remove")
+
 FAKE_GH = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
 d = os.environ["FAKE_GH_DIR"]; a = sys.argv[1:]; assert a[0] == "api"; a = a[1:]
@@ -950,6 +956,9 @@ if a[:2] == ["pr", "view"]:
             print(S["state_read_fail"]); sys.exit(1)
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None,
                           "headRefOid": S.get("state_head") or git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]}))
+elif a[:2] == ["pr", "checks"] and S.get("checks_fail") and S["checks_fail"]["n"] > 0:  # {"n", "msg"}: the next n reads fail with msg, then it answers
+    S["checks_fail"]["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
+    print(S["checks_fail"]["msg"]); sys.exit(1)
 elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
     print("HTTP 404: Not Found"); sys.exit(1)  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
 elif a[:2] == ["pr", "checks"]:
@@ -957,6 +966,10 @@ elif a[:2] == ["pr", "checks"]:
     print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
     sys.exit(0 if all(b in ("pass", "skipping") for _, b, _ in cur) else 8)
 elif a[:2] == ["run", "list"]:
+    rf = S.get("runs_fail_first")  # [text, ...]: the first len() calls fail, one text each, then it answers
+    if rf:
+        S["runs_fail_first"] = rf[1:]; S["runs_failed"] = S.get("runs_failed", 0) + 1; save()
+        print(rf[0]); sys.exit(1)
     if S.get("runs_fail"):  # the text of every failing `gh run list`
         print(S["runs_fail"]); sys.exit(1)
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
@@ -1001,6 +1014,30 @@ NET_WSARECV = 'Post "https://api.github.com/graphql": read tcp 10.0.0.5:51322->1
 NET_DEADLINE = 'Post "https://api.github.com/graphql": context deadline exceeded'
 NET_REFUSED = 'Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: connection refused'
 NET_HOST = "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Could not resolve host: github.com"
+
+# Rate-limit texts (the q_max PR 874 incident, 2026-10-14: every check green, `gh run list` answered HTTP 403). The request id and the
+# timestamp in a text belong to the request. They are no reset time.
+RATE_403 = ("failed to get runs: HTTP 403: API rate limit exceeded for user ID 309471439. If you reach out to GitHub Support for help, please include the request ID "
+            "727E:322B55:45396D:E55920:6ACF7502 and timestamp 2026-10-14 12:26:42 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service "
+            "(https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/ssemwal-cdc/q_max/actions/workflows?page=1&per_page=100)")
+_SECONDARY = ("You have exceeded a secondary rate limit. Please wait a few minutes before you try again. If you reach out to GitHub Support for help, "
+              "please include the request ID 1A2B:3C4D:5E6F and timestamp 2026-10-14 12:30:00 UTC.")
+RATE_SECONDARY_403 = f"failed to get runs: HTTP 403: {_SECONDARY} (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)"
+RATE_GQL_403 = f"HTTP 403: {_SECONDARY} (https://api.github.com/graphql)"  # the form on `gh pr merge`
+# `gh api` prints the JSON body, then its own line, with no newline between (see GH_API_TAIL).
+RATE_API_403 = ('{"message":"API rate limit exceeded for user ID 309471439.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api","status":"403"}'
+                "gh: API rate limit exceeded for user ID 309471439. If you reach out to GitHub Support for help, please include the request ID 727E:322B55:45396D:E55920:6ACF7502 "
+                "and timestamp 2026-10-14 12:26:42 UTC. (HTTP 403)")
+RATE_API_SECONDARY_403 = ('{"message":"You have exceeded a secondary rate limit.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api","status":"403"}'
+                          f"gh: {_SECONDARY} (HTTP 403)")
+R429 = "failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)"
+# A 403 that is a permission refusal: the same three shapes, no rate limit.
+PLAIN_403 = "failed to get runs: HTTP 403: Resource not accessible by integration (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)"
+PLAIN_403_BRANCH = "HTTP 403: Must have admin rights to Repository. (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)"
+PLAIN_403_API = ('{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest","status":"403"}'
+                 "gh: Resource not accessible by integration (HTTP 403)")
+# The GraphQL form on `gh pr checks`, `gh pr view` and `gh pr merge`: no HTTP status in the line.
+RATE_GQL_ALREADY = "GraphQL: API rate limit already exceeded for user ID 309471439."
 
 def drop_config(env):
     """Remove .github/stamp.json from main and feat, as in 5 of the owner's 8 repos. Then pull main into env.co."""
@@ -1396,9 +1433,101 @@ class GhHalf(Env):
 
     def test_a_wrapped_run_list_http_502_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)  # a plain network error waits the normal pause
 
     def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a 429 is a rate limit: the cap
+
+    # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge-net-retry): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
+
+    def test_a_run_list_rate_limit_403_is_a_network_error_retried_then_stopped(self):
+        self.run_list_fails_wrapped(RATE_403)  # the incident text: 4 calls, a network stop, never "not green"
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a rate limit waits the cap. Its request timestamp is no reset time.
+
+    def test_a_run_list_secondary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
+        self.run_list_fails_wrapped(RATE_SECONDARY_403)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
+
+    def test_a_run_list_rate_limit_403_that_clears_on_the_retry_lets_the_merge_go_on(self):
+        self.set(runs_fail_first=[RATE_403])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("not green", out)
+        self.assertEqual(self.gh_state("runs_failed"), 1)
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the first pause is the retry's
+        self.assertEqual(self.claims("main"), 1)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_retry_after_in_the_gh_text_never_changes_the_rate_wait(self):
+        self.set(runs_fail_first=["Retry-After: 17\n" + RATE_403])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the header's 17 s is ignored
+
+    def checks_read_fails(self, msg, n=99):
+        """Every check is green and `gh pr checks` fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed."""
+        self.set(checks_fail={"n": n, "msg": msg})
+        before = self.head()
+        rc, out = self.go()
+        self.assertNotIn("not green", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("checks_failed"), 4, out)  # one try and three retries
+        self.assertIn("network", out.lower())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.head(), before)  # nothing claimed or pushed
+        self.assertFalse(self.lock_ref())
+
+    def test_a_pr_checks_http_429_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails("HTTP 429: Too Many Requests (https://api.github.com/graphql)")
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a 429 is a rate limit: the cap
+
+    def test_a_pr_checks_rate_limit_403_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(RATE_GQL_403)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
+
+    def test_a_pr_checks_graphql_rate_limit_already_exceeded_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(RATE_GQL_ALREADY)  # owner's word: it retries like the 403
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
+
+    def test_a_retry_after_on_a_pr_checks_429_never_changes_the_rate_wait(self):
+        self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\nHTTP 429: Too Many Requests (https://api.github.com/graphql)"})
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.gh_state("checks_failed"), 1)
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the header's 17 s is ignored
+
+    def test_a_required_check_read_with_a_rate_limit_403_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim(RATE_API_403)  # `gh api` form: the claim stays, 4 tries
+
+    def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_without_a_revert(self):
+        self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403)
+
+    def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
+        self.merge_reply_is_retried_then_stops(RATE_GQL_403)
+
+    def test_a_plain_403_on_run_list_is_a_refusal_not_retried_and_not_a_network_stop(self):  # (d): green before the lane, a guard
+        self.set(runs_fail=PLAIN_403)
+        before = self.head()
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("run list"), 1, out)  # a refusal is not retried
+        self.assertEqual(self.paused, [])  # no retry pause
+        self.assertIn("HTTP 403", out)  # the refusal's own text
+        self.assertNotIn("network", out.lower())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.head(), before)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_plain_403_on_the_required_check_read_reverts_the_claim_and_is_not_retried(self):  # (d): a guard
+        self.set(contexts=["gates"], api_fail={"msg": PLAIN_403_API, "after_checks": 1})
+        rc, out = self.go(required="protection")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("api_failed"), 1, out)  # tried once
+        self.assertIn("reverted on feat", out)
+        self.assertNotIn("network", out.lower())
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
 
     def test_a_merge_lock_read_that_fails_once_with_a_json_error_is_retried_and_the_run_goes_on(self):
         # Windows credential manager (PR 411, 2026-10-13 20:35): ls-remote of the lock ref fails once, then works
@@ -2823,6 +2952,154 @@ class NetErrorLines(unittest.TestCase):
         # Round 1 fix guard: the anchor edit must keep the space in `: ` before the message, or `HTTP 502:x (url)` matches.
         self.assertFalse(merge.is_net(1, "failed to get runs: HTTP 502:x (https://x)"))
 
+class RateLimitLines(unittest.TestCase):
+    """merge.is_net on a rate-limited gh call (lane merge-rate-limit). A rate-limit 403 is a network fault. A permission 403 is a refusal.
+    These scan gh's output, not source text, so the string-opener cases of building-scanner-respects-strings do not apply."""
+    def test_a_rate_limit_403_is_a_network_error(self):
+        for out in (RATE_403, RATE_SECONDARY_403, RATE_GQL_403, RATE_API_403, RATE_API_SECONDARY_403, "Retry-After: 17\n" + RATE_403):
+            with self.subTest(out=out[:70]):
+                self.assertTrue(merge.is_net(1, out))
+
+    def test_a_graphql_rate_limit_already_exceeded_is_a_network_error(self):
+        self.assertTrue(merge.is_net(1, RATE_GQL_ALREADY))
+        self.assertTrue(merge.is_net(1, "Retry-After: 17\n" + RATE_GQL_ALREADY))
+
+    def test_a_403_that_is_not_a_rate_limit_is_not_a_network_error(self):
+        for out in (PLAIN_403, PLAIN_403_BRANCH, PLAIN_403_API):  # the same shapes as the rate-limit texts
+            with self.subTest(out=out[:70]):
+                self.assertFalse(merge.is_net(1, out))
+
+    def test_a_refusal_or_check_that_quotes_a_rate_limit_is_not_a_network_error(self):
+        for out in ('GraphQL: Pull Request is not mergeable: #7 "Handle API rate limit exceeded"',
+                    'GraphQL: Pull Request is not mergeable: #7 "Back off on a secondary rate limit"',
+                    'GraphQL: Pull Request is not mergeable: #7 "Fix: HTTP 403: API rate limit exceeded"',
+                    'GraphQL: Pull Request is not mergeable: #7 "Fix: GraphQL: API rate limit already exceeded"',
+                    '[{"name":"API rate limit exceeded guard","bucket":"fail","link":""}]'):
+            with self.subTest(out=out[:70]):
+                self.assertFalse(merge.is_net(1, out))
+
+class RateLimitWait(unittest.TestCase):
+    """retry_net and Host.gh on a rate-limited call (lane merge-rate-limit): how many tries, and how long each wait is. The pause is a
+    recorder, so nothing sleeps. Headers are ignored (orchestrator ruling 2026-10-14): a rate-limit text (403 or 429, any form) waits
+    merge.RATE_WAIT_CAP per retry, whatever a `Retry-After` or `X-Ratelimit-Reset` line says. Any other network error waits merge.NET_PAUSE."""
+    NOW = 1000.0
+
+    def setUp(self):
+        self.pauses, self.calls = [], 0
+
+    def replies(self, *seq):
+        """Patch merge.sh so each gh call answers the next of `seq` (the last repeats). Counts them in self.calls."""
+        self.calls = 0
+        def sh(args, cwd=None, input=None, env=None):
+            self.calls += 1
+            return seq[min(self.calls, len(seq)) - 1]
+        p = unittest.mock.patch.object(merge, "sh", sh)
+        p.start(); self.addCleanup(p.stop)
+
+    def host(self):
+        return merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=self.pauses.append)
+
+    def retry(self, *seq):
+        """-> merge.retry_net's result over the replies `seq`."""
+        self.calls = 0
+        def call():
+            self.calls += 1
+            return seq[min(self.calls, len(seq)) - 1]
+        return merge.retry_net(call, self.pauses.append)
+
+    # retry_net: the tries
+    def test_a_rate_limit_403_is_retried_with_the_rate_wait(self):
+        self.assertEqual(self.retry((1, RATE_403), (1, RATE_SECONDARY_403), (0, "[]")), (0, "[]", 2))
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 2)  # a rate limit waits the cap, not NET_PAUSE
+
+    def test_the_wait_cap_is_60_seconds(self):  # orchestrator's call, 2026-10-14: the one value, so the other cases read the constant
+        self.assertEqual(merge.RATE_WAIT_CAP, 60)
+
+    def test_a_graphql_rate_limit_already_exceeded_is_retried_with_the_rate_wait(self):
+        self.assertEqual(self.retry((1, RATE_GQL_ALREADY), (0, "[]")), (0, "[]", 1))
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limit_403_that_never_clears_is_tried_four_times(self):
+        self.assertEqual(self.retry((1, RATE_403)), (1, RATE_403, 3))
+        self.assertEqual(self.calls, 4)  # one try and three retries
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
+
+    def test_a_429_is_retried_with_the_rate_wait(self):
+        self.assertEqual(self.retry((1, R429), (0, "[]")), (0, "[]", 1))
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_plain_403_is_not_retried(self):  # (d): green before the lane, a guard
+        for out in (PLAIN_403, PLAIN_403_BRANCH, PLAIN_403_API):
+            with self.subTest(out=out[:70]):
+                self.pauses.clear()
+                self.assertEqual(self.retry((1, out), (0, "[]")), (1, out, 0))
+                self.assertEqual(self.pauses, [])
+
+    def test_a_plain_network_error_waits_the_normal_pause_whatever_its_headers(self):  # the NET_PAUSE half of the rule
+        for out in (NET_TLS, "failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)",
+                    "Retry-After: 5\n" + NET_TLS):
+            with self.subTest(out=out[:40]):
+                self.pauses.clear()
+                self.assertEqual(self.retry((1, out), (0, "[]")), (0, "[]", 1))
+                self.assertEqual(self.pauses, [merge.NET_PAUSE])
+
+    def test_a_retry_after_never_changes_the_rate_wait(self):  # a Retry-After of 5 s or 600 s is no wait: every rate-limit text waits the cap
+        for text in (R429, RATE_403, RATE_SECONDARY_403, RATE_GQL_ALREADY):
+            for header in ("Retry-After: 5", "retry-after: 17", "Retry-After: 600"):
+                with self.subTest(text=text[:40], header=header):
+                    self.pauses.clear()
+                    self.assertEqual(self.retry((1, header + "\n" + text), (0, "[]")), (0, "[]", 1))
+                    self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    # Host.gh: a reset header is ignored, near, far or past (orchestrator ruling 2026-10-14). The reset time is no wait.
+    def test_a_reset_time_never_changes_the_rate_wait_on_a_429_or_a_rate_limit_403(self):
+        for text in (R429, RATE_403):
+            for header in (f"X-Ratelimit-Reset: {int(self.NOW) + 5}", f"X-Ratelimit-Reset: {int(self.NOW) + 23}",
+                           f"X-RateLimit-Reset: {int(self.NOW) + 3600}"):
+                with self.subTest(text=text[:40], header=header):
+                    self.pauses.clear()
+                    self.replies((1, header + "\n" + text), (0, "[]"))
+                    self.assertEqual(self.host().gh(["run", "list"]), (0, "[]"))
+                    self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_reset_time_already_past_waits_the_rate_wait_never_a_negative_time(self):
+        self.replies((1, f"X-Ratelimit-Reset: {int(self.NOW) - 100}\n" + R429), (0, "[]"))
+        self.host().gh(["run", "list"])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])  # a fixed cap: no time is computed from the header
+
+    def test_a_rate_limit_waits_the_rate_wait_whatever_its_timestamp_says(self):
+        self.replies((1, RATE_403), (0, "[]"))  # "timestamp 2026-10-14 12:26:42 UTC" is the request's time, not a reset
+        self.host().gh(["run", "list"])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limit_that_never_clears_is_a_net_stop_after_three_retries(self):  # (e)
+        self.replies((1, RATE_403))
+        with self.assertRaises(merge.NetStop) as cm:
+            self.host().gh(["run", "list"])
+        self.assertEqual(self.calls, 4)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
+        self.assertIn("API rate limit exceeded", str(cm.exception))  # the stop shows gh's own words
+
+    def test_a_plain_403_is_returned_at_once_by_host_gh(self):  # (d): a guard
+        self.replies((1, PLAIN_403))
+        self.assertEqual(self.host().gh(["run", "list"]), (1, PLAIN_403))
+        self.assertEqual((self.calls, self.pauses), (1, []))
+
+    def test_a_rate_wait_in_host_gh_prints_one_line_before_the_wait(self):  # item 3, Host.gh: red on 2cc181d
+        self.replies((1, RATE_403), (0, "[]"))
+        buf, snapshots = io.StringIO(), []
+        host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
+        assert_one_rate_wait_line(self, buf.getvalue(), snapshots)
+
+    def test_a_plain_403_prints_no_wait_line(self):  # control: green on 2cc181d, a guard
+        self.replies((1, PLAIN_403))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.assertEqual(self.host().gh(["run", "list"]), (1, PLAIN_403))
+        self.assertNotRegex(buf.getvalue(), r"(?i)\bwait")
+
 class GhLockReadRetry(unittest.TestCase):
     """GhLock.read on a network error: retried as GitLock is (round 2: GhLock is in scope). merge.sh is the only seam,
     so the test holds wherever the retry sits, in read or in api."""
@@ -3362,6 +3639,302 @@ class WaitStepLines(unittest.TestCase):
         host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
         before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
         self.assertRegex(before, r"(?m)^merge: merging #7", f"printed before the merge call: {before!r}")
+
+def assert_one_rate_wait_line(test, text, snapshots):
+    """A rate wait prints one line that says it waits, why (a rate limit) and for how long (60 s). `snapshots` holds the
+    captured output at each pause: the line must already be there when the wait starts, so a 60 s wait never looks like a hang."""
+    lines = [ln for ln in text.splitlines() if re.search(r"wait", ln, re.I)]
+    test.assertEqual(len(lines), 1, f"want one wait line, got {text!r}")
+    test.assertRegex(lines[0], r"(?i)rate[ -]limit", "the wait line must say why it waits")
+    test.assertRegex(lines[0], r"\b60 ?s(econds)?\b", "the wait line must say how long")
+    test.assertEqual(len(snapshots), 1, "one rate wait is one pause")
+    test.assertIn(lines[0], snapshots[0], "the wait line must print before the wait starts")
+
+class GhLockRateRetry(unittest.TestCase):
+    """GhLock on a rate-limit 403 (lane merge-rate-limit, review round 1). Each step of acquire, release, unlock and the lock read
+    answers [rate limit, then success]: the step is retried with RATE_WAIT_CAP pauses. A permission 403 stops at once. merge.sh is
+    the seam, so the test holds wherever the retry sits. self.pauses records every pause; nothing sleeps."""
+    NOW = 1000.0
+    OLD, NEW, BASE, TREE = "oldlock", "newlock", "base1", "tree1"
+    EXPIRED = (0, merge.lock_message(10, 0.0))  # expires at 10: expired at NOW
+    LIVE = (0, "merge lock\nexpires: 2000\nowner: x")
+    DEFAULT = {"lock-read": [(1, "gh: Not Found (HTTP 404)")], "lock-commit-read": [EXPIRED], "base-ref": [(0, BASE)],
+               "base-tree": [(0, TREE)], "lock-commit-post": [(0, NEW)], "refs-post": [(0, "")], "delete": [(0, "")]}
+    OK = {"base-ref": (0, BASE), "base-tree": (0, TREE), "lock-commit-post": (0, NEW), "refs-post": (0, "")}
+
+    def setUp(self):
+        self.pauses, self.calls, self.replies = [], {}, {}
+        p = unittest.mock.patch.object(merge, "sh", self.fake_sh)
+        p.start(); self.addCleanup(p.stop)
+
+    @staticmethod
+    def step_of(args):
+        """Names the gh call by its step: the method and path, and for a GET of a commit, its --jq."""
+        if list(args[:2]) != ["gh", "api"]:
+            return "not-gh-api"
+        rest = list(args[2:])
+        method = "GET"
+        if rest[:1] == ["-X"]:
+            method, rest = rest[1], rest[2:]
+        path = rest[0]
+        jq = rest[rest.index("--jq") + 1] if "--jq" in rest else ""
+        if method == "DELETE" and path.endswith("/git/refs/merge-lock/main"):
+            return "delete"
+        if method == "POST" and path.endswith("/git/commits"):
+            return "lock-commit-post"
+        if method == "POST" and path.endswith("/git/refs"):
+            return "refs-post"
+        if "/git/ref/merge-lock/" in path:
+            return "lock-read"
+        if "/git/ref/heads/" in path:
+            return "base-ref"
+        if "/git/commits/" in path:
+            return "base-tree" if jq == ".tree.sha" else "lock-commit-read"
+        return "unhandled"
+
+    def fake_sh(self, args, cwd=None, input=None, env=None):
+        step = self.step_of(args)
+        self.calls[step] = self.calls.get(step, 0) + 1
+        seq = self.replies.get(step) or self.DEFAULT.get(step)
+        if not seq:
+            return 1, f"unhandled {step}: {' '.join(args)}"
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    def reply(self, step, *seq):
+        self.replies[step] = list(seq)
+
+    def lock(self):
+        return merge.GhLock(now=lambda: self.NOW, pause=self.pauses.append)
+
+    def acquire(self):
+        try:
+            return self.lock().acquire("main", 600)
+        except merge.Stop as e:
+            self.fail(f"acquire stopped: {type(e).__name__}: {e}")
+
+    def test_the_fixture_is_a_rate_limit_and_never_a_404(self):  # control: the text the other cases send
+        self.assertTrue(merge.is_net(1, RATE_API_403))
+        self.assertIsNotNone(merge.RATE_LIMIT.search(RATE_API_403))
+        self.assertNotRegex(RATE_API_403, r"404|Not Found|does not exist")
+
+    def test_a_clean_acquire_takes_the_lock_without_a_pause(self):  # control: green on 8459b59
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual((self.calls.get("delete", 0), self.pauses), (0, []))
+
+    def test_a_clean_acquire_over_an_expired_lock_deletes_it_once(self):  # control: green on 8459b59
+        self.reply("lock-read", (0, self.OLD))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual((self.calls["delete"], self.pauses), (1, []))
+
+    def test_a_rate_limit_on_each_acquire_step_is_retried_with_the_rate_wait(self):
+        for step in ("base-ref", "base-tree", "lock-commit-post", "refs-post"):
+            with self.subTest(step=step):
+                self.calls, self.pauses, self.replies = {}, [], {}
+                self.reply(step, (1, RATE_API_403), self.OK[step])
+                self.assertEqual(self.acquire(), self.NEW)
+                self.assertEqual(self.calls[step], 2)
+                self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_expired_lock_delete_is_retried_before_the_lock_is_replaced(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("delete", (1, RATE_API_403), (0, ""))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_404_after_a_rate_limited_expired_lock_delete_counts_as_done(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_read_of_the_lock_commit_is_retried_and_keeps_its_expiry(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("lock-commit-read", (1, RATE_API_403), self.LIVE)
+        got = self.lock().read("main")
+        self.assertEqual(got[1], 2000)  # base: inf, a live lock for ever
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_permission_403_on_the_lock_commit_stops_at_once(self):  # guard: green on 8459b59, red if a 403 with no rate text is retried
+        self.reply("lock-commit-post", (1, PLAIN_403_API))
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock().acquire("main", 600)
+        self.assertIn("Resource not accessible by integration", str(cm.exception))
+        self.assertEqual((self.calls["lock-commit-post"], self.pauses), (1, []))
+
+    def test_a_refs_post_error_that_is_not_a_rate_limit_keeps_its_text(self):
+        self.reply("refs-post", (1, "gh: Object does not exist (HTTP 422)"))
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock().acquire("main", 600)
+        self.assertIn("Object does not exist", str(cm.exception))
+        self.assertNotIn("another run took", str(cm.exception))
+        self.assertEqual(self.pauses, [])
+
+    def test_a_rate_limited_unlock_is_retried_and_a_404_after_it_counts_as_done(self):
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        try:
+            self.lock().unlock("main")
+        except merge.Stop as e:
+            self.fail(f"unlock stopped on a rate limit: {e}")
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_release_delete_is_retried_and_a_404_after_it_counts_as_done(self):
+        self.reply("lock-read", (0, "tok"))
+        self.reply("lock-commit-read", self.LIVE)
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        out = release_out(self, self.lock(), "tok")
+        self.assertNotIn("the lock release failed", out)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    # review round 2: a 404 inside a rate-limit text is no "ref gone"; a lock read that cannot finish is a NetStop; a wait prints a line.
+    RATE_404_ID = RATE_API_403.replace("309471439", "4040404")  # the user id holds "404": a rate limit a bare "404" check reads as gone
+    LOCK_5XX = '{"message":"Server Error"}gh: Server Error (HTTP 502)'  # gh's own 5xx line after the body, as GH_API_TAIL reads it
+
+    def test_the_404_fixture_is_a_rate_limit_whose_text_holds_404(self):  # control: the trigger of item 1
+        self.assertTrue(merge.is_net(1, self.RATE_404_ID))
+        self.assertIsNotNone(merge.RATE_LIMIT.search(self.RATE_404_ID))
+        self.assertIn("404", self.RATE_404_ID)
+
+    def test_a_rate_limit_whose_text_holds_404_is_never_a_removed_lock(self):  # item 1: red on 2cc181d
+        self.reply("delete", (1, self.RATE_404_ID))
+        try:
+            self.lock().unlock("main")
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"unlock stopped as a plain Stop, not a NetStop: {e}")
+        else:
+            self.fail("unlock returned as if the lock were removed, on a rate limit")
+        self.assertEqual(self.calls["delete"], 4)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
+
+    def run_unlock(self, lock):
+        """`merge --unlock main` over the fake gh. The one git call (the checkout's root) answers at once. -> (rc, stdout and stderr)."""
+        self.reply("not-gh-api", (0, "/repo"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = merge.main(["--unlock", "main"], lock=lock)
+        return rc, buf.getvalue()
+
+    def test_unlock_main_on_a_rate_limit_whose_text_holds_404_stops_and_never_says_removed(self):  # item 1, the CLI line: red on 2cc181d
+        self.reply("delete", (1, self.RATE_404_ID))
+        rc, out = self.run_unlock(self.lock())
+        self.assertEqual(rc, 1, out)
+        self.assertNotRegex(out, r"lock on main removed")
+        self.assertIn("API rate limit exceeded", out)  # the stop shows gh's own words
+        self.assertEqual(self.calls["delete"], 4)
+
+    def test_unlock_main_on_a_missing_ref_says_so_and_never_says_removed(self):  # item 1: red on 2cc181d
+        self.reply("delete", (1, "gh: Not Found (HTTP 404)"))
+        rc, out = self.run_unlock(self.lock())
+        self.assertEqual(rc, 0, out)
+        self.assertNotRegex(out, r"lock on main removed")
+        self.assertRegex(out, r"(?i)no (merge )?lock|not found|does not exist|nothing to remove")
+
+    def test_a_rate_limit_outlasting_the_retries_on_the_lock_commit_read_is_a_net_stop(self):  # item 2: red on 2cc181d
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("lock-commit-read", (1, RATE_API_403))
+        try:
+            self.lock().read("main")
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"a rate limit on the lock commit read stopped as a plain Stop: {e}")
+        else:
+            self.fail("read returned an expiry for a lock it could not read")
+        self.assertEqual(self.calls["lock-commit-read"], 4)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
+
+    def test_a_network_error_outlasting_the_retries_on_the_lock_commit_read_is_a_net_stop(self):  # item 2: red on 2cc181d
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("lock-commit-read", (1, self.LOCK_5XX))
+        try:
+            self.lock().read("main")
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"a network error on the lock commit read stopped as a plain Stop: {e}")
+        else:
+            self.fail("read returned an expiry for a lock it could not read")
+        self.assertEqual(self.calls["lock-commit-read"], 4)
+        self.assertEqual(self.pauses, [merge.NET_PAUSE] * 3)
+
+    def test_a_rate_limit_on_the_lock_commit_read_never_reads_as_a_held_lock(self):  # item 2, the acquire path: red on 2cc181d
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("lock-commit-read", (1, RATE_API_403))
+        try:
+            self.lock().acquire("main", 600)
+        except merge.NetStop:
+            pass
+        except merge.Held as e:
+            self.fail(f"acquire read an unreadable lock as a live one: {e}")
+        except merge.Stop as e:
+            self.fail(f"acquire stopped as a plain Stop, not a NetStop: {e}")
+        else:
+            self.fail("acquire took the lock over an unreadable lock")
+        self.assertEqual((self.calls.get("lock-commit-post", 0), self.calls.get("refs-post", 0)), (0, 0))
+
+    def test_a_rate_wait_on_the_lock_path_prints_one_line_before_the_wait(self):  # item 3: red on 2cc181d
+        self.reply("lock-commit-post", (1, RATE_API_403), self.OK["lock-commit-post"])
+        buf, snapshots = io.StringIO(), []
+        lock = merge.GhLock(now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.assertEqual(lock.acquire("main", 600), self.NEW)
+        self.assertEqual(self.calls["lock-commit-post"], 2)
+        assert_one_rate_wait_line(self, buf.getvalue(), snapshots)
+
+    def test_a_clean_acquire_prints_no_wait_line(self):  # control: green on 2cc181d
+        buf, snapshots = io.StringIO(), []
+        lock = merge.GhLock(now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.assertEqual(lock.acquire("main", 600), self.NEW)
+        self.assertEqual(snapshots, [])
+        self.assertNotRegex(buf.getvalue(), r"(?i)\bwait")
+
+class HostDefaultBranchRateRetry(unittest.TestCase):
+    """host_default_branch (`gh repo view`) on a rate-limit error (lane merge-rate-limit, review round 1). It retries like Host.gh:
+    RATE_WAIT_CAP per retry, three retries, then NetStop. The function has no pause parameter, so the pauses are recorded by
+    patching merge.time.sleep. A fix must call time.sleep at call time, or this test sleeps for real."""
+    def patched(self, *seq):
+        """merge.sh answers `seq` in order (the last repeats). merge.time.sleep records. -> (gh calls, pauses)."""
+        seq, calls, pauses = list(seq), [], []
+        def fake(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+        for target in ((merge, "sh", fake), (merge.time, "sleep", pauses.append)):
+            p = unittest.mock.patch.object(*target)
+            p.start(); self.addCleanup(p.stop)
+        return calls, pauses
+
+    def test_a_rate_limited_repo_view_is_retried_and_returns_the_default_branch(self):
+        calls, pauses = self.patched((1, RATE_GQL_ALREADY), (0, '{"defaultBranchRef":{"name":"trunk"}}'))
+        try:
+            got = merge.host_default_branch("/repo")
+        except merge.Stop as e:
+            self.fail(f"host_default_branch stopped on a rate limit: {e}")
+        self.assertEqual(got, "trunk")
+        self.assertEqual((len(calls), pauses), (2, [merge.RATE_WAIT_CAP]))
+
+    def test_a_rate_limit_that_never_clears_is_a_net_stop_after_three_retries(self):
+        calls, pauses = self.patched((1, RATE_GQL_ALREADY))
+        try:
+            merge.host_default_branch("/repo")
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"a rate limit that never clears stopped as a plain Stop, not a NetStop: {e}")
+        else:
+            self.fail("host_default_branch returned without a stop")
+        self.assertEqual((len(calls), pauses), (4, [merge.RATE_WAIT_CAP] * 3))
+
+    def test_a_permission_403_stops_at_once(self):  # guard: green on 8459b59
+        calls, pauses = self.patched((1, PLAIN_403_API))
+        with self.assertRaises(merge.Stop):
+            merge.host_default_branch("/repo")
+        self.assertEqual((len(calls), pauses), (1, []))
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

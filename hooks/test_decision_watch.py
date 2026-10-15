@@ -31,6 +31,7 @@ _spec.loader.exec_module(dw)
 
 ROOT = tempfile.mkdtemp(prefix="decision_watch_cases_")
 FAILED = []
+SKIPPED = []  # cases that cannot run on this platform: printed as SKIP, counted, never a PASS
 
 
 def _git(cwd, *args):
@@ -119,6 +120,12 @@ def check(name, condition, detail=""):
     else:
         FAILED.append(name)
         print("FAIL: %s  %s" % (name, detail))
+
+
+def skip(name, reason):
+    """A case that cannot run on this platform. It prints SKIP and is counted in the summary."""
+    SKIPPED.append(name)
+    print("SKIP: %s: %s" % (name, reason))
 
 
 # --------------------------------------------------------------------------- case 1
@@ -427,7 +434,7 @@ def _calls(count_file):
 
 def case_allow_verdict_cached_until_the_file_changes():
     if sys.platform == "win32":
-        print("SKIP: allow_cache: the fake claude is a POSIX launcher")
+        skip("allow_cache", "the fake claude is a POSIX launcher")
         return
     repo = make_repo("allow_cache")
     rule = os.path.join(repo, "decisions", "r.md")
@@ -502,7 +509,7 @@ def case_unknown_is_never_cached():
 
 def case_protected_file_committed_this_turn_is_judged():
     if sys.platform == "win32":
-        print("SKIP: committed_this_turn: the fake claude is a POSIX launcher")
+        skip("committed_this_turn", "the fake claude is a POSIX launcher")
         return
     repo = make_repo("committed_turn")
     rule = os.path.join(repo, "decisions", "r.md")
@@ -1758,7 +1765,7 @@ def main():
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
         return 1
-    print("test_decision_watch PASS: all checks right")
+    print("test_decision_watch PASS: all checks right, %d skipped" % len(SKIPPED))
     return 0
 
 
