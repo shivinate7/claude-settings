@@ -7070,6 +7070,13 @@ asks_alone("ask-alone: a Set-Location to the lane's own folder, then the reset, 
            cwd=GITWT)
 asks_alone("ask-alone: an export before the cap write asks",
            "export LANE_NOTE=ask && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
+# A Windows path is no escaped quote, so its backslashes do not make the lead a step (ruling 2026-10-15
+# 12:00). Try 2 first counted every backslash as a step (b20bce5), so both rows deny there. The paths
+# are raw strings, so `\U` and `\x` reach the guard as typed.
+asks_alone("ask-alone: a cd to a Windows path, then the cap write, asks",
+           r"cd C:\Users\x\repo && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a PowerShell Set-Location to a Windows path, then the cap write, asks",
+           r"Set-Location C:\Users\x\repo; " + ASK_CAP, "subagent-model-cap", tool="PowerShell", cwd=PROJ)
 
 # The output tails: tail, head, Out-Null, && echo done, and PowerShell ; Write-Host done.
 asks_alone("ask-alone: the lease push to the default branch, piped to tail, asks",
