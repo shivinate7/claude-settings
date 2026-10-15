@@ -71,19 +71,9 @@ cannot exit on a field in code.
   and `output-never-paste-passing-output`. They stay `unmechanized` in
   `lint/rule_mechanisms.json` until the hook catches a real defect.
 
-Holes, named:
+## Holes, named
 
-- Old counter files are not removed. Cause: no code purges `state/`. Effect: one file of at most
-  70 bytes stays per session. Fix: none named yet.
-- Lost updates. Cause: heavy parallel calls of one session. Effect: a measured stress of 4 threads
-  by 300 calls ended at 30 of 1200. It errs toward judging. Real Stops of one session come seconds
-  apart. Fix: none named yet.
-- Session key copied. Cause: the session key line is copied from
-  `decision_watch._seen_store_path`, with no stated reason. Rule `building-one-home-per-capability`
-  (one home per capability) asks for a stated reason. Effect: the key line lives in two places.
-  Fix: a shared helper that both call.
-- Stop with no reply text. Cause: the counter counts only Stops that carry a reply. Effect: such a
-  Stop neither counts nor judges. Fix: none named yet.
+Debts: `haiku-counter-files-not-purged` (old counter files are not removed). `haiku-counter-lost-updates` (parallel calls lose counter updates). `haiku-session-key-copied` (the session key line is copied). `haiku-stop-no-reply-uncounted` (a Stop with no reply text is not counted).
 
 ## Judge model
 

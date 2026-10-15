@@ -104,6 +104,14 @@ pointer_dir() {
   printf '%s' "$d"
 }
 
+# True when DIR is a linked git worktree: --git-dir and --git-common-dir differ only there. Both
+# print relative to DIR, so a string compare is enough. A folder with no .git is not one.
+is_linked_worktree() {
+  gd=$(git -C "$1" rev-parse --git-dir 2>/dev/null) || return 1
+  gc=$(git -C "$1" rev-parse --git-common-dir 2>/dev/null) || return 1
+  [ "$gd" != "$gc" ]
+}
+
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -152,6 +160,13 @@ else
   fi
 
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
+fi
+
+# Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
+# checkout. Refuse before any write, whether the source came from the script or from the cwd.
+if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
+  log "ERROR: $SRC is a linked git worktree; run the installer from the main clone."
+  exit 1
 fi
 
 if [ -z "$SRC" ]; then

@@ -19,8 +19,10 @@ else beside this file's real path (a symlink install, a worktree). Neither found
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
@@ -32,7 +34,7 @@ OK_SHAPE = {"ok": (True, False)}
 # PreToolUse entry for this hook carries "timeout": 45 = 8 + MODEL_TIMEOUT + 12 s margin.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
-MESSAGE_MAX = 4000  # one argv element: Windows caps the command line near 32,767 characters
+MESSAGE_MAX = 4000  # the prompt rides stdin (decision_watch.invoke_model), so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 
 def find_reader():
@@ -57,10 +59,36 @@ def receiver_state(name):
     node, reader = shutil.which("node"), find_reader()
     if not node or not reader:
         return "unseen"
-    run = subprocess.run([node, reader, name], capture_output=True, text=True, encoding="utf-8",
-                         errors="replace", timeout=READER_TIMEOUT)
-    word = run.stdout.strip()
-    return word if run.returncode == 0 and word in ("busy", "idle", "waiting") else "unseen"
+    # Stdout goes to a file, not a pipe: on Windows, subprocess.run reads the pipe again after the
+    # kill, and a grandchild that holds the pipe then holds the hook with no bound.
+    with tempfile.TemporaryFile() as out:
+        proc = subprocess.Popen([node, reader, name], stdin=subprocess.DEVNULL, stdout=out,
+                                stderr=subprocess.DEVNULL, start_new_session=os.name != "nt")
+        try:
+            code = proc.wait(timeout=READER_TIMEOUT)
+        except subprocess.TimeoutExpired:  # slow board read: unseen, the wording judge covers it
+            kill_tree(proc)
+            print("sendmessage state judge failed open: the board read timed out", file=sys.stderr)
+            return "unseen"
+        out.seek(0)
+        word = out.read().decode("utf-8", "replace").strip()
+    return word if code == 0 and word in ("busy", "idle", "waiting") else "unseen"
+
+
+def kill_tree(proc):
+    """Kill the reader and what it started. Only the process this hook started."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+        proc.wait(timeout=5)
+    except Exception:
+        pass
 
 
 def build_prompt(to, message):

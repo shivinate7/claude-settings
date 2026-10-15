@@ -409,10 +409,32 @@ def _walk_wrappers(tokens):
 # `cat <<'EOF' > .claude/settings.json` writes the settings file.
 #
 # EXCEPTION: a heredoc fed to an interpreter can be executed, so the body stays under inspection.
+# The interpreter is a WORD of the header line: not a part of a file name (`node-notes.md`), and not
+# the value of a message flag of a commit or a pull request (`gh pr create --title "node 20 bump"`).
+# Other quoted text still counts: the shell word of `ssh host "bash -s" <<EOF` runs its body.
+# SHELL_HEREDOC names the shells alone: a rule that reads shell lines keeps only a body a shell
+# runs, never a Python or Node script.
 HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-INTERPRETER_HEREDOC = re.compile(
-    r"\b(bash|sh|zsh|dash|ksh|python3?|perl|ruby|node)\b[^\n]*<<"
-)
+_SEGMENT_BREAK = re.compile(r"(&&|\|\||[;|\n])")
+
+
+def _without_message_values(cmd: str) -> str:
+    """Blank each message value of a commit or a pull request, so prose naming a shell reads as
+    text. The blanking is guard_env's own (imported late: guard_env imports this file)."""
+    if "commit" not in cmd and "create" not in cmd:
+        return cmd
+    from guard_env import _blank_messages
+    return "".join(_blank_messages(part) for part in _SEGMENT_BREAK.split(cmd))
+
+
+def _interpreter_header(words: str):
+    # The word stands alone or ends a path or a name (`/usr/bin/bash`, `ts-node`, `node.cmd`);
+    # the lookahead alone keeps `node-notes.md` and `bash-tips.md` text.
+    return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
+
+
+SHELL_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell")
+INTERPRETER_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell|python[\\d.]*|perl|ruby|node")
 
 
 # The only characters heredoc_heads acts on when nothing is open.
@@ -505,9 +527,12 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     return "\n".join(_split_heredocs(cmd)[0])
 
 
-def strip_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, and keep every header line."""
-    if INTERPRETER_HEREDOC.search(cmd):
+def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
+    """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
+    only when a shell reads it, for a rule that judges shell lines."""
+    if "<<" not in cmd:
+        return cmd  # no heredoc: nothing to drop
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
         return cmd  # the body may be executed, so keep it under inspection
     return _drop_heredoc_bodies(cmd)
 
@@ -1671,8 +1696,11 @@ def inline_script(tokens) -> str:
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in INLINE_SCRIPT_SHELLS:
         return ""
-    has_c = False
-    for tok in tokens[index + 1:]:
+    has_c, rest = False, iter(tokens[index + 1:])
+    for tok in rest:
+        if tok in ("-o", "+o", "-O", "+O"):
+            next(rest, None)   # a shell option's name (`bash -o pipefail -c`), never the script
+            continue
         if tok.startswith("-"):
             has_c = has_c or bool(_C_FLAG.match(tok))
             continue
@@ -1716,8 +1744,8 @@ def _env_split_string(tokens) -> str:
 
 
 def nested_script(tokens) -> str:
-    """The script text a segment hands to another interpreter: `sh -c`, `cmd /c`, `pwsh -c`, or
-    PowerShell's `iex`. Else ''. A rule that judges a command reads this text as one more command."""
+    """The script text a segment hands to another interpreter: `sh -c`, `cmd /c`, `pwsh -c`,
+    `env -S`, PowerShell's `iex`, or `eval`. Else ''. A rule that judges a command reads this text as one more command."""
     script = inline_script(tokens) or _env_split_string(tokens)
     at = resolve_command(tokens)
     if script or at is None:
@@ -1726,7 +1754,7 @@ def nested_script(tokens) -> str:
     if word in CMD_EXE_NAMES:
         flag = next((i for i, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
         return "" if flag is None else " ".join(rest[flag + 1:])
-    if word in ("iex", "invoke-expression"):
+    if word in ("iex", "invoke-expression", "eval"):
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
 

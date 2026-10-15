@@ -12,6 +12,18 @@ to merge). That entry is not changed.
 Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times."
 
 - A `gh` network error is retried 3 times. Each retry waits 5 s first.
+- A rate limit is retried 3 times too, and each retry waits 60 s. A rate limit is a 403 or 429
+  with GitHub's rate-limit text, or a GraphQL rate-limit line. A permission 403 is never retried.
+  This is the orchestrator's call under the same ruling, after the incident of 2026-10-14: the
+  merge of PR 435 failed 7 times at "cannot make the lock commit" on GitHub's secondary write
+  limit. The owner, through the coordinator, named a 429 a rate limit too.
+- Each rate wait prints one line that names the call and the wait.
+- A rate limit is retried 3 times too, and each retry waits 60 s. A rate limit is a 403 or 429
+  with GitHub's rate-limit text, or a GraphQL rate-limit line. A permission 403 is never retried.
+  This is the orchestrator's call under the same ruling, after the incident of 2026-10-14: the
+  merge of PR 435 failed 7 times at "cannot make the lock commit" on GitHub's secondary write
+  limit. The owner, through the coordinator, named a 429 a rate limit too.
+- Each rate wait prints one line that names the call and the wait.
 - After the third retry fails, the run stops with NetStop. The run keeps the claim.
 - Only a proven refusal reverts the claim.
 - A `git fetch` network error after the claim push also stops the run, with no revert. This is
@@ -22,6 +34,14 @@ Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times."
 Code: `merge/merge.py`.
 
 - `Host.gh` is the one home of every `gh` call. It retries a network error, then raises NetStop.
+- `retry_net` is the one retry loop. `Host.gh`, `GhLock.api` (every lock step) and
+  `host_default_branch` call it. `RATE_LIMIT` picks the 60 s wait. A rate text that holds 404
+  never reads as a gone lock. A lock read that outlasts the retries raises NetStop.
+- The guard's head read keeps no retry.
+- `retry_net` is the one retry loop. `Host.gh`, `GhLock.api` (every lock step) and
+  `host_default_branch` call it. `RATE_LIMIT` picks the 60 s wait. A rate text that holds 404
+  never reads as a gone lock. A lock read that outlasts the retries raises NetStop.
+- The guard's head read keeps no retry.
 - `NET_ERROR` matches only the error-line forms of gh and git. A JSON answer never matches. A PR
   title or a check name never matches.
 - `Host.merge` reads state, `mergeCommit` and `headRefOid` after every `gh pr merge` reply. The
@@ -30,34 +50,19 @@ Code: `merge/merge.py`.
   - MERGED at another head: stop, no revert.
   - Unreadable state: NetStop, no revert.
   - Lost reply and state OPEN: NetStop, no revert.
-  - Proven refusal: revert. Hole 1 names one case that also reverts.
+  - Proven refusal: revert. `merge-net-open-reverts` names one case that also reverts.
 - A `git fetch` network error after the claim push: NetStop. The claim stays. Run again to resume.
 
 ## What protects it
 
-`merge/test_merge.py`, class `GhHalf`. The network cases run from
+`merge/test_merge.py`, classes `GhHalf`, `Unlock`, `GhLockRateRetry` and `RateLimitWait`. The network cases run from
 `test_a_network_error_on_the_wait_read_is_retried_and_the_merge_goes_on` to
 `test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert`. This record
 states no pass result. The gate run holds it.
 
 ## Holes, named
 
-Review round 3, final, 2026-10-13. Holes 1, 2 and 4 go to fix lane `merge-net-holes`.
-
-1. A `gh pr merge` reply with exit 0 and a state read of OPEN still reverts (`merge/merge.py`
-   lines 549-550). A lagging read or a merge queue could revert a merge that landed.
-2. REST 5xx texts from `gh api` do not match `NET_ERROR`: `gh: Server Error (HTTP 502)`,
-   `gh: HTTP 503`, `HTTP 502 (url)`. HTTP 500, the GraphQL "Something went wrong" text and 429 do
-   not match either. In `required_names()`, during the wait, a server error reverts the claim.
-3. The NetStop text says "Run again." The merge may have landed. A rerun stops at "is MERGED".
-   The after-merge steps (`ff_main`, `afterMerge`, `cut_branch`) do not run.
-4. The `git fetch` pattern misses some network texts. Each one reverts the claim: HTTP/2
-   INTERNAL_ERROR, Empty reply from server, GnuTLS recv error, Failed sending data to the peer,
-   ssh kex_exchange_identification.
-5. No retry runs inside `shared_deadline`, which wraps the guard's head read. `Host.gh` sets the
-   retry count to 0 there. A network error there reads as unknown.
-6. A refusal whose text ends `: HTTP 5xx (url)` still reads as a network error. Debt:
-   net-error-colon-http-refusal.
+Debts: `merge-net-open-reverts` (a merge reply with state OPEN still reverts), `merge-net-5xx-unmatched` (REST 5xx and 429 texts are not network errors), `merge-net-stop-may-have-merged` (the NetStop text says run again after a possible merge), `merge-net-fetch-texts-missed` (some git fetch network texts revert the claim), `merge-net-no-retry-in-deadline` (no retry runs inside `shared_deadline`), `net-error-colon-http-refusal` (a refusal ending in `: HTTP 5xx (url)` reads as a network error). Rate limits: `lock-ttl-rate-wait` (rate waits can outlast the lock TTL spare), `lock-delete-retry-window` (the expired-lock delete retries for up to 180 s and ignores its result), `lock-read-error-never-expires` (a failed lock-commit read gives a lock that never expires). Rate limits: `lock-ttl-rate-wait` (rate waits can outlast the lock TTL spare), `lock-delete-retry-window` (the expired-lock delete retries for up to 180 s and ignores its result), `lock-read-error-never-expires` (a failed lock-commit read gives a lock that never expires). Lane `merge-net-holes` takes `merge-net-open-reverts`, `merge-net-5xx-unmatched` and `merge-net-fetch-texts-missed`.
 
 ## Build plan
 

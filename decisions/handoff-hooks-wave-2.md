@@ -76,12 +76,7 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 
 ## Holes, named
 
-- An obfuscated `gh pr re''ady` skips the wake.
-- `gh pr ready 2>&1` reads the redirect as the PR selector.
-- Another session's compact reorient in the same directory can sweep a /clear pointer between
-  SessionEnd and SessionStart. The clear then falls back to the newest handoff there.
-- Pointers that have a handoff have no age rule.
-- A raised `cleanupPeriodDays` still sweeps after 30 days.
+Debts: `handoff-wake-misses-ready-forms` (the CI wake misses an obfuscated `gh pr re''ady` and a `gh pr ready 2>&1` form), `handoff-pointer-swept-compact` (another session's compact reorient can sweep a /clear pointer), `handoff-pointers-age-out` (pointers with a handoff have no age rule, and a raised `cleanupPeriodDays` still sweeps after 30 days).
 
 Kind: build
 Plan: decisions/handoff-hooks-wave-2.md#windows (windows)
