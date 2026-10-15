@@ -172,11 +172,17 @@ clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^wor
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
-# worktree allowed.
+# worktree allowed, and only on a detached HEAD at the clone's local main commit.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
   m=$(clone_of "$SRC")
   if [ -z "$m" ] || [ "$(canon "$SRC")" != "$(canon "$(dirname "$m")")/$(basename "$m")-live" ]; then
     log "ERROR: $SRC is a linked git worktree; run the installer from the main clone${m:+ $m}."
+    exit 1
+  fi
+  main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main)
+  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null || [ -z "$main_commit" ] \
+     || [ "$(git -C "$SRC" rev-parse HEAD)" != "$main_commit" ]; then
+    log "ERROR: the pinned checkout $SRC is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
     exit 1
   fi
 fi
@@ -189,8 +195,8 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
   if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
-      git -C "$SRC" worktree add -q --detach "$PIN" "$main_commit" \
-        || { log "ERROR: cannot make the pinned checkout $PIN; free that path and run the installer again."; exit 1; }
+      err=$(git -C "$SRC" worktree add -q --detach "$PIN" "$main_commit" 2>&1) \
+        || { log "ERROR: cannot make the pinned checkout $PIN: $err; fix that and run the installer again."; exit 1; }
       log "made the pinned checkout $PIN at main"
     else
       pin_common=$(canon "$(common_dir "$PIN")")

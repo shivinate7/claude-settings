@@ -23,7 +23,8 @@ $IsLinked = $false
 # checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
 # worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked worktree
-# allowed.
+# allowed, and only on a detached HEAD at the clone's local main commit. $CloneDir moves to the
+# clone, so the post-merge hook lands in the clone's .git\hooks.
 if ($RepoDir) {
     try {
         $gd = Get-Git -C $RepoDir rev-parse --git-dir
@@ -35,6 +36,15 @@ if ($RepoDir) {
                 Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone$(if ($m) { " $m" })."
                 exit 1
             }
+            $mainAt = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+            Get-Git -C $RepoDir symbolic-ref -q HEAD | Out-Null
+            $onBranch = $LASTEXITCODE -eq 0
+            $headAt = Get-Git -C $RepoDir rev-parse HEAD
+            if ($onBranch -or -not $mainAt -or "$headAt" -ne "$mainAt") {
+                Write-Host "claude-settings: ERROR: the pinned checkout $RepoDir is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+                exit 1
+            }
+            $CloneDir = Get-FullDir $m
         }
     } catch { }
 }
@@ -61,8 +71,8 @@ if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
     if ($LASTEXITCODE -eq 0 -and $MainCommit) {
         $Pin = (Get-FullDir $RepoDir) + '-live'
         if (-not (Test-Path -LiteralPath $Pin)) {
-            Get-Git -C $RepoDir worktree add -q --detach $Pin $MainCommit | Out-Null
-            if ($LASTEXITCODE -ne 0) { Log "ERROR: cannot make the pinned checkout $Pin; free that path and run install.ps1 again."; exit 1 }
+            $err = & { $ErrorActionPreference = 'Continue'; & git -C $RepoDir worktree add -q --detach $Pin $MainCommit 2>&1 }
+            if ($LASTEXITCODE -ne 0) { Log "ERROR: cannot make the pinned checkout ${Pin}: $(($err | ForEach-Object { "$_" }) -join ' '); fix that and run install.ps1 again."; exit 1 }
             Log "made the pinned checkout $Pin at main"
         } else {
             $pc = Get-Git -C $Pin rev-parse --path-format=absolute --git-common-dir

@@ -17,14 +17,14 @@ commit=$(git rev-parse --verify -q refs/heads/main) \
 canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
 common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
 if [ ! -e "$pin" ]; then
-  git worktree add -q --detach "$pin" "$commit" 2>/dev/null \
-    || fail "cannot make the pinned checkout $pin; free that path, then run merge/install_from_main.sh"
+  err=$(git worktree add -q --detach "$pin" "$commit" 2>&1) \
+    || fail "cannot make the pinned checkout $pin: $err; fix that, then run merge/install_from_main.sh"
 else
   a=$(canon "$(common "$pin")"); b=$(canon "$(common "$clone")")
   { [ -n "$a" ] && [ "$a" = "$b" ]; } \
     || fail "$pin is not a worktree of this clone; move it aside, then run merge/install_from_main.sh"
-  git -C "$pin" switch -q --detach "$commit" 2>/dev/null \
-    || fail "cannot move the pinned checkout $pin to main; clean it up (git -C \"$pin\" status), then run merge/install_from_main.sh"
+  err=$(git -C "$pin" switch -q --detach "$commit" 2>&1) \
+    || fail "cannot move the pinned checkout $pin to main: $err; fix that (git -C \"$pin\" status), then run merge/install_from_main.sh"
 fi
 
 case "$(uname)" in
