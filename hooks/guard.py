@@ -443,8 +443,8 @@ def discards_output(segment: str) -> bool:
     The walk reads a quote inside `$( )` or backticks as the outer string's own, so
     `-m "$(printf '"')" >/dev/null` hides the redirect. Each substitution is cut out first
     (`_substitutions`, the env layer's cut) and the text around it is read again. Too deep to cut
-    is a redirect: this fails closed. ponytail: a bandaid here; segmentation still misreads such
-    a quote, and the cause is in the quote walk."""
+    is a redirect: this fails closed. ponytail: a bandaid; the cause, the quote walk's reading of
+    a quote inside `$( )`, stays."""
     if any(unquoted_at(segment, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(segment)):
         return True
     if "$(" not in segment and "`" not in segment or not SILENT_WRITE_REDIRECT.search(segment):
