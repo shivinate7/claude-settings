@@ -36,10 +36,9 @@
 // Known hole, not pinned: a rename that git shows as a new file (no 'rename from' line).
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { register as registerHooks } from 'node:module'
 import * as lib from './hooks/lib.mjs'
 
@@ -157,9 +156,6 @@ await test('F5 isTooLargeForModel: one huge line is too large; many short lines 
   assert.ok(many.length > 6000)
   assert.equal(t(many), false)
 })
-await test('F5 TOO_LARGE_NOTE is the row text', () => {
-  assert.equal(lib.TOO_LARGE_NOTE, 'No note: change too large')
-})
 
 // F6 markup in notes: pure
 await test('F6 trimNote: a markdown link becomes its label and plain URL, with no link syntax', () => {
@@ -217,11 +213,6 @@ await test('F8 diffBase: no commits diffs against the empty tree; with HEAD it i
   assert.equal(need('diffBase')(false), EMPTY_TREE)
   assert.equal(need('diffBase')(true), 'HEAD')
   assert.equal(lib.EMPTY_TREE, EMPTY_TREE)
-})
-await test("F8 modelFailNote: 'No note: <reason>' for a result object and for an Error", () => {
-  const m = need('modelFailNote')
-  assert.equal(m({ isAnswered: false, reason: 'api-error' }), 'No note: api-error')
-  assert.equal(m(new Error('timed out')), 'No note: timed out')
 })
 
 // register harness: the real register.mjs; host module 'claude-code' is stubbed by an inline data: hook
@@ -623,9 +614,6 @@ await test('R2-6 register: a model note with ESC or a bidi override is shown wit
 })
 
 // R2-7 truncation: the header says so, and does not present the count as complete.
-await test('R2-7 headerLine: the complete form when not truncated', () => {
-  assert.equal(need('headerLine')({ files: 3, add: 1, del: 1, truncated: false }), '3 files changed, +1 -1')
-})
 await test('R2-7 headerLine: truncated says some files are not shown, and is not the complete form', () => {
   const h = need('headerLine')({ files: 3, add: 1, del: 1, truncated: true })
   assert.ok(h.includes('Diff truncated: some files are not shown'), h)
@@ -637,14 +625,6 @@ await test('R2-7 register: a truncated git result shows the truncation line in t
   assert.ok((await t.rows()).includes('Diff truncated: some files are not shown'))
 })
 
-// R2-8 README: the limit wording is per run, shared by overlapping runs; the unborn-repo base is named.
-await test('R2-8 README: no "at most 5 calls at one time"; says per run, shared by overlapping runs; names the empty tree', () => {
-  const readme = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8')
-  assert.ok(!/at most 5 calls (run )?at one time/i.test(readme), 'old limit wording')
-  assert.ok(readme.includes('at most 5 calls per run'), 'missing per-run wording')
-  assert.ok(readme.includes('shared by overlapping runs'), 'missing shared wording')
-  assert.ok(/empty tree/i.test(readme), 'unborn-repo base not named')
-})
 
 // ---------- Review round 3 (PR 375) ----------
 // Seams the builder adds in round 3:

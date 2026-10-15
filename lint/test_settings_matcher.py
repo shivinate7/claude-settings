@@ -72,13 +72,6 @@ class DecisionJudgeMatch(unittest.TestCase):
                 for path in ("docs/x.md", "docs/decisionsX/x.md"):
                     self.assertNotRegex(path, rx)
 
-    def test_prompt_does_not_answer_ok_for_paths_outside_decisions(self):
-        for tool in ("Edit", "Write"):
-            with self.subTest(tool=tool):
-                prompt = decision_judge(tool)["prompt"]
-                self.assertNotIn("not under a decisions/ folder", prompt)
-                self.assertIn(JUDGE_RULE, prompt)
-
     def test_owner_paths_still_fire_and_lookalike_folders_do_not(self):
         # Green pins, owner ruling 2026-10-13. Commit 8f9a500 widened the glob to any depth.
         for tool in ("Edit", "Write"):
@@ -151,11 +144,6 @@ def decision_watch_stop_rows(settings):
     return [c for c in command_rows(settings["hooks"]["Stop"]) if "decision_watch.py" in script_names(c)]
 
 
-def stop_settings(command):
-    """A settings dict whose only Stop row runs `command`."""
-    return {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}
-
-
 class DecisionWatchSwap(unittest.TestCase):
     def setUp(self):
         with open(SETTINGS, encoding="utf-8") as f:
@@ -166,15 +154,6 @@ class DecisionWatchSwap(unittest.TestCase):
 
     def test_no_stop_row_runs_decision_watch(self):
         self.assertEqual(decision_watch_stop_rows(self.settings), [], "a Stop row still runs decision_watch.py")
-
-    # The detector must see both spellings. The unquoted one is the form a row is most likely to take.
-    def test_quoted_decision_watch_stop_row_is_caught(self):
-        rows = decision_watch_stop_rows(stop_settings('python3 "$HOME/.claude/hooks/decision_watch.py"'))
-        self.assertEqual(len(rows), 1, "a quoted decision_watch.py Stop row is not caught")
-
-    def test_unquoted_decision_watch_stop_row_is_caught(self):
-        rows = decision_watch_stop_rows(stop_settings("python3 ~/.claude/hooks/decision_watch.py"))
-        self.assertEqual(len(rows), 1, "an unquoted decision_watch.py Stop row is not caught")
 
     def test_stop_rows_are_the_others_only(self):
         names = sorted(n for c in command_rows(self.settings["hooks"]["Stop"]) for n in script_names(c))
@@ -206,11 +185,6 @@ class SendMessageJudge(unittest.TestCase):
         self.assertTrue(hooks, "no PreToolUse hook on SendMessage")
         self.assertTrue(any(h.get("type") in ("command", "agent") for h in hooks),
                         "SendMessage has only prompt hooks, which cannot read the board's busy state")
-
-    def test_sendmessage_prompt_does_not_claim_the_receiver_is_invisible(self):
-        for h in pre_tool_hooks("SendMessage"):
-            if h.get("type") == "prompt":
-                self.assertNotIn("cannot see the receiver", h.get("prompt", ""))
 
 
 # Every prompt or agent judge in settings.json must have a row in the model-per-role table

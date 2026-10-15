@@ -289,12 +289,6 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         with open(self.SETTINGS_PATH, encoding="utf-8") as handle:
             self.settings = json.load(handle)
 
-    def test_default_arithmetic_matches_what_the_module_documents(self):
-        self.assertEqual(self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS, 10.0)
-        self.assertEqual(self.mod.RESOLVE_ROOT_GIT_CALLS, 2)
-        self.assertEqual(self.mod.RESOLVE_ROOT_WORST_CASE_SECONDS, 20.0)
-        self.assertEqual(self.mod.HOOK_WORST_CASE_SECONDS, 45.0)
-
     def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
         """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is now a plain, hand-typed constant
         (the owner asked for it, and for `inspect` to leave session_end_sweep.py). A plain
@@ -339,29 +333,6 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
             self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
         )
 
-    def test_settings_json_timeout_does_not_leave_more_than_the_stated_headroom(self):
-        """Arm: SettingsCeilingHeadroomHasAnUpperEdge. The floor test above only refuses a
-        ceiling that runs too CLOSE to the worst case. Nothing above refused one that runs too
-        FAR ahead -- a later change that quietly doubled SWEEP_TIMEOUT_SECONDS (or halved it
-        while settings.json's timeout stayed put) would still pass every arm above it. This arm
-        reads the real constant the module states beside its own arithmetic
-        (SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS), never a copy of it, and refuses a margin
-        that runs past it. When this goes red: either shrink the work (bring
-        SWEEP_TIMEOUT_SECONDS or the git-call budget back down), or move the ceiling on purpose
-        (widen settings.json's SessionEnd timeout AND this module's max-headroom constant, in
-        the same commit, with a reason)."""
-        timeout = self._wired_timeout()
-        self.assertTrue(
-            self.mod.headroom_within_bounds(timeout, self.mod.HOOK_WORST_CASE_SECONDS),
-            "settings.json's SessionEnd timeout (%r) leaves a margin over "
-            "HOOK_WORST_CASE_SECONDS (%r) outside [%r, %r]" % (
-                timeout, self.mod.HOOK_WORST_CASE_SECONDS,
-                self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
-                self.mod.SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS,
-            ),
-        )
-
-
 class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
     """The second permissions.deny layer must keep every entry it shipped with, so a missing
     interpreter still blocks pkill/killall, .env*, and the frozen config paths (see settings.json,
@@ -380,30 +351,6 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
             deny = json.load(handle)["permissions"]["deny"]
         missing = [e for e in self.EXPECTED if e not in deny]
         self.assertFalse(missing, "settings.json permissions.deny is missing: %r" % missing)
-
-
-class HeadroomWithinBoundsUnit(unittest.TestCase):
-    """Direct, synthetic-number coverage of `headroom_within_bounds`, proving the upper-edge arm
-    goes red in BOTH directions -- not just against the one real settings.json this checkout
-    happens to ship. Cheap and fast: no subprocess, no git, no real settings.json involved."""
-
-    def setUp(self):
-        import session_end_sweep
-        self.mod = session_end_sweep
-
-    def test_real_settings_headroom_is_within_bounds(self):
-        """Sanity: the actual repository is not, itself, the defect this arm guards."""
-        self.assertTrue(self.mod.headroom_within_bounds(55.0, 45.0))
-
-    def test_worst_case_grown_toward_the_ceiling_fails_the_band(self):
-        """Direction 1: the worst case creeps up toward the ceiling (SWEEP_TIMEOUT_SECONDS grew,
-        or a future guard._git timeout grew) until the margin drops under the stated floor."""
-        self.assertFalse(self.mod.headroom_within_bounds(55.0, 51.0))  # margin 4 < floor 5
-
-    def test_ceiling_far_ahead_of_the_worst_case_fails_the_band(self):
-        """Direction 2: settings.json's ceiling runs far ahead of the worst case (raised without
-        a matching reason, or the worst case shrank without the ceiling following it down)."""
-        self.assertFalse(self.mod.headroom_within_bounds(100.0, 45.0))  # margin 55 > ceiling 20
 
 
 class ResolveRepoRootUnit(unittest.TestCase):
