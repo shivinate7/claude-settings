@@ -75,36 +75,31 @@ await test('auto-compact on: fill and label measure the 500k auto-compact window
   assert.ok(text.includes('250k / 500k'), text)
 })
 
-await test('auto-compact off: model window is used', async () => {
-  const text = await bandText(context({ isAutoCompactEnabled: false, rawMaxTokens: 500000 }))
-  assert.ok(text.includes('25% of context'), text)
-  assert.ok(text.includes('250k / 1M'), text)
+// One table, one assertion: each row is a fallback input that must fall back to the 1M model window.
+await test('model window is used for every fallback: auto-compact off, rawMaxTokens above the window, no breakdown, rawMaxTokens missing or 0', async () => {
+  const rows = [
+    ['auto-compact off', { isAutoCompactEnabled: false, rawMaxTokens: 500000 }],
+    ['rawMaxTokens above the model window', { isAutoCompactEnabled: true, rawMaxTokens: 2000000 }],
+    ['no breakdown', undefined],
+    ['rawMaxTokens missing', { isAutoCompactEnabled: true }],
+    ['rawMaxTokens 0', { isAutoCompactEnabled: true, rawMaxTokens: 0 }],
+  ]
+  const bad = []
+  for (const [name, breakdown] of rows) {
+    const text = await bandText(context(breakdown))
+    if (!text.includes('25% of context') || !text.includes('250k / 1M')) bad.push(`${name}: ${text}`)
+  }
+  assert.deepEqual(bad, [])
 })
 
-await test('rawMaxTokens above the model window: model window is used', async () => {
-  const text = await bandText(context({ isAutoCompactEnabled: true, rawMaxTokens: 2000000 }))
-  assert.ok(text.includes('25% of context'), text)
-  assert.ok(text.includes('250k / 1M'), text)
-})
-
-await test('no breakdown: model window is used', async () => {
-  const text = await bandText(context(undefined))
-  assert.ok(text.includes('25% of context'), text)
-  assert.ok(text.includes('250k / 1M'), text)
-})
-
-await test('auto-compact on, rawMaxTokens missing: model window is used, no NaN or Infinity', async () => {
-  const text = await bandText(context({ isAutoCompactEnabled: true }))
-  assert.ok(!/NaN|Infinity/.test(text), text)
-  assert.ok(text.includes('25% of context'), text)
-  assert.ok(text.includes('250k / 1M'), text)
-})
-
-await test('auto-compact on, rawMaxTokens 0: model window is used, no NaN or Infinity', async () => {
-  const text = await bandText(context({ isAutoCompactEnabled: true, rawMaxTokens: 0 }))
-  assert.ok(!/NaN|Infinity/.test(text), text)
-  assert.ok(text.includes('25% of context'), text)
-  assert.ok(text.includes('250k / 1M'), text)
+// Its own row: a missing or zero rawMaxTokens must never print NaN or Infinity.
+await test('rawMaxTokens missing or 0: no NaN or Infinity in the band', async () => {
+  const bad = []
+  for (const breakdown of [{ isAutoCompactEnabled: true }, { isAutoCompactEnabled: true, rawMaxTokens: 0 }]) {
+    const text = await bandText(context(breakdown))
+    if (/NaN|Infinity/.test(text)) bad.push(text)
+  }
+  assert.deepEqual(bad, [])
 })
 
 const failed = r1.filter(r => r.startsWith('FAIL')).length
