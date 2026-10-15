@@ -93,8 +93,9 @@ def _split_segments_cached(cmd: str, powershell: bool):
 # ONE QUOTE WALK. `_split_reading` cuts segments with it and `walk_quotes` hands the same steps to
 # a rule that must know whether a character sits inside quotes. `quote` is "", `'`, `"`, or `$'` (a
 # bash ANSI-C string). A backslash escapes the next character outside quotes and inside `"..."` or
-# `$'...'`, so `\"` neither opens nor closes a quote; inside `'...'` it escapes nothing. In
-# PowerShell the escape is the backtick, inside `"..."` only, and a backslash is a path separator.
+# `$'...'`, a backslash too, so `\"` neither opens nor closes a quote and `\\'` opens one; inside
+# `'...'` it escapes nothing. In PowerShell the escape is the backtick, inside `"..."` only, and a
+# backslash is a path separator.
 def quote_advance(text: str, index: int, quote: str):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
     pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
@@ -104,10 +105,10 @@ def quote_advance(text: str, index: int, quote: str):
                 char == "`" and quote == '"' and POWERSHELL_CALL[0]):
             return 2, quote
         return 1, ("" if char == quote[-1] else quote)
-    if char == "\\" and not POWERSHELL_CALL[0] and text[index + 1:index + 2] in ("'", '"'):
-        return 2, ""
-    if char == "'" and not POWERSHELL_CALL[0] and index and text[index - 1] == "$":
-        return 1, "$'"
+    if char == "\\" and not POWERSHELL_CALL[0]:
+        return 2, ""   # `\\` is one escaped backslash, so a quote after the pair opens
+    if char == "$" and not POWERSHELL_CALL[0] and text[index + 1:index + 2] == "'":
+        return 2, "$'"   # read at the `$`, so an escaped `\$'` opens a plain quote
     if char in ("'", '"'):
         return 1, char
     return 1, ""
@@ -187,10 +188,6 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             while index < length and cmd[index] != "\n":
                 index += 1
             continue
-        if char == "\\" and cmd[index + 1:index + 2] == "\\":
-            current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
-            index += 2
-            continue
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
@@ -200,8 +197,11 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(char)   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
-        if char in ("'", '"') or (char == "\\" and cmd[index + 1:index + 2] in ("'", '"')
-                                  and not POWERSHELL_CALL[0]):
+        # The quote walk owns each escape that can move a quote: \' \" \\ \$ and $'. Any other
+        # backslash pair stays two characters here, so `\;` still cuts a segment (an over-read).
+        if char in ("'", '"') or (not POWERSHELL_CALL[0] and (
+                (char == "\\" and cmd[index + 1:index + 2] in ("'", '"', "\\", "$"))
+                or cmd[index:index + 2] == "$'")):
             width, quote = quote_advance(cmd, index, "")
             current.append(cmd[index:index + width])
             index += width
@@ -725,14 +725,15 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there)."""
+    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     for at, segment in enumerate(segments[:number + 1]):
@@ -742,6 +743,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str):
             return where
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
+        if move is not None and not POWERSHELL_CALL[0] and "|" in (
+                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens is None:
             where = None
         elif move is not None:

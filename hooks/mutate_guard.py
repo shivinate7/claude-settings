@@ -780,7 +780,7 @@ MUTATIONS = [
     #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
     ("silent-write: the rule never denies at all",
      '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")\n'
-     '        if matched and not in_throwaway(segments, number, cwd):\n'
+     '        if matched and not in_throwaway(segments, number, cwd, ends):\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
      '            refuse(tool, "deny", "silent-write",',
@@ -857,8 +857,8 @@ MUTATIONS = [
     #   "silent-write: the quote walk is quote-blind, so a redirect named in a message counts"
     #     -> "silent-write scanner: a discard named inside a message is text"
     ("silent-write: the throwaway test always passes, so a real checkout is never judged",
-     'def in_throwaway(segments, number: int, cwd: str) -> bool:',
-     'def in_throwaway(segments, number: int, cwd: str) -> bool:\n    return True', "guard",
+     'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:',
+     'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:\n    return True', "guard",
      "silent-write real: a discarded commit in a real checkout"),
     ("silent-write: the quote walk is quote-blind, so a redirect named in a message counts",
      'def unquoted_at(text: str, index: int) -> bool:',

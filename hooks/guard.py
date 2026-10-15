@@ -464,12 +464,29 @@ def quiet_write(args) -> bool:
 
 
 # A flag that takes the NEXT token as its value. Such a value is text, never a flag: `commit -m -h`
-# and `commit -m "--dry-run"` are real commits. A short cluster ending in one of these letters
-# (`-am`) takes the next token too. A miss here only keeps a deny, never lifts one.
+# and `commit -m "--dry-run"` are real commits. A miss here only keeps a deny, never lifts one.
 VALUE_FLAGS = {"-m", "--message", "-F", "--file", "-c", "-C", "--reuse-message", "--reedit-message",
                "--author", "--date", "--fixup", "--squash", "-t", "--template", "--cleanup",
-               "--trailer", "-o", "--push-option", "-u", "-s", "-X", "--onto", "--repo", "-x",
-               "--strategy", "--strategy-option"}
+               "--trailer", "-o", "--push-option", "-X", "--onto", "--repo", "--strategy",
+               "--strategy-option", "--exec", "--pathspec-from-file", "--receive-pack"}
+# A letter whose value depends on the subcommand: `-s` is a merge's strategy but a commit's
+# sign-off, `-x` a rebase's command but a cherry-pick's note, `-u` a tag's key but a push's upstream.
+SUBCOMMAND_VALUE_FLAGS = {"merge": {"-s"}, "pull": {"-s"}, "rebase": {"-s", "-x"}, "tag": {"-u"}}
+
+
+def takes_next(subcommand: str, token: str) -> bool:
+    """True when `token` takes the next token as its value. In a short cluster the first value
+    letter takes the rest of the cluster (`-mfoo`), or the next token when it is last (`-am`)."""
+    flags = VALUE_FLAGS | SUBCOMMAND_VALUE_FLAGS.get(subcommand, set())
+    if token in flags:
+        return True
+    if token[:1] != "-" or token[1:2] in ("-", ""):
+        return False
+    letters = {flag[1] for flag in flags if len(flag) == 2}
+    for at, letter in enumerate(token[1:], 1):
+        if letter in letters:
+            return at == len(token) - 1
+    return False
 LISTING = re.compile(r"-[ln]+\d*")   # `tag -l`, `-n5`, `-ln1`
 FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o", "--server-option",
                      "--deepen", "--shallow-since", "--shallow-exclude"}
@@ -487,8 +504,7 @@ def read_verb(subcommand: str, args) -> bool:
         elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and token == "-n") or (
                 subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
             return True
-        elif token in VALUE_FLAGS or (token[:1] == "-" and token[1:2] != "-" and len(token) > 2
-                                      and token[-1] in "mFcCtouXsx"):
+        elif takes_next(subcommand, token):
             skip = True
     return False
 
@@ -578,26 +594,28 @@ def _unexpanded(path) -> bool:
     return any(mark in path for mark in "$%`")
 
 
-def in_throwaway(segments, number: int, cwd: str) -> bool:
+def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     """True when the write in `segments[number]` runs under the temp folder, where a lost trace
-    costs nothing real. A `push` never counts: it reaches a remote. The folder is read the way
+    costs nothing real. Only a local git write counts: a `push`, `gh pr merge` or `make merge`
+    reaches past the folder, wherever it runs. The folder is read the way
     the shell reads it (`dir_before_segment`: cd, pushd, Set-Location, cd -, a subshell's cd),
     then its own `-C`, then its own `--git-dir`, which names the repository and outranks `-C`. A
     path that holds a variable, an unknown cwd, a `GIT_DIR` or `--work-tree` all read as not
     throwaway: this fails closed."""
     if any(subcommand == "push" for subcommand, _ in git_calls(segments[number])):
         return False
-    where = dir_before_segment(segments, number, cwd)
     tokens = segment_tokens(segments[number])
-    if tokens:
-        index = resolve_command(tokens) or 0
-        options = _git_option_tokens(tokens)
-        if any(t.startswith(("GIT_DIR=", "GIT_WORK_TREE=")) for t in tokens[:index]) or any(
-                t.startswith("--work-tree") for t in options):
-            return False
-        for named in (_segment_git_c_target(tokens), _git_dir_target(tokens)):
-            if named is not None:
-                where = None if _unexpanded(named) else shell_abs(named, where)
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return False
+    where = dir_before_segment(segments, number, cwd, ends)
+    options = _git_option_tokens(tokens)
+    if any(t.startswith(("GIT_DIR=", "GIT_WORK_TREE=")) for t in tokens[:index]) or any(
+            t.startswith("--work-tree") for t in options):
+        return False
+    for named in (_segment_git_c_target(tokens), _git_dir_target(tokens)):
+        if named is not None:
+            where = None if _unexpanded(named) else shell_abs(named, where)
     if not where:
         return False
     import tempfile   # lazy: only a silenced write reaches here
@@ -1721,7 +1739,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
         matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
-        if matched and not in_throwaway(segments, number, cwd):
+        if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write",
