@@ -121,15 +121,19 @@ def net_wait(out):
     """Seconds to wait before a retry: RATE_WAIT_CAP on a rate-limit text, else NET_PAUSE."""
     return RATE_WAIT_CAP if RATE_LIMIT.search(out) else NET_PAUSE
 
-def retry_net(call, pause, retries=NET_RETRIES):
-    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(out))` while it fails with a network error, up to `retries` times."""
+def retry_net(call, pause, retries=NET_RETRIES, what="the call"):
+    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(out))` while it fails with a network error, up to `retries` times.
+    Before a rate wait it prints one line that names `what`, so a 60 s wait never looks like a hang."""
     n = 0
     while True:
         c, out = call()
         if n >= retries or not is_net(c, out):
             return c, out, n
         n += 1
-        pause(net_wait(out))
+        wait = net_wait(out)
+        if RATE_LIMIT.search(out):
+            say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
+        pause(wait)
 
 UNDO_MEMO = {}
 
@@ -271,7 +275,7 @@ class GitLock(Lock):
 
     def read(self, b):
         ref = f"refs/merge-lock/{b}"
-        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause)
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
         if not out:
@@ -308,6 +312,7 @@ class GitLock(Lock):
         c, out = git(self.root, "push", "-q", "origin", f":refs/merge-lock/{b}")
         if c and "does not exist" not in out:
             raise Stop("unlock failed: " + out)
+        return not c and "non-existent ref" not in out  # False: no lock was there (a remote refuses, or a local one only warns)
 
 class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
@@ -318,7 +323,8 @@ class GhLock(Lock):
         """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
         (RATE_WAIT_CAP on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
         ponytail: no retry inside `shared_deadline`, as in Host.gh. Long rate waits can outlast the lock TTL spare (debt lock-ttl-rate-wait)."""
-        c, out, _ = retry_net(lambda: sh(["gh", "api", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
+        path = next((x for x in a if x.startswith("repos/")), " ".join(a))
+        c, out, _ = retry_net(lambda: sh(["gh", "api", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"the lock call {path}")
         return c, out
 
     def read(self, b):
@@ -330,6 +336,8 @@ class GhLock(Lock):
                 return None
             raise Stop("cannot read the merge lock: " + sha)
         c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
+        if is_net(c, out):  # an unread expiry is no lock that never expires
+            raise NetStop("cannot read the merge lock commit: " + out)
         return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
 
     def acquire(self, b, ttl):
@@ -358,17 +366,22 @@ class GhLock(Lock):
 
     @staticmethod
     def gone(out):
-        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here)."""
-        return "404" in out or "Not Found" in out or "does not exist" in out
+        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here).
+        A network error or rate limit is never "gone", though its text may hold "404" (a user id, a request id)."""
+        return not is_net(1, out) and ("404" in out or "Not Found" in out or "does not exist" in out)
 
     def delete(self, b, token):
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
-        return (0, out) if c and self.gone(out) and not is_net(c, out) else (c, out)
+        return (0, out) if c and self.gone(out) else (c, out)
 
     def unlock(self, b):
+        """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+        if c and is_net(c, out):
+            raise NetStop("unlock failed, still failing after the retries. Run again: " + out)
         if c and not self.gone(out):
             raise Stop("unlock failed: " + out)
+        return not c
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
@@ -386,7 +399,7 @@ class Host:
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`")
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, out
@@ -803,7 +816,7 @@ MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
-    c, out, n = retry_net(lambda: sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0)
+    c, out, n = retry_net(lambda: sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0, "`gh repo view`")
     if is_net(c, out):
         raise NetStop(f"network error from `gh repo view`, still failing after {n} retries. Run again.\n{out}")
     try:
@@ -1001,7 +1014,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 ok, why = False, str(e)
             if not ok:
                 fail(why)
-            c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep))
+            c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
             if is_net(c, out):  # a network error is not a refusal: the claim stays
                 raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
             if c:  # never check against a stale base tip
@@ -1066,8 +1079,7 @@ def main(argv, host=None, lock=None):
             if b is True:
                 c, head = git(root, "rev-parse", "--abbrev-ref", "origin/HEAD")
                 b = head.split("/", 1)[1] if not c and "/" in head else host_default_branch(root)
-            lock.unlock(b)
-            say(f"merge: lock on {b} removed.")
+            say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
         h = host or Host()
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
