@@ -2118,8 +2118,8 @@ sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
-# verdict is the one main's guard.py gives, probed with GUARD_UNDER_TEST: deny for 1, ask for 2 to
-# 5 (main reads the lane for those, so it asks and does not deny; the branch must not allow).
+# verdict is the one each row below pins: deny for 1 to 4 (4 is a Set-Location move, read as a cd),
+# ask for 5 (main reads the lane for 5, so it asks and does not deny; the branch must not allow).
 # Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
 # (cwd lane) and "one -C target repeated".
 # 1. --work-tree names the shared checkout, whatever -C says.
@@ -2148,11 +2148,13 @@ chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the s
             VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
 chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask step",
             VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
-# 4. A PowerShell cd into the shared checkout. main asks the step; the branch must not allow. The
-# leading Set-Location is named by the ruling (ask-steps-run-alone), so the pair asks, once. Its
-# aliases and Push-Location are not named, so they keep the deny as a chained ask step (ask-alone).
-sh("per-file ask: PowerShell Set-Location into the shared checkout, then restore f.txt, from a worktree, asks",
-   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "ask", "shared-tree",
+# 4. A PowerShell Set-Location into the shared checkout. Set-Location is a move, read as a cd
+# (ask-steps-run-alone, guard_core _segment_cd_target), so the restore is judged in the shared checkout
+# and denies. The bash cd form pins the same deny: the nearest rows are the incident form (cd shared
+# && checkout, from a worktree) and the heredoc cd shared && restore, both shared-tree deny. The
+# aliases and Push-Location are not moves, so they keep the deny as a chained ask step (ask-alone).
+sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a worktree",
+   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "deny", "shared-tree",
    tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
 for _cd in ("sl", "chdir", "Push-Location"):
     chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask step"
@@ -6865,21 +6867,21 @@ chained_prune("ask-alone: a line before the prune denies", "echo x\n" + PRUNE)
 chained_prune("ask-alone: two prunes in one command deny", PRUNE + " && " + PRUNE)
 chained_prune("ask-alone: a prune chained in the PowerShell tool denies", PRUNE + "; Write-Output x",
               tool="PowerShell")
-chained_prune("ask-alone: a subagent's chained prune denies the same way", PRUNE + " && echo x",
+chained_prune("ask-alone: a subagent's chained prune denies the same way", PRUNE + "; echo x",
               agent_id="agent-ask-alone")
 
 # STRINGS AND COMMENTS (building-scanner-respects-strings). The count of steps comes from the shell's
 # own quoting: a comment opener inside a string hides no step, a newline inside a string adds none,
 # a lone quote in a comment or a heredoc body swallows none, and a separator inside a string,
 # a comment or a heredoc body is no chain.
-chained_prune("ask-alone: a # inside a quoted argument does not hide the && after it",
-              PRUNE + ' --expire "a # b" && echo x')
-chained_prune("ask-alone: a /* inside a quoted argument does not hide the && after it",
-              PRUNE + " --expire '/* x' && echo x")
+chained_prune("ask-alone: a # inside a quoted argument does not hide the step after it",
+              PRUNE + ' --expire "a # b"; echo x')
+chained_prune("ask-alone: a /* inside a quoted argument does not hide the step after it",
+              PRUNE + " --expire '/* x'; echo x")
 chained_prune("ask-alone: a // inside a quoted argument before the prune does not hide it",
               "echo 'http://x' && " + PRUNE)
-chained_prune("ask-alone: a newline inside a quoted argument adds no step, the && after it does",
-              PRUNE + ' --expire "a\nb" && echo x')
+chained_prune("ask-alone: a newline inside a quoted argument adds no step, the step after it does",
+              PRUNE + ' --expire "a\nb"; echo x')
 chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, denies",
               PRUNE + "\ncat <<'EOF'\ndon't\nEOF")
 
