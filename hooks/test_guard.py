@@ -3463,6 +3463,11 @@ sh("playwright-install: the Node 22 cli.js form with a parent-relative path is a
 # Control: a workspace exec that runs a test is not an install.
 sh("playwright-install: a workspace exec test run is allowed",
    "npm -w app exec playwright test", "allow", cwd=NOGIT)
+# The -w and --workspace list entries: alone, each one makes the name a workspace, not a command.
+sh("playwright-install: npm -w takes a workspace name, its install is allowed",
+   "npm -w playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: npm --workspace takes a workspace name, its install is allowed",
+   "npm --workspace playwright install", "allow", cwd=NOGIT)
 # Round 4 allows, main session. A package manager's own install, a flag's value, and a test
 # filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
 sh("playwright-install: pnpm -C takes a directory, its install is allowed",
