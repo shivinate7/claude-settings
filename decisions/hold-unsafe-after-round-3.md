@@ -19,7 +19,7 @@ The rule that follows:
 - The owner's word can allow work on a held change. A merge still needs positive net value.
 - Owner ruling, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split.
 - The red-CI split in `review-cap-red-ci` (red CI is split, not a hole) still applies to changes that are not held.
-- A safety hole is a guard, gate or check that lets through an act that main refuses or asks about. It counts only if Claude could write the act by mistake or from a misread task (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker).
+- A safety hole is a guard, gate or check that lets through an act that main refuses or asks about. For a guard hook (`hooks/guard*.py`), it counts only if Claude could write the act by mistake or from a misread task (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker).
 - A main refusal that the change turns into an ask is a hole opened. A main ask that the change turns into a refusal is a hole closed.
 
 ## Why

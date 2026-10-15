@@ -38,10 +38,11 @@ In scope (a hole):
 
 - A routine wrapper round a denied step, such as `bash -c '<git write>'` or `x=$(<git write>)`.
 - A python heredoc with an apostrophe in a comment, followed by a git write.
+- ANSI-C quoting (`$'...'`) or an escape such as `\x2f` in a protected path. Debts
+  `frozen-path-ansi-c-quote` and `ansi-c-escape-not-decoded` stay open.
 
 Out of scope (not a hole):
 
-- An escape that spells a protected path, such as `\x2f`, or a `$'...'` quoted protected path.
 - A PowerShell block with no space that sets `GIT_DIR` inside a group.
 - The `export GIT_SSH_COMMAND='<cmd>' && <ask step>` form named under Trigger.
 
@@ -53,10 +54,11 @@ Out of scope (not a hole):
 
 ## Effect on other records
 
-This ruling narrows the word "safety hole". Under this ruling a hole counts only when Claude could
-write the act by mistake or from a misread task. The rule `roles-review-cap-three`,
-`hold-unsafe-after-round-3` (the hold rule for a change's net safety value) and
-`stop-guardrail-became-a-command-hook` are rewritten to match.
+This ruling covers the guard hooks (`hooks/guard*.py`) only. For a guard hook, a safety hole counts
+only when Claude could write the act by mistake or from a misread task. The rule
+`roles-review-cap-three` (a change gets three review rounds) and `hold-unsafe-after-round-3` (hold
+a change whose net safety value is not positive) say so. Other gates and checks keep the wider
+definition.
 
 Kind: process
 Home: rule:roles-review-cap-three
