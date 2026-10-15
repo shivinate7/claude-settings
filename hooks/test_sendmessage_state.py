@@ -23,6 +23,10 @@ Canary: every hook run must leave a `loaded` file (the sitecustomize ran) and, w
 reaches the reader, exactly one stub call naming the peer, with no agents call. Without them, a
 "no model call" pass proves nothing.
 
+Timing: the answer cases set READER_TIMEOUT to None, so a slow runner cannot cut the stub short. A stub
+that never answers ends at run_hook's cap as a traceback: a hang guard, not a speed check. Only the hang
+and hold cases set a short timeout, and they need it to fire.
+
 Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run instead. Its
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
 """
@@ -47,8 +51,9 @@ PEER, OTHER = "peer", "other"
 SID_A, SID_B = "ses00001", "ses00002"
 ALLOW = '{"ok": true}'
 FLAG = '{"ok": false, "reason": "parallelism-no-mid-task-talk: send only what changes the work."}'
-READER_SECONDS = 3  # the hook's READER_TIMEOUT in the timed cases, set by TIMED_HOOK
-WALL_LIMIT = READER_SECONDS + 10  # a margin over the set timeout, not a tight absolute bound
+READER_SECONDS = 3  # the hook's READER_TIMEOUT for the hang and hold cases, set by TIMED_HOOK
+NO_BOUND = None  # the hook's READER_TIMEOUT for every answer case: the stub is never cut short
+WALL_LIMIT = READER_SECONDS + 10  # the hold case's margin over its set timeout, not a tight absolute bound
 HOLD_MS = 30000  # the held child outlives WALL_LIMIT, so a held pipe fails the bound
 HARNESS_CAP = HOLD_MS // 1000 + 30  # this run's own cap, so a hang ends as a FAIL line
 
@@ -130,8 +135,8 @@ if (mode === "idle" || mode === "waiting") {
 }
 '''
 
-# Runs the hook with READER_TIMEOUT set to a short test value. The product reads that module global
-# at call time, so a fix that changes how the reader is run still meets this seam.
+# Runs the hook with READER_TIMEOUT set: a number, or None for no wait bound. The product reads that
+# module global at call time, so a fix that changes how the reader is run still meets this seam.
 TIMED_HOOK = r'''
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("sendmessage_state_timed", %r)
@@ -222,7 +227,7 @@ def point_reader_at_stub(cfg, base):
 
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
-             reader_mode="board", reader_seconds=None, cap=120):
+             reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -248,7 +253,7 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     point_reader_at_stub(cfg, base)  # every run: no case reaches the real reader
     env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS),
                 "SM_LIB_PATH": os.path.join(os.path.dirname(HERE), "mods", "session-board", "hooks", "lib.mjs")})
-    if reader_seconds is not None:
+    if not direct:  # the hook's own READER_TIMEOUT is replaced here; direct runs the script as shipped
         script = os.path.join(base, "hook_timed.py")
         with open(script, "w", encoding="utf-8") as f:
             f.write(TIMED_HOOK % (HOOK, reader_seconds))
@@ -393,15 +398,19 @@ def case_unseen_receivers_allow_with_no_model_call():
 
 
 def case_malformed_input_fails_open_with_no_deny():
-    for label, text in (
-        ("stdin is not JSON", "not json"),
-        ("tool_input is not an object", '{"tool_input": "oops"}'),
-        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}'),
-        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}'),
+    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
+    # inside main() and print the failed-open line; the last two return 0 with no line.
+    for label, text, opened in (
+        ("stdin is not JSON", "not json", True),
+        ("tool_input is not an object", '{"tool_input": "oops"}', True),
+        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False),
+        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False),
     ):
-        r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-        check("malformed input (%s): exit 0, no deny, no model call, no reader call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == [], detail(r))
+        r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG, direct=True)
+        check("malformed input (%s): exit 0, no deny, no model call, no reader call, failed-open line %s"
+              % (label, "printed" if opened else "absent"),
+              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == []
+              and ("failed open" in r.err) == opened, detail(r))
 
 
 def case_reader_timeout_allows_with_one_plain_line():
@@ -439,9 +448,11 @@ def case_model_failures_fail_open_with_no_deny():
     check("busy + model exits non-zero: exit 0, no deny, failed-open line",
           r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
           and r.reached_board(), detail(r))
+    # One model call is required too: a reader timeout also prints "failed open", with no call.
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer='{"verdict": "FLAG"}')
-    check("busy + off-shape model answer: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err and r.reached_board(), detail(r))
+    check("busy + off-shape model answer: exit 0, no deny, failed-open line, one model call",
+          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
+          and r.reached_board(), detail(r))
 
 
 def case_model_row_names_the_call():
