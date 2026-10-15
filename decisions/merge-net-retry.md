@@ -30,7 +30,7 @@ Code: `merge/merge.py`.
   - MERGED at another head: stop, no revert.
   - Unreadable state: NetStop, no revert.
   - Lost reply and state OPEN: NetStop, no revert.
-  - Proven refusal: revert. Hole 1 names one case that also reverts.
+  - Proven refusal: revert. `merge-net-open-reverts` names one case that also reverts.
 - A `git fetch` network error after the claim push: NetStop. The claim stays. Run again to resume.
 
 ## What protects it
@@ -42,24 +42,7 @@ states no pass result. The gate run holds it.
 
 ## Holes, named
 
-Review round 3, final, 2026-10-13. Holes 1, 2 and 4 go to fix lane `merge-net-holes`.
-
-1. A `gh pr merge` reply with exit 0 and a state read of OPEN still reverts (`merge/merge.py`
-   lines 549-550). A lagging read or a merge queue could revert a merge that landed.
-2. REST 5xx texts from `gh api` do not match `NET_ERROR`: `gh: Server Error (HTTP 502)`,
-   `gh: HTTP 503`, `HTTP 502 (url)`. HTTP 500, the GraphQL "Something went wrong" text and 429 do
-   not match either. In `required_names()`, during the wait, a server error reverts the claim.
-3. The NetStop text says "Run again." The merge may have landed. A rerun stops at "is MERGED".
-   The after-merge steps (`ff_main`, `afterMerge`, `cut_branch`) do not run.
-4. The `git fetch` pattern misses some network texts. Each one reverts the claim: HTTP/2
-   INTERNAL_ERROR, Empty reply from server, GnuTLS recv error, Failed sending data to the peer,
-   ssh kex_exchange_identification.
-5. No retry runs inside `shared_deadline`, which wraps the guard's head read. `Host.gh` sets the
-   retry count to 0 there. A network error there reads as unknown.
-6. A refusal whose text ends `: HTTP 5xx (url)` still reads as a network error. Debt:
-   net-error-colon-http-refusal.
-7. The lock's expiry read has no retry, so a network blip reads as "never expires". Debt:
-   lock-expiry-read-no-retry.
+Debts: `merge-net-open-reverts` (a merge reply with state OPEN still reverts), `merge-net-5xx-unmatched` (REST 5xx and 429 texts are not network errors), `merge-net-stop-may-have-merged` (the NetStop text says run again after a possible merge), `merge-net-fetch-texts-missed` (some git fetch network texts revert the claim), `merge-net-no-retry-in-deadline` (no retry runs inside `shared_deadline`), `net-error-colon-http-refusal` (a refusal ending in `: HTTP 5xx (url)` reads as a network error), `lock-expiry-read-no-retry` (the lock's expiry read has no retry). Lane `merge-net-holes` takes `merge-net-open-reverts`, `merge-net-5xx-unmatched` and `merge-net-fetch-texts-missed`.
 
 ## Build plan
 

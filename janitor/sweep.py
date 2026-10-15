@@ -590,10 +590,46 @@ def _strict_keep(where: str, path: str, idle):
     return None
 
 
-def decide_worktree(where: str, entry: dict, attended: bool = False):
+AGENT_IDLE_SECONDS = 4 * 60 * 60  # owner ruling 2026-10-14: a finished agent's tree needs 4 hours of quiet
+
+
+def _is_agent_worktree(where: str, path: str) -> bool:
+    """True when PATH is `<WHERE>/.claude/worktrees/agent-*`, directly under that folder."""
+    def norm(p):
+        return os.path.normcase(os.path.realpath(p))
+    parent, name = os.path.split(norm(path))
+    return parent == norm(os.path.join(where, ".claude", "worktrees")) and name.startswith("agent-")
+
+
+def _agent_rule_keep(kept: dict, idle):
+    """The agent rule (owner ruling 2026-10-14). It ADDS removals to the older unattended
+    rulings and never narrows them. The caller runs it for a tree under `.claude/worktrees/agent-*`
+    that those rulings keep (KEPT is their decision), after the clean, lock, session and
+    live-ls-remote reads passed. Returns a keep decision, or None when the tree may go: idle 4
+    hours, and HEAD on a remote-tracking ref (`git branch -r --contains`). A keep that came from
+    a failed read (`unreadable-subject`, an unreadable idle time included) stays, and so does a
+    failed read here."""
+    path = kept["path"]
+    if kept["reason"] == "unreadable-subject":
+        return kept
+    if idle < AGENT_IDLE_SECONDS:
+        return {"path": path, "action": "keep",
+                "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    contains = guard._git(path, "branch", "-r", "--contains", "HEAD")
+    if contains is None or contains.returncode != 0:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if not contains.stdout.strip():
+        return {"path": path, "action": "keep",
+                "reason": "unpushed: HEAD is on no remote-tracking ref"}
+    return None
+
+
+def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
-    ATTENDED (a person's run) skips those two keeps."""
+    ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
+    fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
+    keeps hold it. A repo's own `reap:worktrees` script turns it off."""
     # Read first: `git status` below can rewrite the index and make every tree look active.
     idle = worktree_idle_seconds(entry["path"]) if not attended else None
     path = entry["path"]
@@ -633,6 +669,8 @@ def decide_worktree(where: str, entry: dict, attended: bool = False):
                     "reason": "unpushed: HEAD has a commit on no remote branch"}
     if not attended:
         kept = _strict_keep(where, path, idle)
+        if kept and agent_rule and _is_agent_worktree(where, path):
+            kept = _agent_rule_keep(kept, idle)
         if kept:
             return kept
     # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
@@ -2433,6 +2471,47 @@ def _is_toplevel(path: str) -> bool:
 MODES = ("full", "tier1", "branches")
 
 
+REAPER_SCRIPT = "reap:worktrees"
+# session_end_sweep.py kills this sweep at 25 s (SWEEP_TIMEOUT_SECONDS). The repo's own script has
+# to end well inside that, or the kill orphans its npm child, so it gets 15 s. After a timeout the
+# older rules alone judge the trees.
+REAPER_TIMEOUT_SECONDS = 15
+
+
+def repo_reaper(root: str):
+    """The repo's own agent-worktree remover: ("none", None) when `<root>/package.json` is absent
+    or defines no `reap:worktrees` script, ("script", None) when it does, ("unreadable", why) when
+    package.json cannot be read or parsed. The agent rule needs "none"."""
+    package = os.path.join(root, "package.json")
+    if not os.path.isfile(package):
+        return "none", None
+    try:
+        with open(package, encoding="utf-8") as handle:
+            scripts = json.load(handle).get("scripts") or {}
+        return ("script" if REAPER_SCRIPT in scripts else "none"), None
+    except Exception as exc:
+        return "unreadable", "package.json unreadable: %s" % exc
+
+
+def run_repo_reaper(root: str):
+    """Run `npm run reap:worktrees -- --remove` in ROOT. Returns None on success, else why it
+    failed. npm is resolved with shutil.which (npm.cmd on Windows); prompts are off."""
+    npm = shutil.which("npm")
+    if npm is None:
+        return "npm not found"
+    try:
+        done = subprocess.run(
+            [npm, "run", REAPER_SCRIPT, "--", "--remove"], cwd=root, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=REAPER_TIMEOUT_SECONDS,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+    except Exception as exc:
+        return "npm run %s failed: %s" % (REAPER_SCRIPT, exc)
+    if done.returncode != 0:
+        return "npm run %s exited %d: %s" % (REAPER_SCRIPT, done.returncode,
+                                             (done.stderr or done.stdout).strip()[-200:])
+    return None
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
@@ -2462,6 +2541,21 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # "branches" prunes nothing: a stale registration then keeps its branch held.
     if mode != "branches":
         result["pruned"] = prune_registrations(root, confirm)
+
+    # The agent rule (owner ruling 2026-10-14) is the default remover of finished agent trees. A repo
+    # with its own `reap:worktrees` script gets that script instead, run before the list is read so
+    # the trees it removes are not judged; an unreadable package.json turns the rule off.
+    agent_rule = mode == "full" and not attended
+    if agent_rule:
+        reaper, why = repo_reaper(root)
+        if reaper != "none":
+            agent_rule = False
+            if reaper == "unreadable":
+                result["reaper"] = why
+            elif confirm:
+                result["reaper"] = run_repo_reaper(root) or "ran"
+            else:
+                result["reaper"] = "would run"
 
     entries = parse_worktree_list(root)
     if entries is None:
@@ -2499,7 +2593,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, attended)
+        return decide_worktree(root, entry, attended, agent_rule)
 
     judged = entries if mode == "full" else []
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
@@ -2585,6 +2679,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
                 and not has_prune and result.get("husks", []) == [] and result.get("strays", []) == []:  # None is unknown
             print("  nothing to examine", file=out)
+        if result.get("reaper"):
+            print("  reaper    %s: %s" % (REAPER_SCRIPT, result["reaper"]), file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
         elif pruned:

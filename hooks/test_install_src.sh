@@ -1903,6 +1903,96 @@ caseG7() {
   else ok "$name"; fi
 }
 
+# ---- Refuse-worktree: install.sh run from a linked git worktree stops before it writes ---------
+# Incident 2026-10-14: install.sh ran from a linked worktree, so ~/.claude/CLAUDE.md and the hooks
+# pointed at that temp checkout. From a linked worktree install.sh must exit non-zero, print a line
+# that names the main clone, and leave CLAUDE_CONFIG_DIR and HOME as they were. Red on origin/main:
+# it installs from the worktree and rewrites the pointer there.
+# keep_wt1 and keep_plain1 guard the other side: the main clone of a repo that has a linked worktree
+# still installs, and a plain folder copy with no .git still installs.
+
+# refuse_fixture NAME: a main clone with one detached linked worktree (as in the incident), a copy of
+# install.sh in the worktree, and a config dir seeded with a pointer to the main clone. Sets rw_h
+# (the fake HOME), rw_co, rw_wt, rw_cfg, rw_ptr (the seeded pointer) and rw_snap (the config dir
+# listing). Returns 1 when git cannot make the worktree.
+refuse_fixture() {
+  rw_co="$work/$1-main"; rw_wt="$work/$1-wt"; rw_cfg="$work/$1-cfg"
+  rw_h=$(mktemp -d); rw_h=$(realpwd "$rw_h")
+  make_checkout "$rw_co" "# $1 main"
+  git -C "$rw_co" worktree add -q --detach "$rw_wt" >/dev/null 2>&1 || return 1
+  cp "$INSTALL_SH" "$rw_wt/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$rw_wt/$sub"; done
+  seed_pointer "$rw_cfg" "$rw_co"
+  rw_ptr=$(cat "$rw_cfg/CLAUDE.md"); rw_snap=$(find "$rw_cfg" | sort)
+}
+
+# refuse_check NAME RC OUT: the run must exit non-zero, name the main clone, and write nothing
+# (pointer unchanged, config dir listing unchanged, fake HOME empty). Every reason found goes into
+# the FAIL line, so a red run shows what the installer wrote.
+refuse_check() {
+  why=""
+  [ "$2" -ne 0 ] || why="$why exit 0, want non-zero;"
+  printf '%s\n' "$3" | grep -qi 'main clone' || why="$why no output line names the main clone;"
+  [ "$(cat "$rw_cfg/CLAUDE.md" 2>/dev/null)" = "$rw_ptr" ] || why="$why pointer changed to [$(cat "$rw_cfg/CLAUDE.md" 2>/dev/null)];"
+  [ "$(find "$rw_cfg" | sort)" = "$rw_snap" ] || why="$why config dir changed;"
+  [ -z "$(ls -A "$rw_h")" ] || why="$why fake HOME was written;"
+  if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why"; fi
+}
+
+refuse_wt1() {
+  name="refuse_wt1: install.sh run from a linked worktree refuses and writes nothing"
+  refuse_fixture refuse_wt1 || { bad "$name" "fixture: git worktree add failed"; return; }
+  out=$(cd "$rw_wt" && env -i PATH="$PATH" HOME="$rw_h" CLAUDE_CONFIG_DIR="$rw_cfg" bash ./install.sh 2>&1)
+  rc=$?
+  refuse_check "$name" "$rc" "$out"
+  rm -rf "$rw_h"
+}
+
+refuse_wt2() {
+  name="refuse_wt2: install.sh in a linked worktree refuses even when run from the main clone"
+  refuse_fixture refuse_wt2 || { bad "$name" "fixture: git worktree add failed"; return; }
+  out=$(cd "$rw_co" && env -i PATH="$PATH" HOME="$rw_h" CLAUDE_CONFIG_DIR="$rw_cfg" bash "$rw_wt/install.sh" 2>&1)
+  rc=$?
+  refuse_check "$name" "$rc" "$out"
+  rm -rf "$rw_h"
+}
+
+# keep_check NAME RC OUT CFG HOME TARGET: the run must exit 0 and point CFG/CLAUDE.md at TARGET.
+keep_check() {
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$4/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$5${pointer#\~}";; esac
+  if [ "$2" -ne 0 ]; then bad "$1" "install.sh exited $2: $3"
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$6")" ]; then bad "$1" "pointer target [$pointer] != [$6]"
+  else ok "$1"; fi
+}
+
+keep_wt1() {
+  name="keep_wt1: main clone of a repo with a linked worktree still installs"
+  co="$work/keep_wt1-main"; wt="$work/keep_wt1-wt"; cfg="$work/keep_wt1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# keep_wt1 main"
+  cp "$INSTALL_SH" "$co/install.sh"
+  git -C "$co" worktree add -q --detach "$wt" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$co"
+  rm -rf "$h"
+}
+
+keep_plain1() {
+  name="keep_plain1: a plain folder copy with no .git still installs"
+  dir="$work/keep_plain1-release"; cfg="$work/keep_plain1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$dir" "# keep_plain1 release"
+  rm -rf "$dir/.git"
+  cp "$INSTALL_SH" "$dir/install.sh"
+  out=$(cd "$dir" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$dir"
+  rm -rf "$h"
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -1965,6 +2055,10 @@ run caseG4
 run caseG5
 run caseG6
 run caseG7
+run refuse_wt1
+run refuse_wt2
+run keep_wt1
+run keep_plain1
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

@@ -391,7 +391,7 @@ def inbox_note(session_id):
                 note += " Open feedback items: %s. Keep each in the handoff." % ", ".join(ids)
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
-    if os.path.exists(paths[1]):  # exists() does not raise
+    if local_time.is_open(paths[1]):  # never raises
         note += " Feedback capture is still open: the owner has not sent `fb done`."
     return note
 
