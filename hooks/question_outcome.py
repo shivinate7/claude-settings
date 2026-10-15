@@ -36,6 +36,7 @@ Per question with two or more options (a clarifying question passes first):
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
 - The judge reads each option on one line: its label, description and preview, each defanged and
   cut to OPTION_PART_CAP (800) chars. A cut part ends in OPTION_CUT, and the prompt names that mark.
+  The question text is defanged the same way.
 - A failed model call, an unreadable transcript, or hook input that is not readable lets the
   question through, with one systemMessage saying the check did not run. It never echoes the
   prompt. An options value that is not a list counts as no options: the question passes with

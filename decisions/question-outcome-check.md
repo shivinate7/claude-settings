@@ -108,7 +108,7 @@ Owner rulings, 2026-10-08:
 - The judge reads each option on one line: its label, description and preview. Each part is
   defanged and cut to 800 chars (OPTION_PART_CAP), so a long option cannot crowd out the owner's
   messages. A cut part ends in `[cut]` (OPTION_CUT), and the prompt says that mark is a cut for
-  length, not a missing part. Incident, 2026-10-14: the judge saw only the labels and denied 4
+  length, not a missing part. The question text is defanged too. Incident, 2026-10-14: the judge saw only the labels and denied 4
   good questions.
 - Hook input that is not readable lets the question through, and the hook says the check did
   not run. An options value that is not a list counts as no options, so the question passes
@@ -123,7 +123,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `question-text-not-defanged` (case variants of the fence tokens, such as `<<<end>>>`, are not defanged), `judge-fence-lookalikes` (lookalike fence forms are not defanged), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text). `question-preface-punctuation` (a punctuation-led preface line before Goal is denied, and the free pass then lets the retry through).
+Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `judge-fence-lookalikes` (lookalike fence forms are not defanged), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text). `question-preface-punctuation` (a punctuation-led preface line before Goal is denied, and the free pass then lets the retry through).
 
 Kind: process
 Home: hooks/question_outcome.py
