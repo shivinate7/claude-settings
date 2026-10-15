@@ -504,7 +504,13 @@ def _deny(reason):
 
 
 def _options(q):
-    return [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)]
+    """One line per option for the judge: label, then its description and preview when it has them.
+    Check (6) asks what each option gains and loses, and the description holds that. Every part is
+    defanged, so no option text can forge a fence."""
+    def line(o):
+        parts = [_defang(str(o.get(k) or ""), one_line=True) for k in ("label", "description", "preview")]
+        return " - ".join(p for p in parts if p)
+    return [line(o) for o in q.get("options") or [] if isinstance(o, dict)]
 
 
 def _did_not_run(why):
