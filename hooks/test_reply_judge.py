@@ -218,8 +218,16 @@ def case_model_ok_is_silent():
     check("ok: exactly one claude call", len(run.calls) == 1, len(run.calls))
 
 
-# Owner ruling: run model haiku at effort xhigh. Its check lives in test_decision_watch
-# case_invoke_model_argv, the one home for the model and isolation flags this hook passes.
+# Owner ruling: run model haiku at effort xhigh. This case alone pins the model this hook passes
+# (reply_judge.py, the invoke_model call). test_decision_watch case_invoke_model_argv pins the
+# argv builder; neither covers the other's call site.
+
+def case_model_is_haiku_at_xhigh():
+    run = run_hook(MARK, answer=json.dumps({"ok": True}))
+    argv = run.calls[0]["argv"] if run.calls else []
+    pairs = list(zip(argv, argv[1:]))
+    check("model: --model haiku in argv", ("--model", "haiku") in pairs, argv)
+    check("model: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
 
 
 # --------------------------------------------------------------------------- case 3
@@ -726,6 +734,7 @@ def table_write_and_remove():
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_model_ok_is_silent,
+    case_model_is_haiku_at_xhigh,
     case_model_finding_emits_note_not_block,
     case_finding_without_reason_is_still_a_note,
     case_model_failure_fails_open,

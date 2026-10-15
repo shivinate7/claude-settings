@@ -341,7 +341,6 @@ GENERAL_CASES = [
     ("a JSON array on stdin gets the general line", "[1, 2]"),
     ("a JSON string on stdin gets the general line", '"builder"'),
 ]
-# named failure: none found in the chunk files or git history (reported under Input Needed).
 def general_rows_check():
     """One case for the ten general-line rows. A failing row names itself in the note."""
     check = scope_check("general")

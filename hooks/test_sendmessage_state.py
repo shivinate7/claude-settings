@@ -366,7 +366,6 @@ def case_idle_and_waiting_allow_with_no_model_call():
 
 
 # Busy receiver and a model FLAG. Each row: (row id, model answer, reason prefix the deny carries).
-# named failure: none found in the chunk files or git history (reported under Input Needed).
 # The blank-reason row reaches the default-reason branch, so it stays a row, not a duplicate.
 BUSY_FLAG_ROWS = (
     ("busy + model FLAG: one deny carrying the model's reason", FLAG,

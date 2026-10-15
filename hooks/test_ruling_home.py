@@ -455,7 +455,8 @@ def case_values_that_are_no_home():
     commit_all(repo)
     rows = (
         ("absolute_value_refused", real_target, ROOT),
-        # A tracked file in the repo: only the absolute-path refusal can block it.
+        # A tracked file in the repo, named by its absolute path. git also refuses the value, so
+        # this row does not isolate the isabs check on its own.
         ("absolute_value_refused_in_repo", os.path.join(repo, "decisions", "real.md"), repo),
         ("refuses_dot", ".", repo),
         ("refuses_dotdot", "..", repo),
