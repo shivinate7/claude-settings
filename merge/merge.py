@@ -691,7 +691,8 @@ def identity(wt):
 def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", "Rebuild the records page"]
+    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", "Rebuild the records page",
+           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim: " + out)
@@ -721,14 +722,12 @@ def records_proof(wt, base_ref):
         if c:
             if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
                 raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
+            page = os.path.join(wt, *RECORDS_PAGE.split("/"))
+            if os.path.exists(page):
+                os.remove(page)  # the generator is the only thing that clears a conflict on the page: a page it does not write stays a conflict
             rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
-            try:  # a repo with no record folders gets no generated page, so a hand-written page keeps its conflict markers
-                with open(os.path.join(wt, *RECORDS_PAGE.split("/")), encoding="utf-8", errors="replace") as f:
-                    marked = re.search(r"^(<{7}|>{7})( |$)", f.read(), re.M)
-            except OSError:
-                marked = None
-            if marked:
-                raise Stop(f"the records page {RECORDS_PAGE} has a merge conflict with {base_ref} that the rebuild did not clear, so nothing was merged. Resolve the page by hand on the branch.")
+            if not os.path.exists(page):  # a repo with no record folders gets no generated page, so a hand-written one cannot be rebuilt
+                raise Stop(f"the records page {RECORDS_PAGE} conflicts with {base_ref} and the generator writes no page for this repo, so nothing was merged. Resolve the page by hand on the branch.")
             # the rebuilt page drops lines a side added; the silent-undo check after the next wait must read that as generated
             c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page",
                          "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt on the merged tree")

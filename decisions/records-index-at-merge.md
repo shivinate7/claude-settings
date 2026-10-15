@@ -18,4 +18,4 @@ The records grew past 300 files. A reader had to search the folders to find the 
 
 ## Holes, named
 
-Review round 3 left these open. Lane records-heal-scope closed four. The heal stops on a conflict marker. The merge runs only the records mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop paths have tests. Two debts stay open: `old-before-was-flags-history` (the history rule flags a plain description) and `catalog-root-needs-skills-dir` (a settings root with hooks/ and no skills/ crashes the catalog).
+Review round 3 left these open. Lane records-heal-scope closed four. The heal stops when the generator writes no page for a conflicted page. The merge runs only the records mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop paths have tests. Three debts stay open: `old-before-was-flags-history` (the history rule flags a plain description), `catalog-root-needs-skills-dir` (a settings root with hooks/ and no skills/ crashes the catalog), and `merge-by-button-stale-page` (a merge through the GitHub button leaves a stale page).
