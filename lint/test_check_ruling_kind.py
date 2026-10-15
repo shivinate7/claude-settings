@@ -161,6 +161,10 @@ class RulingKindTests(unittest.TestCase):
             ("Kind: build\nPlan: plans/missing.md#phase-1-the-sweep (mac)", "plans/missing.md"),
             ("Kind: build\nPlan: plans/build-plan.md#phase-9-nothing (mac)", "phase-9-nothing"),
             ("Kind: build\nPlan: %s" % L1, "phase-1-the-sweep"),  # no platform label
+            # Merged from test_platform_none_or_empty_fails: a platform label that is none or empty.
+            ("Kind: build\nPlan: %s (none)" % L1, "plan"),
+            ("Kind: build\nPlan: %s (None)" % L1, "plan"),
+            ("Kind: build\nPlan: %s ()" % L1, "plan"),
         ]
         for ruling, token in cases:
             with self.subTest(ruling=ruling):
@@ -228,6 +232,14 @@ class RulingKindTests(unittest.TestCase):
     def test_plan_file_passed_in_is_ignored(self):
         # The plan has no Kind line. It passes only because the lint does not check it.
         self.assert_passes(PLAN)
+        # Merged from test_default_leaves_docs_decisions_unchecked: without --dir only decisions/ is
+        # checked, so a nested docs/decisions record passes. Named failure: the default check spreads
+        # into docs/ and fails records that claude-settings never meant to check.
+        self.css_plan()
+        self.put(NESTED, record("Owner ruling. Ship it."))
+        self.assert_passes(NESTED)
+        self.put(NESTED, record("Kind: build\nPlan: src/index.css#no-such-heading (web)"))
+        self.assert_passes(NESTED)
 
     def test_diff_unchanged_old_record_is_ignored(self):
         self.put(OLD, record("Old ruling, no kind line."))
@@ -298,13 +310,6 @@ class RulingKindTests(unittest.TestCase):
                     self.assert_passes(REC)
                 else:
                     self.assert_fails(REC, "Kind")
-
-    def test_platform_none_or_empty_fails(self):
-        for label in ("(none)", "(None)", "()"):
-            with self.subTest(label=label):
-                self.put(REC, record("Kind: build\nPlan: %s %s" % (L1, label)))
-                self.assert_fails(REC, "plan")
-
 
     # --rules-file: a Home names a rule that lives in either rules file. Each file is one side:
     # the caller's CLAUDE.md and the claude-settings CLAUDE.md, passed by check.sh.
@@ -397,14 +402,6 @@ class RulingKindTests(unittest.TestCase):
                 self.put(rel, record("Owner ruling. No kind line."))
                 self.assert_passes(rel, "--dir", DOCS)
 
-    def test_default_leaves_docs_decisions_unchecked(self):
-        # claude-settings keeps its behaviour: without --dir, only decisions/ is checked.
-        self.css_plan()
-        self.put(NESTED, record("Owner ruling. Ship it."))
-        self.assert_passes(NESTED)
-        self.put(NESTED, record("Kind: build\nPlan: src/index.css#no-such-heading (web)"))
-        self.assert_passes(NESTED)
-
     def test_dir_checks_records_added_in_the_diff(self):
         # The CI path: no file arguments, the lint reads the diff against --base.
         self.commit_base()
@@ -425,8 +422,13 @@ class RulingKindTests(unittest.TestCase):
     # Case: on a case-insensitive disk "Decisions" resolves, so the spelling must be compared too.
 
     def test_dir_that_names_no_usable_folder_fails(self):
+        # Rows: no usable folder (decision, docs/decisions-old, ., "", Decisions), and a name that is a
+        # file (CLAUDE.md, decisions/x.md, merged from test_dir_that_names_a_file_fails). The diff-mode
+        # case stays in test_dir_that_names_no_usable_folder_fails_in_the_diff. Named failure: a bad
+        # --dir passes the lint instead of failing closed.
+        self.put("decisions/x.md", record(BUILD_OK))
         self.put(REC, record(BUILD_OK))
-        for value in ("decision", "docs/decisions-old", ".", "", "Decisions"):
+        for value in ("decision", "docs/decisions-old", ".", "", "Decisions", "CLAUDE.md", "decisions/x.md"):
             with self.subTest(dir=value):
                 rc, out = self.lint("--dir", value, REC)
                 self.assertNotEqual(rc, 0, out)
@@ -441,17 +443,6 @@ class RulingKindTests(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("'decision'", out)
         self.assertNotIn("Traceback", out)
-
-    def test_dir_that_names_a_file_fails(self):
-        # A file is not a records folder. Its name passes the listing check, so the lint must not.
-        self.put("decisions/x.md", record(BUILD_OK))
-        self.put(REC, record(BUILD_OK))
-        for value in ("CLAUDE.md", "decisions/x.md"):
-            with self.subTest(dir=value):
-                rc, out = self.lint("--dir", value, REC)
-                self.assertNotEqual(rc, 0, out)
-                self.assertIn("'%s'" % value, out)
-                self.assertNotIn("Traceback", out)
 
     def test_default_and_named_records_folder_pass(self):
         self.put(REC, record(BUILD_OK))
