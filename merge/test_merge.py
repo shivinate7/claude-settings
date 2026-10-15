@@ -311,6 +311,7 @@ class Flow(Env):
         self.assertEqual(rc, 1, out)  # owner ruling: a failed local fast-forward exits non-zero
         self.assertIn("the merge landed. The local main did not move", out)
         self.assertIn(path, out)  # git named the blocking path
+        self.assertIn(os.path.realpath(self.co), out)  # the checkout that was checked, by path (ff_main names it on both cases)
         self.assertIn("overwritten", out)  # and it was git's refusal
         self.assertNotIn("stash", out)  # never git's raw advice
         self.assertIn("Fast-forward main there by hand.", out)
@@ -333,16 +334,6 @@ class Flow(Env):
         old = sh(self.co, "git", "rev-parse", "main")
         rc, out = self.run_merge("7", "--confirm")
         self.assert_git_refuses_the_overwrite(rc, out, old, "docs/decisions/second.md", "mine\n")
-
-    def test_the_dirty_tree_message_names_the_checkout_path_it_checked(self):
-        o = self.other  # same dirty-file setup as above: the merge changes first.md, which is dirty in the checkout
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "pr edit\n")
-        sh(o, "git", "commit", "-qam", "pr edits first"); sh(o, "git", "push", "-q", "origin", "feat")
-        put(os.path.join(self.co, "docs/decisions/first.md"), "my edit\n")
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn(os.path.realpath(self.co), out)  # the checkout that was checked, by path
 
     def test_after_merge_failure_is_reported_and_the_merge_stays(self):
         sh(self.other, "git", "checkout", "-q", "main")
@@ -571,10 +562,6 @@ class AfterPush(Env):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_the_tree_is_gone_at_the_base_check(self):
-        self.host.on_wait = lambda: shutil.rmtree(os.path.dirname(self.merge_tree()))
-        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
-
     def base_loses(self, text):
         """The base moves during the wait: its .github/stamp.json is removed when text is None, else rewritten to text."""
         o = self.other
@@ -593,13 +580,21 @@ class AfterPush(Env):
         self.assertEqual(len(lines), 1, out)  # one line, from merge
         self.assertTrue(lines[0].startswith("merge: "), lines[0])
 
-    def test_the_config_is_gone_at_the_base_check(self):
-        self.host.on_wait = lambda: self.base_loses(None)
-        self.assert_base_lost(*self.run_merge("7", "--confirm"))
-
-    def test_the_kinds_are_gone_at_the_base_check(self):
-        self.host.on_wait = lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"}))
-        self.assert_base_lost(*self.run_merge("7", "--confirm"))
+    def test_the_tree_config_or_kinds_gone_at_the_base_check_stops_clean(self):
+        """The tree, the config or the kinds gone at the base check: one outcome, a stop with no claim left
+        behind. Each row is a fresh fixture, so subTest runs its own setUp."""
+        def tree_gone():
+            shutil.rmtree(os.path.dirname(self.merge_tree()))
+        cases = (
+            ("tree", tree_gone, self.assert_clean_stop),
+            ("config", lambda: self.base_loses(None), self.assert_base_lost),
+            ("kinds", lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"})), self.assert_base_lost),
+        )
+        for name, hook, check in cases:
+            with self.subTest(gone=name):
+                self.setUp()
+                self.host.on_wait = hook
+                check(*self.run_merge("7", "--confirm"))
 
     def test_any_error_after_the_push_reverts_the_claim(self):
         def boom():
@@ -1273,12 +1268,6 @@ class GhHalf(Env):
     def test_a_lost_merge_reply_with_a_wsarecv_error_reads_merged_and_carries_on(self):
         self.lost_reply_reads_merged(NET_WSARECV)
 
-    def test_a_lost_merge_reply_with_a_deadline_error_reads_merged_and_carries_on(self):
-        self.lost_reply_reads_merged(NET_DEADLINE)
-
-    def test_a_lost_merge_reply_with_a_refused_connection_reads_merged_and_carries_on(self):
-        self.lost_reply_reads_merged(NET_REFUSED)
-
     def test_a_network_error_then_a_real_not_mergeable_reply_reverts_the_claim(self):
         self.set(merge_replies=[[NET_TLS, False], ["GraphQL: Pull Request is not mergeable", False]])  # the retry gets a real refusal
         rc, out = self.go()
@@ -1332,19 +1321,6 @@ class GhHalf(Env):
     def test_a_required_check_read_with_gh_server_error_502_stops_without_a_revert(self):
         self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
 
-    def test_a_required_check_read_with_gh_http_503_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim("gh: HTTP 503")
-
-    def test_a_required_check_read_with_http_502_and_a_url_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim("HTTP 502 (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)")
-
-    def test_a_required_check_read_with_gh_http_500_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim("gh: HTTP 500")
-
-    def test_a_required_check_read_with_a_json_body_then_a_gh_502_line_is_retried_then_stops_without_a_revert(self):
-        # round 2: the JSON body and gh's error line share one line, with no newline between them
-        self.required_read_fails_after_the_claim('{"message":"Server Error"}gh: Server Error (HTTP 502)')
-
     def merge_reply_is_retried_then_stops(self, msg):
         """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert."""
         self.set(merge_replies=[[msg, False]])
@@ -1359,9 +1335,6 @@ class GhHalf(Env):
     def test_a_merge_reply_something_went_wrong_is_retried_then_stops_without_a_revert(self):
         self.merge_reply_is_retried_then_stops("GraphQL: Something went wrong while executing your query on this domain.")
 
-    def test_a_merge_reply_http_429_is_retried_then_stops_without_a_revert(self):
-        self.merge_reply_is_retried_then_stops("HTTP 429: Too Many Requests")
-
     def fetch_fails_after_the_claim_push(self, msg):
         """The fetch of main after the claim push fails with `msg`, a network-class error: the claim stays, nothing is reverted."""
         rc, out = self.go_with_fetch_after_push(msg)
@@ -1373,18 +1346,6 @@ class GhHalf(Env):
 
     def test_a_git_fetch_http2_stream_error_after_the_claim_push_stops_without_a_revert(self):
         self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
-
-    def test_a_git_fetch_empty_reply_after_the_claim_push_stops_without_a_revert(self):
-        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Empty reply from server")
-
-    def test_a_git_fetch_gnutls_recv_error_after_the_claim_push_stops_without_a_revert(self):
-        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': GnuTLS recv error (-9): Error decoding the received TLS packet.")
-
-    def test_a_git_fetch_failed_sending_after_the_claim_push_stops_without_a_revert(self):
-        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Failed sending data to the peer")
-
-    def test_a_git_fetch_ssh_kex_error_after_the_claim_push_stops_without_a_revert(self):
-        self.fetch_fails_after_the_claim_push("kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.")
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
         self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]],  # the merge lands, its reply and the retries are lost
@@ -1806,45 +1767,34 @@ class GhHalf(Env):
 
     # Incident 2026-10-13, PR 381: two gates runs started on one head in the same second. GitHub cancelled one (concurrency).
     # judge_runs must read the live twin, not the cancelled one, whatever the list order.
-    def test_a_cancelled_twin_beside_a_live_run_of_its_name_waits_in_either_order(self):
-        live = {"name": "gates", "status": "in_progress", "conclusion": ""}
+    def test_a_cancelled_twin_beside_a_run_of_its_name_is_judged_by_the_run_that_ran_in_either_order(self):
+        # Rows, one outcome each: a live twin waits; a succeeded twin is green (owner ruling 2026-10-13, option (a):
+        # a run that ran outranks a cancelled run of its name); a failed twin is red on the failure. Either order.
         cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
-        for order, runs in (("cancelled first", [cancelled, live]), ("live first", [live, cancelled])):
-            with self.subTest(order=order):
-                self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+        rows = (
+            ("live", {"name": "gates", "status": "in_progress", "conclusion": ""}, ([], ["workflow gates"])),
+            ("succeeded", {"name": "gates", "status": "completed", "conclusion": "success"}, ([], [])),
+            ("failed", {"name": "gates", "status": "completed", "conclusion": "failure"}, (["workflow gates: failure"], [])),
+        )
+        for twin, other, want in rows:
+            for order, runs in (("cancelled first", [cancelled, other]), ("twin first", [other, cancelled])):
+                with self.subTest(twin=twin, order=order):
+                    self.assertEqual(merge.Host.judge_runs(runs), want)
 
-    def test_a_cancelled_twin_beside_a_live_run_that_succeeded_is_green_in_either_order(self):
-        # Owner ruling 2026-10-13, option (a): a run that ran outranks a cancelled run of its name, in either order.
-        success ={"name": "gates", "status": "completed", "conclusion": "success"}
-        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
-        for order, runs in (("cancelled first", [cancelled, success]), ("live first", [success, cancelled])):
-            with self.subTest(order=order):
-                self.assertEqual(merge.Host.judge_runs(runs), ([], []))
-
-    def test_a_cancelled_twin_beside_a_live_run_that_failed_is_red_on_the_failure_in_either_order(self):
-        failure = {"name": "gates", "status": "completed", "conclusion": "failure"}
-        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
-        for order, runs in (("cancelled first", [cancelled, failure]), ("live first", [failure, cancelled])):
-            with self.subTest(order=order):
-                self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: failure"], []))
-
-    def test_a_newer_skipped_run_does_not_outrank_an_older_success_of_the_same_name(self):
+    def test_a_newer_skipped_run_does_not_outrank_hide_or_erase_an_older_run_of_its_name(self):
         # Incident 2026-10-12, bin/merge 360: a draft PR marked ready in the same second. The skipped `opened` run is
         # newer than the green `ready_for_review` run of the same workflow. A skip never outranks a run that ran.
-        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
-
-    def test_a_newer_skipped_run_does_not_hide_an_older_run_in_progress(self):
-        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "in_progress", "conclusion": ""}]
-        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
-
-    def test_a_newer_skipped_run_does_not_erase_an_older_cancelled_run(self):
-        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
-        self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: cancelled"], []))
-
-    def test_a_newer_skipped_run_does_not_erase_an_older_failure(self):
-        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "failure"}]
-        self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: failure"], []))
+        # Rows: the older run is a success, in progress, cancelled, or failed. Each row is one pure judge_runs input.
+        skipped = {"name": "gates", "status": "completed", "conclusion": "skipped"}
+        rows = (
+            ("success", {"name": "gates", "status": "completed", "conclusion": "success"}, ([], [])),
+            ("in progress", {"name": "gates", "status": "in_progress", "conclusion": ""}, ([], ["workflow gates"])),
+            ("cancelled", {"name": "gates", "status": "completed", "conclusion": "cancelled"}, (["workflow gates: cancelled"], [])),
+            ("failure", {"name": "gates", "status": "completed", "conclusion": "failure"}, (["workflow gates: failure"], [])),
+        )
+        for older, run, want in rows:
+            with self.subTest(older=older):
+                self.assertEqual(merge.Host.judge_runs([skipped, run]), want)
 
     def test_a_head_where_every_check_skipped_is_refused_with_the_remedy(self):
         before = self.head()
@@ -2148,16 +2098,6 @@ class ConfigFile(Env):
         self.assertIn(".github/stamp.json", lines[0])
         self.assertNotIn("Traceback", out)
 
-    def test_ignoreChecks_null_stops_with_one_line_and_no_type_error(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=None))))
-        rc, out = self.run_merge("7")
-        self.assertEqual(rc, 1, out)
-        lines = [l for l in out.splitlines() if l.strip()]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("ignoreChecks", lines[0])
-        self.assertNotIn("TypeError", out)
-        self.assertNotIn("Traceback", out)
-
     def one_merge_line(self, out):
         lines = [l for l in out.splitlines() if l.strip()]
         self.assertEqual(len(lines), 1, out)
@@ -2165,51 +2105,31 @@ class ConfigFile(Env):
         self.assertNotIn("Traceback", out)
         return lines[0]
 
-    def test_ignoreChecks_name_as_list_stops_with_one_line_and_no_type_error(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": ["gates"], "reason": "x"}]))))
-        rc, out = self.run_merge("7")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
-        self.assertNotIn("TypeError", out)
-
-    def test_ignoreChecks_reason_null_is_refused_like_an_empty_reason(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": "design", "reason": None}]))))
-        rc, out = self.run_merge("7")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
-
-    def test_ignoreChecks_name_not_a_string_is_refused_like_a_missing_name(self):  # a check name is a string; 5 never matches one
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": 5, "reason": "x"}]))))
-        rc, out = self.run_merge("7")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
-
-    def test_deadlineMinutes_must_be_a_positive_whole_number_at_preview(self):  # the file is refused at load, not at the lock
-        for bad in ("45", True, 0, -5):
-            with self.subTest(deadlineMinutes=bad):
-                put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=bad))))
-                rc, out = self.run_merge("7")
-                self.assertEqual(rc, 1, out)
-                line = self.one_merge_line(out)
-                self.assertIn("deadlineMinutes", line)
-                self.assertIn(".github/stamp.json", line)
-
-    def test_deadlineMinutes_as_a_string_stops_at_confirm_with_one_line_and_no_type_error(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes="45"))))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("deadlineMinutes", self.one_merge_line(out))
-        self.assertNotIn("TypeError", out)
-        self.assertFalse(self.lock_ref())
-
-    def test_deadlineMinutes_over_the_360_cap_stops_with_one_line_at_preview_and_confirm(self):  # 360 is GitHub's longest job run
-        for bad, label in ((361, "361"), (10 ** 400, "10**400")):
-            put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=bad))))
-            for args in (("7",), ("7", "--confirm")):
-                with self.subTest(deadlineMinutes=label, args=args):
+    def test_a_bad_deadlineMinutes_or_ignoreChecks_stops_with_one_line_naming_it_and_no_lock(self):
+        """One validator per field, many inputs. Rows: deadlineMinutes of the wrong type, zero or negative, past the
+        360 cap (GitHub's longest job run; 10**400 too), each at preview and at confirm; ignoreChecks null, a list as a
+        name, a null reason, a non-string name (a check name is a string; 5 never matches one). Each row stops with one
+        merge line naming the field, with no traceback, no TypeError, no OverflowError and no lock taken. A deadlineMinutes
+        preview row also names the config file, the line the refusal at load has always printed."""
+        rows = [("deadlineMinutes", v) for v in ("45", True, 0, -5, 361, 10 ** 400)]
+        rows += [("ignoreChecks", v) for v in (None,
+                                              [{"name": ["gates"], "reason": "x"}],
+                                              [{"name": "design", "reason": None}],
+                                              [{"name": 5, "reason": "x"}])]
+        for field, bad in rows:
+            text = json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], **{field: bad})))
+            args_list = (("7",), ("7", "--confirm")) if field == "deadlineMinutes" else (("7",),)
+            for args in args_list:
+                with self.subTest(field=field, value=repr(bad)[:40], args=args):
+                    self.setUp()  # a fresh checkout per row: the same config text twice is "nothing to commit"
+                    put_base_config(self, text)
                     rc, out = self.run_merge(*args)
                     self.assertEqual(rc, 1, out)
-                    self.assertIn("deadlineMinutes", self.one_merge_line(out))
+                    line = self.one_merge_line(out)
+                    self.assertIn(field, line)
+                    if args == ("7",) and field == "deadlineMinutes":
+                        self.assertIn(".github/stamp.json", line)
+                    self.assertNotIn("TypeError", out)
                     self.assertNotIn("OverflowError", out)
                     self.assertFalse(self.lock_ref())
 
@@ -2235,31 +2155,23 @@ class ConfigFile(Env):
         self.assertEqual(self.refs(), before)  # no claim pushed, no lock taken
         self.assertFalse(getattr(self.host, "merged", False))
 
-    def test_afterMerge_of_the_wrong_type_is_refused_at_preview(self):
-        for bad in (None, 5, True, [1], [""]):
-            with self.subTest(afterMerge=bad):
-                self.refused_at_preview(self.config_text({"afterMerge": bad}), "afterMerge")
-
-    def test_requiredChecks_of_the_wrong_shape_is_refused_at_preview(self):  # only "protection" or a non-empty list of non-empty strings
-        for bad in ([["gates"]], [{}], [1, "gates"], [], "gates", [""]):
-            with self.subTest(requiredChecks=bad):
-                self.refused_at_preview(self.config_text({"requiredChecks": bad}), "requiredChecks")
-
-    def test_deleteBranch_must_be_a_bool(self):
-        for bad in ("false", 1):
-            with self.subTest(deleteBranch=bad):
-                self.refused_at_preview(self.config_text({"deleteBranch": bad}), "deleteBranch")
-
-    def test_defaultBranch_must_be_a_non_empty_string(self):
-        with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):  # "" must not fall back to the host
-            for bad in (5, ""):
-                with self.subTest(defaultBranch=bad):
-                    self.refused_at_preview(self.config_text(defaultBranch=bad), "defaultBranch")
-
-    def test_method_must_be_merge_squash_or_rebase(self):
-        for bad in ("admin", "Squash"):
-            with self.subTest(method=bad):
-                self.refused_at_preview(self.config_text({"method": bad}), "method")
+    def test_a_bad_value_of_a_merge_field_is_refused_at_preview_naming_the_field(self):
+        """One validator, many inputs. Each row is one bad value of one field: refused at preview, one line naming the
+        field, before any lock, claim or merge. Rows: afterMerge (wrong type); requiredChecks (wrong shape; only
+        "protection" or a non-empty list of non-empty strings); deleteBranch (not a bool); method (not merge, squash or
+        rebase); defaultBranch (not a non-empty string; "" must not fall back to the host, so the host is patched)."""
+        rows = [("afterMerge", self.config_text({"afterMerge": v})) for v in (None, 5, True, [1], [""])]
+        rows += [("requiredChecks", self.config_text({"requiredChecks": v})) for v in ([["gates"]], [{}], [1, "gates"], [], "gates", [""])]
+        rows += [("deleteBranch", self.config_text({"deleteBranch": v})) for v in ("false", 1)]
+        rows += [("method", self.config_text({"method": v})) for v in ("admin", "Squash")]
+        for i, (field, text) in enumerate(rows):
+            with self.subTest(field=field, row=i):
+                self.setUp()
+                self.refused_at_preview(text, field)
+        for v in (5, ""):
+            with self.subTest(field="defaultBranch", value=v), unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):
+                self.setUp()
+                self.refused_at_preview(self.config_text(defaultBranch=v), "defaultBranch")
 
     def test_a_valid_config_with_every_field_is_accepted_at_preview(self):  # the control: green today and after the fix
         for fields in ({"method": "squash", "requiredChecks": "protection", "afterMerge": ["true"], "deleteBranch": False},
@@ -2761,17 +2673,13 @@ class LockHolder(Env):
         self.assertNotIn("Traceback", out)
         self.assertNotIn("The holder is dead", out)
 
-    def test_a_pid_too_big_for_the_os_reads_cannot_tell(self):
-        self.garbled(pid=10 ** 12)
-
-    def test_a_non_ascii_digit_pid_reads_cannot_tell(self):
-        self.garbled(pid="²")
-
-    def test_a_non_ascii_digit_started_reads_cannot_tell(self):
-        self.garbled(started="²")
-
-    def test_a_twenty_digit_started_reads_cannot_tell(self):
-        self.garbled(started="1" * 20)
+    def test_a_garbled_pid_or_started_field_reads_cannot_tell(self):
+        # Rows: a pid too big for the OS; a non-ASCII digit in pid; in started; a twenty-digit started.
+        # Each row is a fresh fixture: garbled() pushes the lock ref, and a second push is rejected.
+        for fields in (dict(pid=10 ** 12), dict(pid="²"), dict(started="²"), dict(started="1" * 20)):
+            with self.subTest(fields=fields):
+                self.setUp()
+                self.garbled(**fields)
 
     @windows_slice
     def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
@@ -2951,6 +2859,23 @@ class NetErrorLines(unittest.TestCase):
     def test_a_wrapped_5xx_with_no_space_after_its_colon_is_not_a_network_error(self):
         # Round 1 fix guard: the anchor edit must keep the space in `: ` before the message, or `HTTP 502:x (url)` matches.
         self.assertFalse(merge.is_net(1, "failed to get runs: HTTP 502:x (https://x)"))
+
+    def test_each_network_string_a_retried_path_once_drove_is_a_network_error(self):
+        """The one matcher, is_net, for every retried path: the git fetch after the claim push, a lost merge reply, the
+        required-checks read and the merge reply. These rows held full git flows before (M13). One e2e case per path stays."""
+        for out in ("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Empty reply from server",
+                    "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': GnuTLS recv error (-9): Error decoding the received TLS packet.",
+                    "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Failed sending data to the peer",
+                    "kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.",
+                    NET_DEADLINE,
+                    NET_REFUSED,
+                    "gh: HTTP 503",
+                    "gh: HTTP 500",
+                    "HTTP 502 (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)",
+                    '{"message":"Server Error"}gh: Server Error (HTTP 502)',
+                    "HTTP 429: Too Many Requests"):
+            with self.subTest(out=out):
+                self.assertTrue(merge.is_net(1, out))
 
 class RateLimitLines(unittest.TestCase):
     """merge.is_net on a rate-limited gh call (lane merge-rate-limit). A rate-limit 403 is a network fault. A permission 403 is a refusal.
@@ -3599,16 +3524,18 @@ class ScanProgress(Env):
         out = self.run_undo_scan(self.stub(check), event_cls=QuickEvent, on_line=on_line)
         self.assertEqual(during, [True], f"no beat printed during the scan: {out!r}")
 
-    def test_the_progress_hook_is_cleared_after_a_scan(self):
-        stub = self.stub()
-        self.run_undo_scan(stub)
-        self.assertIsNone(stub.progress, "the progress hook stayed set after the scan")
-
-    def test_the_progress_hook_is_cleared_when_the_scan_raises(self):
-        stub = self.stub(RuntimeError("scan broke"))
-        with self.assertRaises(RuntimeError):
-            self.run_undo_scan(stub)
-        self.assertIsNone(stub.progress, "the progress hook stayed set after the scan raised")
+    def test_the_progress_hook_is_cleared_after_a_scan_and_when_the_scan_raises(self):
+        # Rows: the scan returns (no check error); the scan raises. Either way the hook must not stay set.
+        for check in (None, RuntimeError("scan broke")):
+            with self.subTest(scan="raises" if check else "returns"):
+                merge.UNDO_MEMO.clear()  # a memo hit skips the scan, so the second row must start empty
+                stub = self.stub(check)
+                if check is None:
+                    self.run_undo_scan(stub)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        self.run_undo_scan(stub)
+                self.assertIsNone(stub.progress, "the progress hook stayed set after the scan")
 
 class WaitStepLines(unittest.TestCase):
     """Each long step prints its name before its first gh call can block: the check read and the merge call.

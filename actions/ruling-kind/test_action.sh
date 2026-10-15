@@ -6,8 +6,6 @@
 #    action-repo-record-ignored (an undeclared record only in the action's own repo must not
 #    change the run) and caller-root-record-read (an undeclared record in the caller root must
 #    go red and be named). A lint that ignored --root fails both.
-#  - undeclared-record-fails: the --root proof from before. A lint that ignored --root would
-#    diff the action's repo, find no bad record, and pass.
 #  - develop-base-declared-passes: BASE_REF=develop. A check.sh that drops --base diffs main,
 #    finds the develop-only undeclared record, and goes red.
 #  - unpersisted-local-base-passes: origin/main is present locally and origin is unreachable.
@@ -39,11 +37,9 @@ record() { # branch file body [from-branch]: a branch that adds one record (defa
   quiet git -C "$seed" push -q "$remote" "$1"
 }
 record topic decisions/declared-ruling.md 'Kind: process\nHome: fixture-home.md\n'
-record topic-undeclared decisions/undeclared-ruling.md 'No kind line here.\n'
 record develop decisions/develop-undeclared.md 'No kind line here.\n'
 record develop-topic decisions/develop-declared.md 'Kind: process\nHome: fixture-home.md\n' develop
 quiet git clone -q -b topic "$remote" "$tmp/topic"
-quiet git clone -q -b topic-undeclared "$remote" "$tmp/undeclared"
 quiet git clone -q -b develop-topic "$remote" "$tmp/develop"
 quiet git clone -q -b topic "$remote" "$tmp/unpersisted"
 quiet git clone -q --no-local --depth 1 -b topic "$remote" "$tmp/shallow"
@@ -74,8 +70,8 @@ expect 0 action-repo-record-ignored "$tmp/topic" main "" "$act/actions/ruling-ki
 mkdir -p "$tmp/topic/decisions"; printf 'No kind line here.\n' > "$tmp/topic/decisions/second-undeclared.md"
 quiet git -C "$tmp/topic" add decisions/second-undeclared.md
 quiet git -C "$tmp/topic" commit -q -m second-undeclared
+# The --root proof: a lint that ignored --root would diff the action's repo and pass.
 expect 1 caller-root-record-read "$tmp/topic" main "FAIL: decisions/second-undeclared.md"
-expect 1 undeclared-record-fails "$tmp/undeclared" main "check_ruling_kind: FAIL"
 expect 1 unreadable-base-fails "$tmp/topic" no-such-base "cannot fetch base"
 expect 0 empty-base-skipped "$tmp/topic" "" "skipped"
 expect 0 develop-base-declared-passes "$tmp/develop" develop ""

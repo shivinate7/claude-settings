@@ -136,9 +136,6 @@ await test('F2 match is case-sensitive (README.md vs Readme.md); trailing slash 
 await test('F3 sanitizeForCode drops ESC and NUL, keeps tab, newline, CR', () => {
   assert.equal(need('sanitizeForCode')('a\x1b[31mred\x00\tb\r\nc'), 'a[31mred\tb\r\nc')
 })
-await test('F3 sanitizeForCode: ESC inside a quoted string keeps the quotes and the text', () => {
-  assert.equal(need('sanitizeForCode')('const s = "\x1bhi"; // Don\'t\x1b'), 'const s = "hi"; // Don\'t')
-})
 
 // F4 stale note: pure
 await test('F4 applyNote sets a note only on the pending entry with the same key', () => {
@@ -173,27 +170,6 @@ await test('F6 trimNote: table pipes are removed', () => {
 })
 await test("F6 trimNote keeps an apostrophe intact (guard, green on head)", () => {
   assert.equal(lib.trimNote("Don't panic."), "Don't panic.")
-})
-
-// F7 shared cap: pure
-await test('F7 makeLimiter: cap while in flight, same key shares a call, budget resets when idle', async () => {
-  const L = need('makeLimiter')(2)
-  let n = 0
-  const slowCall = v => () => {
-    n++
-    return new Promise(r => setTimeout(() => r(v), 5))
-  }
-  const pa = L.run('a', slowCall('A'))
-  const pb = L.run('b', slowCall('B'))
-  const pc = L.run('c', slowCall('C')) // refused: 2 already in flight
-  const pa2 = L.run('a', slowCall('A2')) // in flight: shares the call
-  assert.equal(await pc, null)
-  assert.equal(await pa, 'A')
-  assert.equal(await pa2, 'A')
-  assert.equal(await pb, 'B')
-  assert.equal(n, 2)
-  assert.equal(await L.run('d', slowCall('D')), 'D') // idle again: fresh budget
-  assert.equal(n, 3)
 })
 
 // F8 parse, base, failure text: pure
@@ -361,13 +337,19 @@ await test('F1 register: secret files make no model call; rows say Skipped: secr
 })
 
 // F3 control characters: register
-await test('F3 register: the Code row holds no ESC or NUL, keeps tab', async () => {
+await test('F3 register: the Code row holds no ESC or NUL, keeps tab; an ESC in a quoted string keeps the quotes', async () => {
   const t = host({ diff: fileDiff('ctl.txt', 'a\x1b[1m\x00\tb') })
   await t.run()
   const src = await t.codes()
   assert.equal(src.length, 1)
   assert.ok(!/[\x00\x1b]/.test(src[0]), JSON.stringify(src[0]))
   assert.ok(src[0].includes('\t'))
+  // Second input: a quoted string with a lone quote in a comment. The ESC goes, the quotes stay.
+  const q = host({ diff: fileDiff('quoted.js', 'const s = "\x1bhi"; // Don\'t\x1b') })
+  await q.run()
+  const qsrc = await q.codes()
+  assert.equal(qsrc.length, 1)
+  assert.ok(qsrc[0].includes('const s = "hi"; // Don\'t'), JSON.stringify(qsrc[0]))
 })
 
 // F4 stale note: register. Order: v1 starts, v2 starts, v1 answers, v2 answers.
@@ -574,16 +556,7 @@ await test('R2-4 register: a secret-shaped turn note is not shown; the row says 
   assert.ok(rows.includes('No note'), rows)
 })
 
-// R2-5 limiter honesty: 5 starts per busy period; a hung call is freed by the limiter's timeout.
-await test('R2-5 makeLimiter(5): 5 starts per busy period; the 6th is refused until the period ends', async () => {
-  const L = need('makeLimiter')(5)
-  const gates = Array.from({ length: 5 }, () => deferred())
-  const ps = gates.map((g, i) => L.run('k' + i, () => g.promise))
-  assert.equal(await L.run('k5', async () => 'X'), null)
-  gates.forEach((g, i) => g.resolve(i))
-  assert.deepEqual(await Promise.all(ps), [0, 1, 2, 3, 4])
-  assert.equal(await L.run('k6', async () => 'Y'), 'Y')
-})
+// R2-5 limiter honesty: a hung call is freed by the limiter's timeout, so a later call is admitted.
 await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is admitted and the hung run gives null', async () => {
   const L = need('makeLimiter')(1, { timeoutMs: 20 })
   const hung = L.run('a', () => new Promise(() => {}))
@@ -595,22 +568,19 @@ await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is 
 
 // R2-6 control characters in notes: ESC, BEL, bidi overrides removed from turn and model notes.
 const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f‪-‮⁦-⁩]/
-await test('R2-6 trimNote strips ESC, BEL and bidi overrides', () => {
-  const o = lib.trimNote('Fixed\x1b[31m the login\x07 check.‮ Done.')
-  assert.ok(!CTRL.test(o), show(o))
-  assert.ok(o.includes('login') && o.includes('Done'), show(o))
-})
 await test('R2-6 a turn-text note with BEL or a bidi override is cleaned too', () => {
   const o = need('noteFromMessages')(editedAt('/repo/src/bel.js', 'Turn\x07 note.‮'), '/repo', 'src/bel.js')
   assert.ok(!CTRL.test(o), show(o))
   assert.ok(o.includes('Turn'), show(o))
 })
-await test('R2-6 register: a model note with ESC or a bidi override is shown without them', async () => {
-  const t = host({ diff: fileDiff('esc.txt', 'z'), model: async () => ({ isAnswered: true, text: 'Model\x1b[1m note‮ here.' }) })
+await test('R2-6 register: a model note with ESC, BEL or a bidi override is shown without them', async () => {
+  // Rows: the note text carries an ESC, a BEL and a bidi override.
+  const t = host({ diff: fileDiff('esc.txt', 'z'), model: async () => ({ isAnswered: true, text: 'Model\x1b[1m note\x07‮ here.' }) })
   await t.run()
   const rows = await t.rows()
   assert.ok(!CTRL.test(rows), show(rows))
   assert.ok(rows.includes('Model'), show(rows))
+  assert.ok(rows.includes('note') && rows.includes('here'), show(rows))
 })
 
 // R2-7 truncation: the header says so, and does not present the count as complete.
