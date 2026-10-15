@@ -3432,6 +3432,13 @@ class RecordsEnv(Env):
             put_lf(os.path.join(o, rel), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
 
+    def drop(self, branch, rel, msg):
+        """Push one commit to origin/<branch> from the second clone that removes rel, as a person would."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        sh(o, "git", "rm", "-q", rel); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
+
     def rev(self, expr):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "rev-parse", expr)
@@ -3760,6 +3767,84 @@ class RecordsScope(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
+    def test_a_page_edited_on_both_sides_with_nine_char_markers_stops_the_merge(self):
+        # Red on 741a17e: the heal looks for seven-character markers only. A page with nine-character markers passes that look.
+        self.kinds_off()
+        self.on("main", {".gitattributes": "docs/records.md conflict-marker-size=9\n", "docs/records.md": "records\n- base\n"},
+                "a hand-written page, nine-character markers")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        self.assertIn("conflict-marker-size: 9", sh(o, "git", "check-attr", "conflict-marker-size", "--", "docs/records.md"))  # the precondition
+        put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"), "the defect: nine-character markers reach main")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "conflict" in l and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.head(), before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def delete_edit_setup(self, head_files=None, generated=False, trailer=False):
+        """The page is in the base. The head edits it: by hand, or, when generated, to the generator's own output for the head's
+        debts (head_files are written first, so the generator sees them). Then main deletes it. trailer adds the Drops-lines
+        trailer on the head's commit, as the heal's merge commit carries it."""
+        self.kinds_off()
+        self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        for rel, text in (head_files or {}).items():
+            put_lf(os.path.join(o, rel), text)
+        if generated:
+            sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        else:
+            put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        msg = ["-m", "the head edits the page"] + (["-m", "Drops-lines: docs/records.md -- a generated page, rebuilt by the generator"] if trailer else [])
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", *msg); sh(o, "git", "push", "-q", "origin", "feat")
+        self.drop("main", "docs/records.md", "main drops the page")
+
+    def test_a_page_deleted_on_main_and_edited_on_the_head_with_no_records_stops_the_merge(self):
+        # Red on 741a17e: the generator writes nothing here, and the head's page has no marker, so the head's page is committed to main.
+        self.delete_edit_setup()
+        before, head_before = self.rev("origin/main"), self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("docs/records.md", self.tree_names("origin/main"), "the defect: the head's page reaches main")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/main"), before)
+        self.assertEqual(self.head(), head_before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_generated_page_deleted_on_main_with_records_rebuilds_and_merges(self):
+        # The control, red on 741a17e: a root with a record folder. The head's page is the generator's output for its debt, and main
+        # deletes the page. The rebuild should go on. The silent-undo check refuses the head's commit: it drops a base line and
+        # carries no Drops-lines trailer. The heal's merge commit carries one, and the next case shows it goes through with it.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+
+    def test_a_generated_page_with_a_drops_trailer_deleted_on_main_with_records_rebuilds_and_merges(self):
+        # Green control, as the heal's merge commit does it: the same head commit with the Drops-lines trailer. The page is generated,
+        # so the drop of a base line is excused, and the merge goes on.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+
     def test_a_root_with_hooks_and_no_settings_merges(self):
         # Red on 392cc37: "hook_catalog: cannot read settings.json", so the records page cannot be rebuilt.
         self.kinds_off()
@@ -3768,6 +3853,9 @@ class RecordsScope(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        changed = sh(self.co, "git", "diff", "--name-only", "origin/main^1", "origin/main").split()  # the merge commit
+        self.assertIn("docs/records.md", changed)
+        self.assertNotIn("docs/catalog.md", changed, changed)  # no generated catalog page: the records-only mode
 
     def test_the_merge_commit_carries_no_catalog_page(self):
         # Red on 392cc37: the root renders a catalog, so the generator writes docs/catalog.md and the merge brings it in.
@@ -3858,7 +3946,8 @@ class RecordsHeal(RecordsEnv):
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
     exits non-zero, with no traceback. Red on 392cc37: the import error is a traceback."""
-    def test_a_blocked_generator_import_stops_with_one_line(self):
+    def tool_root(self):
+        """A root with merge/merge.py copied in, and a gh shim that fails if the tool reaches it."""
         root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-"))
         self.addCleanup(shutil.rmtree, root, True)
         tool = os.path.join(root, "merge", "merge.py")
@@ -3868,8 +3957,9 @@ class MergeImport(unittest.TestCase):
         old = os.environ.get("PATH", "")
         os.environ["PATH"] = os.path.join(root, "bin") + os.pathsep + old
         self.addCleanup(os.environ.__setitem__, "PATH", old)
-        code = "import runpy, sys; sys.modules['hook_catalog'] = None; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
-        r = subprocess.run([sys.executable, "-c", code, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        return root, tool
+
+    def assert_one_clear_line(self, r, *names):
         out = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0, out)
         self.assertNotIn("Traceback", out)
@@ -3877,6 +3967,28 @@ class MergeImport(unittest.TestCase):
         self.assertEqual(len(lines), 1, out)
         self.assertTrue(lines[0].startswith("merge: "), out)
         self.assertRegex(lines[0], r"hook_catalog|records")
+        for n in names:  # the error's own type, so a different one-line failure does not pass
+            self.assertIn(n, lines[0], out)
+
+    def test_a_blocked_generator_import_stops_with_one_line(self):
+        root, tool = self.tool_root()
+        code = "import runpy, sys; sys.modules['hook_catalog'] = None; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+        r = subprocess.run([sys.executable, "-c", code, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r)
+
+    def test_a_syntax_error_in_the_generator_stops_with_one_line(self):
+        # The generator file is real and broken at import: merge.py must name the error in one line, as it does for ImportError.
+        root, tool = self.tool_root()
+        put(os.path.join(root, "lint", "hook_catalog.py"), "RECORDS_PAGE = 'docs/records.md'\ndef broken(:\n    pass\n")
+        r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r, "SyntaxError")
+
+    def test_a_name_error_in_the_generator_stops_with_one_line(self):
+        # A top-level name the module never binds: the import raises NameError before RECORDS_PAGE exists.
+        root, tool = self.tool_root()
+        put(os.path.join(root, "lint", "hook_catalog.py"), "RECORDS_PAGE = missing_name\n")
+        r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r, "NameError")
 
 class RecordsPageHome(unittest.TestCase):
     """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy.
