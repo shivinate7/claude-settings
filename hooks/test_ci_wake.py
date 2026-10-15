@@ -620,41 +620,26 @@ def main():
     check("push, then gh pr ready 12: no pr list call (the push is not read)",
           count(res, "pr", "list") == 0, why(res))
 
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([pr(12, draft=True)], [GREEN]))
-    expect_silent("git push, only a draft PR", res)
-    expect_no_watch("git push, only a draft PR", res)
-    expect_no_gh("git push, only a draft PR", res)
-
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([pr(12, branch="other-branch")], [GREEN]))
-    expect_silent("git push, no PR for this branch (a ready PR on another branch)", res)
-    expect_no_watch("git push, no PR for this branch", res)
-    expect_no_gh("git push, no PR for this branch", res)
-
-    res = run_hook(bash("git push origin hook-wave-2"), fixture([], [GREEN]))
-    expect_silent("git push, no PR at all", res)
-    expect_no_watch("git push, no PR at all", res)
-    expect_no_gh("git push, no PR at all", res)
-
-    res = run_hook(bash("ls -la"), fixture(READY, [GREEN]))
-    expect_silent("ls -la", res)
-    expect_no_gh("ls -la", res)
-
-    res = run_hook(bash("git status"), fixture(READY, [GREEN]))
-    expect_silent("git status", res)
-    expect_no_gh("git status", res)
-
-    res = run_hook(bash('git commit -m "note: gh pr ready 12 later"'), fixture(READY, [GREEN]))
-    expect_silent("trigger text inside a quoted commit message", res)
-    expect_no_watch("trigger text inside a quoted commit message", res)
-
-    res = run_hook(bash('echo "git push origin hook-wave-2"'), fixture(READY, [GREEN]))
-    expect_silent("trigger text inside a quoted echo", res)
-    expect_no_watch("trigger text inside a quoted echo", res)
-
-    res = run_hook({"tool_name": "Edit", "tool_input": {"command": "gh pr ready 12"}},
-                   fixture(READY, [GREEN]))
-    expect_silent("non-Bash, non-PowerShell tool carrying a trigger command", res)
-    expect_no_watch("non-Bash, non-PowerShell tool carrying a trigger command", res)
+    # No watch and no gh call. Each row: (row id, tool payload, the PRs the stub holds).
+    # The row id prints on FAIL. The quoted, heredoc and comment rows below stay separate.
+    NO_WATCH_ROWS = (
+        ("git push, only a draft PR", bash("git push origin hook-wave-2"), [pr(12, draft=True)]),
+        ("git push, no PR for this branch (a ready PR on another branch)",
+         bash("git push origin hook-wave-2"), [pr(12, branch="other-branch")]),
+        ("git push, no PR at all", bash("git push origin hook-wave-2"), []),
+        ("ls -la", bash("ls -la"), READY),
+        ("git status", bash("git status"), READY),
+        ("trigger text inside a quoted commit message",
+         bash('git commit -m "note: gh pr ready 12 later"'), READY),
+        ("trigger text inside a quoted echo", bash('echo "git push origin hook-wave-2"'), READY),
+        ("non-Bash, non-PowerShell tool carrying a trigger command",
+         {"tool_name": "Edit", "tool_input": {"command": "gh pr ready 12"}}, READY),
+    )
+    for label, payload, prs in NO_WATCH_ROWS:
+        res = run_hook(payload, fixture(prs, [GREEN]))
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        expect_no_gh(label, res)
 
     # Quotes, heredoc bodies, comments. The record: none of these starts a watch.
     guard_silent("gh pr ready inside double quotes", 'echo "gh pr ready 12"')
