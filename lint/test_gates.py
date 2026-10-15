@@ -350,6 +350,7 @@ class ReportGateTests(unittest.TestCase):
                 ]
                 path = write_transcript(records, tmp)
                 run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
                 out = json.loads(run.stdout)
                 self.assertEqual(out.get("decision"), "block")
 
@@ -1421,7 +1422,7 @@ class MdSweepTests(unittest.TestCase):
         # THE DEFECT: `python3 gen.py` has no `-c` string for the old hook to read. The new
         # predicate does not care what ran, only that the file changed.
         # Catches: a markdown error written by any command blocks. The predicate never reads
-        # the command text, so a garbage string, `bash`, or `make` reaches this same branch.
+        # the command text, so the command string does not change the result.
         self._write_md("gen.md", self.ERROR_TEXT)
         run = self.run_sweep(command="python3 gen.py")
         self.assert_blocks(run, "gen.md")
@@ -1922,6 +1923,7 @@ class UICopyLintTests(unittest.TestCase):
             with self.subTest(text=text):
                 findings = self.check("a.tsx", text)
                 if blocked:
+                    self.assertEqual([f.code for f in findings], ["STE020"])
                     hit = [f for f in findings if f.code == "STE020"]
                     self.assertTrue(hit)
                     self.assertIn("5 words", hit[0].message)
@@ -2890,17 +2892,17 @@ class SteGateLogTests(unittest.TestCase):
         core = gl_guard_core()
         rows = [
             # Catches: a tab, a newline or U+2028 in a name splits the log line.
-            ("a\tb\nc d ñé日本.md", "fixed", "ñé日本.md fixed=2", core.LOG_MAX_MATCHED),
+            ("a\tb\nc d ñé日本.md", "fixed", "ñé日本.md fixed=2", " fixed=2", core.LOG_MAX_MATCHED),
             # Catches: a 5000-character name loses its count or breaks the cap.
-            ("n" * 5000 + ".md", "fixed", ".md fixed=2", core.LOG_MAX_MATCHED),
+            ("n" * 5000 + ".md", "fixed", None, ".md fixed=2", core.LOG_MAX_MATCHED),
             # Catches: a lone surrogate in a name breaks the log line.
-            ("notes\ud800.md", None, None, 80),
+            ("notes\ud800.md", None, None, None, 80),
             # Catches: bidi isolates reach the log.
-            ("a⁦b⁧c⁨d⁩e.md", "fixed", ".md", 80),
+            ("a⁦b⁧c⁨d⁩e.md", "fixed", ".md", None, 80),
             # Catches: control bytes, a bidi override and a long name are not cleaned and capped.
-            ("p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md", None, None, 80),
+            ("p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md", None, None, None, 80),
         ]
-        for name, decision, fragment, cap in rows:
+        for name, decision, contains, ends, cap in rows:
             with self.subTest(name=ascii(name)):
                 self._fresh_row()
                 run = gl_gate(self.cfg, "Write",
@@ -2917,8 +2919,10 @@ class SteGateLogTests(unittest.TestCase):
                 else:
                     self.assertEqual(got, decision)
                     self.assertEqual(rule, "STE007,STE008")
-                if fragment is not None:
-                    self.assertIn(fragment, matched)
+                if contains is not None:
+                    self.assertIn(contains, matched)
+                if ends is not None:
+                    self.assertTrue(matched.endswith(ends), matched)
                 self.assertLessEqual(len(matched), cap, matched)
                 self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
 
