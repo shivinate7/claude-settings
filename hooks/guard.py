@@ -220,7 +220,7 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, nested_script, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_powershell, is_worktree, log_path_and_text, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
@@ -438,8 +438,22 @@ def unquoted_at(text: str, index: int) -> bool:
 
 def discards_output(segment: str) -> bool:
     """True when the segment redirects stdout or stderr, on any descriptor, to a null device. A
-    redirect named inside a quoted string (a commit message, an echo) is text, never a redirect."""
-    return any(unquoted_at(segment, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(segment))
+    redirect named inside a quoted string (a commit message, an echo) is text, never a redirect.
+
+    The walk reads a quote inside `$( )` or backticks as the outer string's own, so
+    `-m "$(printf '"')" >/dev/null` hides the redirect. Each substitution is cut out first
+    (`_substitutions`, the env layer's cut) and the text around it is read again. Too deep to cut
+    is a redirect: this fails closed. ponytail: a bandaid here; segmentation still misreads such
+    a quote, and the cause is in the quote walk."""
+    if any(unquoted_at(segment, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(segment)):
+        return True
+    if "$(" not in segment and "`" not in segment or not SILENT_WRITE_REDIRECT.search(segment):
+        return False
+    texts, too_deep = _substitutions(segment, powershell=is_powershell(segment))
+    if too_deep:
+        return True
+    outer = type(segment)(texts[-1][0])
+    return any(unquoted_at(outer, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(outer))
 
 
 # PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
@@ -594,12 +608,19 @@ def _unexpanded(path) -> bool:
     return any(mark in path for mark in "$%`")
 
 
+# The writes that change the work tree as well as the repository. `commit`, `tag` and a `fetch`
+# write only the repository.
+WORK_TREE_WRITES = ("merge", "rebase", "cherry-pick", "pull")
+
+
 def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     """True when the write in `segments[number]` runs under the temp folder, where a lost trace
     costs nothing real. Only a local git write counts: a `push`, `gh pr merge` or `make merge`
     reaches past the folder, wherever it runs. The folder is read the way
     the shell reads it (`dir_before_segment`: cd, pushd, Set-Location, cd -, a subshell's cd),
-    then its own `-C`, then its own `--git-dir`, which names the repository and outranks `-C`. A
+    then its own `-C`, then its own `--git-dir`, which names the repository and outranks `-C`.
+    A `--git-dir` leaves the work tree in the folder, so a write that changes the work tree
+    (WORK_TREE_WRITES) needs that folder under the temp folder too. A
     path that holds a variable, an unknown cwd, a `GIT_DIR` or `--work-tree` all read as not
     throwaway: this fails closed."""
     if any(subcommand == "push" for subcommand, _ in git_calls(segments[number])):
@@ -613,13 +634,16 @@ def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     if any(t.startswith(("GIT_DIR=", "GIT_WORK_TREE=")) for t in tokens[:index]) or any(
             t.startswith("--work-tree") for t in options):
         return False
+    judged = []
     for named in (_segment_git_c_target(tokens), _git_dir_target(tokens)):
         if named is not None:
             where = None if _unexpanded(named) else shell_abs(named, where)
-    if not where:
-        return False
+        judged.append(where)
+    # judged[0] is the work tree, judged[1] the repository
+    if not any(subcommand in WORK_TREE_WRITES for subcommand, _ in git_calls(segments[number])):
+        judged = judged[1:]
     import tempfile   # lazy: only a silenced write reaches here
-    return bool(path_is_inside(where, tempfile.gettempdir()))
+    return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
 
 
 SILENT_WRITE_REDIRECT_REASON = (
