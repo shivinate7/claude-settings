@@ -458,20 +458,28 @@ def _interpreter_header(words: str):
 
 
 _SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
-# A header whose heredoc pipes into a shell (`cat <<EOF | sh`, `... | ssh host bash -s`): the shell runs the body.
+# A header whose heredoc pipes into a shell (`cat <<EOF | sh`, `... | ssh host bash -s`) or into xargs or source
+# (`cat <<EOF | xargs sh -c`, `| source /dev/stdin`): the shell runs the body.
 _PIPED_SHELL = re.compile(
-    r"<<[^\n]*\|\s*(?:(?:sudo|env|exec)\s+)?(?:[^\s|;&]*[/\\])?(?:" + _SHELLS + r")(?:\.exe|\.cmd)?(?![\w.-])"
+    r"<<[^\n]*\|\s*(?:(?:sudo|env|exec)\s+)?(?:[^\s|;&]*[/\\])?(?:" + _SHELLS + r"|xargs|source)(?:\.exe|\.cmd)?(?![\w.-])"
+    r"|<<[^\n]*\|\s*\.[ \t]"
     r"|<<[^\n]*\|\s*ssh\b[^\n|]*(?<!\w)(?:" + _SHELLS + r")(?![\w.-])").search
+# A heredoc that eval, source or `.` runs: on its segment (`source /dev/stdin <<EOF`), or opened in a `$(`, `<(`
+# or backtick that the word reads (`eval "$(cat <<EOF`, `. <(cat <<EOF`), on its line or a later one. The word
+# stands in command position, so `cd .. && cat <<EOF` and `ls . <<EOF` stay text.
+_FED_SHELL = re.compile(
+    r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
+    r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
 _INTERPRETER_FIRST = _interpreter_header(_SHELLS + "|python[\\d.]*|perl|ruby|node")
 
 
 def SHELL_HEREDOC(text: str) -> bool:
-    return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text))
+    return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
 
 
 def INTERPRETER_HEREDOC(text: str) -> bool:
-    return bool(_INTERPRETER_FIRST(text) or _PIPED_SHELL(text))
+    return bool(_INTERPRETER_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
 
 
 # The only characters heredoc_heads acts on when nothing is open.
@@ -570,6 +578,8 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
+    if any(_main_kept(header, body) for _, body, header in _walk_heredocs(cmd)[1]):
+        return cmd  # BANDAID, see _MAIN_HEADER
     return "\n".join(_split_heredocs(cmd)[0])
 
 
@@ -583,6 +593,33 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     if _walk_heredocs(cmd)[2]:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
     return _drop_heredoc_bodies(cmd)
+
+
+# BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). Before heredoc-one-step the
+# header pattern was this one. It finds no header at a word such as `'EOF-1'` or `\EOF`. At `EOF-1` or `"E"OF`
+# it reads a shorter word, which closes the body early at a line `EOF` or `E`. Either way main kept body lines
+# in view, so a run path that no rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line,
+# `| python3 -`) still denied. heredoc_delimiter reads those words right. So _drop_heredoc_bodies keeps the
+# whole command when main kept a line of the body: every drop, the unconditional one too.
+# Retire it when each run path reads its body (debt heredoc-run-other-path).
+_MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _main_kept(header: str, body: str) -> bool:
+    """True when the old pattern kept a line of this body in view: it saw no heredoc at a `<<` of the
+    header line, or it read a shorter delimiter that a line of the body matches."""
+    for at in re.finditer(r"(?<!<)<<(?!<)", header):
+        lane = HEREDOC_HEADER.match(header, at.start())
+        if not lane:
+            continue
+        main = _MAIN_HEADER.match(header, at.start())
+        if not main:
+            return True
+        word = main.group(2)
+        if word != heredoc_delimiter(lane.group(1))[1] and any(
+                line.strip() == word for line in body.split("\n")):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ git call parsing
