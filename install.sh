@@ -162,9 +162,20 @@ else
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
 
+# The pinned checkout (record merge-reinstalls-from-main): the links point at <clone>-live, a
+# linked worktree of the clone on a detached HEAD at main's commit. The install makes it when it
+# is missing. Only merge/install_from_main.sh moves it. is_pin DIR: DIR is the pinned checkout of
+# its own clone. Both git-dirs come from git, so the two strings share one spelling of the path.
+is_pin() {
+  m=$(git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+  [ -n "$m" ] && [ -f "$m-live/.git" ] || return 1
+  [ "$(git -C "$m-live" rev-parse --absolute-git-dir 2>/dev/null)" = "$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" ]
+}
+
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
-if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
+# The pinned checkout <clone>-live is the one linked worktree that may install.
+if [ -n "$SRC" ] && is_linked_worktree "$SRC" && ! is_pin "$SRC"; then
   log "ERROR: $SRC is a linked git worktree; run the installer from the main clone."
   exit 1
 fi
@@ -182,6 +193,29 @@ if [ -z "$SRC" ]; then
   for f in CLAUDE.md settings.json; do
     [ -f "$SRC/$f" ] || { log "ERROR: $SRC/$f missing, aborting"; exit 0; }
   done
+fi
+
+# Local mode from a clone: link into the pinned checkout, not the clone, which follows its branch.
+# A clone with no branch named main has nothing to pin to, so it links to itself. Cloud mode and a
+# plain folder copy (no .git) stay unpinned. An existing pinned checkout is left where it is.
+if [ "$CLOUD" != 1 ] && [ -d "$SRC/.git" ]; then
+  if git -C "$SRC" rev-parse -q --verify refs/heads/main >/dev/null 2>&1; then
+    PIN="$SRC-live"
+    if [ -e "$PIN" ] || [ -L "$PIN" ]; then
+      case "$(git -C "$PIN" rev-parse --absolute-git-dir 2>/dev/null)" in
+        "$(git -C "$SRC" rev-parse --absolute-git-dir)"/worktrees/*) [ -f "$PIN/.git" ] ;;
+        *) false ;;
+      esac || { log "ERROR: $PIN exists and is not a worktree of $SRC; move it away and run install.sh again."; exit 1; }
+    else
+      git -C "$SRC" worktree prune
+      git -C "$SRC" worktree add -q --detach "$PIN" refs/heads/main \
+        || { log "ERROR: could not make the pinned checkout $PIN; fix the git error above and run install.sh again."; exit 1; }
+      log "made the pinned checkout $PIN at main"
+    fi
+    SRC="$PIN"
+  else
+    log "WARN: no branch named main in $SRC; linking to the clone itself, not a pinned checkout"
+  fi
 fi
 
 mkdir -p "$CLAUDE_DIR"
