@@ -266,6 +266,15 @@ _SMART_QUOTES = frozenset("\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
+# A command that can run stored text, or rename what a printer is, makes no text data (review r2
+# H2, H3): `eval`, `printf -v`, a command word built from a variable (`$D`, `"${D}"`), a `${F@P}`
+# operator (even inside double quotes), and a function, an alias or a PATH change, which can make
+# `cat` or `echo` run its input. Read on the text outside quotes, so a message may name them.
+_RENAMES_A_COMMAND = re.compile(
+    r"\b(?:eval|function|alias|set-alias|new-alias|sal|nal|hash)\b|\(\s*\)|(?<![-\w])path\s*\+?=",
+    re.IGNORECASE)
+_PARAM_OPERATOR = re.compile(r"\$\{[^}]*@")
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
 
@@ -304,6 +313,8 @@ def _kind(words, plain: str) -> str:
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
+    if name in _PRINTERS and re.search(r"[/\\]", words[0]):
+        return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
     if name == "git":
@@ -346,12 +357,37 @@ def _data_words(kind: str, words):
     return data
 
 
+def _unquoted(word: str) -> str:
+    """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
+    kind of quote is text."""
+    out, quote = [], ""
+    for char in word:
+        if char == quote:
+            quote = ""
+        elif not quote and char in "'\"":
+            quote = char
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def _words_of(word: str):
-    """The words a word stands for with its quotes read: each quote's text is its own words."""
-    out = []
-    for piece in re.split(r"""['"]""", word):
+    """The words a word stands for with its quotes read: the word itself after quote removal, and
+    each quote's text as its own words (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
+    out = [_unquoted(word)]
+    for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
+
+
+def _runs_stored_text(segment: str, words, plain: str) -> bool:
+    """True when the segment can run text it holds or stores, or rename a printer."""
+    if _RENAMES_A_COMMAND.search(plain) or _PARAM_OPERATOR.search(segment):
+        return True
+    command = next((word for word in words if not _ASSIGNMENT.match(word)), "")
+    if "$" in command:
+        return True
+    return _name(command) == "printf" and any(word.startswith("-v") for word in words)
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
@@ -360,8 +396,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
-    closed = any(unsafe for unsafe, _plain in scans)
     parsed = [_quoted_words(segment) for segment in segments]
+    closed = any(unsafe or _runs_stored_text(segment, words, plain)
+                 for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
