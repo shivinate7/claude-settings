@@ -137,42 +137,32 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(mem_unknown, 0)
 
     def test_02_missing_cwd_counts_as_unknown_never_not_found(self):
-        project_dir = self.make_project("proj_no_cwd")
-        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
-        records = [
-            human("start"),  # no cwd at all anywhere in this transcript
-            tool_use_msg("Write", {
-                "file_path": os.path.join(project_dir, "memory", "plan.md"),
-                "content": "this sentence has plenty of words to clear the reach floor\n",
-            }, id_="write_1"),
-            tool_result_msg("write_1"),
-        ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["unknown"], 1)
-        self.assertEqual(counts["reach_not_found"], 0)
-        self.assertEqual(counts["reach_found"], 0)
-
-    def test_08_cwd_not_a_git_repo_counts_as_unknown(self):
-        project_dir = self.make_project("proj_bad_cwd")
-        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
+        # Rows: no cwd anywhere in the transcript (test_02), and a cwd that is not a git repo
+        # (merged test_08). Named failure: a wrong count reads as "lost", never as not-found.
         not_a_repo = os.path.join(self.tmp.name, "plain-dir")
         os.makedirs(not_a_repo, exist_ok=True)
-        records = [
-            human("start", cwd=not_a_repo),
-            tool_use_msg("Write", {
-                "file_path": os.path.join(project_dir, "memory", "plan.md"),
-                "content": "this sentence has plenty of words to clear the reach floor\n",
-            }, id_="write_1"),
-            tool_result_msg("write_1"),
+        cases = [
+            ("no cwd", "proj_no_cwd", human("start")),
+            ("cwd not a git repo", "proj_bad_cwd", human("start", cwd=not_a_repo)),
         ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["unknown"], 1)
-        self.assertEqual(counts["reach_not_found"], 0)
-        self.assertEqual(counts["reach_found"], 0)
+        for case, name, first in cases:
+            with self.subTest(case):
+                project_dir = self.make_project(name)
+                os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
+                records = [
+                    first,
+                    tool_use_msg("Write", {
+                        "file_path": os.path.join(project_dir, "memory", "plan.md"),
+                        "content": "this sentence has plenty of words to clear the reach floor\n",
+                    }, id_="write_1"),
+                    tool_result_msg("write_1"),
+                ]
+                path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+                timeouts = [0]
+                counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+                self.assertEqual(counts["unknown"], 1)
+                self.assertEqual(counts["reach_not_found"], 0)
+                self.assertEqual(counts["reach_found"], 0)
 
     def test_09_whitespace_collapse_finds_a_differently_spaced_line(self):
         # The repo commit holds the phrase with single spaces. The memory-write line is
@@ -241,6 +231,15 @@ class RulingCensusTests(unittest.TestCase):
                     "scratchpad_writes", "ruling_lines", "process_only_lines",
                     "reach_found", "reach_not_found", "unknown"):
             self.assertIn(key, out["total"])
+        # Merged from test_06: an empty root still prints a zero TOTAL in table mode.
+        # Named failure: an empty root crashes the census instead of printing its total.
+        empty_root = os.path.join(self.tmp.name, "no-such-root")
+        empty = subprocess.run(
+            [sys.executable, CENSUS, "--root", empty_root],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(empty.returncode, 0)
+        self.assertIn("TOTAL", empty.stdout)
 
     def test_05_table_run_prints_header_total_and_note(self):
         project_dir = self.make_project("proj_table")
@@ -255,15 +254,6 @@ class RulingCensusTests(unittest.TestCase):
         self.assertIn("TOTAL", run.stdout)
         self.assertIn(ruling_census.NOT_FOUND_NOTE, run.stdout)
         self.assertIn("Timed out:", run.stdout)
-
-    def test_06_empty_root_still_prints_a_zero_total(self):
-        empty_root = os.path.join(self.tmp.name, "no-such-root")
-        run = subprocess.run(
-            [sys.executable, CENSUS, "--root", empty_root],
-            capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(run.returncode, 0)
-        self.assertIn("TOTAL", run.stdout)
 
     def test_07_worker_transcript_folds_in_but_is_not_a_session(self):
         # A worker transcript lives at <project>/<session-id>/subagents/*.jsonl. Its memory
@@ -331,37 +321,29 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(process_only, 1)
         self.assertEqual(unknown, 1)  # only bad.md, .DS_Store is never opened (not .md)
 
-    def test_12_tool_use_file_path_not_a_string_counts_unknown(self):
-        project_dir = self.make_project("proj_bad_path")
-        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Write", {"file_path": ["not", "a", "string"], "content": "x"},
-                         id_="write_1"),
-            tool_result_msg("write_1"),
-        ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["memory_writes"], 0)
-        self.assertEqual(counts["unknown"], 1)
-
     def test_12b_tool_use_input_not_an_object_counts_unknown_not_crash(self):
-        # A tool use whose `input` is a list, not an object, must not crash the census
-        # with AttributeError on `inp.get(...)`. It is skipped and counted as unknown.
-        project_dir = self.make_project("proj_bad_input")
-        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Write", ["not", "an", "object"], id_="write_1"),
-            tool_result_msg("write_1"),
+        # Rows: an `input` that is a list (test_12b: must not crash the census with AttributeError on
+        # `inp.get(...)`), and a `file_path` that is a list (merged test_12). Both are skipped and
+        # counted as unknown. Named failure: a malformed tool use crashes the census or counts as a write.
+        cases = [
+            ("input not an object", "proj_bad_input", ["not", "an", "object"]),
+            ("file_path not a string", "proj_bad_path", {"file_path": ["not", "a", "string"], "content": "x"}),
         ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["memory_writes"], 0)
-        self.assertEqual(counts["scratchpad_writes"], 0)
-        self.assertEqual(counts["unknown"], 1)
+        for case, name, tool_input in cases:
+            with self.subTest(case):
+                project_dir = self.make_project(name)
+                os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
+                records = [
+                    human("start", cwd=self.repo),
+                    tool_use_msg("Write", tool_input, id_="write_1"),
+                    tool_result_msg("write_1"),
+                ]
+                path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+                timeouts = [0]
+                counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+                self.assertEqual(counts["memory_writes"], 0)
+                self.assertEqual(counts["scratchpad_writes"], 0)
+                self.assertEqual(counts["unknown"], 1)
 
     # ---------------------------------------------------------- fix 2: relative --root
 
@@ -394,16 +376,22 @@ class RulingCensusTests(unittest.TestCase):
     # ---------------------------------------------------------- fix 3: scratchpad is writes only
 
     def test_14_bash_touching_scratchpad_is_not_counted(self):
-        project_dir = self.make_project("proj_bash_scratchpad")
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Bash", {"command": "cat /tmp/x/scratchpad/notes.txt"}, id_="bash_1"),
-            tool_result_msg("bash_1"),
+        # Rows: a Bash command (test_14) and a Read of a scratchpad path (merged test_16).
+        # Named failure: a read of a scratchpad counted as a scratchpad write.
+        cases = [
+            ("bash", "proj_bash_scratchpad",
+             tool_use_msg("Bash", {"command": "cat /tmp/x/scratchpad/notes.txt"}, id_="bash_1"), "bash_1"),
+            ("read", "proj_read_scratchpad",
+             tool_use_msg("Read", {"file_path": "/tmp/x/scratchpad/notes.txt"}, id_="read_1"), "read_1"),
         ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["scratchpad_writes"], 0)
+        for case, name, use, use_id in cases:
+            with self.subTest(case):
+                project_dir = self.make_project(name)
+                records = [human("start", cwd=self.repo), use, tool_result_msg(use_id)]
+                path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+                timeouts = [0]
+                counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+                self.assertEqual(counts["scratchpad_writes"], 0)
 
     def test_15_windows_scratchpad_path_is_normalized(self):
         project_dir = self.make_project("proj_windows_scratchpad")
@@ -419,18 +407,6 @@ class RulingCensusTests(unittest.TestCase):
         timeouts = [0]
         counts = ruling_census.scan_transcript(path, project_dir, timeouts)
         self.assertEqual(counts["scratchpad_writes"], 1)
-
-    def test_16_read_tool_touching_scratchpad_is_not_counted(self):
-        project_dir = self.make_project("proj_read_scratchpad")
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Read", {"file_path": "/tmp/x/scratchpad/notes.txt"}, id_="read_1"),
-            tool_result_msg("read_1"),
-        ]
-        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
-        self.assertEqual(counts["scratchpad_writes"], 0)
 
     # ---------------------------------------------------------- fix 5: the hook's home: pattern
 
@@ -471,24 +447,34 @@ class RulingCensusTests(unittest.TestCase):
         return real_base, link_base
 
     def test_18_root_via_symlink_file_path_via_real_path_still_matches(self):
-        real_base, link_base = self._make_symlink_pair("real_projects", "link_projects")
-        project_dir_via_link = os.path.join(link_base, "proj_symlink")
-        os.makedirs(project_dir_via_link)
-        memory_dir_via_real = os.path.join(real_base, "proj_symlink", "memory")
-        os.makedirs(memory_dir_via_real)
-
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Write", {
-                "file_path": os.path.join(memory_dir_via_real, "plan.md"),
-                "content": "a short note",
-            }, id_="write_1"),
-            tool_result_msg("write_1"),
+        # Rows: the root through the symlink with the file path real (test_18), and the mirror
+        # with the root real and the file path through the symlink (merged test_19).
+        # Named failure: a memory write is missed when the root and file path are spelled differently.
+        cases = [
+            ("root via link, file via real", "real_projects", "link_projects", "proj_symlink", "real"),
+            ("root real, file via link", "real_projects2", "link_projects2", "proj_symlink2", "link"),
         ]
-        path = write_transcript(records, os.path.join(project_dir_via_link, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir_via_link, timeouts)
-        self.assertEqual(counts["memory_writes"], 1)
+        for case, real_name, link_name, proj, file_side in cases:
+            with self.subTest(case):
+                real_base, link_base = self._make_symlink_pair(real_name, link_name)
+                root_base = link_base if file_side == "real" else real_base
+                file_base = real_base if file_side == "real" else link_base
+                project_dir = os.path.join(root_base, proj)
+                os.makedirs(project_dir)
+                memory_dir = os.path.join(file_base, proj, "memory")
+                os.makedirs(memory_dir)
+                records = [
+                    human("start", cwd=self.repo),
+                    tool_use_msg("Write", {
+                        "file_path": os.path.join(memory_dir, "plan.md"),
+                        "content": "a short note",
+                    }, id_="write_1"),
+                    tool_result_msg("write_1"),
+                ]
+                path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+                timeouts = [0]
+                counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+                self.assertEqual(counts["memory_writes"], 1)
 
     # ---------------------------------------------------------- --sample
 
@@ -571,16 +557,6 @@ class RulingCensusTests(unittest.TestCase):
         self.assertIsNone(item["project"])
         self.assertIsNone(item["remote"])
 
-    def test_24_long_field_is_cut(self):
-        long_answer = "x" * 2500
-        self.assertEqual(len(ruling_census.cap_text(long_answer)),
-                          ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
-        self.assertTrue(ruling_census.cap_text(long_answer).endswith(
-            ruling_census.SAMPLE_CUT_MARK))
-        short = "short text"
-        self.assertEqual(ruling_census.cap_text(short), short)
-        self.assertIsNone(ruling_census.cap_text(None))
-
     def test_25_sample_cli_prints_capped_jsonl(self):
         project_dir = self.make_project("proj_sample_cli")
         long_answer = "y" * 2500
@@ -606,6 +582,13 @@ class RulingCensusTests(unittest.TestCase):
         self.assertTrue(row["answer"].endswith(ruling_census.SAMPLE_CUT_MARK))
         self.assertEqual(len(row["answer"]),
                           ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
+        # Merged from test_24: cap_text cuts a long field to the cap plus the mark, keeps a short one.
+        # Named failure: a long answer printed whole, or a short one cut.
+        self.assertEqual(len(ruling_census.cap_text("x" * 2500)),
+                         ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
+        self.assertTrue(ruling_census.cap_text("x" * 2500).endswith(ruling_census.SAMPLE_CUT_MARK))
+        self.assertEqual(ruling_census.cap_text("short text"), "short text")
+        self.assertIsNone(ruling_census.cap_text(None))
 
     def test_26_sample_includes_worker_transcript_answers(self):
         project_dir = self.make_project("proj_sample_worker")
@@ -658,29 +641,6 @@ class RulingCensusTests(unittest.TestCase):
             self.assertEqual(row["project"], self.repo)
             self.assertIn("real", row["answer"])
         self.assertIn("Skipped 2 candidate answer(s)", run.stderr)
-
-    def test_19_root_via_real_path_file_path_via_symlink_still_matches(self):
-        # The mirror case: the project folder passed in is the real path, but the tool
-        # use's own file_path is spelled through the symlink.
-        real_base, link_base = self._make_symlink_pair("real_projects2", "link_projects2")
-        project_dir_real = os.path.join(real_base, "proj_symlink2")
-        os.makedirs(project_dir_real)
-        memory_dir_via_link = os.path.join(link_base, "proj_symlink2", "memory")
-        os.makedirs(memory_dir_via_link)
-
-        records = [
-            human("start", cwd=self.repo),
-            tool_use_msg("Write", {
-                "file_path": os.path.join(memory_dir_via_link, "plan.md"),
-                "content": "a short note",
-            }, id_="write_1"),
-            tool_result_msg("write_1"),
-        ]
-        path = write_transcript(records, os.path.join(project_dir_real, "s1.jsonl"))
-        timeouts = [0]
-        counts = ruling_census.scan_transcript(path, project_dir_real, timeouts)
-        self.assertEqual(counts["memory_writes"], 1)
-
 
 if __name__ == "__main__":
     unittest.main()
