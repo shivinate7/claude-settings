@@ -2720,11 +2720,12 @@ sh("kill: xargs unwraps to the real command it runs", "xargs pkill", "deny",
 # refused, mechanically. INCIDENT 2026-10-10: a feed-build session pointed the variable at a scratch
 # directory to work around a missing chromium_headless_shell. The real cause was a stale `__dirlock`
 # in ~/Library/Caches/ms-playwright. The install sat 73 minutes, and the workaround hid the cause.
-# One table of set forms, one row per branch of guard_kill.py's walk: the shell words, the PowerShell
-# statement, the profile write, the continuation, the case fold. A spelling that reaches a branch
-# already in the table is dropped. Each row names the branch it holds. Row: (name, command, tool).
+# One table of set forms. One row per branch the walk in guard_kill.py reads: each regex alternative
+# and each list entry it matches (PLAYWRIGHT_PS_SET, PLAYWRIGHT_PROFILE, ASSIGNING_BUILTINS,
+# INLINE_SCRIPT_SHELLS, the cmdlet names), each wrapper form, each write route, the printf filter,
+# the continuation. Row: (name, command, tool).
 PLAYWRIGHT_SET_DENY = (
-    # PR #314 review round 1: the shell words that set the variable.
+    # The shell words that set the variable.
     ("playwright: an inline assignment ahead of an install",
      "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium", "Bash"),
     ("playwright: an export ahead of a test run",
@@ -2736,20 +2737,36 @@ PLAYWRIGHT_SET_DENY = (
     ("playwright: a subshell assigns it ahead of a test run",
      "(PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test)", "Bash"),
     ("playwright: cmd /c set sets it", "cmd /c set PLAYWRIGHT_BROWSERS_PATH=C:\\x", "Bash"),
+    ("playwright: cmd /c with a quoted set sets it",
+     'cmd /c "set PLAYWRIGHT_BROWSERS_PATH=C:\\x"', "Bash"),
+    ("playwright: sh -c assigns it ahead of a test run",
+     "sh -c 'PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test'", "Bash"),
+    ("playwright: builtin export sets it", "builtin export PLAYWRIGHT_BROWSERS_PATH=/x", "Bash"),
+    ("playwright: exec env names it", "exec env PLAYWRIGHT_BROWSERS_PATH=/x npx", "Bash"),
     ("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "Bash"),
     ("playwright: npx cross-env sets it ahead of an install",
      "npx cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "Bash"),
-    # PR #314 review: the PowerShell statements. The `=` and `+=` forms share one branch.
+    ("playwright: cross-env sets it ahead of an install, bare",
+     "cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "Bash"),
+    # PowerShell statements: one row per form the PowerShell reader matches.
     ("playwright: the PowerShell form sets it", '$env:PLAYWRIGHT_BROWSERS_PATH = "C:\\x"', "PowerShell"),
+    ("playwright: PowerShell += appends to it",
+     '$env:PLAYWRIGHT_BROWSERS_PATH += ";C:\\x"', "PowerShell"),
+    ("playwright: PowerShell braced env drive sets it",
+     '${env:PLAYWRIGHT_BROWSERS_PATH} = "C:\\x"', "PowerShell"),
     ("playwright: Set-Item on the env drive sets it", "Set-Item env:PLAYWRIGHT_BROWSERS_PATH C:\\x",
      "PowerShell"),
+    ("playwright: Set-Item on the Env:\\ drive sets it", "Set-Item Env:\\PLAYWRIGHT_BROWSERS_PATH C:\\x",
+     "PowerShell"),
+    ("playwright: the New-Item alias ni sets the env drive variable, denies",
+     r"ni env:PLAYWRIGHT_BROWSERS_PATH -Value D:\x", "PowerShell"),
     ("playwright: SetEnvironmentVariable sets it",
      '[Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH","C:\\x")', "PowerShell"),
     ("playwright: the real PowerShell setter inside pwsh -c stays denied",
      """pwsh -c '$env:PLAYWRIGHT_BROWSERS_PATH = "x"'""", "Bash"),
     ("playwright: a PowerShell path ending in a backslash, then a setter on the next line, denies",
      "Set-Location C:\\tmp\\\nSet-Item env:PLAYWRIGHT_BROWSERS_PATH D:\\cache", "PowerShell"),
-    # PR #314 review: the profile writes. One row per write route; a file name is no branch.
+    # Profile writes: one row per write route, and one row per profile file name.
     ("playwright: a shell rc file gets the export",
      "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshrc", "Bash"),
     ("playwright: a heredoc writes the export into a shell rc file",
@@ -2758,7 +2775,19 @@ PLAYWRIGHT_SET_DENY = (
      "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' | tee -a ~/.zshrc", "Bash"),
     ("playwright: printf with a %s format writes the export to zshrc, denies",
      "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> ~/.zshrc", "Bash"),
-    # PR #314 review: a backslash-newline is a continuation, so the assignment still reaches the install.
+    ("playwright: printf writes the export line into zshrc, denies",
+     'printf "%s\\n" "export PLAYWRIGHT_BROWSERS_PATH=/x" >> ~/.zshrc', "Bash"),
+    ("playwright: echo writes the export line into zshrc past noclobber with >|, denies",
+     "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >| ~/.zshrc", "Bash"),
+    ("playwright: an echo appends the export to ~/.zshenv",
+     "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshenv", "Bash"),
+    ("playwright: an echo appends the export to ~/.zlogin",
+     "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zlogin", "Bash"),
+    ("playwright: an echo appends the export to ~/.bash_login",
+     "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.bash_login", "Bash"),
+    ("playwright: an envrc file gets the assignment",
+     "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "Bash"),
+    # A backslash-newline is a continuation, so the assignment still reaches the install.
     ("playwright: an assignment continued by a backslash-newline still sets it for an install",
      "PLAYWRIGHT_BROWSERS_PATH=/x \\\nnpx playwright install", "Bash"),
 )
@@ -3277,12 +3306,10 @@ sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowe
 # Node 26.11. The install hangs while it unpacks (measured, see decision playwright-browsers-path).
 # One hung 20 minutes, and they fought over the shared ~/Library/Caches/ms-playwright/__dirlock.
 # The main-session forms below are denied. Each one runs an install under the default Node.
-# One table of the main-session deny forms. Each row is one branch of guard_kill.py's walk
-# (_playwright_install_hit): a name right after its runner, a word or flag between runner and name,
-# the npx-only flag exclusion, a name followed by another name, a wrapper shell, a scoped or pinned
-# name, a bin path, a chain, and the quoted text the scanner must see past. A runner word (pnpm,
-# yarn, bunx, npm exec, pnpm dlx) takes the same branch as npx, and so does a `--flag` before the
-# name, so each of those is no row. Row: (name, command, tool).
+# One table of the main-session deny forms. One row per branch _playwright_install_hit reads: each
+# runner in _PW_RUNNERS, each CLI path in _PW_CLIS, the npx-only value-flag list, the name followed by
+# another name, the wrapper shells, the scoped and pinned names, the bin path, the chain, and the
+# quoted text the scanner must see past. Row: (name, command, tool).
 PLAYWRIGHT_INSTALL_DENY = (
     ("playwright-install: npx names the browser install", "npx playwright install chromium", "Bash"),
     ("playwright-install: npx -y installs without a prompt", "npx -y playwright install", "Bash"),
@@ -3296,6 +3323,8 @@ PLAYWRIGHT_INSTALL_DENY = (
      "Bash"),
     ("playwright-install: the default node runs the cli.js install",
      "node node_modules/playwright/cli.js install", "Bash"),
+    ("playwright-install: node runs the playwright-core cli.js install",
+     "node node_modules/playwright-core/cli.js install", "Bash"),
     ("playwright-install: bash -c wraps the install", "bash -c 'npx playwright install chromium'",
      "Bash"),
     ("playwright-install: cd then && runs the install", "cd x && npx playwright install chromium",
@@ -3315,11 +3344,21 @@ PLAYWRIGHT_INSTALL_DENY = (
     ("playwright-install: cmd /c runs the install", "cmd /c npx playwright install", "Bash"),
     ("playwright-install: powershell -Command runs the install",
      'powershell -Command "npx playwright install"', "Bash"),
+    ("playwright-install: pwsh -c runs the install", "pwsh -c 'npx playwright install'", "Bash"),
+    ("playwright-install: pwsh -Command runs the install", "pwsh -Command npx playwright install",
+     "Bash"),
     # The scoped package's bin is playwright, so its install is the same act.
     ("playwright-install: the scoped test package installs the browsers",
      "npx @playwright/test install", "Bash"),
     ("playwright-install: npm exec --yes runs the install", "npm exec --yes playwright install",
      "Bash"),
+    ("playwright-install: npm -w exec runs the install", "npm -w app exec playwright install",
+     "Bash"),
+    ("playwright-install: npm --workspace exec -- runs the install",
+     "npm --workspace app exec -- playwright install", "Bash"),
+    ("playwright-install: pnpm exec runs the install", "pnpm exec playwright install", "Bash"),
+    ("playwright-install: yarn runs the install", "yarn playwright install", "Bash"),
+    ("playwright-install: bunx runs the install", "bunx playwright install", "Bash"),
 )
 for _name, _command, _tool in PLAYWRIGHT_INSTALL_DENY:
     sh(_name, _command, "deny", "playwright-install", tool=_tool, cwd=NOGIT)
@@ -3364,6 +3403,11 @@ sh("playwright-install: the Node 22 cli.js form with a parent-relative path is a
 # Control: a workspace exec that runs a test is not an install.
 sh("playwright-install: a workspace exec test run is allowed",
    "npm -w app exec playwright test", "allow", cwd=NOGIT)
+# The -w and --workspace list entries: alone, each one makes the name a workspace, not a command.
+sh("playwright-install: npm -w takes a workspace name, its install is allowed",
+   "npm -w playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: npm --workspace takes a workspace name, its install is allowed",
+   "npm --workspace playwright install", "allow", cwd=NOGIT)
 # Round 4 allows, main session. A package manager's own install, a flag's value, and a test
 # filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
 sh("playwright-install: pnpm -C takes a directory, its install is allowed",
