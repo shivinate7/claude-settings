@@ -1694,6 +1694,13 @@ sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it 
 sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the outer shell",
    "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
+# ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
+# the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
+# deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
+# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
+   "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",
@@ -3798,6 +3805,42 @@ sh("heredoc: r2-hd a hash inside double quotes, then a source heredoc with a kil
 sh("heredoc: r2-hd a lone apostrophe in the body of a source heredoc, then a kill, denies",
    "source <(cat <<\\EOF\necho don't\npkill -f node\nEOF\n)", "deny", "machine-wide-kill", cwd=PROJ)
 
+# ---- r3-bd (try 3, the bandaid), kill family. A shell runs each body. Main keeps it in view: its header is one it
+# cannot read (`'EOF-1'`, `\EOF`), or it reads a shorter word that a stray line closes on (`EOF-1` as `EOF`, `"E"OF`
+# as `E`). Head without the bandaid drops the body, so each allows. Each denies on main too.
+R3_KILL = "pkill -f node"
+for _label, _form in (
+        ("a write then sh, delimiter 'EOF-1'",
+         "cat <<'EOF-1' > x.sh && sh x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1"),
+        ("a write, then sh on the next line, delimiter 'EOF-1'",
+         "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+        ("a tee, then bash, delimiter 'EOF-1'",
+         "cat <<'EOF-1' | tee x.sh; bash x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1"),
+        ("python3 on a backslash delimiter",
+         "cat <<\\EOF | python3 -\n" + R3_KILL + "\nEOF"),
+        ("a write then sh, unquoted EOF-1",
+         "cat <<EOF-1 > x.sh\necho hi\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+        ("a write then sh, delimiter \"E\"OF",
+         'cat <<"E"OF > x.sh\necho hi\nE\n' + R3_KILL + "\nEOF\nsh x.sh"),
+        ("a lone apostrophe in the body, then a write and sh",
+         "cat <<'EOF-1' > x.sh\necho don't\nEOF\n" + R3_KILL + "\nEOF-1\nsh x.sh"),
+):
+    sh("heredoc r3-bd: a kill in the body of %s, denies" % _label, _form, "deny", "machine-wide-kill", cwd=PROJ)
+
+# ---- r3-fed (try 3, `_FED_SHELL`), kill family. eval, source and `.` run a heredoc that a `<( )`, `$( )` or
+# backtick reads, and bash executes its body. The plain delimiter is one no bandaid reads, so main allows these (a
+# hole main lacks, not a parity pin). Head denies. Removing _FED_SHELL turns each red. Not pinned: `source $( )`
+# and `. ` backticks (the output is a file name, so no body runs) and the quoted `"$( )"` kill (allowed on head
+# and main; see the eval form in the r2-hd block above).
+for _label, _form in (
+        ("source <( )", "source <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+        ("dot <( )", ". <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+        ("eval backticks", "eval `cat <<EOF\n" + R3_KILL + "\nEOF\n`"),
+        ("unquoted eval $( )", "eval $(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
+):
+    sh("heredoc r3-fed: a kill in the body of a heredoc that %s runs, denies" % _label, _form,
+       "deny", "machine-wide-kill", cwd=PROJ)
+
 
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
@@ -5455,6 +5498,16 @@ for _shell in ("sh", "bash"):
 for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
     sh("env: r2-hd a heredoc in %s, an env read in the body, denies" % _label,
        _form.replace("BODY", "cat " + ENV), "deny", "env-file", cwd=PROJ)
+
+# ---- r3-bd and r3-fed (try 3), env family. A body with an env read, under a stray `EOF` line, denies as on main.
+# The eval `$( )` and eval backtick forms run their body as code, so an env read there denies too. Main allows the
+# two eval forms (a hole main lacks). Removing _FED_SHELL turns them red.
+sh("env: r3-bd a body with an env read after a stray EOF line, written then sh, denies as on main",
+   "cat <<'EOF-1' > x.sh && sh x.sh\nEOF\ncat " + ENV + "\nEOF-1", "deny", "env-file", cwd=PROJ)
+sh("env: r3-fed an eval $( ) heredoc with an env read in the body, denies",
+   'eval "$(cat <<EOF\ncat ' + ENV + '\nEOF\n)"', "deny", "env-file", cwd=PROJ)
+sh("env: r3-fed an eval backtick heredoc with an env read in the body, denies",
+   "eval `cat <<EOF\ncat " + ENV + "\nEOF\n`", "deny", "env-file", cwd=PROJ)
 
 
 # =========================================================================== git env set
@@ -7238,6 +7291,31 @@ for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
 # once. MAIN DENIES BY DESIGN: the one-step ruling is the lane's, and main counts each body line.
 sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
    "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+
+
+# ---- r3-bd (try 3, the bandaid), ask-alone family. A prune or a push delete in a body that main keeps in view is a
+# second step on main, so the command denies as a chained ask. Without the bandaid the body drops and the command
+# allows or asks alone. The scanner shapes (a comment opener in quotes, a lone apostrophe, a template literal) are
+# pinned here too, so the walk is judged on each.
+chained_prune("ask-alone: r3-bd a prune after a stray EOF line, written then sh on the next line, denies",
+              "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a stray EOF line, piped to tee, then bash, denies",
+              "cat <<'EOF-1' | tee x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nbash x.sh")
+chained_prune("ask-alone: r3-bd a prune on a backslash delimiter piped to python3, denies",
+              "cat <<\\EOF | python3 -\necho hi\n" + PRUNE + "\nEOF")
+chained_prune("ask-alone: r3-bd a prune on an unquoted EOF-1 that main reads as EOF, denies",
+              "cat <<EOF-1 > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a comment opener in quotes on the header, denies",
+              'echo "a # b" && cat <<\'EOF-1\' > x.sh\necho hi\nEOF\n' + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune after a lone apostrophe in a body comment, denies",
+              "cat <<'EOF-1' > x.sh\n# don't\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
+chained_prune("ask-alone: r3-bd a prune inside a multi-line template literal in the body, denies",
+              "cat <<'EOF-1' > x.sh\nconst s = `\nEOF\n" + PRUNE + "\n`;\nEOF-1\nsh x.sh")
+# The push-delete path reads the same walk. The verdict here does not turn on the run dir, so this pins the walk
+# through the body, not a `cd`: the body holds the cd and the push, and the push asks on main.
+chained_ask("ask-alone: r3-bd a body with a cd and a push delete of main, written then sh, denies",
+            "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(PUSHMAIN) + "\ngit push origin :main\nEOF-1\nsh x.sh",
+            cwd=PUSHFEAT)
 
 
 # =========================================================================== ordinary work
