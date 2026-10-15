@@ -359,22 +359,25 @@ def _data_words(kind: str, words):
 
 def _unquoted(word: str) -> str:
     """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
-    kind of quote is text."""
+    kind of quote is text. The `$` of an unquoted `$'...'` or `$"..."` goes with the quote.
+    RESIDUAL GAP: a backslash escape inside `$'...'` (hex or octal) is not decoded."""
     out, quote = [], ""
-    for char in word:
+    for index, char in enumerate(word):
         if char == quote:
             quote = ""
         elif not quote and char in "'\"":
             quote = char
-        else:
+        elif not (not quote and char == "$" and word[index + 1:index + 2] in ("'", '"')):
             out.append(char)
     return "".join(out)
 
 
 def _words_of(word: str):
-    """The words a word stands for with its quotes read: the word itself after quote removal, and
-    each quote's text as its own words (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
-    out = [_unquoted(word)]
+    """The words a word stands for with its quotes read: the word itself after quote removal, that
+    text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
+    (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
+    inner = _unquoted(word)
+    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
