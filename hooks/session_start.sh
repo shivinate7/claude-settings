@@ -107,8 +107,19 @@ fi
 # of the rules and the gates every session on this machine runs. A branch left checked out
 # there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
 # branch switch is a whole-tree act and another session may be working in it.
-if [ -n "$d" ] && [ -d "$d/.git" ]; then
+# `.git` is a directory in a full clone and a file in a linked worktree (the pinned `<clone>-live`).
+# A checkout detached at local main's commit counts as on main; detached anywhere else is off main.
+if [ -n "$d" ] && [ -e "$d/.git" ]; then
   pointer_branch=$(cd "$d" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ "$pointer_branch" = "HEAD" ]; then
+    pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
+    main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
+    if [ -n "$pin_head" ] && [ "$pin_head" = "$main_head" ]; then
+      pointer_branch=main
+    else
+      pointer_branch="a detached HEAD"
+    fi
+  fi
   if [ -n "$pointer_branch" ] && [ "$pointer_branch" != "main" ]; then
     printf 'claude-settings: %s is on %s, not main; global rules and hooks are that branch\n' \
       "$d" "$pointer_branch"

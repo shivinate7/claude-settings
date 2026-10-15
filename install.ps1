@@ -283,7 +283,18 @@ $AgentFailed = $false
 # runs on any machine (install-no-gap.test.ps1).
 function New-Link([string]$Path, [string]$Target) {
     if ($env:CLAUDE_SETTINGS_FORCE_COPY -eq '1') { throw 'symlink forced off by CLAUDE_SETTINGS_FORCE_COPY' }
-    New-Item -ItemType SymbolicLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null
+    try { New-Item -ItemType SymbolicLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null; return }
+    catch { $newItemErr = $_.Exception.Message }
+    # Windows PowerShell 5.1 New-Item needs admin even in Developer Mode; mklink does not
+    # (measured 2026-10-15). Try it before the caller copies.
+    if ($env:OS -eq 'Windows_NT') {
+        $flag = if (Test-Path -LiteralPath $Target -PathType Container) { '/D ' } else { '' }
+        $out = cmd /c "mklink $flag`"$Path`" `"$Target`" 2>&1"
+        $i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -eq 0 -and $i -and $i.LinkType) { return }
+        throw "mklink failed ($out); New-Item failed ($newItemErr)"
+    }
+    throw $newItemErr
 }
 
 # Removes a leftover file, directory, or link. A directory link goes without -Recurse, so
