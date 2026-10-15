@@ -70,7 +70,7 @@ expect 0 action-repo-record-ignored "$tmp/topic" main "" "$act/actions/ruling-ki
 mkdir -p "$tmp/topic/decisions"; printf 'No kind line here.\n' > "$tmp/topic/decisions/second-undeclared.md"
 quiet git -C "$tmp/topic" add decisions/second-undeclared.md
 quiet git -C "$tmp/topic" commit -q -m second-undeclared
-# Also the --root proof (was undeclared-record-fails, merged here): a lint that ignored --root would diff the action's repo and pass.
+# The --root proof: a lint that ignored --root would diff the action's repo and pass.
 expect 1 caller-root-record-read "$tmp/topic" main "FAIL: decisions/second-undeclared.md"
 expect 1 unreadable-base-fails "$tmp/topic" no-such-base "cannot fetch base"
 expect 0 empty-base-skipped "$tmp/topic" "" "skipped"

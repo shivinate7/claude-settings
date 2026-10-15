@@ -581,8 +581,8 @@ class AfterPush(Env):
         self.assertTrue(lines[0].startswith("merge: "), lines[0])
 
     def test_the_tree_config_or_kinds_gone_at_the_base_check_stops_clean(self):
-        """Was three tests (the tree, the config and the kinds gone at the base check). One outcome: a stop with no
-        claim left behind. Each row is a fresh fixture, so subTest runs its own setUp."""
+        """The tree, the config or the kinds gone at the base check: one outcome, a stop with no claim left
+        behind. Each row is a fresh fixture, so subTest runs its own setUp."""
         def tree_gone():
             shutil.rmtree(os.path.dirname(self.merge_tree()))
         cases = (

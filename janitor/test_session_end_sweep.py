@@ -234,8 +234,8 @@ class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
                           "the shared repository's reapable branch should still have been swept")
 
     def test_subdirectory_cwd_sweeps_its_own_repository_and_not_the_sibling(self):
-        """A cwd inside a checkout (not its root) must resolve to that checkout's root (was
-        ResolveRepoRootUnit.test_subdirectory_resolves_to_the_checkout_root, merged here)."""
+        """A cwd inside a checkout (not its root) must resolve to that checkout's root, and the
+        sibling checkout must be left alone."""
         repo_a = os.path.join(ROOT, "repo_a_sub")
         repo_b = os.path.join(ROOT, "repo_b_sub")
         make_repo(repo_a)

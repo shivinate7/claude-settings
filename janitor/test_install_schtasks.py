@@ -246,7 +246,7 @@ class WritesXmlEncodingRealSchtasksAccepts(unittest.TestCase):
         self.assertTrue(raw.startswith(b"\xff\xfe"),
                          "the file must open with a UTF-16 LE byte order mark, or real "
                          "schtasks.exe refuses it with 'The task XML is malformed'")
-        # The XML declaration names UTF-16 (was test_declaration_names_utf16, merged here: same write).
+        # The XML declaration must name UTF-16, the encoding the byte order mark sets.
         declaration = raw[:100].decode("utf-16")
         self.assertIn("UTF-16", declaration.upper())
 

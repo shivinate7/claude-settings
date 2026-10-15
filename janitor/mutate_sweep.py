@@ -555,11 +555,9 @@ MUTATIONS = [
 
 
     # 3. PR #84 review: an elapsed reading this function cannot trust (negative, or non-finite)
-    # must not be spent as if it were free time. Verified by hand against a `.bak` copy: dropping
-    # the validation block fails exactly test_negative_elapsed_is_refused_not_treated_as_extra_
-    # time and the non-finite rows among the FAIL lines of test_too_little_budget_left_returns_none
-    # (its subTest rows for the negative and nan/inf elapsed readings), and no other case (the
-    # larger-than-the-ceiling row stays green on its own, unrelated arithmetic).
+    # must not be spent as if it were free time. Dropping the validation block fails the negative
+    # row and the nan row of test_too_little_budget_left_returns_none (one subTest per row). The
+    # inf row and the over-ceiling row still return None without the block, so they stay green.
     ("budget: an untrustworthy elapsed reading (negative or non-finite) is spent as real time",
      "session_end_sweep",
      '    if (\n'

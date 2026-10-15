@@ -344,7 +344,7 @@ await test('F3 register: the Code row holds no ESC or NUL, keeps tab; an ESC in 
   assert.equal(src.length, 1)
   assert.ok(!/[\x00\x1b]/.test(src[0]), JSON.stringify(src[0]))
   assert.ok(src[0].includes('\t'))
-  // Second input (was the sanitizeForCode unit case for a quoted string, merged here): the ESC goes, the quotes stay.
+  // Second input: a quoted string with a lone quote in a comment. The ESC goes, the quotes stay.
   const q = host({ diff: fileDiff('quoted.js', 'const s = "\x1bhi"; // Don\'t\x1b') })
   await q.run()
   const qsrc = await q.codes()
@@ -556,8 +556,7 @@ await test('R2-4 register: a secret-shaped turn note is not shown; the row says 
   assert.ok(rows.includes('No note'), rows)
 })
 
-// R2-5 limiter honesty: a hung call is freed by the limiter's timeout. (The 5-starts cap was merged into the
-// register F7 cases, which run the same limiter through the real handler.)
+// R2-5 limiter honesty: a hung call is freed by the limiter's timeout, so a later call is admitted.
 await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is admitted and the hung run gives null', async () => {
   const L = need('makeLimiter')(1, { timeoutMs: 20 })
   const hung = L.run('a', () => new Promise(() => {}))
@@ -569,14 +568,13 @@ await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is 
 
 // R2-6 control characters in notes: ESC, BEL, bidi overrides removed from turn and model notes.
 const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f‪-‮⁦-⁩]/
-// (The trimNote unit case stripping ESC, BEL and bidi overrides was merged into the register case below.)
 await test('R2-6 a turn-text note with BEL or a bidi override is cleaned too', () => {
   const o = need('noteFromMessages')(editedAt('/repo/src/bel.js', 'Turn\x07 note.‮'), '/repo', 'src/bel.js')
   assert.ok(!CTRL.test(o), show(o))
   assert.ok(o.includes('Turn'), show(o))
 })
 await test('R2-6 register: a model note with ESC, BEL or a bidi override is shown without them', async () => {
-  // Rows: the note text carries an ESC, a BEL and a bidi override (was the trimNote unit case, merged here).
+  // Rows: the note text carries an ESC, a BEL and a bidi override.
   const t = host({ diff: fileDiff('esc.txt', 'z'), model: async () => ({ isAnswered: true, text: 'Model\x1b[1m note\x07‮ here.' }) })
   await t.run()
   const rows = await t.rows()

@@ -1823,8 +1823,7 @@ class SameRunBranchCutTests(unittest.TestCase):
     def test_confirm_removes_the_worktree_and_its_branch_in_one_run(self):
         root, wt = self._repo("confirm")
         result = self._sweep(root, True)
-        # The worktree row as well: the repository is not refused, and the worktree reads reap with no error
-        # (merged here from WorktreeRemovalTests.test_confirm_removes_a_reapable_worktree).
+        # The worktree row as well: the repository is not refused, and the worktree reads reap with no error.
         self.assertIsNone(result["refused"])
         rows = [w for w in result["worktrees"]
                 if os.path.normcase(os.path.realpath(w["path"])) == os.path.normcase(os.path.realpath(wt))]
@@ -2409,8 +2408,8 @@ class AllCwdsMacosTests(unittest.TestCase):
             self.assertIsNone(sweep._all_cwds_macos())
 
     def test_darwin_processes_in_reads_one_table(self):
-        # Moved here from HuskTests (merged into this class): processes_in on darwin reads the one
-        # table; an unreadable table reads as unknown. The platform is patched for this process only.
+        # processes_in on darwin reads the one table; an unreadable table reads as unknown. The
+        # platform is patched for this process only.
         inside = os.path.join(ROOT, "husk-table")
         os.makedirs(inside, exist_ok=True)
         real = sweep.sys.platform
@@ -2849,7 +2848,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                          "the expired entry dropped the ref that holds the younger restore "
                          "point: purge drops by branch name, not by commit")
         self.assertIn(young, [e["commit"] for e in sweep.read_restore_log(log)],
-                      "the purge must not drop the younger entry's line (was test_the_purge_leaves_the_younger_log_line_in_place, merged here)")
+                      "the purge must not drop the younger entry's line")
 
     def test_an_expired_entry_whose_ref_was_deleted_by_hand_purges_without_error(self):
         repo = self.fresh_repo("gone-ref")
@@ -2954,7 +2953,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
 
     def test_a_missing_repo_path_is_reported_not_read_as_a_gone_ref(self):
         """git exits 128 for a missing path, and inside a directory that is not a repository. Only exit 1 means the
-        ref is gone. Rows: the missing path; the plain directory (was test_a_non_repo_directory..., merged here)."""
+        ref is gone. Rows: the missing path; the plain directory."""
         missing = os.path.join(ROOT, "pown-no-such-repo")
         plain = os.path.join(ROOT, "pown-plain-dir")
         os.makedirs(plain, exist_ok=True)
@@ -3216,7 +3215,7 @@ class AgentEndReapBatchTests(unittest.TestCase):
 
     def test_decide_reads_every_process_cwd_in_one_batch_call(self):
         # One lsof batch, and no call to the per-pid cwd reader over 1,300 pids. Counts calls, not seconds: a
-        # timing bound flakes on a loaded machine. (The per-pid reader case was merged here.)
+        # timing bound flakes on a loaded machine.
         calls = []
 
         def counting_reader(pid):
@@ -4628,8 +4627,7 @@ class StrayFolderTests(unittest.TestCase):
                           % (result["strays"],))
         judged = [_norm_path(d["path"]) for d in result["worktrees"]]
         self.assertIn(_norm_path(self.registered), judged, "the registered worktree was not judged")
-        # The printed report too (merged from test_unreadable_worktrees_base_report_says_unknown_not_zero):
-        # an unreadable folder must not read as "strays ... (kept): 0".
+        # The printed report too: an unreadable folder must not read as "strays ... (kept): 0".
         out = io.StringIO()
         sweep.print_sweep_report([result], False, out=out)
         lines = [ln for ln in out.getvalue().splitlines() if "strays under .claude/worktrees" in ln]
@@ -4955,10 +4953,8 @@ class SimulatorTierTests(unittest.TestCase):
         return {d["udid"]: d for d in sweep.sim_tier(confirm, record_path=self.record)}
 
     def test_one_shutdown_per_device_and_never_all(self):
-        # Two idle recorded devices, each shut down once on confirm. The one-device case
-        # (test_idle_recorded_device_is_shut_down_on_confirm) was the same loop with one device, so it was
-        # folded here. The preview case (test_preview_plans_the_shutdown_and_runs_none) is judged by
-        # SimulatorTierActTests, which asserts the preview verdict equals the act verdict.
+        # Two idle recorded devices, each shut down once on confirm, never all at once. The preview
+        # verdict is checked against the act verdict in SimulatorTierActTests.
         self.arm([(SIM_U1, "Idle Pro", "Booted"), (SIM_U2, "Idle Two", "Booted")],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600)),
                           sim_record(SIM_U2, "Idle Two", sim_iso_ago(3 * 3600))])
@@ -5095,7 +5091,7 @@ class SimulatorTierTests(unittest.TestCase):
         # Rows, each a record that does not match the live launchd_sim, so the device is kept as boot-record-mismatch:
         # (a) recorded 4 hours ago with launchd_sim pid 501, shut down, then booted by hand (a live launchd_sim with a
         # start time and no record line for the hand boot); (b) a pid reused after the recorded launchd_sim died,
-        # same pid with a different start time (was test_the_same_launchd_pid_with_a_new_start_time_is_kept).
+        # same pid with a different start time, which must be kept (a reused pid is not the recorded device).
         rows = (
             ("booted by hand", dict(pid=501, start="Sat Oct 10 00:10:00 2026")),
             ("same pid, new start time", dict(start="Fri Oct 9 09:00:00 2026")),
