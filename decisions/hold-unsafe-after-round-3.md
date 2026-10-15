@@ -15,7 +15,7 @@ Owner rulings, 2026-10-14, CDT. The owner's words, as the coordinator quoted the
 The rule that follows:
 
 - After round 3, a change merges on green when it is better than main. Better than main means that the change holds no safety hole that main lacks.
-- Read the hole narrowly: a hole main lacks, not any violation. Every guard has some known gaps on main, so "any violation" would hold every change. The owner is to confirm this reading on the morning list.
+- Read the hole narrowly: a hole main lacks, not any violation. Every guard has some known gaps on main, so "any violation" would hold every change. The owner is to confirm this reading: deferred entry `hold-rule-owner-confirm`.
 - A safety hole is a guard, gate or check that lets through an act that main refuses or asks about.
 - A change that holds a safety hole main lacks is held. It is dropped from the batch, so the rest merges green. It is parked: it gets no fix lane and no more work until the owner decides.
 - The owner's word can allow work on a held change, as at 22:29. A merge still needs no safety hole that main lacks.
@@ -41,7 +41,7 @@ Protected outcome: no merge leaves a guard weaker than main. No open gap stays o
 - No check decides whether a change is better than main. The call is a reviewer's judgment. Debt: `safety-hole-test-is-judgment`.
 - No check makes the orchestrator read the round-3 line `Safety hole vs main:` before a merge. Debt: `safety-line-unread-at-merge`.
 
-Debts: `safety-hole-test-is-judgment`, `safety-line-unread-at-merge`.
+Debts: `safety-hole-test-is-judgment`, `safety-line-unread-at-merge`, `hold-own-hole-unrecorded`.
 
 Kind: process
 Home: rule:roles-review-cap-three
