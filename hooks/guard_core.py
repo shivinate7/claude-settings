@@ -442,7 +442,7 @@ def _spent_by_bash(tokens):
     source = getattr(tokens, "bash_source", "")
     if not source:
         return tokens
-    marks = [index for index, char, quote in walk_quotes(source) if char == "`" and quote != "'"]
+    marks = [index for index, char, quote in walk_quotes(source) if char == "`" and quote not in ("'", "$'")]
     out, last = [], 0
     for start, end in zip(marks[::2], marks[1::2]):
         out += [source[last:start], "x"]
