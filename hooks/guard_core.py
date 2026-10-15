@@ -540,7 +540,8 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     return kept, bodies
 
 
-def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False):
+def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
+                   kept_at: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -548,7 +549,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     `'` is text, so `echo don't` then a `<<'B'` line shows its header. A caller that judges what
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
-    heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing."""
+    heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
+    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -559,6 +561,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     stack = ""
     while index < len(lines):
         kept.append(lines[index])
+        if kept_at is not None:
+            kept_at.append(index)
         header_line = lines[index]
         heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
         index += 1
@@ -579,8 +583,12 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
-    if any(_main_kept(header, body) for _, body, header in _walk_heredocs(cmd)[1]):
-        return "\n".join(_walk_heredocs(cmd, legacy=True)[0])  # BANDAID: main's own walk, see _MAIN_HEADER
+    lane_at, main_at = [], []
+    _walk_heredocs(cmd, kept_at=lane_at)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
+    if lane_at != main_at:
+        keep = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
+        return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in keep)
     return "\n".join(_split_heredocs(cmd)[0])
 
 
@@ -600,28 +608,13 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 # header pattern was this one. It finds no header at a word such as `'EOF-1'` or `\EOF`. At `EOF-1` or `"E"OF`
 # it reads a shorter word, which closes the body early at a line `EOF` or `E`. Either way main kept body lines
 # in view, so a run path that no rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line,
-# `| python3 -`) still denied. heredoc_delimiter reads those words right. So when main kept a line of a body,
-# _drop_heredoc_bodies returns main's own walk: every drop, the unconditional one too, sees what main saw.
+# `| python3 -`) still denied. heredoc_delimiter reads those words right. So _drop_heredoc_bodies walks the
+# command twice, as the lane reads it and as main read it, and keeps a line when either walk keeps it: every
+# drop, the unconditional one too, sees what main saw. That holds for two heredocs in one command, where main's
+# early close at a line of the second body leaves its payload outside every body.
 # The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
 # Retire it when each run path reads its body (debt heredoc-run-other-path).
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-
-
-def _main_kept(header: str, body: str) -> bool:
-    """True when the old pattern kept a line of this body in view: it saw no heredoc at a `<<` of the
-    header line, or it read a shorter delimiter that a line of the body matches."""
-    for at in re.finditer(r"(?<!<)<<(?!<)", header):
-        lane = HEREDOC_HEADER.match(header, at.start())
-        if not lane:
-            continue
-        main = _MAIN_HEADER.match(header, at.start())
-        if not main:
-            return True
-        word = main.group(2)
-        if word != heredoc_delimiter(lane.group(1))[1] and any(
-                line.strip() == word for line in body.split("\n")):
-            return True
-    return False
 
 
 # ------------------------------------------------------------------ git call parsing
