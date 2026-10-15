@@ -18,6 +18,7 @@ itself, never typed by hand through a shell, the same way hooks/test_guard.py dr
 fixtures.
 """
 import contextlib
+import gc
 import hashlib
 import io
 import json
@@ -3295,12 +3296,6 @@ class AgentEndReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.target_worktree(
                 {"hook_event_name": "SubagentStop", "agent_id": agent_id, "cwd": self.repo}))
 
-    def test_only_subagent_stop_names_a_target(self):
-        # Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired and names nothing.
-        self.assertIsNone(self.reap.target_worktree(
-            {"hook_event_name": "WorktreeRemove", "worktree_path": self.wts["reapA"]}))
-        self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.repo}))
-
     def test_the_primary_checkout_is_never_a_target(self):
         self.assertEqual(self.reap.decide(self.repo)[0], "primary-checkout")
 
@@ -3385,6 +3380,199 @@ class AgentEndReapTests(unittest.TestCase):
                 raws = [json.loads(line)["raw"] for line in handle.read().splitlines()]
         self.assertEqual(len(denied), 1, "the injected PermissionError was never reached")
         self.assertIn("payload 3", raws)
+
+
+class _AgentEndFixture(unittest.TestCase):
+    """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
+    worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="agent_end_wt_")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
+        self.primary = os.path.join(self.root, "repo")
+        make_repo(self.primary, {"f.txt": "base\n", ".gitignore": ".claude/\n"})
+        give_remote(self.primary)
+        import agent_end_reap
+        self.reap = agent_end_reap
+
+    def add(self, name):
+        """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
+        on origin/main, so it is pushed until a case commits there."""
+        path = os.path.join(self.primary, ".claude", "worktrees", "agent-" + name)
+        require(run_vcs(self.primary, "worktree", "add", "-q", path, "-b", "lane-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        return path
+
+    def add_other_lane(self, name):
+        """A clean, pushed worktree under `.claude/worktrees/` that is NOT an agent worktree."""
+        path = os.path.join(self.primary, ".claude", "worktrees", name)
+        require(run_vcs(self.primary, "worktree", "add", "-q", path, "-b", "other-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        return path
+
+    def fire(self, agent, path):
+        """Run the SubagentStop hook for AGENT with payload cwd PATH. The hook must exit 0."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": path, "session_id": "agent-end-wt-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        answer = subprocess.run([sys.executable, os.path.join(HERE, "agent_end_reap.py")],
+                                input=payload, capture_output=True, text=True, env=env,
+                                cwd=self.root, timeout=120)
+        self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+
+    def listed(self):
+        out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
+        return {_norm_path(line[len("worktree "):]) for line in out.splitlines() if line.startswith("worktree ")}
+
+    def assertRemoved(self, path):
+        """Gone from disk AND from `git worktree list`, so a leftover prunable entry also fails."""
+        self.assertFalse(os.path.exists(path), "%s was not removed" % path)
+        self.assertNotIn(_norm_path(path), self.listed(), "%s is still a git worktree" % path)
+
+    def assertKept(self, path):
+        self.assertTrue(os.path.isdir(path), "%s was removed" % path)
+        self.assertIn(_norm_path(path), self.listed(), "%s is no longer a git worktree" % path)
+
+    def live_lock_reason(self, name):
+        """The reason the Agent tool writes, naming THIS test process, with its real start time."""
+        start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
+        return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
+
+    def lock(self, path, reason):
+        require(run_vcs(self.primary, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                "lock of %s failed" % path)
+
+    @staticmethod
+    def dirty(path):
+        write(os.path.join(path, "f.txt"), "changed in place\n")
+
+    @staticmethod
+    def untracked(path):
+        write(os.path.join(path, "scratch.txt"), "not tracked\n")
+
+    def unpushed(self, path):
+        write(os.path.join(path, "lane.txt"), "only in this worktree\n")
+        run_vcs(path, "add", "lane.txt")
+        commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
+        require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
+
+    @staticmethod
+    def stop(proc):
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+class AgentEndOwnWorktreeTests(_AgentEndFixture):
+    """Owner ruling 2026-10-15: when an agent ends (SubagentStop), janitor/agent_end_reap.py removes
+    the ending agent's OWN worktree under `.claude/worktrees/agent-*` when it is clean, holds no
+    untracked file, has HEAD on a remote-tracking ref, has no process inside, and holds no live
+    harness lock. A stale lock does not hold it. No idle time applies to the ending agent's own tree.
+
+    Each keep arm runs beside a clean, pushed control twin that must be removed in the same test, so a
+    keep arm cannot pass on a hook that deletes nothing."""
+
+    def keep_case(self, name, damage, proof):
+        """PROOF reads the damage back, so a keep arm cannot pass on a fixture that never took."""
+        twin, subject = self.add(name + "twin"), self.add(name)
+        damage(subject)
+        proof(subject)
+        self.fire(name + "twin", twin)
+        with self.subTest(control="clean pushed twin is removed"):
+            self.assertRemoved(twin)
+        self.fire(name, subject)
+        with self.subTest(arm=name):
+            self.assertKept(subject)
+
+    def test_subagent_stop_removes_its_own_clean_pushed_worktree(self):
+        # Owner ruling 2026-10-15 deleted the 2026-09-27 ruling that kept WorktreeRemove unwired.
+        # SubagentStop is the trigger. Stop and WorktreeRemove name no worktree to end.
+        self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.primary}))
+        own = self.add("trigger")
+        self.assertIsNone(self.reap.target_worktree(
+            {"hook_event_name": "WorktreeRemove", "worktree_path": own}))
+        self.fire("trigger", own)
+        self.assertRemoved(own)
+
+    def test_a_stale_lock_does_not_hold_the_own_worktree(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead_pid = gone.pid
+        # Windows reads an exited pid as live while this process still holds its handle, so drop it.
+        del gone
+        gc.collect()
+        own = self.add("stalelock")
+        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime())
+        reason = "claude agent agent-stalelock (pid %d start %s)" % (dead_pid, stamp)
+        self.assertTrue(sweep.stale_agent_lock_verdict(reason), "the fixture lock is not stale: %r" % reason)
+        self.lock(own, reason)
+        self.fire("stalelock", own)
+        self.assertRemoved(own)
+
+    def test_a_dirty_own_worktree_is_kept(self):
+        self.keep_case("dirty", self.dirty, lambda p: self.assertTrue(guard.porcelain(p), "no dirty edit"))
+
+    def test_an_untracked_file_keeps_the_own_worktree(self):
+        self.keep_case("untracked", self.untracked, lambda p: self.assertTrue(guard.porcelain(p), "no file"))
+
+    def test_an_unpushed_commit_keeps_the_own_worktree(self):
+        self.keep_case("unpushed", self.unpushed, lambda p: self.assertEqual(
+            run_vcs(p, "branch", "-r", "--contains", "HEAD").stdout.strip(), "", "HEAD is pushed"))
+
+    def test_a_live_lock_keeps_the_own_worktree(self):
+        reason = self.live_lock_reason("livelock")
+        self.assertFalse(sweep.stale_agent_lock_verdict(reason), "the fixture lock reads as stale: %r" % reason)
+        self.keep_case("livelock", lambda path: self.lock(path, reason), lambda p: None)
+
+    def test_a_process_inside_keeps_the_own_worktree(self):
+        twin, subject = self.add("proctwin"), self.add("proc")
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=subject,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        inside, _unreadable = sweep.processes_in(subject)
+        self.assertIn(proc.pid, inside or [], "the fixture process is not inside the worktree")
+        self.fire("proctwin", twin)
+        with self.subTest(control="clean pushed twin is removed"):
+            self.assertRemoved(twin)
+        self.fire("proc", subject)
+        with self.subTest(arm="process inside"):
+            self.assertKept(subject)
+            self.assertIsNone(proc.poll(), "the process inside the own worktree was stopped")
+
+
+class AgentEndOtherWorktreeTests(_AgentEndFixture):
+    """Owner ruling 2026-10-15: the same SubagentStop run also removes ANOTHER finished agent's tree
+    under `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
+    ref, holds no live lock, and has been idle 30 minutes or more. A tree idle less than 30 minutes
+    stays. So does a worktree outside `agent-*`. Each tree is aged last, right before the hook runs,
+    so a git call earlier in the run cannot reset its idle time."""
+
+    def test_an_other_agent_tree_idle_31_minutes_is_removed_and_29_minutes_is_kept(self):
+        ending = self.add("endnow")
+        old = self.add("oldidle")
+        recent = self.add("recentidle")
+        dirty = self.add("dirtyidle")
+        self.dirty(dirty)
+        locked = self.add("lockedidle")
+        self.lock(locked, self.live_lock_reason("lockedidle"))
+        lane = self.add_other_lane("lane-free")
+        for path, minutes in ((old, 31), (recent, 29), (dirty, 31), (locked, 31), (lane, 31)):
+            _age_admin_files(path, minutes * 60)
+        # Control: the aging landed on the reads the hook makes, on both sides of the 30 minute line.
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(old), 31 * 60 - 60, "old tree is not 31 min idle")
+        self.assertLess(sweep.worktree_idle_seconds(recent), 30 * 60, "recent tree is not under 30 min idle")
+        self.fire("endnow", ending)
+        with self.subTest(case="clean, pushed, idle 31 min"):
+            self.assertRemoved(old)
+        with self.subTest(case="clean, pushed, idle 29 min"):
+            self.assertKept(recent)
+        with self.subTest(case="dirty, idle 31 min"):
+            self.assertKept(dirty)
+        with self.subTest(case="live lock, idle 31 min"):
+            self.assertKept(locked)
+        with self.subTest(case="outside agent-*, idle 31 min"):
+            self.assertKept(lane)
 
 
 BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
