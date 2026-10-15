@@ -14,16 +14,27 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptPath = $MyInvocation.MyCommand.Path
 $RepoDir   = if ($ScriptPath) { Split-Path -Parent $ScriptPath } else { '' }
+# git with the error preference off: a failing native call must not throw. Output on stdout only.
+function Get-Git { $ErrorActionPreference = 'Continue'; & git @args 2>$null }
+function Get-FullDir([string]$p) { [IO.Path]::GetFullPath($p).TrimEnd('\') }
+$CloneDir = $RepoDir     # the clone that holds .git\hooks; $RepoDir moves to the pinned checkout below
+$IsLinked = $false
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
 # worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
+# Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked worktree
+# allowed.
 if ($RepoDir) {
     try {
-        $gd = & git -C $RepoDir rev-parse --git-dir 2>$null
-        if ($LASTEXITCODE -eq 0) { $gc = & git -C $RepoDir rev-parse --git-common-dir 2>$null }
+        $gd = Get-Git -C $RepoDir rev-parse --git-dir
+        if ($LASTEXITCODE -eq 0) { $gc = Get-Git -C $RepoDir rev-parse --git-common-dir }
         if ($LASTEXITCODE -eq 0 -and $gd -and $gc -and "$gd" -ne "$gc") {
-            Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone."
-            exit 1
+            $IsLinked = $true
+            $m = (Get-Git -C $RepoDir worktree list --porcelain | Select-Object -First 1) -replace '^worktree ', ''
+            if (-not $m -or (Get-FullDir $RepoDir) -ine ((Get-FullDir $m) + '-live')) {
+                Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone$(if ($m) { " $m" })."
+                exit 1
+            }
         }
     } catch { }
 }
@@ -39,6 +50,32 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
     Log "cannot locate this clone (CLAUDE.md and settings.json not found next to the script)."
     Log "run it from the clone: powershell -ExecutionPolicy Bypass -File .\install.ps1"
     exit 1
+}
+
+# Decision merge-reinstalls-from-main: run from a clone that has a branch named main, the links
+# point at the pinned checkout <clone>-live, a worktree on a detached HEAD at main's commit, never
+# at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh
+# moves it. A clone with no main branch stays unpinned.
+if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
+    $MainCommit = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+    if ($LASTEXITCODE -eq 0 -and $MainCommit) {
+        $Pin = (Get-FullDir $RepoDir) + '-live'
+        if (-not (Test-Path -LiteralPath $Pin)) {
+            Get-Git -C $RepoDir worktree add -q --detach $Pin $MainCommit | Out-Null
+            if ($LASTEXITCODE -ne 0) { Log "ERROR: cannot make the pinned checkout $Pin; free that path and run install.ps1 again."; exit 1 }
+            Log "made the pinned checkout $Pin at main"
+        } else {
+            $pc = Get-Git -C $Pin rev-parse --path-format=absolute --git-common-dir
+            $rc = Get-Git -C $RepoDir rev-parse --path-format=absolute --git-common-dir
+            if (-not $pc -or -not $rc -or (Get-FullDir $pc) -ine (Get-FullDir $rc)) {
+                Log "ERROR: $Pin is not a worktree of $RepoDir; move it aside and run install.ps1 again."
+                exit 1
+            }
+        }
+        $RepoDir = $Pin
+    } else {
+        Log "WARN: $RepoDir has no branch named main; the links follow the clone's checked-out branch"
+    }
 }
 
 # One dated line per install.ps1 run, on every exit path, so a copy-mode machine has a record
@@ -83,7 +120,7 @@ function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
 # Returns 'installed' or 'skipped', for the install-log summary.
 function Install-PostMergeHook {
-    $hooksDir = Join-Path $RepoDir '.git\hooks'
+    $hooksDir = Join-Path $CloneDir '.git\hooks'
     if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return 'skipped' }
     $hookPath = Join-Path $hooksDir 'post-merge'
     $marker   = '# claude-settings post-merge hook'

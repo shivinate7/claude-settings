@@ -162,11 +162,47 @@ else
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
 
+# Canonical path, so C:/x and /c/x compare equal. Prints nothing when DIR is empty or missing.
+canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
+# Absolute common git dir of DIR: the same for a clone and every worktree of it.
+common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+# The main working tree of the repo DIR belongs to: the first entry of the worktree list.
+clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'; }
+
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
+# Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
+# worktree allowed.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
-  log "ERROR: $SRC is a linked git worktree; run the installer from the main clone."
-  exit 1
+  m=$(clone_of "$SRC")
+  if [ -z "$m" ] || [ "$(canon "$SRC")" != "$(canon "$(dirname "$m")")/$(basename "$m")-live" ]; then
+    log "ERROR: $SRC is a linked git worktree; run the installer from the main clone${m:+ $m}."
+    exit 1
+  fi
+fi
+
+# Local install from a clone that has a branch named main: the links point at the pinned
+# checkout <clone>-live, a worktree on a detached HEAD at main's commit, never at the clone,
+# whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
+# mode and a clone with no main branch stay unpinned.
+if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_worktree "$SRC"; then
+  if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
+    PIN="$SRC-live"
+    if [ ! -e "$PIN" ]; then
+      git -C "$SRC" worktree add -q --detach "$PIN" "$main_commit" \
+        || { log "ERROR: cannot make the pinned checkout $PIN; free that path and run the installer again."; exit 1; }
+      log "made the pinned checkout $PIN at main"
+    else
+      pin_common=$(canon "$(common_dir "$PIN")")
+      if [ -z "$pin_common" ] || [ "$pin_common" != "$(canon "$(common_dir "$SRC")")" ]; then
+        log "ERROR: $PIN is not a worktree of $SRC; move it aside and run the installer again."
+        exit 1
+      fi
+    fi
+    SRC="$PIN"
+  else
+    log "WARN: $SRC has no branch named main; the links follow the clone's checked-out branch"
+  fi
 fi
 
 if [ -z "$SRC" ]; then
