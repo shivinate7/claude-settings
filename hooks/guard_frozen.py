@@ -8,7 +8,7 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _drop_heredoc_bodies, _expanded, _resolved, norm, split_segments,
+    REDIRECT, _expanded, _resolved, norm, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -229,79 +229,136 @@ def _resolve_vars(cmd: str) -> str:
     return _VAR_TOKEN.sub(step, cmd)
 
 
-# DATA IS NOT A WRITE. Incident 2026-10-14: a reviewer's probe piped a JSON sample that held a cap
-# write into `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing.
-# FAIL CLOSED (review round 1, owner's orchestrator call). Quoted text and a heredoc body are data only
-# when EVERY segment of the command starts with a known reader that runs nothing it is handed: `echo`,
-# `printf`, `cat`, `grep`, `git`, `gh`, `jq`, `wc`, a `python script.py` that runs a file. Any other
-# command word keeps all text in view: a shell, an interpreter body (`python3 <<EOF`, `perl`, `node`),
-# `env`, `flock`, `script`, `xargs`, `eval`, `iex`, a scriptblock, a quoted or variable command word, a
-# subshell, or a command not listed. So does a segment with a backtick, a backslash before a quote, or
-# an ANSI-C `$'`: the scanner's quote reading may then differ from the shell's. A word that holds a
-# quote is read in whole: the text of each quote is its own words, so `system("sh", "-c", "tee P")`
-# shows its `tee P`.
-# RESIDUAL GAPS, each a debt: a write made by a program's own code (cap-write-by-python-unseen), and
+# DATA IS NOT A WRITE. Incident 2026-10-14: the guard asked the owner 29 times, in bypass mode,
+# for commands that only named the cap key or a frozen path as text. Owner ruling: fix the guard,
+# and let no real write through. A list of "reader" commands does not converge (git, gh, rg, sort
+# and python run text they are given), so quoted text is data in TWO places only (review option A):
+#  (a) the value of a named message flag: `git [-C dir] commit` -m, --message or -F, and
+#      `gh pr|issue create|edit` --title, --body, -t or -b;
+#  (b) a quoted argument of a pure printer (`echo`, `printf`, `cat`, `grep`, `wc`, `jq`).
+# Either is data only when its output runs nowhere: a pipe only into a printer or a
+# `python script.py`, and a write to a file only when every segment of the command is a printer or
+# a `cd`. A redirect target is never data. All other text stays in view. Each segment is judged
+# alone, so a leading `cd dir &&` or `Set-Location dir;` does not change the answer.
+# FAIL CLOSED. No text is data when the command holds, outside single quotes, a backtick, `$(`,
+# `$'`, `$"`, `<(`, `>(`, a backslash before a quote, or an unmated quote: the shell may then read
+# its quotes differently from the scanner. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
+# holds no data: a background job, a call operator, a PowerShell group such as `(iex "...")`.
+# A word in view that holds a quote is read in whole: the text of each quote is its own words, so
+# `system("sh", "-c", "tee P")` shows its `tee P`.
+# RESIDUAL GAPS, each a debt: a write made by a program's own code (cap-write-by-python-unseen);
 # `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"` (debts
-# shell-write-miss-pipe-heredoc, -eval-heredoc, -subshell, -dq-substitution). Main missed these too.
-_READERS = frozenset((
-    "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "head", "tail", "wc", "jq", "sort",
-    "uniq", "ls", "tr", "cut", "diff", "cmp", "git", "gh", "write-output", "write-host"))
-_PYTHON = frozenset(("python", "python3", "py"))
-_UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]""")
+# shell-write-miss-pipe-heredoc, -eval-heredoc, -subshell, -dq-substitution); `sort -o P`,
+# `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space
+# (shell-write-miss-sort-output, -git-diff-output, -git-config-file, -noclobber, -spaced-target).
+# Main missed these too.
+_PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
+_QUIET = _PRINTERS | {"cd", "set-location"}
+_MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
+_GH_MESSAGE_CALLS = frozenset((
+    ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
+_PYTHON = frozenset(("python", "python3"))
+_UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(""")
+_GROUP_MARK = re.compile(r"[&(){}]")
+_FD_DUP = re.compile(r"\d*>&\d*|&>")
+_COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
+_REDIRECT_CHARS = frozenset("0123456789<>&|")
+_NULL_TARGETS = ("/dev/null", "nul", "$null")
 
 
-def _unsafe_segment(segment: str) -> bool:
-    """True when the segment holds, outside single quotes, a backtick, `$(`, `$'`, `$"` or a
-    backslash before a quote. The shell may then read its quotes differently from the scanner.
-    Single-quoted text is skipped whole: a `\"` in a JSON sample there is plain text."""
-    index, quote = 0, ""
-    while index < len(segment):
-        char = segment[index]
+def _scan(segment: str):
+    """(fail closed?, the segment's text outside quotes). Single-quoted text is skipped whole, so a
+    `\\"` in a JSON sample there is plain text."""
+    plain, quote = [], ""
+    for index, char in enumerate(segment):
         if quote == "'":
             quote = "" if char == "'" else quote
-        elif quote == '"' and char == "\\":
-            index += 1   # an escaped character in double quotes
-        elif _UNSAFE_MARK.match(segment, index) and not (quote == '"' and char == "\\"):
-            return True
+        elif _UNSAFE_MARK.match(segment, index):
+            return True, ""
         elif char in "'\"":
             quote = "" if quote == char else (quote or char)
-        index += 1
-    return bool(quote)   # a quote with no mate: fail closed
-_COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
-_ASSIGNMENT_WORD = re.compile(r"[A-Za-z_]\w*=[^\s'\"`$]*")
-_DATA_WORD = re.compile(r"[\s<>|;&]")
+        elif not quote:
+            plain.append(char)
+    return bool(quote), "".join(plain)   # a quote with no mate: fail closed
+
+
+def _name(word: str) -> str:
+    """The command name of a word, or '' when the word is quoted or built from a variable."""
+    if _COMMAND_WORD_HOLDS.search(word):
+        return ""
+    return word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+
+
+def _is_redirect(word: str) -> bool:
+    return bool(word) and set(word) <= _REDIRECT_CHARS
 
 
 def _runs_a_file(args) -> bool:
-    """True for `python [-flags] script ...`: a script file, no `-c`, `-m` or `-` (stdin) code."""
+    """True for `python [-flags] script ...`: it runs a file and reads stdin as data. `-c`, `-m`,
+    `-i`, `-` and a flag not known here fail closed."""
+    args = iter(args)
     for arg in args:
-        if arg in ("-c", "-m", "-") or arg.startswith("-c") or arg.startswith("-m"):
-            return False
         if not arg.startswith("-"):
             return True
+        if arg == "-" or arg.startswith("--"):
+            return False
+        for place, letter in enumerate(arg[1:], 2):
+            if letter in "WX":   # takes a value: glued, or the next word
+                if place == len(arg):
+                    next(args, None)
+                break
+            if letter not in "BEIOsSuqv":
+                return False
     return False
 
 
-def _reader_segment(segment: str, words) -> bool:
-    """True when the segment's command word is a known reader that runs none of its text."""
-    if _unsafe_segment(segment):
-        return False
-    index = 0
-    while index < len(words) and _ASSIGNMENT_WORD.fullmatch(words[index]):
-        index += 1
-    if index >= len(words):
-        return True   # assignments only: nothing runs
-    word = words[index]
-    if _COMMAND_WORD_HOLDS.search(word):
-        return False
-    name = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+def _kind(words, plain: str) -> str:
+    """'printer', 'message', 'python', 'cd' or '' for one segment."""
+    if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
+        return ""
+    name = _name(words[0])
+    if name in _QUIET:
+        return "cd" if name not in _PRINTERS else "printer"
     if name in _PYTHON:
-        return "<<" not in segment and _runs_a_file(words[index + 1:])
-    if name not in _READERS:
-        return False
-    if name in ("git", "gh") and any(w.lstrip("'\"").startswith("!") for w in words):
-        return False   # an alias that runs a shell
-    return True
+        return "python" if _runs_a_file(words[1:]) else ""
+    if name == "git":
+        index = 1
+        while words[index:index + 1] == ["-C"]:
+            index += 2
+        return "message" if words[index:index + 1] == ["commit"] else ""
+    if name == "gh" and tuple(words[1:3]) in _GH_MESSAGE_CALLS:
+        return "message"
+    return ""
+
+
+def _writes_a_file(words) -> bool:
+    """True when the segment redirects output onto a file, not a null device or a descriptor."""
+    for index, word in enumerate(words):
+        if ">" in word and _is_redirect(word) and not word.endswith("&"):
+            target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
+            if target not in _NULL_TARGETS and not target.startswith("&"):
+                return True
+    return False
+
+
+def _data_words(kind: str, words):
+    """The indexes of the words that are data in a printer or message segment."""
+    data = set()
+    if kind == "printer":
+        for index in range(1, len(words)):
+            if ("'" in words[index] or '"' in words[index]) and not _is_redirect(words[index - 1]):
+                data.add(index)
+        return data
+    name = _name(words[0])
+    flags = _MESSAGE_FLAGS[name]
+    for index, word in enumerate(words):
+        if word in flags or (name == "git" and re.fullmatch(r"-[A-Za-z]*m", word)):
+            if index + 1 < len(words) and not _is_redirect(words[index + 1]):
+                data.add(index + 1)
+        elif any(word.startswith(flag + "=") if flag.startswith("--")
+                 else word.startswith(flag) and len(word) > 2 for flag in flags):
+            data.add(index)   # a glued value: --body=..., -m"..."
+    return data
 
 
 def _words_of(word: str):
@@ -315,20 +372,30 @@ def _words_of(word: str):
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
     cmd = _resolve_vars(cmd)
-    bare_cmd = _drop_heredoc_bodies(cmd)
-    parsed = [(seg, _quoted_words(seg)) for seg in split_segments(bare_cmd) if seg.strip()]
-    data_only = all(_reader_segment(seg, words) for seg, words in parsed)
-    if not data_only:   # a heredoc body fed to anything else stays in view
-        parsed = [(seg, _quoted_words(seg)) for seg in split_segments(cmd) if seg.strip()]
-    for _segment, raw in parsed:
+    ends = []
+    segments = split_segments(cmd, ends)
+    scans = [_scan(segment) for segment in segments]
+    closed = any(unsafe for unsafe, _plain in scans)
+    parsed = [_quoted_words(segment) for segment in segments]
+    kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
+    quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    for number, raw in enumerate(parsed):
+        data = ()
+        if kinds[number] in ("printer", "message"):
+            last = number
+            while last + 1 < len(kinds) and ends[last] == "|":
+                last += 1
+            chain = range(number, last + 1)
+            runs_nowhere = all(kinds[k] in ("printer", "python") for k in chain[1:])
+            to_file = any(_writes_a_file(parsed[k]) for k in chain)
+            if runs_nowhere and (quiet or not to_file):
+                data = _data_words(kinds[number], raw)
         words = []
-        for number, word in enumerate(raw):
-            quoted = "'" in word or '"' in word
-            after_redirect = number > 0 and REDIRECT.fullmatch(raw[number - 1])
-            if data_only and quoted and _DATA_WORD.search(word) and not after_redirect:
-                words.append('""')   # data handed to a reader: no redirect or `tee` in it runs
+        for index, word in enumerate(raw):
+            if index in data:
+                words.append('""')   # data: no redirect or `tee` in it runs
             else:
-                words.extend(_words_of(word) if quoted else [word])
+                words.extend(_words_of(word) if "'" in word or '"' in word else [word])
         text = " ".join(words)
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
