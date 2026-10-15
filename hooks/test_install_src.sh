@@ -2141,6 +2141,178 @@ pinoff3() {
   fi
 }
 
+# ---- install-set cases (owner ruling 2026-10-15 17:40): one install swaps every guard file at once,
+# and one install runs at a time. Copy mode is `install.sh --cloud`: only that path stamps each guard
+# file with its INSTALL_ID through put_file, so only that path can show a mix. install.sh has no
+# seam, so a `mv` shim first on PATH holds an install between two guard landings. That is the stall a
+# held file makes on Windows (install-set.test.ps1 uses a share lock). The shim logs each guard landing
+# with its build. The stall outlasts guard.py's own load wait (_LOAD_WAIT_SECONDS, read from guard.py),
+# so a guard that still fails after that wait is a crash a user would see.
+TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 150"
+
+# The two files the install-set cases share: the probe that prints the INSTALL_IDs the guard loads, and
+# the guard payload, a plain `ls`. install-set.test.ps1 has the same probe (Get-LoadedId).
+install_set_setup() {
+  cat > "$work/loaded-ids.py" <<'EOF'
+import runpy, sys
+ns = runpy.run_path(sys.argv[1], run_name="guard_probe")
+ids = {str(getattr(m, "INSTALL_ID", "(none)")) for name, m in list(sys.modules.items()) if name.startswith("guard")}
+ids.add(str(ns.get("INSTALL_ID", "(none)")))
+print("\n".join(sorted(ids)))
+EOF
+  printf '%s' '{"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/"}' > "$work/guard-payload.json"
+}
+
+# A guard fixture at build $2 in clone folder $1: install.sh, the landed-dirs list, the install files, and
+# guard.py and each guard_*.py from this repo with a "# build $2" line appended. Mirrors New-Clone in
+# install-set.test.ps1.
+make_guard_clone() {
+  mkdir -p "$1/hooks"
+  cp "$INSTALL_SH" "$1/install.sh"
+  cp "$REPO_ROOT/landed-dirs.txt" "$1/landed-dirs.txt"
+  printf '# fixture CLAUDE.md %s\n' "$2" > "$1/CLAUDE.md"
+  printf '{}\n' > "$1/settings.json"
+  for f in "$REPO_ROOT/hooks/guard.py" "$REPO_ROOT"/hooks/guard_*.py; do
+    b=$(basename "$f")
+    { cat "$f"; printf '\n# build %s\n' "$2"; } > "$1/hooks/$b"
+  done
+}
+
+# The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
+# shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
+# logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds. It runs the real mv. After the landing
+# it logs "landed <epoch seconds> <build>". Every other mv passes straight through.
+make_swap_bin() {
+  mkdir -p "$1"
+  real_mv=$(command -v mv)
+  cat > "$1/mv" <<EOF
+#!/bin/sh
+dest=""
+for a in "\$@"; do dest="\$a"; done
+case "\$dest" in
+  */hooks/guard*.py)
+    if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ]; then
+      printf 'paused\n' >> "\$SWAP_EVENTS"; sleep "\$SWAP_PAUSE"
+    fi ;;
+esac
+"$real_mv" "\$@" || exit \$?
+case "\$dest" in
+  */hooks/guard*.py)
+    printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest" | head -n1)" >> "\$SWAP_EVENTS" ;;
+esac
+EOF
+  chmod +x "$1/mv"
+}
+
+# One copy-mode install of clone $1 into config dir $2, logging guard landings to events file $3. $4,
+# when given, is the stall in seconds before the second guard landing. The caller sets $h (home) and
+# $swap_bin (the shim folder). Run it in the background to overlap two installs.
+run_cloud() {
+  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" ${4:+SWAP_PAUSE="$4"} \
+      PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud )
+}
+
+# The distinct INSTALL_ID values the real guard loads from config dir $1, one per line.
+loaded_ids() {
+  env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$1" HOME="$h" PYTHONPATH= \
+    python3 -B "$work/loaded-ids.py" "$1/hooks/guard.py" 2>/dev/null | sort -u
+}
+
+# One guard run through the installed hook, the way Claude Code runs it: the payload on stdin. Stdout
+# goes to file $2. Empty stdout is an allow. A crash deny names guard-crash.
+guard_run() {
+  env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$1" HOME="$h" CLAUDE_GUARD_ROOT_PID="$$" PYTHONPATH= \
+    python3 -B "$1/hooks/guard.py" < "$work/guard-payload.json" > "$2" 2>/dev/null
+}
+
+# ---- swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash ----
+swap1sh() {
+  name="swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash, and after it the guard loads one new set"
+  install_set_setup
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/swap1sh-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/swap1sh-one" one
+  make_guard_clone "$work/swap1sh-two" two
+  wait_s=$(sed -n 's/^_LOAD_WAIT_SECONDS = \([0-9][0-9]*\).*/\1/p' "$REPO_ROOT/hooks/guard.py" | head -n1)
+  pause=$(( ${wait_s:-5} * 2 + 2 ))
+  ev1="$work/swap1sh-ev1"; ev2="$work/swap1sh-ev2"; : > "$ev1"; : > "$ev2"
+  run_cloud "$work/swap1sh-one" "$cfg" "$ev1" > "$work/swap1sh-run1" 2>&1; rc1=$?
+  id1=$(loaded_ids "$cfg")
+  run_cloud "$work/swap1sh-two" "$cfg" "$ev2" "$pause" > "$work/swap1sh-run2" 2>&1 &
+  p2=$!
+  # Bounded sampler: real guard runs while install 2 is alive, at most 300 of them.
+  loads=0; crashes=0; others=0; n=0; gout="$work/swap1sh-guard.out"
+  while kill -0 "$p2" 2>/dev/null && [ "$n" -lt 300 ]; do
+    n=$((n + 1))
+    guard_run "$cfg" "$gout"
+    loads=$((loads + 1))
+    if grep -q 'guard-crash' "$gout"; then crashes=$((crashes + 1))
+    elif [ -s "$gout" ]; then others=$((others + 1)); fi
+  done
+  wait "$p2"; rc2=$?
+  stalled=$(grep -c '^paused' "$ev2")
+  id2=$(loaded_ids "$cfg")
+
+  if [ "$rc1" -ne 0 ] || [ "$(printf '%s\n' "$id1" | grep -c .)" != 1 ]; then
+    bad "$name" "setup: install 1 exit $rc1, loaded ids [$id1]"
+  elif [ "$stalled" != 1 ]; then bad "$name" "precondition: the stall never fired, so the case proves nothing"
+  elif [ "$rc2" -ne 0 ]; then bad "$name" "install 2 exit $rc2: $(cat "$work/swap1sh-run2")"
+  elif [ "$crashes" -gt 0 ]; then bad "$name" "$crashes of $loads guard runs during install 2 were guard-crash denies, while install 2 was stalled between guard landings"
+  elif [ "$others" -gt 0 ]; then bad "$name" "$others of $loads guard runs during install 2 were a deny, not an allow"
+  elif [ "$loads" -lt 3 ]; then bad "$name" "precondition: only $loads guard runs during install 2, so the window is not covered"
+  elif [ "$(printf '%s\n' "$id2" | grep -c .)" != 1 ] || [ "$id2" = "$id1" ]; then
+    bad "$name" "after install 2 the guard loads [$id2] (install 1: [$id1]), want one new id"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- lock1sh: a second install waits for the first, or refuses with one clear line ----------------
+lock1sh() {
+  name="lock1sh: a second copy-mode install started while the first is stalled lands no guard file before the first exits, or exits with one lock line"
+  install_set_setup
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/lock1sh-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/lock1sh-one" A
+  make_guard_clone "$work/lock1sh-two" B
+  evA="$work/lock1sh-evA"; evB="$work/lock1sh-evB"; : > "$evA"; : > "$evB"
+  run_cloud "$work/lock1sh-one" "$cfg" "$evA" 6 > "$work/lock1sh-runA" 2>&1 &
+  pA=$!
+  sleep 0.3
+  alive=no; kill -0 "$pA" 2>/dev/null && alive=yes
+  run_cloud "$work/lock1sh-two" "$cfg" "$evB" > "$work/lock1sh-runB" 2>&1 &
+  pB=$!
+  # Bounded sampler: it records the second when install A exits, at most 3000 polls.
+  aExit=""; n=0
+  while { kill -0 "$pA" 2>/dev/null || kill -0 "$pB" 2>/dev/null; } && [ "$n" -lt 3000 ]; do
+    n=$((n + 1))
+    if [ -z "$aExit" ] && ! kill -0 "$pA" 2>/dev/null; then aExit=$(date +%s); fi
+    sleep 0.05
+  done
+  wait "$pA"; rcA=$?
+  wait "$pB"; rcB=$?
+  [ -n "$aExit" ] || aExit=$(date +%s)
+  bFirst=$(sed -n 's/^landed \([0-9][0-9]*\) .*/\1/p' "$evB" | head -n1)
+  lockLines=$(grep -ciE 'lock|another install|already running|waiting' "$work/lock1sh-runB")
+
+  if [ "$alive" != yes ]; then bad "$name" "precondition: install A had already exited when install B started, so the case proves nothing"
+  elif [ "$(grep -c '^paused' "$evA")" -lt 1 ]; then
+    bad "$name" "precondition: install A never stalled, so the case proves nothing; A events [$(tr '\n' ' ' < "$evA")], A output [$(tail -n 3 "$work/lock1sh-runA" | tr '\n' ' ')]"
+  elif [ -n "$bFirst" ] && [ $((aExit - bFirst)) -ge 2 ]; then
+    bad "$name" "install B landed its first guard file $((aExit - bFirst)) s before install A exited, while A was stalled"
+  elif [ -z "$bFirst" ] && [ "$lockLines" != 1 ]; then
+    bad "$name" "install B landed no guard file and printed $lockLines lock line(s), want one clear line"
+  elif [ "$rcA" -ne 0 ]; then bad "$name" "install A exit $rcA: $(cat "$work/lock1sh-runA")"
+  elif [ -n "$bFirst" ] && [ "$rcB" -ne 0 ]; then bad "$name" "install B landed its guard files but exit $rcB"
+  else
+    builds=$(sed -n 's/^# build //p' "$cfg"/hooks/guard*.py | sort -u | wc -l | tr -d ' ')
+    if [ "$builds" = 1 ]; then ok "$name"
+    else bad "$name" "after both installs the guard files carry $builds builds, want one whole set"
+    fi
+  fi
+  rm -rf "$h"
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2211,6 +2383,8 @@ run pinned_wt1
 run pinoff1
 run pinoff2
 run pinoff3
+run swap1sh
+run lock1sh
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

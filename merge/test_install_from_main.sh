@@ -412,7 +412,101 @@ case11() {
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11"
+# ---- Case 12: link mode, the pinned checkout moves from A to B while the links are loaded -----
+# Owner ruling 2026-10-15 (install-set). A link in ~/.claude points into <clone>-live, and the move
+# is the git switch in this helper, which writes the files one at a time. Link mode carries the
+# placeholder in every guard file, so guard.py's INSTALL_ID check cannot see a mix here: the case
+# samples the loads itself. The fixture's guard_core.py and guard_sib.py carry a marker that differs
+# between A and B. A smudge filter holds the switch on hooks/guard_pause.txt, which sorts between
+# them. While it holds, guard_core.py is B and guard_sib.py is still A. Each load must read all-A or
+# all-B. The stub guard retries a failed load for a few seconds, as guard.py does, so a load that
+# falls between git's unlink and write of a file is not a crash.
+guard_fixture() {  # $1 clone, $2 marker: the stub guard and its two modules at one commit
+  mkdir -p "$1/hooks"
+  printf '%s\n' 'import guard_core' 'import guard_sib' 'print(guard_core.MARK, guard_sib.MARK)' > "$1/hooks/guard.py"
+  printf 'MARK = "%s"\n' "$2" > "$1/hooks/guard_core.py"
+  printf 'MARK = "%s"\n' "$2" > "$1/hooks/guard_sib.py"
+  printf 'marker %s\n' "$2" > "$1/hooks/guard_pause.txt"
+  printf 'hooks/guard_pause.txt filter=pause\n' > "$1/.gitattributes"
+}
+
+# One guard load through the links, retried up to 3 s as guard.py retries a failed load. Prints the
+# pair the stub prints, or nothing when no attempt loaded. $1 is the config dir; $h is the home.
+link_probe() {
+  i=0; got=""
+  while [ "$i" -lt 15 ]; do
+    got=$(env CLAUDE_CONFIG_DIR="$1" HOME="$h" PYTHONPATH= python3 -B "$1/hooks/guard.py" 2>/dev/null) \
+      && [ -n "$got" ] && break
+    got=""; i=$((i + 1)); sleep 0.2
+  done
+  printf '%s' "$got"
+}
+
+case12() {
+  name="case12: a pinned-checkout move from A to B, sampled through the links, never loads a mix or a crash"
+  if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here, so the link check cannot run"; return; fi
+  d="$work/case12"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  guard_fixture "$d/clone" A
+  git -C "$d/clone" add -A
+  git -C "$d/clone" commit -q -m A
+  pin_at_main "$d/clone"
+  git -C "$d/clone" switch -q -c trunk
+  guard_fixture "$d/clone" B
+  git -C "$d/clone" add -A
+  git -C "$d/clone" commit -q -m B
+  git -C "$d/clone" branch -q -f main trunk
+  pause="$d/pause-smudge.sh"
+  cat > "$pause" <<'EOF'
+#!/bin/sh
+# Smudge filter for hooks/guard_pause.txt. While $PAUSE_FLAG exists, it logs the call and sleeps
+# $PAUSE_SECS before git writes the file. Otherwise it passes the content through.
+if [ -e "$PAUSE_FLAG" ]; then printf '%s\n' "$1" >> "$PAUSE_LOG"; sleep "$PAUSE_SECS"; fi
+cat
+EOF
+  git -C "$d/clone" config filter.pause.smudge "sh \"$pause\" %f"
+  git -C "$d/clone" config checkout.workers 1
+  cfg="$h/.claude-cfg"; mkdir -p "$cfg/hooks"
+  for f in guard.py guard_core.py guard_sib.py; do
+    MSYS=winsymlinks:nativestrict ln -s "$d/clone-live/hooks/$f" "$cfg/hooks/$f" \
+      || { bad "$name" "could not link $f into $cfg/hooks"; return; }
+  done
+
+  PAUSE_FLAG="$d/pause.flag"; PAUSE_LOG="$d/pause.log"; : > "$PAUSE_FLAG"; : > "$PAUSE_LOG"
+  ( cd "$d/clone" && env HOME="$h" CLAUDE_CONFIG_DIR="$cfg" PATH="$SHIM:$PATH" \
+      PAUSE_FLAG="$PAUSE_FLAG" PAUSE_LOG="$PAUSE_LOG" PAUSE_SECS=2 bash "$SCRIPT" ) > "$d/helper.out" 2>&1 &
+  hp=$!
+  # Bounded sampler: it reads local files through the links while the move runs, and stops when the
+  # move exits or after 400 loads.
+  loads=0; mixed=0; crashes=0; seen=""; n=0
+  while kill -0 "$hp" 2>/dev/null && [ "$n" -lt 400 ]; do
+    n=$((n + 1))
+    got=$(link_probe "$cfg")
+    loads=$((loads + 1))
+    case "$got" in
+      "A A"|"B B") ;;
+      "A B"|"B A") mixed=$((mixed + 1)); seen="$got" ;;
+      *) crashes=$((crashes + 1)) ;;
+    esac
+  done
+  wait "$hp"; hrc=$?
+  paused=$(grep -c . "$PAUSE_LOG")
+  final=$(link_probe "$cfg")
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+  want_head=$(git -C "$d/clone" rev-parse main 2>/dev/null)
+
+  if [ "$hrc" -ne 0 ]; then bad "$name" "the helper exited $hrc: $(cat "$d/helper.out")"
+  elif [ "$pin_head" != "$want_head" ]; then bad "$name" "the pinned checkout is at [$pin_head], want main at [$want_head]"
+  elif [ "$mixed" -gt 0 ]; then bad "$name" "$mixed of $loads loads read a mix ($seen) while the pinned checkout moved from A to B"
+  elif [ "$crashes" -gt 0 ]; then bad "$name" "$crashes of $loads loads crashed, with no marker pair after retries"
+  elif [ "$paused" -lt 1 ]; then bad "$name" "precondition: the switch never held, so no load was sampled inside it"
+  elif [ "$loads" -lt 3 ]; then bad "$name" "precondition: only $loads loads ran during the switch"
+  elif [ "$final" != "B B" ]; then bad "$name" "after the move a load read [$final], want [B B]"
+  else ok "$name"
+  fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
