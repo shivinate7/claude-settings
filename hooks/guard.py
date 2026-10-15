@@ -1548,9 +1548,9 @@ def count_steps(text: str) -> int:
 # extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
-# and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution or a `&` in
-# the segment makes it a step. Only a run of them at the head and a run at the tail count.
-UNSAFE_TEXT = re.compile(r"[<>`&]|\$\(|\$\{")
+# and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution, a `&` or a
+# backslash in the segment makes it a step. Only a run of them at the head and a run at the tail count.
+UNSAFE_TEXT = re.compile(r"[<>`&\\]|\$\(|\$\{")  # a backslash may escape a quote the splitter read as a close
 ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
 
@@ -1558,7 +1558,8 @@ COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
 def harmless_lead(tokens: list, end: str) -> bool:
     word, args = tokens[0].lower(), tokens[1:]
     if word == "cd" and end == "&&":
-        return len(args) == 1 or (len(args) == 2 and args[0] in ("-P", "-L"))
+        # `cd -` is the previous folder, which no path in the command names
+        return args != ["-"] and (len(args) == 1 or (len(args) == 2 and args[0] in ("-P", "-L") and args[1] != "-"))
     if word == "export" and end == "&&":
         return bool(args) and all(ASSIGN_WORD.match(arg) for arg in args)
     if word == "set-location" and end == ";":
