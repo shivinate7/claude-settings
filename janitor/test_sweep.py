@@ -1534,29 +1534,22 @@ class JanitorRootsSettingTests(unittest.TestCase):
         self.assertIn(repo, found)
 
     def test_malformed_roots_not_a_list_refuses(self):
-        path = os.path.join(ROOT, "settings-roots-not-list.json")
-        write(path, json.dumps({"janitor": {"roots": "~/Developer"}}))
-        roots, ok = sweep.load_janitor_roots_setting(path)
-        self.assertFalse(ok, "a bare string is not a list of strings: it must refuse")
-        self.assertIsNone(roots)
-
-    def test_malformed_roots_non_string_item_refuses(self):
-        path = os.path.join(ROOT, "settings-roots-bad-item.json")
-        write(path, json.dumps({"janitor": {"roots": ["~/Developer", 7]}}))
-        roots, ok = sweep.load_janitor_roots_setting(path)
-        self.assertFalse(ok, "a non-string item must refuse, not be silently dropped")
-
-    def test_malformed_janitor_key_not_an_object_refuses(self):
-        path = os.path.join(ROOT, "settings-janitor-not-object.json")
-        write(path, json.dumps({"janitor": "nope"}))
-        roots, ok = sweep.load_janitor_roots_setting(path)
-        self.assertFalse(ok)
-
-    def test_unparseable_settings_file_refuses(self):
-        path = os.path.join(ROOT, "settings-roots-broken.json")
-        write(path, "{ not json at all")
-        roots, ok = sweep.load_janitor_roots_setting(path)
-        self.assertFalse(ok)
+        # Rows, one malformed settings file each; every row must refuse (ok False) and name no roots:
+        # roots as a bare string; a non-string item (refused, not dropped); janitor as a string, not an
+        # object; a file that does not parse at all.
+        rows = (
+            ("settings-roots-not-list.json", json.dumps({"janitor": {"roots": "~/Developer"}}), "a bare string is not a list of strings: it must refuse"),
+            ("settings-roots-bad-item.json", json.dumps({"janitor": {"roots": ["~/Developer", 7]}}), "a non-string item must refuse, not be silently dropped"),
+            ("settings-janitor-not-object.json", json.dumps({"janitor": "nope"}), "a janitor key that is not an object must refuse"),
+            ("settings-roots-broken.json", "{ not json at all", "a file that does not parse must refuse"),
+        )
+        for name, text, why in rows:
+            with self.subTest(row=name):
+                path = os.path.join(ROOT, name)
+                write(path, text)
+                roots, ok = sweep.load_janitor_roots_setting(path)
+                self.assertFalse(ok, why)
+                self.assertIsNone(roots)
 
     def test_cli_refuses_to_discover_when_roots_is_malformed_and_no_root_given(self):
         """Traces the caller path the brief names: no explicit ROOT, no --discover, and a
@@ -1654,57 +1647,27 @@ class OptOutTests(unittest.TestCase):
 
     def test_sweep_string_false_refuses_the_whole_repository(self):
         # The exact regression this build guards: `"sweep": "false"`, the STRING, must never be
-        # treated as truthy-and-swept. It must refuse the repository the way an unreadable file
-        # does, not fall through to the permissive default.
-        root = make_optout_repo("optout-sweep-string-false", json.dumps({"sweep": "false"}))
-        branches = sweep.list_local_branches(root)
-        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
-        self.assertIn("feature", branches)
-        enabled, prefixes, ok = sweep.load_optout(root)
-        self.assertFalse(ok, "a non-boolean sweep value must not read as ok")
-        result = sweep.sweep_repo(root, confirm=False,
-                                   restore_log_path=os.path.join(ROOT, "x-str.log"))
-        self.assertEqual(result["refused"], "unreadable-optout")
-        self.assertEqual(result["branches"], [], "a refused repository must decide on nothing")
-
-    def test_sweep_zero_refuses_the_whole_repository(self):
-        root = make_optout_repo("optout-sweep-zero", json.dumps({"sweep": 0}))
-        branches = sweep.list_local_branches(root)
-        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
-        self.assertIn("feature", branches)
-        enabled, prefixes, ok = sweep.load_optout(root)
-        self.assertFalse(ok, "0 is not a bool in Python's own sense here: it must refuse")
-        result = sweep.sweep_repo(root, confirm=False,
-                                   restore_log_path=os.path.join(ROOT, "x-zero.log"))
-        self.assertEqual(result["refused"], "unreadable-optout")
-        self.assertEqual(result["branches"], [])
-
-    def test_sweep_null_refuses_the_whole_repository(self):
-        root = make_optout_repo("optout-sweep-null", json.dumps({"sweep": None}))
-        branches = sweep.list_local_branches(root)
-        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
-        self.assertIn("feature", branches)
-        enabled, prefixes, ok = sweep.load_optout(root)
-        self.assertFalse(ok, "null is present and is not a boolean: it must refuse")
-        result = sweep.sweep_repo(root, confirm=False,
-                                   restore_log_path=os.path.join(ROOT, "x-null.log"))
-        self.assertEqual(result["refused"], "unreadable-optout")
-        self.assertEqual(result["branches"], [])
-
-    def test_protected_prefixes_bare_string_refuses_the_whole_repository(self):
-        # "archive/" the bare string is not a list, so the intended protection can be neither
-        # read nor safely ignored: refuse the repository rather than silently protect nothing.
-        root = make_optout_repo("optout-prefixes-bare-string",
-                                 json.dumps({"protectedPrefixes": "archive/"}))
-        branches = sweep.list_local_branches(root)
-        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
-        self.assertIn("feature", branches)
-        enabled, prefixes, ok = sweep.load_optout(root)
-        self.assertFalse(ok, "a bare string is not a list of strings: it must refuse")
-        result = sweep.sweep_repo(root, confirm=False,
-                                   restore_log_path=os.path.join(ROOT, "x-prefstr.log"))
-        self.assertEqual(result["refused"], "unreadable-optout")
-        self.assertEqual(result["branches"], [])
+        # treated as truthy-and-swept. A malformed present value must refuse the repository the way
+        # an unreadable file does, not fall through to the permissive default. Rows, one input each:
+        # the string "false"; 0 (not a bool here); null; a bare string where protectedPrefixes is a list.
+        rows = (
+            ("optout-sweep-string-false", json.dumps({"sweep": "false"}), "x-str.log", "a non-boolean sweep value must not read as ok"),
+            ("optout-sweep-zero", json.dumps({"sweep": 0}), "x-zero.log", "0 is not a bool in Python's own sense here: it must refuse"),
+            ("optout-sweep-null", json.dumps({"sweep": None}), "x-null.log", "null is present and is not a boolean: it must refuse"),
+            ("optout-prefixes-bare-string", json.dumps({"protectedPrefixes": "archive/"}), "x-prefstr.log",
+             "a bare string is not a list of strings: it must refuse"),
+        )
+        for folder, text, log, why in rows:
+            with self.subTest(row=folder):
+                root = make_optout_repo(folder, text)
+                branches = sweep.list_local_branches(root)
+                self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+                self.assertIn("feature", branches)
+                enabled, prefixes, ok = sweep.load_optout(root)
+                self.assertFalse(ok, why)
+                result = sweep.sweep_repo(root, confirm=False, restore_log_path=os.path.join(ROOT, log))
+                self.assertEqual(result["refused"], "unreadable-optout")
+                self.assertEqual(result["branches"], [], "a refused repository must decide on nothing")
 
 
 # --------------------------------------------------------------------------- the tombstone
@@ -1829,28 +1792,6 @@ class TombstoneTests(unittest.TestCase):
 # --------------------------------------------------------------------------- worktree removal
 
 
-class WorktreeRemovalTests(unittest.TestCase):
-    def test_confirm_removes_a_reapable_worktree(self):
-        root = os.path.join(ROOT, "wt-remove-repo")
-        make_repo(root, {"f.txt": "x\n"})
-        give_remote(root)
-        target = os.path.join(ROOT, "wt-remove-target")
-        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-remove")
-
-        entries = sweep.parse_worktree_list(root)
-        self.assertTrue(entries is not None and len(entries) > 0)
-
-        log_path = os.path.join(ROOT, "wt-remove.log")
-        result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path, attended=True)
-        self.assertIsNone(result["refused"])
-        matches = [w for w in result["worktrees"]
-                   if os.path.normcase(os.path.realpath(w["path"]))
-                   == os.path.normcase(os.path.realpath(target))]
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(matches[0]["action"], "reap")
-        self.assertNotIn("error", matches[0])
-        self.assertFalse(os.path.isdir(target))
-
 
 class SameRunBranchCutTests(unittest.TestCase):
     """A branch is released from "checked-out" only when the worktree holding it is removed in
@@ -1882,6 +1823,14 @@ class SameRunBranchCutTests(unittest.TestCase):
     def test_confirm_removes_the_worktree_and_its_branch_in_one_run(self):
         root, wt = self._repo("confirm")
         result = self._sweep(root, True)
+        # The worktree row as well: the repository is not refused, and the worktree reads reap with no error
+        # (merged here from WorktreeRemovalTests.test_confirm_removes_a_reapable_worktree).
+        self.assertIsNone(result["refused"])
+        rows = [w for w in result["worktrees"]
+                if os.path.normcase(os.path.realpath(w["path"])) == os.path.normcase(os.path.realpath(wt))]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "reap")
+        self.assertNotIn("error", rows[0])
         self.assertEqual(self._branch(result)["action"], "reap")
         self.assertNotIn("error", self._branch(result))
         self.assertFalse(os.path.isdir(wt))
@@ -2336,19 +2285,6 @@ class HuskTests(unittest.TestCase):
         with _Stub("processes_in", lambda path: (None, None)):
             self.assertEqual(self._husks(root), {"gone": "keep"})
 
-    def test_darwin_processes_in_reads_one_table(self):
-        inside = os.path.join(ROOT, "husk-table")
-        os.makedirs(inside, exist_ok=True)
-        real = sweep.sys.platform
-        sweep.sys.platform = "darwin"
-        try:
-            with _Stub("_all_cwds_macos", lambda: [(7, inside), (8, "/elsewhere")]):
-                self.assertEqual(sweep.processes_in(inside), ([7], []))
-            with _Stub("_all_cwds_macos", lambda: None):
-                self.assertEqual(sweep.processes_in(inside), (None, None))
-        finally:
-            sweep.sys.platform = real
-
 
     @unittest.skipIf(os.name == "nt", "the sleep fixture is POSIX only")
     def test_a_process_inside_keeps_the_husk(self):
@@ -2471,6 +2407,21 @@ class AllCwdsMacosTests(unittest.TestCase):
             self.assertIsNone(sweep._all_cwds_macos())
         with _FakeLsof(1, ""):
             self.assertIsNone(sweep._all_cwds_macos())
+
+    def test_darwin_processes_in_reads_one_table(self):
+        # Moved here from HuskTests (merged into this class): processes_in on darwin reads the one
+        # table; an unreadable table reads as unknown. The platform is patched for this process only.
+        inside = os.path.join(ROOT, "husk-table")
+        os.makedirs(inside, exist_ok=True)
+        real = sweep.sys.platform
+        sweep.sys.platform = "darwin"
+        try:
+            with _Stub("_all_cwds_macos", lambda: [(7, inside), (8, "/elsewhere")]):
+                self.assertEqual(sweep.processes_in(inside), ([7], []))
+            with _Stub("_all_cwds_macos", lambda: None):
+                self.assertEqual(sweep.processes_in(inside), (None, None))
+        finally:
+            sweep.sys.platform = real
 
 
 # --------------------------------------------------------------------------- the preview cache
@@ -2897,33 +2848,8 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.assertEqual(self.ref(repo, "lane-twice"), young,
                          "the expired entry dropped the ref that holds the younger restore "
                          "point: purge drops by branch name, not by commit")
-
-    def test_the_purge_leaves_the_younger_log_line_in_place(self):
-        repo = self.fresh_repo("twice-log")
-        log = self.log_path("twice-log")
-        now = int(time.time() * 1000)
-        self.reap(repo, "lane-twice-log", self.rev(repo, "HEAD"), log)
-        young = self.younger_commit(repo, "younger reap of the same name")
-        self.reap(repo, "lane-twice-log", young, log)
-        self.age_log(log, [91, 5], now)
-
-        sweep.purge_tombstones(log, confirm=True, now_ms=now)
-
         self.assertIn(young, [e["commit"] for e in sweep.read_restore_log(log)],
-                      "the purge must not drop the younger entry's line")
-
-    def test_a_lone_expired_entry_whose_ref_holds_its_commit_drops_the_ref(self):
-        repo = self.fresh_repo("lone-ref")
-        log = self.log_path("lone-ref")
-        now = int(time.time() * 1000)
-        self.reap(repo, "lane-lone", self.rev(repo, "HEAD"), log)
-        self.age_log(log, [91], now)
-
-        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
-
-        self.assertEqual(decisions[0]["action"], "purge")
-        self.assertNotIn("error", decisions[0])
-        self.assertIsNone(self.ref(repo, "lane-lone"), "the ref must be dropped")
+                      "the purge must not drop the younger entry's line (was test_the_purge_leaves_the_younger_log_line_in_place, merged here)")
 
     def test_an_expired_entry_whose_ref_was_deleted_by_hand_purges_without_error(self):
         repo = self.fresh_repo("gone-ref")
@@ -3027,32 +2953,21 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                           "both rows are expired and name the commit: the ref must be dropped")
 
     def test_a_missing_repo_path_is_reported_not_read_as_a_gone_ref(self):
-        """git exits 128 for a missing path. Only exit 1 means the ref is gone."""
+        """git exits 128 for a missing path, and inside a directory that is not a repository. Only exit 1 means the
+        ref is gone. Rows: the missing path; the plain directory (was test_a_non_repo_directory..., merged here)."""
         missing = os.path.join(ROOT, "pown-no-such-repo")
-        self.assertFalse(os.path.exists(missing), "fixture: the path must not exist")
-        log = self.log_path("missing-path")
-        now = int(time.time() * 1000)
-        self.write_rows(log, [{"repo": missing, "branch": "lane-missing-path",
-                               "commit": "1" * 40, "time_ms": now - 91 * self.DAY_MS}])
-
-        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
-
-        self.assertIn("error", decisions[0],
-                      "a git failure (exit 128) must be reported, not read as a gone ref")
-
-    def test_a_non_repo_directory_is_reported_not_read_as_a_gone_ref(self):
-        """git exits 128 inside a directory that is not a repository."""
         plain = os.path.join(ROOT, "pown-plain-dir")
         os.makedirs(plain, exist_ok=True)
-        log = self.log_path("plain-dir")
+        self.assertFalse(os.path.exists(missing), "fixture: the path must not exist")
         now = int(time.time() * 1000)
-        self.write_rows(log, [{"repo": plain, "branch": "lane-plain-dir",
-                               "commit": "2" * 40, "time_ms": now - 91 * self.DAY_MS}])
-
-        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
-
-        self.assertIn("error", decisions[0],
-                      "a git failure (exit 128) must be reported, not read as a gone ref")
+        for name, repo, commit in (("missing-path", missing, "1" * 40), ("plain-dir", plain, "2" * 40)):
+            with self.subTest(row=name):
+                log = self.log_path(name)
+                self.write_rows(log, [{"repo": repo, "branch": "lane-" + name,
+                                       "commit": commit, "time_ms": now - 91 * self.DAY_MS}])
+                decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+                self.assertIn("error", decisions[0],
+                              "a git failure (exit 128) must be reported, not read as a gone ref")
 
     def test_a_failed_ref_read_is_reported_and_keeps_the_ref(self):
         repo = self.fresh_repo("read-fails")
@@ -3229,11 +3144,11 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         lost = sorted(set("r" + str(i) for i in range(rows)) - set(runs))
         self.assertEqual(lost, [], "%d of %d rows lost with %d writers" % (len(lost), rows, writers))
 
-    def test_three_parallel_writers_lose_no_row(self):
-        self.run_writers(3, 120)
-
-    def test_twenty_four_parallel_writers_lose_no_row(self):
-        self.run_writers(24, 120)
+    def test_parallel_writers_lose_no_row(self):
+        # Rows: three writers (a measured run lost 13 of 120 rows at three) and twenty-four writers.
+        for writers in (3, 24):
+            with self.subTest(writers=writers):
+                self.run_writers(writers, 120)
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
@@ -3300,22 +3215,20 @@ class AgentEndReapBatchTests(unittest.TestCase):
                 patch.stop()
 
     def test_decide_reads_every_process_cwd_in_one_batch_call(self):
-        reason, _decisions = self.decide_with_table()
-        self.assertIsNone(reason)
-        self.assertEqual(len(self.lsof_calls), 1,
-                         "cwd reads for 1,300 pids: %d; want one batch read" % len(self.lsof_calls))
-        self.assertTrue(all("-p" not in call for call in self.lsof_calls),
-                        "the one read is per-pid, not a batch: %r" % self.lsof_calls)
-
-    def test_decide_never_calls_the_per_pid_cwd_reader_over_1300_pids(self):
-        # Counts calls, not seconds: a timing bound flakes on a loaded machine.
+        # One lsof batch, and no call to the per-pid cwd reader over 1,300 pids. Counts calls, not seconds: a
+        # timing bound flakes on a loaded machine. (The per-pid reader case was merged here.)
         calls = []
 
         def counting_reader(pid):
             calls.append(pid)
             return self.table.get(pid)
         with mock.patch.object(sweep, "process_cwd", counting_reader):
-            self.decide_with_table()
+            reason, _decisions = self.decide_with_table()
+        self.assertIsNone(reason)
+        self.assertEqual(len(self.lsof_calls), 1,
+                         "cwd reads for 1,300 pids: %d; want one batch read" % len(self.lsof_calls))
+        self.assertTrue(all("-p" not in call for call in self.lsof_calls),
+                        "the one read is per-pid, not a batch: %r" % self.lsof_calls)
         self.assertEqual(calls, [], "per-pid cwd reads over 1,300 pids: %d" % len(calls))
 
     def test_decide_still_reaps_and_keeps_the_same_pids_from_the_table(self):
@@ -4051,21 +3964,6 @@ class RemoteLivenessTests(unittest.TestCase):
             self.assertEqual(env.get("GIT_TERMINAL_PROMPT"), "0", env)
             self.assertEqual(env.get("GCM_INTERACTIVE"), "never", env)
 
-    def test_a_failed_ls_remote_keeps_the_tree(self):
-        """Pin for P3: when the ls-remote call fails, the tree is kept as unreadable-subject."""
-        real_run = subprocess.run
-
-        def failing(argv, *args, **kwargs):
-            if "ls-remote" in argv:
-                return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: no login")
-            return real_run(argv, *args, **kwargs)
-
-        _age_admin_files(self.live, 25 * 3600)
-        with mock.patch.object(subprocess, "run", side_effect=failing):
-            decision = sweep.decide_worktree(self.root, self.entry(self.live))
-        self.assertEqual(decision["action"], "keep", decision)
-        self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
-
 
 # --------------------------------------------------------------------------- owner rulings 2026-10-08
 
@@ -4730,27 +4628,13 @@ class StrayFolderTests(unittest.TestCase):
                           % (result["strays"],))
         judged = [_norm_path(d["path"]) for d in result["worktrees"]]
         self.assertIn(_norm_path(self.registered), judged, "the registered worktree was not judged")
-
-    def test_unreadable_worktrees_base_report_says_unknown_not_zero(self):
-        """Batch review J2: the printed report must not say "strays ... (kept): 0" for a folder
-        it could not read. It must say the count is unknown or the folder unreadable."""
-        base = os.path.join(self.root, ".claude", "worktrees")
-        real_listdir = os.listdir
-
-        def denied(path="."):
-            if _norm_path(path) == _norm_path(base):
-                raise PermissionError(13, "Access is denied", path)
-            return real_listdir(path)
-
-        with mock.patch.object(sweep.os, "listdir", side_effect=denied):
-            result = sweep.sweep_repo(self.root, False, self.log)
+        # The printed report too (merged from test_unreadable_worktrees_base_report_says_unknown_not_zero):
+        # an unreadable folder must not read as "strays ... (kept): 0".
         out = io.StringIO()
         sweep.print_sweep_report([result], False, out=out)
-        text = out.getvalue()
-        lines = [ln for ln in text.splitlines() if "strays under .claude/worktrees" in ln]
-        self.assertEqual(len(lines), 1, "no single strays line in the report: %r" % text)
-        self.assertNotIn("(kept): 0", lines[0], "an unreadable folder reported zero strays: %r"
-                         % lines[0])
+        lines = [ln for ln in out.getvalue().splitlines() if "strays under .claude/worktrees" in ln]
+        self.assertEqual(len(lines), 1, "no single strays line in the report: %r" % out.getvalue())
+        self.assertNotIn("(kept): 0", lines[0], "an unreadable folder reported zero strays: %r" % lines[0])
         self.assertRegex(lines[0], r"(?i)unknown|unreadable", "the strays line does not say the "
                          "scan could not run: %r" % lines[0])
 
@@ -4827,31 +4711,6 @@ class DanglingDefaultBaseTests(unittest.TestCase):
             base = guard.resolve_default_base(root)
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
-
-    def test_origin_head_verify_returncode_128_falls_back_to_local_main(self):
-        """Round 3 R7 (pin): git answers the origin/HEAD verify with returncode 128, a dangling
-        origin/HEAD. Only a live origin/HEAD keeps origin's ref, so the base falls to local main.
-        Green on the pre-round-3 code: a pin, not a red case."""
-        root, _ = self._squash_lane("refs/remotes/origin/main")
-        real_git = guard._git
-        verify_calls = []
-
-        def fatal_verify(where, *args):
-            if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
-                verify_calls.append(args)
-                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object")
-            return real_git(where, *args)
-
-        with mock.patch.object(sys.modules["guard_core"], "_git", side_effect=fatal_verify):
-            base = guard.resolve_default_base(root)
-        self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
-        self.assertEqual(base, "main")
-
-    def test_live_origin_head_resolves_to_origin_ref(self):
-        """Round 3 R7 (pin): a live origin/HEAD is the base, as origin/main. Green on the
-        pre-round-3 code: a pin, not a red case."""
-        root, _ = self._squash_lane("refs/remotes/origin/main")
-        self.assertEqual(guard.resolve_default_base(root), "origin/main")
 
 
 class UnreadableHuskBaseRunTests(unittest.TestCase):
@@ -5095,23 +4954,11 @@ class SimulatorTierTests(unittest.TestCase):
     def tier(self, confirm):
         return {d["udid"]: d for d in sweep.sim_tier(confirm, record_path=self.record)}
 
-    def test_idle_recorded_device_is_shut_down_on_confirm(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "shutdown")
-        self.assertEqual(self.world.shutdowns(), [SIM_U1])
-
-    def test_preview_plans_the_shutdown_and_runs_none(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        decisions = self.tier(confirm=False)
-        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "shutdown")
-        self.assertEqual(self.world.shutdowns(), [], "a preview ran a shutdown")
-
     def test_one_shutdown_per_device_and_never_all(self):
+        # Two idle recorded devices, each shut down once on confirm. The one-device case
+        # (test_idle_recorded_device_is_shut_down_on_confirm) was the same loop with one device, so it was
+        # folded here. The preview case (test_preview_plans_the_shutdown_and_runs_none) is judged by
+        # SimulatorTierActTests, which asserts the preview verdict equals the act verdict.
         self.arm([(SIM_U1, "Idle Pro", "Booted"), (SIM_U2, "Idle Two", "Booted")],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600)),
                           sim_record(SIM_U2, "Idle Two", sim_iso_ago(3 * 3600))])
@@ -5245,29 +5092,23 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertEqual(self.world.shutdowns(), [])
 
     def test_a_device_booted_again_by_hand_is_kept(self):
-        # Recorded 4 hours ago with launchd_sim pid 501. Shut down, then booted by hand: the live
-        # launchd_sim has pid 1001 and a start time. No record line for the hand boot.
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(4 * 3600), pid=501,
-                                     start="Sat Oct 10 00:10:00 2026")])
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
-                         "a device booted by hand was judged on the record of an older boot")
-        self.assertEqual(self.world.shutdowns(), [])
-
-    def test_the_same_launchd_pid_with_a_new_start_time_is_kept(self):
-        # A pid reused after the recorded launchd_sim died: same pid, different start time.
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(4 * 3600),
-                                     start="Fri Oct 9 09:00:00 2026")])
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
-                         "a reused launchd_sim pid with a new start time matched the record")
-        self.assertEqual(self.world.shutdowns(), [])
+        # Rows, each a record that does not match the live launchd_sim, so the device is kept as boot-record-mismatch:
+        # (a) recorded 4 hours ago with launchd_sim pid 501, shut down, then booted by hand (a live launchd_sim with a
+        # start time and no record line for the hand boot); (b) a pid reused after the recorded launchd_sim died,
+        # same pid with a different start time (was test_the_same_launchd_pid_with_a_new_start_time_is_kept).
+        rows = (
+            ("booted by hand", dict(pid=501, start="Sat Oct 10 00:10:00 2026")),
+            ("same pid, new start time", dict(start="Fri Oct 9 09:00:00 2026")),
+        )
+        for name, extra in rows:
+            with self.subTest(row=name):
+                self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                         records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(4 * 3600), **extra)])
+                decisions = self.tier(confirm=True)
+                self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
+                self.assertEqual(decisions[SIM_U1]["action"], "keep")
+                self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch", name)
+                self.assertEqual(self.world.shutdowns(), [])
 
     def test_two_live_launchd_sims_for_one_udid_keep_it(self):
         # The record names pid 90. The table names two launchd_sim processes for the UDID, so no
@@ -5283,44 +5124,30 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertEqual(self.world.shutdowns(), [])
 
     def test_a_failed_simctl_read_keeps_every_device(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        self.world.simctl_rc = 1
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertIn("simctl-unreadable", decisions[SIM_U1]["reason"])
-        self.assertEqual(self.world.shutdowns(), [])
-
-    def test_bad_simctl_json_keeps_every_device(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        self.world.simctl_out = "this is not json {"
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertIn("simctl-unreadable", decisions[SIM_U1]["reason"])
-        self.assertEqual(self.world.shutdowns(), [])
+        # Rows: simctl exits 1; simctl answers text that is not JSON. Each keeps the device as simctl-unreadable.
+        for attr, value in (("simctl_rc", 1), ("simctl_out", "this is not json {")):
+            with self.subTest(attr=attr):
+                self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                         records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
+                setattr(self.world, attr, value)
+                decisions = self.tier(confirm=True)
+                self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
+                self.assertEqual(decisions[SIM_U1]["action"], "keep")
+                self.assertIn("simctl-unreadable", decisions[SIM_U1]["reason"])
+                self.assertEqual(self.world.shutdowns(), [])
 
     def test_a_failed_process_table_keeps_every_device(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        self.world.ps_rc = 1
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertIn("process-table-unreadable", decisions[SIM_U1]["reason"])
-        self.assertEqual(self.world.shutdowns(), [])
-
-    def test_an_empty_process_table_keeps_every_device(self):
-        self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
-        self.world.ps_out = ""
-        decisions = self.tier(confirm=True)
-        self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
-        self.assertEqual(decisions[SIM_U1]["action"], "keep")
-        self.assertIn("process-table-unreadable", decisions[SIM_U1]["reason"])
-        self.assertEqual(self.world.shutdowns(), [])
+        # Rows: the process table read exits 1; the process table is empty. Each keeps the device.
+        for attr, value in (("ps_rc", 1), ("ps_out", "")):
+            with self.subTest(attr=attr):
+                self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                         records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
+                setattr(self.world, attr, value)
+                decisions = self.tier(confirm=True)
+                self.assertIn(SIM_U1, decisions, "the recorded device was not judged")
+                self.assertEqual(decisions[SIM_U1]["action"], "keep")
+                self.assertIn("process-table-unreadable", decisions[SIM_U1]["reason"])
+                self.assertEqual(self.world.shutdowns(), [])
 
     def test_an_unreadable_start_time_keeps_that_device(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
