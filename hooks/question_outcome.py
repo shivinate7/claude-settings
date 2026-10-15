@@ -34,8 +34,12 @@ Per question with two or more options (a clarifying question passes first):
   says how many. A ruling under another heading is not read.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
-- A failed model call, unreadable transcript, or malformed input lets the question through,
-  with one systemMessage saying the check did not run. It never echoes the prompt.
+- The judge reads each option on one line: its label, description and preview, each defanged and
+  cut to OPTION_PART_CAP (800) chars. A cut part ends in OPTION_CUT, and the prompt names that mark.
+- A failed model call, an unreadable transcript, or hook input that is not readable lets the
+  question through, with one systemMessage saying the check did not run. It never echoes the
+  prompt. An options value that is not a list counts as no options: the question passes with
+  no model call and no message, as a clarifying question does.
 
 Deny: stdout one PreToolUse deny JSON, exit 0. Allow: empty stdout, exit 0.
 """
@@ -72,6 +76,10 @@ SPAN_BUDGET = 20000
 # unmeasured: debt model-clip-unmeasured.
 PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
+# Chars of one option's label, description or preview; a longer part is cut and ends in OPTION_CUT.
+# Real descriptions run to 375 chars at p99 (605 max), and the Loss text sits at the end.
+OPTION_PART_CAP = 800
+OPTION_CUT = " [cut]"
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
 RELAY_TAG = re.compile(r"<cross-session-message\b[^>]*>(.*?)</cross-session-message>", re.DOTALL)
 # The two labels. Each sits in its style-file rule bullet; every use below reads these.
@@ -125,11 +133,12 @@ PROMPT = (
     "(a decision id, a branch, a sha, a key, a rule name) explained in plain words; (5) does the "
     "question point at anything the box does not show, such as an earlier message, a time that refers to "
     "an earlier message, or an item number like \"item 4\"; (6) does each option say what the owner gains and what "
-    "the owner loses, each as a change for the owner and not for a record. A goal line is a paraphrase of the goal in plain words; "
+    "the owner loses, each as a change for the owner and not for a record. An option part that ends in "
+    "`%s` was cut for length: that mark is not a missing part. A goal line is a paraphrase of the goal in plain words; "
     "a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
-    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL)
+    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL, OPTION_CUT.strip())
 )
 
 
@@ -501,10 +510,6 @@ def _emit(obj):
 def _deny(reason):
     _emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                   "permissionDecisionReason": reason}})
-
-
-OPTION_PART_CAP = 300  # chars of one option's label, description or preview; a longer one is cut
-OPTION_CUT = " [cut]"
 
 
 def _options(q):
