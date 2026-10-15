@@ -5119,23 +5119,15 @@ sh("silent-write false alarm: commit -s takes no value, so --dry-run after it is
 sh("silent-write false alarm: commit -mfoo glues its value, so --dry-run after it is a dry run",
    VCS + " commit -mfoo --dry-run >/dev/null", "allow", cwd=GITMAIN)
 
-# (f) LIMITS, pinned at today's behaviour. Each is a gap the guard does not close. The name says so.
-# Do not flip one without the owner.
-sh("silent-write limit (pinned allowed): a quote inside $( ) in a message ends the walk early, so a real commit's redirect reads as text",
-   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "allow", cwd=GITMAIN)
-# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the pin needs it.
-if os.name == "nt":
-    sh("silent-write limit (pinned allowed): a --git-dir under the temp folder is judged as a throwaway, though the cwd is a real checkout",
-       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "allow", cwd=GITMAIN)
-
-TEMP_DIR = None   # back to the system temp for the sections below
-
-
-# =========================================================================== 3. push and delete
+# The five cases below are PowerShell escapes and openers in the silent write. They sit in the ROOT/tmp
+# section, so their NOGIT cwd (under ROOT, outside ROOT/tmp) is not a throwaway. Under the system temp,
+# the throwaway allow decides them, so the case would not test the quote walk.
 # ---- lane swn-pwsh-escape, review round 2, item 2. A PowerShell escape or opener that quote_advance
-# does not read (a backtick outside quotes, a `<# #>` comment, a here-string) flips the quote state,
-# so the silenced commit after it reads as quoted text and is allowed. RED on 2055fd8, deny on
-# origin/main. The lone apostrophe is a PIN: it denies on both heads, and a fix must keep it so.
+# does not read (a backtick outside quotes, a `<# #>` comment, a here-string) flips the quote state, so
+# the silenced commit after it reads as quoted text. MEASURED: on fae948c (the parent of 64a5b09) the
+# backtick, block comment and here-string cases allow. The comment opener in a string and the pin deny.
+# On origin/main 9d7533c all five deny, so those cases do not separate main from the fix. The lone
+# apostrophe is a PIN: it denies on both heads, and a fix must keep it so.
 sh("silent-write: a backtick-escaped quote in PowerShell, then a silenced commit, denies",
    "echo `\"; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
@@ -5152,6 +5144,19 @@ sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, 
    "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
+# (f) LIMITS, pinned at today's behaviour. Each is a gap the guard does not close. The name says so.
+# Do not flip one without the owner.
+sh("silent-write limit (pinned allowed): a quote inside $( ) in a message ends the walk early, so a real commit's redirect reads as text",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "allow", cwd=GITMAIN)
+# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the pin needs it.
+if os.name == "nt":
+    sh("silent-write limit (pinned allowed): a --git-dir under the temp folder is judged as a throwaway, though the cwd is a real checkout",
+       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "allow", cwd=GITMAIN)
+
+TEMP_DIR = None   # back to the system temp for the sections below
+
+
+# =========================================================================== 3. push and delete
 FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
