@@ -3439,6 +3439,42 @@ class _AgentEndFixture(unittest.TestCase):
         start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
         return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
 
+    def host_lock(self, name):
+        """The lock text `git worktree list --porcelain` shows now, MEASURED 2026-10-15 on six agent
+        trees: `claude agent agent-<id> (pid N)`, N the claude host, with no start time. N is this
+        test process, the host that fire_under_host names."""
+        return "claude agent agent-%s (pid %d)" % (name, os.getpid())
+
+    def fire_under_host(self, agent, path):
+        """Run the SubagentStop hook one process below an intermediate python, itself run by this test
+        process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
+        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell)."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": path, "session_id": "agent-end-wt-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
+        relay = ("import subprocess, sys; sys.exit(subprocess.run([sys.executable, sys.argv[1]], "
+                 "input=sys.stdin.read(), text=True).returncode)")
+        answer = subprocess.run([sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
+                                input=payload, capture_output=True, text=True, env=env,
+                                cwd=self.root, timeout=120)
+        self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+
+    def own_row(self, path):
+        """The decision row the last hook run wrote for PATH, or None."""
+        with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
+            last = json.loads(handle.readlines()[-1])
+        for row in last.get("worktrees") or []:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(path):
+                return row
+        return None
+
+    def assert_own_reaped(self, path):
+        """The hook decided REAP for PATH and the tree is gone. A keep prints the row's reason."""
+        row = self.own_row(path)
+        self.assertIsNotNone(row, "the hook wrote no decision row for the own tree")
+        self.assertEqual(row.get("action"), "reap", "the own tree was kept: %s" % row.get("reason"))
+        self.assertRemoved(path)
+
     def lock(self, path, reason):
         require(run_vcs(self.primary, "worktree", "lock", path, "--reason", reason).returncode == 0,
                 "lock of %s failed" % path)
@@ -3466,8 +3502,9 @@ class _AgentEndFixture(unittest.TestCase):
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
     """Owner ruling 2026-10-15: when an agent ends (SubagentStop), janitor/agent_end_reap.py removes
     the ending agent's OWN worktree under `.claude/worktrees/agent-*` when it is clean, holds no
-    untracked file, has HEAD on a remote-tracking ref, has no process inside, and holds no live
-    harness lock. A stale lock does not hold it. No idle time applies to the ending agent's own tree.
+    untracked file, has HEAD on a remote-tracking ref, and has no process inside. A lock does not hold
+    it when the lock names the host pid the hook runs under, or a dead pid. A lock held by another live
+    process keeps it. No idle time applies to the ending agent's own tree.
 
     Each keep arm runs beside a clean, pushed control twin that must be removed in the same test, so a
     keep arm cannot pass on a hook that deletes nothing."""
@@ -3519,10 +3556,72 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.keep_case("unpushed", self.unpushed, lambda p: self.assertEqual(
             run_vcs(p, "branch", "-r", "--contains", "HEAD").stdout.strip(), "", "HEAD is pushed"))
 
-    def test_a_live_lock_keeps_the_own_worktree(self):
-        reason = self.live_lock_reason("livelock")
-        self.assertFalse(sweep.stale_agent_lock_verdict(reason), "the fixture lock reads as stale: %r" % reason)
-        self.keep_case("livelock", lambda path: self.lock(path, reason), lambda p: None)
+    def test_own_tree_locked_by_its_host_pid_is_unlocked_and_removed(self):
+        # Red on 2104e94: the measured lock text has no start time, so AGENT_LOCK_RE never matches and
+        # every lock keeps the tree, the host's included.
+        own = self.add("hostlock")
+        self.lock(own, self.host_lock("hostlock"))
+        self.assertTrue(guard.worktree_locked(self.primary, own), "the fixture lock did not take")
+        self.fire_under_host("hostlock", own)
+        self.assert_own_reaped(own)
+
+    def test_own_tree_locked_by_a_dead_pid_in_the_measured_form_is_unlocked_and_removed(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead_pid = gone.pid
+        # Windows reads an exited pid as live while this process still holds its handle, so drop it.
+        del gone
+        gc.collect()
+        own = self.add("deadlock")
+        self.lock(own, "claude agent agent-deadlock (pid %d)" % dead_pid)
+        self.fire_under_host("deadlock", own)
+        self.assert_own_reaped(own)
+
+    def test_own_tree_locked_by_a_different_live_pid_is_kept_and_stays_locked(self):
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.root,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, other)
+        twin, subject = self.add("othertwin"), self.add("otherpid")
+        self.lock(twin, self.host_lock("othertwin"))
+        self.lock(subject, "claude agent agent-otherpid (pid %d)" % other.pid)
+        self.fire_under_host("othertwin", twin)
+        with self.subTest(control="host-locked clean pushed twin is removed"):
+            self.assertRemoved(twin)
+        self.fire_under_host("otherpid", subject)
+        with self.subTest(arm="another live process holds the lock"):
+            self.assertKept(subject)
+            self.assertTrue(guard.worktree_locked(self.primary, subject), "the other pid's lock was lifted")
+            self.assertIsNone(other.poll(), "the fixture process exited")
+
+    def test_own_tree_locked_by_its_host_pid_but_dirty_is_kept_and_stays_locked(self):
+        twin, subject = self.add("dirtytwin"), self.add("dirtyhost")
+        self.lock(twin, self.host_lock("dirtytwin"))
+        self.lock(subject, self.host_lock("dirtyhost"))
+        self.dirty(subject)
+        self.assertTrue(guard.porcelain(subject), "no dirty edit")
+        self.fire_under_host("dirtytwin", twin)
+        with self.subTest(control="host-locked clean pushed twin is removed"):
+            self.assertRemoved(twin)
+        self.fire_under_host("dirtyhost", subject)
+        with self.subTest(arm="dirty, locked by its host pid"):
+            self.assertKept(subject)
+            self.assertTrue(guard.worktree_locked(self.primary, subject), "the dirty tree was unlocked")
+
+    def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
+        # Guard, green on 2104e94: the exemption must cover the ending agent's own tree only. Every
+        # agent tree of one session carries the same host pid.
+        own, sibling = self.add("ownsib"), self.add("sibhost")
+        self.lock(sibling, self.host_lock("sibhost"))
+        _age_admin_files(sibling, 31 * 60)
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
+                                "the sibling is not 31 min idle")
+        self.fire_under_host("ownsib", own)
+        with self.subTest(control="own tree, no lock, is removed"):
+            self.assertRemoved(own)
+        with self.subTest(arm="sibling locked by the same host pid, idle 31 min"):
+            self.assertKept(sibling)
+            self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
 
     def test_a_process_inside_keeps_the_own_worktree(self):
         twin, subject = self.add("proctwin"), self.add("proc")
