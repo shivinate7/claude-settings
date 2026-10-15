@@ -1230,7 +1230,7 @@ MUTATIONS = [
      '        paras = ["", "\\n\\n".join(texts)]',
      "guard", 'cite-by-id: a Drops-lines line in a middle paragraph is denied'),
     ("powershell: a backslash is eaten as under Bash",
-     '    if POWERSHELL_CALL[0]:\n        segment = segment.replace("\\\\", "\\\\\\\\")',
+     '    if is_powershell(segment):\n        segment = segment.replace("\\\\", "\\\\\\\\")',
      '    if False:\n        segment = segment.replace("\\\\", "\\\\\\\\")', "guard",
      'powershell: a backslash path survives tokenizing'),
     ("cite-by-id: an environment file is opened as a message file",

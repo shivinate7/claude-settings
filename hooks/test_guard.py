@@ -4077,6 +4077,11 @@ add("background-end: py -3 -m http.server under run_in_background with no note i
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
+# Lane swn-pwsh-escape, review round 2, item 3: a backslash before ; hides the server in a cmd /c
+# script. RED when guard_stream's cmd /c tail (guard_stream:319) is read as bash text.
+add("background-end: a cmd /c with a backslash before ; hides npm run dev under run_in_background, denies",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command=r'cmd /c "echo C:\x\; npm run dev"', run_in_background=True)
 add("background-end: bash -c around npm run dev under run_in_background is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command='bash -c "npm run dev"', run_in_background=True)
@@ -4603,6 +4608,21 @@ sh("wsl: a sed script with a backslash before & and a trigger word after it, all
 sh("wsl: a find -exec with a backslash before ; is text, allowed",
    r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
 
+# ---- lane swn-pwsh-escape, review round 2, item 3. Each case is RED when the read it names is
+# dropped (the scratch mutants, see the proof): quote_advance:118 for the escaped quote, _split_
+# reading:196 for the backslash-newline, nested_script's cmd /c tail (guard_core:1900). Each DENIES
+# on 2055fd8, so each is green there.
+sh("wsl: a pwsh -c with an escaped quote before ; hides wsl --shutdown, denies",
+   r"""pwsh -c 'echo "a\"; wsl --shutdown'""", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a pwsh -c with a backslash before a line break hides wsl --shutdown, denies",
+   'pwsh -c "cd C:\\x\\' + "\n" + 'wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell script, denies",
+   r'cmd /c "echo C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+# The PowerShell tool's own text: a doubled quote in a single-quoted pwsh -c string ends the quote
+# early under the walk, so the `;` reads as quoted. RED on 2055fd8, deny on origin/main.
+sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
+   "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
@@ -5075,6 +5095,26 @@ TEMP_DIR = None   # back to the system temp for the sections below
 
 
 # =========================================================================== 3. push and delete
+# ---- lane swn-pwsh-escape, review round 2, item 2. A PowerShell escape or opener that quote_advance
+# does not read (a backtick outside quotes, a `<# #>` comment, a here-string) flips the quote state,
+# so the silenced commit after it reads as quoted text and is allowed. RED on 2055fd8, deny on
+# origin/main. The lone apostrophe is a PIN: it denies on both heads, and a fix must keep it so.
+sh("silent-write: a backtick-escaped quote in PowerShell, then a silenced commit, denies",
+   "echo `\"; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell block comment with a quote, then a silenced commit, denies",
+   '<# " #>; ' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell comment opener inside a string, then a silenced commit, denies",
+   'echo "<#"; ' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell here-string with an odd quote, then a silenced commit, denies",
+   '@"\nsay "hi\n"@\n' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, still denies",
+   "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+
 FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
@@ -9349,6 +9389,39 @@ def powershell_backslash_case():
     return True, "PowerShell keeps backslashes, Bash eats them as an escape"
 
 
+def wsl_script_tag_keeps_backslash_case():
+    """segment_tokens reads a PowerShellScript's own tag, not only POWERSHELL_CALL, so a pwsh -c
+    script keeps its backslashes with no PowerShell tool in play. Dropping that arm (guard_core
+    318) makes shlex eat `C:\\tmp` to `C:tmp`. Lane swn-pwsh-escape, review round 2, item 3."""
+    guard = _load_guard_module()
+    script_type = sys.modules["guard_core"].PowerShellScript
+    guard.POWERSHELL_CALL[0] = False
+    try:
+        tokens = guard.segment_tokens(script_type(r"cd C:\repo; git commit -F C:\tmp\msg.txt"))
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if tokens != ["cd", "C:\\repo;", "git", "commit", "-F", "C:\\tmp\\msg.txt"]:
+        return False, "a PowerShell script tag lost a backslash: %r" % (tokens,)
+    return True, "a PowerShell script tag keeps its backslashes with no PowerShell tool"
+
+
+def wsl_split_tag_keeps_backslash_case():
+    """split_segments wraps each segment of a PowerShell script in the script's tag (guard_core
+    180). Without that wrap the first segment reads with Bash rules: `C:\\x` loses its backslash.
+    Lane swn-pwsh-escape, review round 2, item 3."""
+    guard = _load_guard_module()
+    script_type = sys.modules["guard_core"].PowerShellScript
+    guard.POWERSHELL_CALL[0] = False
+    try:
+        segments = guard.split_segments(script_type(r"cd C:\x; echo y"))
+        tokens = guard.segment_tokens(segments[0]) if segments else None
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if tokens != ["cd", "C:\\x"]:
+        return False, "a split segment lost its PowerShell tag: %r" % (tokens,)
+    return True, "a split segment keeps the PowerShell tag its script had"
+
+
 def merge_tool_missing_case():
     """A merge gate that cannot load the merge tool is unknown, and denies.
 
@@ -10100,6 +10173,8 @@ LOG_CHECKS = (
     ("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
+    ("wsl: a PowerShell script tag keeps its backslashes in segment_tokens", wsl_script_tag_keeps_backslash_case),
+    ("wsl: a split segment keeps the PowerShell tag its script had", wsl_split_tag_keeps_backslash_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
@@ -11315,6 +11390,8 @@ LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 # L1837-1905, the ctypes arm on Windows) or a PowerShell tokenizing rule (L307-320).
 WINDOWS_CHECKERS = {
     powershell_backslash_case,
+    wsl_script_tag_keeps_backslash_case,
+    wsl_split_tag_keeps_backslash_case,
     process_start_ms_case,
     process_start_ms_windows_case,
     session_is_live_case,
@@ -11702,6 +11779,8 @@ LOG_RULE_FAMILY = (
     ("merge-checks: a merge tool that cannot load", "merge"),
     ("merge-checks: a gh that never answers", "merge"),
     ("powershell: a backslash path survives", "paths"),
+    ("wsl: a PowerShell script tag keeps its backslashes", "wsl"),
+    ("wsl: a split segment keeps the PowerShell tag", "wsl"),
     ("trim: a conflict-side checkout", "shared-tree"),
     ("log: an unreadable subject", "shared-tree"),
     ("log: a hard reset in an agent-owned", "shared-tree"),
