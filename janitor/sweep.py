@@ -615,6 +615,12 @@ def _agent_rule_keep(kept: dict, idle):
     if idle < AGENT_IDLE_SECONDS:
         return {"path": path, "action": "keep",
                 "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    return _remote_tracking_keep(path)
+
+
+def _remote_tracking_keep(path: str):
+    """A keep decision unless HEAD of PATH is on a remote-tracking ref (`git branch -r --contains`),
+    else None. A failed read keeps. One home: the agent rule and the agent-end rule both ask it."""
     contains = guard._git(path, "branch", "-r", "--contains", "HEAD")
     if contains is None or contains.returncode != 0:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
@@ -700,6 +706,32 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "reap", "reason": "removable: stale agent lock",
                 "unlock": True, "lock_reason": holder}
     return {"path": path, "action": "reap", "reason": "removable"}
+
+
+# Owner ruling 2026-10-15: at agent end, ANOTHER finished agent's tree needs 30 minutes of quiet.
+# The ending agent's own tree needs none. AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
+AGENT_END_IDLE_SECONDS = 30 * 60
+
+
+def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
+    """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
+    the seconds of git quiet the tree needs (None: none, the ending agent's own tree). Idle is read
+    first: `git status` can rewrite the index and make every tree look active. The rest is
+    `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
+    the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
+    remote-tracking ref. Any failed read keeps."""
+    path = entry["path"]
+    if min_idle is not None:
+        idle = worktree_idle_seconds(path)
+        if idle is None:
+            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+        if idle < min_idle:
+            return {"path": path, "action": "keep",
+                    "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    decision = decide_worktree(where, entry, attended=True)
+    if decision["action"] != "reap":
+        return decision
+    return _remote_tracking_keep(path) or decision
 
 
 # ------------------------------------------------------------------ orphaned TCP listeners

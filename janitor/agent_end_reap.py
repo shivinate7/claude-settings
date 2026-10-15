@@ -10,8 +10,8 @@ reads the live stub and keeps the server forever.
 
 Reads one hook payload on stdin. SubagentStop names the agent by `agent_id`. The harness names
 that agent's worktree `.claude/worktrees/agent-<agent_id>` under the primary checkout.
-Only SubagentStop names a target (owner ruling 1, 2026-09-27: WorktreeRemove stays
-unwired). The target must have the `.claude/worktrees/<name>` shape and must not be a primary checkout.
+Only SubagentStop names a target. The target must have the `.claude/worktrees/<name>` shape and
+must not be a primary checkout.
 
 A process is stopped only when all of these answer a confirmed yes:
 - its cwd sits inside the target worktree
@@ -28,6 +28,13 @@ worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` pl
 a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
+
+Worktrees (owner ruling 2026-10-15): when the gates above hold for the whole worktree, the hook then
+removes the ending agent's OWN worktree, and every other `.claude/worktrees/agent-*` worktree idle
+30 minutes or more. `sweep.decide_agent_end_worktree` decides each one: clean (no dirty or untracked
+file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot prove keeps.
+The own tree goes first, and the stage stops at WORKTREE_SECONDS or the hook's own budget, so the
+hook stays inside its 60 s timeout. A removed own tree has no build folders left to reap.
 
 Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
@@ -283,7 +290,43 @@ def reap_build_dirs(target: str, cwds):
     return renamed
 
 
-def handle(raw: str):
+WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits for the next agent end
+HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
+
+
+def reap_worktrees(target: str, deadline: float):
+    """Remove TARGET (the ending agent's own worktree, first) and every other finished
+    `.claude/worktrees/agent-*` worktree of its repository that `sweep.decide_agent_end_worktree`
+    clears. The caller has proven the process gates for TARGET. Returns one decision per tree
+    decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
+    entries = sweep.parse_worktree_list(root)
+    if entries is None:
+        return [{"path": target, "action": "keep", "reason": "unreadable-subject"}]
+    own = os.path.normcase(os.path.realpath(target))
+    queue = []
+    for entry in entries:
+        if os.path.normcase(os.path.realpath(entry["path"])) == own:
+            queue.insert(0, (entry, None))  # the own tree needs no idle time
+        elif sweep._is_agent_worktree(root, entry["path"]):
+            queue.append((entry, sweep.AGENT_END_IDLE_SECONDS))
+    rows = []
+    sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
+    try:
+        for done, (entry, min_idle) in enumerate(queue):
+            if time.monotonic() > deadline:
+                rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
+                break
+            decision = sweep.decide_agent_end_worktree(root, entry, min_idle)
+            if decision["action"] == "reap":
+                sweep.remove_worktree(root, entry["path"], decision)
+            rows.append(decision)
+    finally:
+        sweep._LIVE_HEADS = None
+    return rows
+
+
+def handle(raw: str, started=None):
     try:
         payload = json.loads(raw)
     except Exception:
@@ -300,7 +343,11 @@ def handle(raw: str):
             decision["signalled"] = sweep.send_signal(decision["pid"])
     record.update(reason=reason, decisions=decisions)
     if reason is None:
-        record["buildDirs"] = reap_build_dirs(target, cwds)
+        now = time.monotonic()
+        deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
+        record["worktrees"] = reap_worktrees(target, deadline)
+        if os.path.isdir(target):  # a removed own tree has no build folders left
+            record["buildDirs"] = reap_build_dirs(target, cwds)
     return record
 
 
@@ -309,10 +356,11 @@ def main() -> int:
         raw = sys.stdin.read()
     except Exception:
         raw = ""
+    started = time.monotonic()
     run = "%d-%d" % (os.getpid(), time.time_ns())
     log({"raw": raw, "run": run, "state": "started"})  # a run the hook timeout kills leaves this row
     try:
-        record = handle(raw)
+        record = handle(raw, started)
     except Exception as exc:
         record = {"raw": raw, "error": repr(exc)}
     log(dict(record, run=run, state="done"), replace_run=run)
