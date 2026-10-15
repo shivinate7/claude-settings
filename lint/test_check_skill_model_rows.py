@@ -38,7 +38,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CHECK = os.path.join(HERE, "check_skill_model_rows.py")
 RECORD = "decisions/subagent-model-cap.md"
-REAL_SKILLS = os.path.join(ROOT, "skills")
 GATES = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
@@ -79,7 +78,7 @@ POSIX_USER = hasattr(os, "geteuid") and os.geteuid() != 0
 CHECK_LOCKED = "needs POSIX chmod and a non-root user; not pinned on Windows (no ACL change made)"
 
 
-def run(files, real_skills=False, locked=()):
+def run(files, locked=()):
     """Build a temp repo from {relpath: text}, run the check in it. Returns (exit code, output).
 
     `locked` names folders to chmod 000 after the files are written. They are restored before
@@ -91,8 +90,6 @@ def run(files, real_skills=False, locked=()):
         os.makedirs(os.path.join(tree, "lint"))
         script = os.path.join(tree, "lint", "check_skill_model_rows.py")
         shutil.copy(CHECK, script)
-        if real_skills:
-            shutil.copytree(REAL_SKILLS, os.path.join(tree, "skills"))
         for rel, text in files.items():
             path = os.path.join(tree, *rel.split("/"))
             os.makedirs(os.path.dirname(path), exist_ok=True)

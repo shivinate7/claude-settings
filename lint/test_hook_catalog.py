@@ -270,6 +270,48 @@ class RealRepo(unittest.TestCase):
         self.assertTrue(seen, "no prompt hook found, so the scan proves nothing")
         self.assertFalse(problems, "\n".join(problems))
 
+    def test_r1b_every_inline_command_has_one_line_summary_in_the_sidecar(self):
+        inline = [(inline_label(event, matcher, cond), hook.get("command", ""))
+                  for event, matcher, cond, hook in registrations()
+                  if hook.get("type") == "command" and command_script(hook) is None]
+        self.assertTrue(inline, "no inline command in settings.json, so the scan proves nothing: "
+                                "the SessionStart startup|resume refresh must stay inline (F1 ruling)")
+        self.assertTrue(os.path.isfile(INLINE_JSON), "lint/hook_catalog_inline.json does not exist")
+        summaries = json.loads(read(INLINE_JSON))
+        rows = {r["Key"].strip("`"): r for r in page_rows(self.page()) if r["Kind"] == "hook"}
+        problems, keys = [], set()
+        for label, command in inline:
+            key = sidecar_key(label, command)
+            keys.add(key)
+            text = summaries.get(key)
+            if not isinstance(text, str) or not text.strip():
+                problems.append("%s: no summary under the key %r in lint/hook_catalog_inline.json" % (label, key))
+                continue
+            if "\n" in text or text != text.strip():
+                problems.append("%s: summary is not one trimmed line" % label)
+            row = rows.get("inline: " + label)
+            if row is None:
+                problems.append("%s: no row keyed 'inline: %s'" % (label, label))
+            elif row["What it does"] != " ".join(text.split()):
+                problems.append("%s: row text %r is not the summary %r" % (label, row["What it does"], text))
+        for stray in sorted(set(summaries) - keys):
+            problems.append("%s: sidecar key matches no inline command" % stray)
+        self.assertFalse(problems, "\n".join(problems))
+
+    def test_r5b_every_hook_judge_mod_and_skill_row_is_filled_in(self):
+        problems = []
+        for r in page_rows(self.page()):
+            name = r["Key"] or "(no key)"
+            if r["Kind"] in ("hook", "judge"):
+                if r["Event"] in ("", "-"):
+                    problems.append("%s: no event" % name)
+                if not r["Matcher"]:
+                    problems.append("%s: matcher cell empty (write - when absent)" % name)
+            for col in ("Model", "Effort", "What it does"):
+                if not r[col]:
+                    problems.append("%s: %s is empty" % (name, col))
+        self.assertFalse(problems, "\n".join(problems))
+
     def test_r6_model_and_effort_match_settings_and_the_model_table(self):
         rows = {}
         for r in page_rows(self.page()):

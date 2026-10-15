@@ -229,7 +229,7 @@ class RulingKindTests(unittest.TestCase):
         self.put(REC, record(BUILD_OK), newline="\r\n")
         self.assert_passes(REC)
 
-    def test_plan_file_passed_in_is_ignored(self):
+    def test_plan_file_passed_in_is_ignored_and_default_folder_is_decisions_only(self):
         # The plan has no Kind line. It passes only because the lint does not check it.
         self.assert_passes(PLAN)
         # Merged from test_default_leaves_docs_decisions_unchecked: without --dir only decisions/ is
