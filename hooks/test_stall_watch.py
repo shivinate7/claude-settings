@@ -71,6 +71,19 @@ def case(fn):
     return fn
 
 
+def posix_case(fn):
+    """A case that needs the posix hook. Off posix the hook is silent by design, so the case
+    reports SKIP there, never PASS (decision: stall_watch is posix-only)."""
+    def gated():
+        if os.name != "posix":
+            raise Skip("posix only: the hook is silent on os.name %r" % os.name)
+        return fn()
+    gated.__doc__ = fn.__doc__
+    gated.__name__ = fn.__name__
+    CASES.append(gated)
+    return fn
+
+
 def expect(ok, msg):
     return [] if ok else [msg]
 
@@ -257,20 +270,17 @@ def parity_problems(orig, full_output_shells=("/bin/sh", "/bin/bash"), rc_only_s
     return problems
 
 
-@case
 def trailing_backslash_keeps_brace_apart():
     """8. an original ending in a backslash: sh and bash match bare output; zsh matches exit code"""
     return parity_problems("echo ends-with-backslash \\")
 
 
-@case
 def comment_ending_in_backslash_keeps_exit_code():
     """10. false # note \\ keeps the bare exit code in sh, bash and zsh"""
     return parity_problems("false # note \\", full_output_shells=(),
                            rc_only_shells=("/bin/sh", "/bin/bash", "/bin/zsh"))
 
 
-@case
 def lone_backslash_line_keeps_exit_code():
     """11. false, then a lone backslash line: exit code matches bare in sh and bash"""
     # Known limit, not checked here: bare zsh treats a lone backslash line as an empty command and
@@ -279,7 +289,7 @@ def lone_backslash_line_keeps_exit_code():
                            rc_only_shells=("/bin/sh", "/bin/bash"))
 
 
-@case
+@posix_case
 def hook_has_no_permission_decision():
     """1. the hook output has updatedInput and no permissionDecision key"""
     rc, out, err = hook("echo hi")
@@ -293,7 +303,7 @@ def hook_has_no_permission_decision():
     return problems
 
 
-@case
+@posix_case
 def original_is_unquoted_top_level():
     """2a. the original command appears verbatim as top-level code inside { ... }"""
     orig = "echo zzq*.nomatch"
@@ -318,7 +328,7 @@ def zsh_glob_fails_as_zsh_does():
     return problems
 
 
-@case
+@posix_case
 def quiet_sleep_stalls_and_exits_3():
     """3a. quiet sleep 30: STALL with a pid within about 4 s, exit 3, sleep still alive"""
     problems = []
@@ -329,7 +339,7 @@ def quiet_sleep_stalls_and_exits_3():
     return problems
 
 
-@case
+@posix_case
 def healthy_printer_no_stall():
     """3b. a printer that prints every second: no STALL, exit 0"""
     orig = "i=0; while [ $i -lt 4 ]; do echo tick$i; sleep 1; i=$((i+1)); done"
@@ -341,7 +351,6 @@ def healthy_printer_no_stall():
     return problems
 
 
-@case
 def exit_code_passes_through():
     """3c. exit 7 gives 7, with the output printed before it"""
     rc, text, _secs, _cmd = run_rewritten("echo before; exit 7")
@@ -351,7 +360,7 @@ def exit_code_passes_through():
     return problems
 
 
-@case
+@posix_case
 def quoting_and_chains_survive():
     """3d. quotes, $, && and a trailing # comment all work, in both shells"""
     problems = []
@@ -363,7 +372,7 @@ def quoting_and_chains_survive():
     return problems
 
 
-@case
+@posix_case
 def heredoc_survives():
     """3e. a heredoc in the original works, in both shells"""
     problems = []
@@ -429,7 +438,7 @@ def non_posix_hook_prints_nothing():
     return problems
 
 
-@case
+@posix_case
 def report_names_pid_and_asks_owner_to_stop():
     """6. the report names the pid and tells the session to ask the owner to stop it, not kill it"""
     rc, text, secs, _cmd = run_rewritten("sleep 30")
@@ -444,7 +453,7 @@ def report_names_pid_and_asks_owner_to_stop():
     return problems
 
 
-@case
+@posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
     rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second")
@@ -466,6 +475,28 @@ def log_keeps_growing_after_watcher_exits():
     problems += expect("first" in body, "log lacks the output printed before the stall")
     problems += expect("second" in body, "log lacks output printed after the watcher exited")
     reap()
+    return problems
+
+
+# Parity table. A row is one case body from above, unchanged, and keeps its label. A failing row
+# prints that label before its problem. A row that raises names itself too.
+@posix_case
+def table_parity_and_exit_codes():
+    """Table, parity: a rewritten original keeps the bare exit code, and the bare output where
+    the row says so, in each shell that is installed."""
+    problems = []
+    for body in (trailing_backslash_keeps_brace_apart,
+                 comment_ending_in_backslash_keeps_exit_code,
+                 lone_backslash_line_keeps_exit_code,
+                 exit_code_passes_through):
+        label = body.__doc__.split(".")[0].strip()
+        try:
+            found = body()
+        except Skip:
+            raise
+        except Exception as e:
+            found = [str(e)]
+        problems += ["%s: %s" % (label, p) for p in found]
     return problems
 
 
