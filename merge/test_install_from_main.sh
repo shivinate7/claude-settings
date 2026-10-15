@@ -205,9 +205,235 @@ case6() {
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6"
+# ---- Live pin: owner ruling 2026-10-15, record merge-reinstalls-from-main ("The ruling") ----
+# The links in ~/.claude point at one pinned checkout: a worktree of the clone, on a detached
+# HEAD at main's commit, at the sibling path <clone>-live. The helper moves that checkout to
+# the new main, then runs the install from it. Cases 7-11 build a fake clone at $d/clone, a
+# caller worktree at $d/linked, and the pinned checkout at $d/clone-live.
+# Stub cases (7, 10, 11) commit marker installers, so no real install runs. Cases 8 and 9 run
+# the real install.sh. Cases 7-10 shim uname to Linux, so the helper takes its POSIX path on
+# Git Bash. Case 11 uses the real uname.
+
+SKIP=0
+skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
+
+# install.sh links into CLAUDE_CONFIG_DIR. Git Bash makes real links only with
+# winsymlinks:nativestrict, and only when the account may create them. Probe once.
+printf x > "$work/probe-src"
+LINKS_OK=no
+if MSYS=winsymlinks:nativestrict ln -s "$work/probe-src" "$work/probe-link" 2>/dev/null \
+   && [ -L "$work/probe-link" ]; then LINKS_OK=yes; fi
+
+# Marker installers for a clone at $1. Each writes a marker file into its own folder.
+stub_installers() {
+  cat > "$1/install.sh" <<'EOF'
+#!/bin/sh
+printf ran > "$(dirname "$0")/ran-sh.txt"
+EOF
+  cat > "$1/install.ps1" <<'EOF'
+Set-Content -Path (Join-Path $PSScriptRoot 'ran-ps1.txt') -Value 'ran'
+EOF
+}
+
+# The real install.sh with its landed-dirs.txt, plus a small CLAUDE.md and settings.json. The
+# landed directories are created empty, as hooks/test_install_src.sh does: a full copy makes
+# the install slow here, because each landed file gets its own link.
+payload_files() {
+  git -c core.autocrlf=false -C "$REPO_ROOT" archive HEAD install.sh landed-dirs.txt | tar -x -C "$1"
+  printf '# fixture CLAUDE.md\n' > "$1/CLAUDE.md"
+  printf '{}\n' > "$1/settings.json"
+  while IFS= read -r sub || [ -n "$sub" ]; do
+    sub=$(printf '%s' "$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+    if [ -n "$sub" ]; then mkdir -p "$1/$sub"; fi
+  done < "$1/landed-dirs.txt"
+}
+
+# Fake clone at $1 on branch main, with one commit. $2 is stub (marker installers) or payload
+# (the real install.sh and its manifest). autocrlf is off: this host sets it on, and that
+# would turn the scripts into CRLF.
+live_clone() {
+  mkdir -p "$1"
+  git -C "$1" init -q -b main
+  git -C "$1" config core.autocrlf false
+  git -C "$1" config user.email t@example.com
+  git -C "$1" config user.name t
+  if [ "$2" = payload ]; then
+    payload_files "$1"
+    git -C "$1" remote add origin https://github.com/shivinate7/claude-settings.git
+  else
+    stub_installers "$1"
+  fi
+  git -C "$1" add -A
+  git -C "$1" commit -q -m init
+}
+
+# A uname that reports Linux, in dir $1. The helper takes its POSIX path only on Linux.
+make_shim() {
+  mkdir -p "$1"
+  printf '#!/bin/sh\necho Linux\n' > "$1/uname"
+  chmod +x "$1/uname"
+}
+
+# Run the helper with cwd $1 and HOME $h. Sets rc, outs (stdout), errs (stderr), out (both).
+# SHIM, when set, goes first on PATH.
+run_live() {
+  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" MSYS=winsymlinks:nativestrict \
+      PATH="${SHIM:+$SHIM:}$PATH" bash "$SCRIPT" ) > "$work/run.out" 2> "$work/run.err"
+  rc=$?
+  outs=$(cat "$work/run.out")
+  errs=$(cat "$work/run.err")
+  out=$(cat "$work/run.out" "$work/run.err")
+}
+
+# ---- Case 7: a merge moves main -> the pinned checkout moves to main's commit, detached ----
+case7() {
+  name="case7: after a merge moves main, the pinned checkout moves to main's commit, detached"
+  d="$work/case7"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  c0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
+  git -C "$d/clone" switch -q -c lane
+  printf 'lane\n' > "$d/clone/lane.txt"
+  git -C "$d/clone" add lane.txt
+  git -C "$d/clone" commit -q -m lane
+  git -C "$d/clone" switch -q main
+  git -C "$d/clone" merge -q --no-ff -m merge lane
+  c1=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" != "$c1" ]; then
+    bad "$name" "pinned checkout is not at main's commit $c1: $out"
+  elif git -C "$d/clone-live" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    bad "$name" "pinned checkout is on a branch, expected a detached HEAD"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout: $out"
+  elif [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+    bad "$name" "install ran from the clone or from the calling worktree"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 8: a branch switch in the clone does not change what the links point at ---------
+case8() {
+  name="case8: a branch switch in the clone does not change what the links point at"
+  if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here, so the link check cannot run"; return; fi
+  d="$work/case8"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" payload
+  c0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
+  git -C "$d/clone" worktree add -q -b feature "$d/linked"
+  git -C "$d/clone" switch -q -c lane
+  printf 'lane\n' > "$d/clone/settings.json"
+  git -C "$d/clone" commit -q -am lane
+  printf 'main\n' > "$d/linked/settings.json"
+  git -C "$d/linked" commit -q -am main
+  c1=$(git -C "$d/linked" rev-parse HEAD)
+  git -C "$d/clone" branch -f main "$c1"
+  git -C "$d/clone" show "$c1:settings.json" > "$work/case8.want"
+  run_live "$d/linked"
+  cfg="$h/.claude-cfg"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" != "$c1" ]; then
+    bad "$name" "pinned checkout is not at main's commit $c1: $out"
+  elif git -C "$d/clone-live" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    bad "$name" "pinned checkout is on a branch, expected a detached HEAD"
+  elif [ "$(git -C "$d/clone" symbolic-ref -q HEAD)" != refs/heads/lane ]; then
+    bad "$name" "the helper changed the clone's branch"
+  elif [ ! -L "$cfg/settings.json" ]; then
+    bad "$name" "settings.json in CLAUDE_CONFIG_DIR is not a link: $out"
+  elif ! cmp -s "$cfg/settings.json" "$work/case8.want"; then
+    bad "$name" "the link does not read main's settings.json, so it follows the clone's branch"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 9: no pinned checkout -> the real install makes one at main's commit ------------
+case9() {
+  name="case9: with no pinned checkout, the install makes one at main's commit"
+  d="$work/case9"; h="$d/home"; cfg="$h/.claude-cfg"; mkdir -p "$h"
+  live_clone "$d/clone" payload
+  c0=$(git -C "$d/clone" rev-parse main)
+  out=$(cd "$d/clone" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" MSYS=winsymlinks:nativestrict bash ./install.sh 2>&1)
+  rc=$?
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n 1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}" ;; esac
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" != "$c0" ]; then
+    bad "$name" "no pinned checkout at main's commit $c0 after the install"
+  elif git -C "$d/clone-live" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    bad "$name" "pinned checkout is on a branch, expected a detached HEAD"
+  elif [ "$(realpwd "$pointer")" != "$(realpwd "$d/clone-live")" ]; then
+    bad "$name" "CLAUDE.md pointer [$pointer] does not name the pinned checkout"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 10: the pinned path cannot be moved -> one stderr line, non-zero, no install -----
+case10() {
+  name="case10: a pinned path that cannot be moved prints one stderr line, exits non-zero, runs no install"
+  d="$work/case10"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  mkdir -p "$d/clone-live"
+  printf 'keep\n' > "$d/clone-live/keep.txt"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+  lines=$(printf '%s\n' "$errs" | grep -c .)
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
+  elif [ "$lines" -ne 1 ]; then
+    bad "$name" "expected one stderr line, got $lines: $errs"
+  else
+    case "$errs" in
+      *"not run"*"clone-live"*) ;;
+      *) bad "$name" "stderr line does not say the install did not run and name the pinned path: $errs"; return ;;
+    esac
+    if [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ] || [ -e "$d/clone-live/ran-sh.txt" ]; then
+      bad "$name" "an install ran anyway"
+    elif [ ! -f "$d/clone-live/keep.txt" ]; then
+      bad "$name" "the file in the blocking directory was removed"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
+# ---- Case 11: Windows -> the after-merge step runs install.ps1, not the pointer ----------
+case11() {
+  name="case11: on Windows the after-merge step runs install.ps1, not the pointer"
+  case "$(uname)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) skip "$name" "not Windows"; return ;;
+  esac
+  d="$work/case11"; h="$d/home"; mkdir -p "$h"; SHIM=""
+  live_clone "$d/clone" stub
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "script exited $rc: $out"
+  elif printf '%s\n' "$out" | grep -q 'by hand'; then
+    bad "$name" "printed the pointer instead of running install.ps1: $out"
+  elif [ ! -f "$d/clone-live/ran-ps1.txt" ]; then
+    bad "$name" "install.ps1 did not run from the pinned checkout: $out"
+  else
+    ok "$name"
+  fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
-printf '%s passed, %s failed\n' "$PASS" "$FAIL"
+printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
