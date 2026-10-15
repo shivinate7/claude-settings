@@ -10,6 +10,9 @@ chain too, and the guard denies it.
 The steps that ask today: a worktree prune, a worktree discard, a forced push, and a shell write
 to the model-cap settings. The deny names the kind of step, never the command text.
 
+- Owner, 2026-10-14 22:25 CDT: an interpreter heredoc (python, node, perl, ruby) counts as one step
+  and asks once. A chain around it still counts. A shell heredoc still counts each line.
+
 Kind: process
 Home: hooks/guard.py
 

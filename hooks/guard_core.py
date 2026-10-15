@@ -414,7 +414,8 @@ def _walk_wrappers(tokens):
 # Other quoted text still counts: the shell word of `ssh host "bash -s" <<EOF` runs its body.
 # SHELL_HEREDOC names the shells alone: a rule that reads shell lines keeps only a body a shell
 # runs, never a Python or Node script.
-HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# The delimiter is the whole shell word (`E-F`), so the body ends at that word and no earlier one.
+HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][^\s'\"|&;<>()]*)\1")
 _SEGMENT_BREAK = re.compile(r"(&&|\|\||[;|\n])")
 
 

@@ -1547,7 +1547,8 @@ def settle_ask(tool: str, stripped: str) -> None:
     if not PENDING_ASK:
         return
     rule, reason, matched, step = PENDING_ASK[0]
-    if count_steps(stripped) > 1:
+    # An interpreter heredoc (python, node, perl, ruby) is one step: its body is not counted line by line.
+    if count_steps(strip_heredoc_bodies(stripped, shells_only=True)) > 1:
         refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
     refuse(tool, "ask", rule, reason, matched)
 
