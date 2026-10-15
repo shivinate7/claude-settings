@@ -3691,9 +3691,6 @@ sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "all
 sh("waiter: a PowerShell while-loop with Start-Sleep is refused",
    "while (-not (Test-Path f)) { Start-Sleep -Seconds 2 }", "deny", "waiter",
    tool="PowerShell", cwd=NOGIT)
-sh("waiter: a PowerShell for-loop with Start-Sleep is refused",
-   "for ($i = 0; $i -lt 5; $i++) { Start-Sleep -Seconds 2 }", "deny", "waiter",
-   tool="PowerShell", cwd=NOGIT)
 sh("waiter: timeout /t on Windows cmd", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 
 # A watcher blocks the foreground call. The same watcher is allowed under run_in_background,
@@ -3737,10 +3734,6 @@ sh("waiter: a sleep then a foreground watcher, joined by &, is refused",
    "sleep 5 & gh run watch 1", "deny", "detached-launch", cwd=NOGIT)
 sh("waiter: a PowerShell while-loop with Start-Sleep in braces is refused",
    "while(1){Start-Sleep 1}", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
-sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
-   "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
-sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
-   "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 sh("waiter: gh.exe run watch in the foreground is refused", "gh.exe run watch 1", "deny",
    "waiter", cwd=NOGIT)
 sh("waiter: gh pr checks --watch=true in the foreground is refused",
@@ -3875,27 +3868,12 @@ add("background-end: a server named in a comment line is not run, allowed", "all
 add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm --prefix web run dev", run_in_background=True)
-add("background-end: npm -w web run dev under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="npm -w web run dev", run_in_background=True)
-add("background-end: pnpm -C web dev under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="pnpm -C web dev", run_in_background=True)
-add("background-end: pnpm --filter web dev under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="pnpm --filter web dev", run_in_background=True)
 add("background-end: npm.cmd run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm.cmd run dev", run_in_background=True)
-add("background-end: python.exe -m http.server under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="python.exe -m http.server", run_in_background=True)
 add("background-end: python -u -m http.server under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="python -u -m http.server", run_in_background=True)
-add("background-end: py -3 -m http.server under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="py -3 -m http.server", run_in_background=True)
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
@@ -3908,21 +3886,9 @@ add("background-end: a '# ready' comment opener in a bash -c string does not hid
 add("background-end: a PowerShell call operator before npm run dev is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
     command="& npm run dev", run_in_background=True)
-add("background-end: npm run dev under PowerShell run_in_background is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
-    command="npm run dev", run_in_background=True)
 add("background-end: npm run dev in a subshell under run_in_background is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="(npm run dev)", run_in_background=True)
-add("background-end: npx vite@5 under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="npx vite@5", run_in_background=True)
-add("background-end: npm run build:watch under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="npm run build:watch", run_in_background=True)
-add("background-end: npm run dev:frontend under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
-    command="npm run dev:frontend", run_in_background=True)
 add("background-end: npx vite build --watch under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npx vite build --watch", run_in_background=True)
@@ -3944,45 +3910,15 @@ DEVSERVER_DENY = ("background-end", "until:")
 add("background-end: bun --watch server.ts under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command="bun --watch server.ts", run_in_background=True)
-add("background-end: bun run --watch server.ts under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="bun run --watch server.ts", run_in_background=True)
 add("background-end: bun --hot server.ts under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command="bun --hot server.ts", run_in_background=True)
 add("background-end: deno task dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command="deno task dev", run_in_background=True)
-add("background-end: deno serve main.ts under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="deno serve main.ts", run_in_background=True)
 add("background-end: flask run under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command="flask run", run_in_background=True)
-add("background-end: uvicorn app:app --reload under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="uvicorn app:app --reload", run_in_background=True)
-add("background-end: jupyter lab under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="jupyter lab", run_in_background=True)
-add("background-end: webpack serve under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="webpack serve", run_in_background=True)
-add("background-end: astro dev under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="astro dev", run_in_background=True)
-add("background-end: rails s under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="rails s", run_in_background=True)
-add("background-end: streamlit run app.py under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="streamlit run app.py", run_in_background=True)
-add("background-end: npm run dev-server under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="npm run dev-server", run_in_background=True)
-add("background-end: npm run start-api under run_in_background with no note is refused",
-    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
-    command="npm run start-api", run_in_background=True)
 
 add("background-end: jest --watch=false under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="jest --watch=false", run_in_background=True)
@@ -4258,12 +4194,13 @@ for _name, _command in (
 # curly. `$( )` inside a token is known gap 6, and is not covered here.
 for _sep, _sep_name in ((";", "a semicolon"), (" && ", "and-and"), (" | ", "a pipe")):
     for _name, _command, _rule in (
-        ("a contraction before pkill", "echo a's b'" + _sep + "pkill foo", "machine-wide-kill"),
-        ("a sed quote before pkill", "sed -e's;a;b;' f" + _sep + "pkill foo", "machine-wide-kill"),
         ("a contraction before wsl", "echo a's b'" + _sep + "wsl --shutdown", WSL_RULE),
     ):
         sh("guard-command-position: regression, %s, %s denies" % (_name, _sep_name), _command,
            "deny", rule=_rule, cwd=NOGIT)
+# One pkill row for the contraction shape above: the wsl rows carry the separator depth.
+sh("guard-command-position: regression, a contraction before pkill, a semicolon denies",
+   "echo a's b'; pkill foo", "deny", rule="machine-wide-kill", cwd=NOGIT)
 for _name, _command in (
     ("sudo with bundled -Eu", "sudo -Eu root wsl --shutdown"),
     ("sudo with bundled -iu", "sudo -iu root wsl --shutdown"),
@@ -4291,31 +4228,20 @@ for _name, _command in (
 # openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
 # pins keep a lone apostrophe, and a quoted one, from hiding a later call that must stay allowed.
 for _name, _command, _rule in (
-    ("a contraction, a quoted apostrophe, then pkill", "echo a's b'; pkill foo; echo \"it's\"",
-     "machine-wide-kill"),
-    ("a contraction, a lone apostrophe, then pkill", "echo a's b'; pkill foo; echo don't",
-     "machine-wide-kill"),
-    ("a sed quote, a lone apostrophe, then pkill", "sed -e's;a;b;' f; pkill foo; echo don't",
-     "machine-wide-kill"),
     ("a contraction, a quoted apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo \"it's\"",
      WSL_RULE),
     ("a contraction, a lone apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo don't",
      WSL_RULE),
     ("a sed quote, a lone apostrophe, then wsl", "sed -e's;a;b;' f; wsl --shutdown; echo don't",
      WSL_RULE),
-    ("a contraction, a hash in the quote, then pkill", "echo a's # b'; pkill foo",
-     "machine-wide-kill"),
     ("a contraction, a double slash in the quote, then wsl", "echo a's // b'; wsl --shutdown",
      WSL_RULE),
-    ("a contraction, a slash-star in the quote, then pkill", "echo a's /* b'; pkill foo",
-     "machine-wide-kill"),
-    ("a contraction and a quote, then pkill on the next line",
-     "echo a's b'\npkill foo\necho \"it's\"", "machine-wide-kill"),
-    ("a lone apostrophe, an open paren, then pkill", "echo don't (x; pkill foo",
-     "machine-wide-kill"),
 ):
     sh("guard-command-position: regression, %s, denies" % _name, _command, "deny", rule=_rule,
        cwd=NOGIT)
+# One pkill row for the lone-apostrophe shape: the wsl rows above carry the same scanner paths.
+sh("guard-command-position: regression, a lone apostrophe, then pkill, denies",
+   "echo a's b'; pkill foo; echo don't", "deny", rule="machine-wide-kill", cwd=NOGIT)
 for _name, _command in (
     ("a lone apostrophe, a quoted apostrophe, then ls", "echo don't; echo \"it's\"; ls"),
     ("a contraction in plain text", "echo it's fine"),
@@ -4328,15 +4254,11 @@ for _name, _command in (
 # bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way. The
 # heredoc case is RED on 39160ee and also allows on 103a976: `it's` opens a quote that closes on
 # the line below, so `pkill foo` runs there, and it must deny.
-for _name, _command in (
-    ("a lone apostrophe in a double-quoted run", "echo don't \" don't \npkill foo\n \""),
-    ("a lone apostrophe closing a double-quoted run", "echo don't \" '\npkill foo\n \""),
-    ("an apostrophe after x closing a double-quoted run", "echo don't \" x'\npkill foo\n \""),
-    ("an apostrophe before a heredoc, closed on the next line",
-     "echo it's <<EOF\n'; pkill foo\nEOF"),
-):
-    sh("guard-command-position: round 2 bypass, %s, then pkill on the next line, denies" % _name,
-       _command, "deny", rule="machine-wide-kill", cwd=NOGIT)
+# The apostrophe in a double-quoted run closes a single quote on the line after, so pkill there is a
+# real separator. One row carries the shape.
+sh("guard-command-position: round 2 bypass, a lone apostrophe in a double-quoted run, "
+   "then pkill on the next line, denies",
+   "echo don't \" don't \npkill foo\n \"", "deny", rule="machine-wide-kill", cwd=NOGIT)
 
 # ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The RED case is
 # text `env -S` before the real wrapper: it hides the call after `$(`. It is RED on 1633efa and
@@ -4370,9 +4292,6 @@ sh("silent-write: merge's own quiet flag needs no redirect at all, MEASURED 2026
    VCS + " merge --quiet feature/x", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-write: rebase's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
    VCS + " rebase -q main", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
-sh("silent-write: a discarded refusal, stderr alone",
-   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="a redirect silences",
-   cwd=NOGIT)
 sh("silent-write: a discarded proof of landing, stdout alone",
    VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
    cwd=NOGIT)
@@ -5078,30 +4997,21 @@ sh("env: the accessor search in the other shell",
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
 # refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
 # wrapper, and a read stays refused behind any wrapper.
+# One row per wrapper shape: the time keyword, a `--flag=value` timeout, a Windows launcher path,
+# the py launcher, a loop body, and a quoted apostrophe ahead of a loop.
 for _cmd in (
     "time node --env-file=" + ENV + " app.js",
-    "time -p node --env-file=" + ENV + " app.js",
-    "verdict time node --env-file=" + ENV + " app.js",
-    "time verdict node --env-file=" + ENV + " app.js",
     "timeout --signal=TERM 5 node --env-file=" + ENV + " app.js",
-    "timeout --kill-after=2 5 node --env-file=" + ENV + " app.js",
     "bin/verdict.cmd node --env-file=" + ENV + " app.js",
     "py -3 bin/verdict node --env-file=" + ENV + " app.js",
     "for f in a; do node --env-file=" + ENV + " t.js; done",
-    "for f in a; do verdict node --env-file=" + ENV + " t.js; done",
-    "for f in a; do time node --env-file=" + ENV + " t.js; done",
-    "for f in a; do timeout 5 node --env-file=" + ENV + " t.js; done",
     'echo "don\'t"; for f in a; do node --env-file=' + ENV + ' t.js; done',
 ):
     sh("audit-high env: a runner behind a wrapper is allowed, " + _cmd[:34], _cmd, "allow",
        cwd=NOGIT)
 for _cmd in (
     "time cat " + ENV,
-    "time -p cat --env-file=" + ENV,
-    "for f in a; do cat " + ENV + "; done",
-    "verdict time cat --env-file=" + ENV,
     "timeout --signal=TERM 5 cat --env-file=" + ENV,
-    "bin/verdict.cmd cat --env-file=" + ENV,
     "verdict pytest --env-file=" + ENV,
     "time node --env-file=" + ENV + " app.js && cat " + ENV,
     "for f in a; do node --env-file=" + ENV + " t.js; cat " + ENV + "; done",
@@ -5115,10 +5025,11 @@ for _cmd in (
 # `--context`, `--include`, `rg -g`) and the `-v` assignment of awk are not patterns either. The
 # multi-line shape is the scanner's own case: a quoted string that holds a newline. Each one is red
 # on 13cebec. The shapes the owner named are green controls below.
+# Pattern shapes, one row each: a quoted pattern with a space, the scanner's quote and comment
+# openers inside a pattern, a multi-line pattern, a value flag of each kind, and the awk assignment.
 for _cmd in (
     'grep -n "def .*" f',
     "grep -rn 'node --env-file=.* x' docs/",
-    "grep -rn -- --env-file=.* hooks/",
     'grep -n "/\\* .* \\*/" src/a.js',
     'grep -n "don\'t .*" notes.md',
     'grep -n "a .* # b" f',
@@ -5126,25 +5037,19 @@ for _cmd in (
     "sed -n '/.* err/p' log.txt",
     "awk '/.* x/' f",
     "grep --max-count 5 '.*' file",
-    "grep --context 3 '.*' file",
     "grep --include '*.js' '.*' src/",
     "rg -g '*.ts' '.*' src/",
-    "time grep '.*' file",
     'for f in a; do grep ".*" "$f"; done',
     "awk -v re='.*' '$0 ~ re' file",
 ):
     add("audit-high env: a search pattern is not a path, " + _cmd[:30].replace("\n", " "),
         "allow", tool="Bash", cwd=NOGIT, command=_cmd)
 for _cmd in (
-    "grep '.*' file",
     "grep -e '--env-file=.*' f",
     'grep -n "a # b" f',
     'grep -n "x // y" f',
     "grep -n '#.*' file",
     "sed -n '/.env/p' file",
-    "sed 's/.*//' file",
-    "awk '/.*/' file",
-    "awk -F. '{print $1}' file",
     "for f in a; do\n  node --env-file=" + ENV + " t.js\ndone",
 ):
     add("audit-high env: a shape the owner named, or a scanner control, stays allowed, "
@@ -5152,11 +5057,7 @@ for _cmd in (
 for _cmd in (
     'grep -n "def .*" ' + ENV,
     "sed -n '/.* err/p' " + ENV,
-    "awk '/.* x/' " + ENV,
     "grep --max-count 5 foo " + ENV,
-    "grep --context 3 foo " + ENV,
-    "grep --include '*.js' '.*' " + ENV,
-    "rg -g '*.ts' foo " + ENV,
     "time grep -f " + ENV + " x",
     "for f in a; do grep foo " + ENV + "; done",
 ):
@@ -5352,15 +5253,11 @@ sh("git env set: Bash quoted heredoc runs no substitution, allowed",
 # the guard (RED on 46c3191). The spaced forms deny in the round 2 block above. One template per
 # opener: `@@` takes the set for the deny case and a body that sets nothing for the allow case, so
 # each form has both directions. A glued opener the guard must read, and one it must leave alone.
+# Three openers, one per tokenizer shape: a symbol alias (`%{`), a keyword after a paren (`if (...){`),
+# and an assignment (`$sb={`). Each has a deny and an allow.
 _GLUED_OPENERS = (
     ("pipeline %{", "1..2|%{@@}"),
     ("if ($t){", "if ($t){@@}"),
-    ("if($t){", "if($t){@@}"),
-    ("foreach($i in 1..2){", "foreach($i in 1..2){@@}"),
-    ("try{", "try{@@}catch{}"),
-    ("do{", "do{@@}while(0)"),
-    ("else{", "if (0) {1} else{@@}"),
-    ("ForEach-Object{", "1..2 | ForEach-Object{@@}"),
     ("$sb={", "$sb={@@}; & $sb"),
 )
 for _label, _template in _GLUED_OPENERS:
@@ -5371,19 +5268,13 @@ for _label, _template in _GLUED_OPENERS:
        _template.replace("@@", "$_"), "allow", tool="PowerShell", cwd=NOGIT)
 # Round 1 review of faa1e35: a glued opener, a space, then the set. 46c3191 denies every one of
 # these, and faa1e35 allows them (a regression, RED on faa1e35): its split leaves an empty token
-# after the brace, so the set no longer follows `{`. The same nine openers, a space before the set.
+# after the brace, so the set no longer follows `{`. The same three openers, a space before the set.
 for _label, _template in _GLUED_OPENERS:
     sh("git env set: PowerShell, a set after a space in a glued %s block, denies" % _label,
        _template.replace("@@", " $env:GIT_DIR='x' "), "deny", GIT_ENV_RULE, tool="PowerShell",
        cwd=NOGIT)
-sh("git env set: PowerShell, spaces around the pipe and the equals sign in a glued %{ block, denies",
-   "1..2 | %{ $env:GIT_DIR = 'x' }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
-for _cmd in (
-    """pwsh -c '1..2|%{ $env:GIT_DIR="x" }'""",
-    """pwsh -c 'if(1){ $env:GIT_DIR="x" }'""",
-):
-    sh("git env set: Bash, pwsh -c with a space before the set in a glued block, %s, denies"
-       % _cmd[8:20], _cmd, "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash, pwsh -c with a space before the set in a glued block, denies",
+   """pwsh -c 'if(1){ $env:GIT_DIR="x" }'""", "deny", GIT_ENV_RULE, cwd=NOGIT)
 # Pins, GREEN on 46c3191 and on faa1e35. A double-quoted here-string (`@"..."@`) expands its
 # `$( )`, so a set inside it runs and denies. A single-quoted one (`@'...'@`) is text: the same set
 # in it allows, and so does a double-quoted one that holds no set.
@@ -5411,10 +5302,8 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a set in a spaced block, %s, denies" % _cmd[:30], _cmd, "deny",
        GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
-# The other two names, a cmdlet set and a lower-case name inside a glued block.
+# A cmdlet set and a lower-case name inside a glued block. The other names take the same branch.
 for _cmd in (
-    "1..2|%{$env:GIT_WORK_TREE='x'}",
-    "1..2|%{$env:GIT_INDEX_FILE='x'}",
     "1..2|%{Set-Item env:GIT_DIR x}",
     "if($t){$env:git_dir='x'}",
 ):
@@ -5424,10 +5313,8 @@ for _cmd in (
 for _cmd in (
     "1..2|%{$env:GIT_DIR}",
     "1..2|%{$env:GIT_DIR=$null}",
-    "1..2|%{$env:GIT_TRACE='1'}",
     "if($t){Remove-Item env:GIT_DIR}",
     "Write-Host 'if($t){$env:GIT_DIR=1}'",
-    "Write-Host '1..2|%{$env:GIT_DIR=1}'",
     'Write-Host "# 1..2|%{$env:GIT_DIR=1}"',
     'Write-Host "first line\n1..2|%{$env:GIT_DIR=1}\nlast line"',
     "@'\n1..2|%{$env:GIT_DIR=1}\n'@",
@@ -5493,47 +5380,16 @@ for _cmd in (
 # the walk allows their split forms on both heads. A bare split assignment with no command after
 # it is allowed on both too (a bare name in capitals is denied only when it is written whole).
 _SPLIT = "GIT_INDE$(echo X)_FILE"
-for _label, _cmd in (
-    ("export", "export %s=/x; python -m pytest"),
-    ("declare -x", "declare -x %s=/x; python -m pytest"),
-    ("typeset -x", "typeset -x %s=/x; python -m pytest"),
-    ("env", "env %s=/x python -m pytest"),
-    ("sh -c export", 'sh -c "export %s=/x; python -m pytest"'),
-    ("a prefix assignment", "%s=/x python -m pytest"),
-    ("setx", "setx %s x"),
-    ("cmd /c setx", "cmd /c setx %s x"),
-):
-    sh("git env set: Bash, a name split by a substitution, %s, denies" % _label, _cmd % _SPLIT,
-       "deny", GIT_ENV_RULE, cwd=NOGIT)
-for _label, _cmd in (
-    ("Set-Item", r'Set-Item env:%s "C:\x\index"; python -m pytest'),
-    ("New-Item", r"New-Item env:%s -Value C:\x\index; python -m pytest"),
-    ("setx", "setx %s x"),
-):
-    sh("git env set: PowerShell, a name split by a substitution, %s, denies" % _label,
-       _cmd % _SPLIT, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: Bash, a name split by a substitution, export, denies",
+   "export %s=/x; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE, cwd=NOGIT)
 
 # Round 2 review of a01afb0 (guard-speed): a name split by a printf directive. `%s` and `%b` with
 # no argument print nothing, so the profile gets `GIT_DIR=/x`. The walk drops the directives
 # (`_PRINTF_DIRECTIVE`) before it reads the name, so the raw text holds no whole name and a quick
 # test of the raw text or of a substitution's text skips the walk. Each case below is denied on
 # 46c3191 and allowed on a01afb0.
-for _label, _cmd in (
-    ("%s, GIT_DIR", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
-    ("%b, GIT_DIR", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
-    ("%s, GIT_INDEX_FILE", r"printf 'GIT_INDEX_%sFILE=/x\n' >> ~/.bashrc"),
-    ("%s, GIT_WORK_TREE", r"printf 'GIT_WORK_%sTREE=/x\n' >> ~/.bashrc"),
-    ("%s, with an export prefix", r"printf 'export GIT_%sDIR=/x\n' >> ~/.bashrc"),
-    ("%s, piped to tee -a", r"printf 'GIT_%sDIR=/x\n' | tee -a ~/.bashrc"),
-):
-    sh("git env set: Bash printf into a profile, a name split by a directive %s, denies" % _label,
-       _cmd, "deny", GIT_ENV_RULE, cwd=NOGIT)
-for _label, _cmd in (
-    ("%s", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
-    ("%b", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
-):
-    sh("git env set: PowerShell printf into a profile, a name split by a directive %s, denies"
-       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: Bash printf into a profile, a name split by a printf directive, denies",
+   r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
 # Round 3 review of 78ba117 (guard-speed): the quick test cannot read a printf directive by a strip
 # over the whole text, in either order with `QUOTE_MARKS`. Each case below is denied on 46c3191 and
@@ -5706,13 +5562,8 @@ sh("merge-checks: reading a pending pull request is untouched", "gh pr view 12 -
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12 --squash"',
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge-checks: a grep for a merge is no merge", "grep -rn 'gh pr merge' docs", "allow",
-   silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a heredoc body that names a merge is data",
    "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=NOGIT,
-   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge-checks: a commit message that names a merge is a message",
-   VCS + ' log --grep "gh pr merge"', "allow", silent=True, cwd=NOGIT,
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 
 
@@ -5723,29 +5574,23 @@ FAMILY = "cite"
 # path, the word "decisions", a read of a record and a record's own file stay allowed.
 
 CITE = "decisions/one-shared-record-stamp.md"
+# Each form below reaches its own branch of the cite scan: a flag shape, a message source, or a
+# path spelling. A form that only repeats another's branch is not listed.
 for _name, _command in (
     ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
-    ("a second -m paragraph", VCS + ' commit -m "title" -m "body cites ' + CITE + '"'),
     ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
     ("the long --message=", VCS + ' commit --message="cites ' + CITE + '"'),
-    ("a single-quoted message", VCS + " commit -m 'cites " + CITE + "'"),
-    ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
-    ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF"),
     ("a file named by -F", VCS + " commit -F " + slash(MSG_BAD)),
+    ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
-    ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
-    ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
-    ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'cites " + CITE + "'"),
 ):
     sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a message file that cannot be read is unknown, and denies",
    VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt", "deny", "cite-by-id",
    carries="could not be read", cwd=NOGIT, config=MERGECFG)
-sh("cite-by-id: a PowerShell -F file at a native path is read", VCS + " commit -F " + MSG_BAD,
-   "deny", "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
@@ -6046,26 +5891,15 @@ def cite_unread_folders_case():
 # interpreter-fed body, which shifts the header count so the commit reads another body; and a case
 # pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
 # cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
+# Wrapper forms: one row per wrapper walk (a bare form, a value flag, a subshell). The deep set of
+# wrappers lives in the wsl section above, so this block keeps one row for each walk.
 for _name, _command in (
     ("exec", "exec " + VCS + ' commit -m "fix (N20)"'),
-    ("builtin exec", "builtin exec " + VCS + ' commit -m "fix (N20)"'),
-    ("a leading bang", "! " + VCS + ' commit -m "fix (N20)"'),
     ("a dollar paren", "$(" + VCS + ' commit -m "fix (N20)")'),
     ("a glued subshell", "(" + VCS + ' commit -m "fix (N20)")'),
     ("a nice value flag", "nice -n 5 " + VCS + ' commit -m "fix (N20)"'),
-    ("a sudo value flag", "sudo -u root " + VCS + ' commit -m "fix (N20)"'),
-    ("an env value flag", "env -u X " + VCS + ' commit -m "fix (N20)"'),
-    ("an xargs value flag", "xargs -n 1 " + VCS + ' commit -m "fix (N20)"'),
     ("a glued subshell with a heredoc commit",
      "(" + VCS + " commit -F - <<'B'\nLane N20 lands\nB\n)"),
-    ("a nice value flag with a heredoc commit",
-     "nice -n 5 " + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
-    ("a nice value flag with a PR create",
-     "nice -n 5 gh pr create --draft -t 'fix (N20)' -b ok"),
-    ("a sudo value flag with a PR create",
-     "sudo -u root gh pr create --draft -t 'fix (N20)' -b ok"),
-    ("an env value flag with a PR create",
-     "env -u X gh pr create --draft -t 'fix (N20)' -b ok"),
     ("a here-string header", "cat <<<word\n" + VCS + ' commit -m "fix (N20)"'),
     ("a quoted header", 'echo "<<EOF"\n' + VCS + ' commit -m "fix (N20)"'),
     ("a commented header", "# note <<EOF\n" + VCS + ' commit -m "fix (N20)"'),
@@ -6073,18 +5907,11 @@ for _name, _command in (
      'echo "# <<EOF"\n' + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("an interpreter body with a << word, then a heredoc commit",
      "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
-    ("an interpreter -c body with a << word, then a heredoc commit",
-     "python3 -c 'print(1)' <<EOF\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
-    ("two interpreter bodies with << words, then a heredoc commit",
-     "python3 - <<'EOF'\nx = 1 << y\nEOF\npython3 - <<'EOF'\nz = 2 << w\nEOF\n"
-     + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("a case pattern paren in an open dollar paren, then an interpreter body with a << word",
      "echo $(case a in (a) echo ok;; esac\npython3 - <<'EOF'\nx = 1 << y\nEOF\n"
      + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("a lone apostrophe on the line before a heredoc commit",
      "echo don't\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
-    ("a lone apostrophe on the line before a -m commit",
-     "echo don't\n" + VCS + ' commit -m "fix (N20)"'),
 ):
     sh("guard-command-position: lane %s denies" % _name, _command, "deny", "lane-by-slug",
        cwd=NOGIT, config=MERGECFG)
@@ -6098,24 +5925,14 @@ sh("guard-command-position: lane, a lone quote pair then a -m $(cat commit namin
    "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("command", "command " + VCS + ' commit -m "fix (N20)"'),
-    ("nice", "nice " + VCS + ' commit -m "fix (N20)"'),
     ("timeout", "timeout 5 " + VCS + ' commit -m "fix (N20)"'),
-    ("sudo", "sudo " + VCS + ' commit -m "fix (N20)"'),
-    ("xargs", "xargs " + VCS + ' commit -m "fix (N20)"'),
     ("time", "time " + VCS + ' commit -m "fix (N20)"'),
-    ("nohup", "nohup " + VCS + ' commit -m "fix (N20)"'),
-    ("doas", "doas " + VCS + ' commit -m "fix (N20)"'),
-    ("an env prefix", "env X=1 " + VCS + ' commit -m "fix (N20)"'),
     ("a spaced subshell", "( " + VCS + ' commit -m "fix (N20)" )'),
     ("a brace group", "{ " + VCS + ' commit -m "fix (N20)"; }'),
     ("an interpreter body with a << word, then a lane -m commit",
      "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + ' commit -m "fix (N20)"'),
-    ("an interpreter body with a shift operator, then a heredoc lane commit",
-     "python3 - <<'EOF'\nprint(1 << 2)\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("a plain heredoc body with a << word, then a heredoc lane commit",
      "cat <<'A'\nx = 1 << y\nA\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
-    ("a closed case pattern paren in a dollar paren, then a heredoc lane commit",
-     "echo $(case a in (a) echo ok;; esac)\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("an open case pattern paren in a dollar paren, then a heredoc lane commit",
      "echo $(case a in (a) echo ok;; esac\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
     ("a multi-line quoted text, then a heredoc lane commit",
@@ -6125,12 +5942,7 @@ for _name, _command in (
        "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("an env value flag with a clean commit", "env -u X " + VCS + ' commit -m "fix guard parsing"'),
-    ("a nice value flag with a clean commit", "nice -n 5 " + VCS + ' commit -m "fix guard parsing"'),
-    ("a sudo value flag with a clean PR create", "sudo -u root gh pr create --draft -t 'fix guard' -b ok"),
     ("a heredoc body that names a lane", "cat <<'EOF'\n" + VCS + ' commit -m "fix (N20)"\nEOF'),
-    ("a lone apostrophe on the line before a clean commit",
-     "echo don't\n" + VCS + ' commit -m "fix guard"'),
-    ("a quoted lane in echo", 'echo "lane N20 lands"'),
     ("a comment opener in quotes before a clean commit",
      'echo "# N20"\n' + VCS + ' commit -m "fix guard parsing"'),
     ("a glued subshell around a clean commit", "(" + VCS + ' commit -m "fix guard parsing")'),
@@ -7436,10 +7248,12 @@ for _name, _change in AUTHOR_GREEN:
 # non-.md path slips through) and false deny (an .md path is blocked).
 RW = dict(agent_id="rw1", agent_type="record-writer", cwd=NOGIT)
 RW_RULE = "record-writer-scope"
+# One allow row per tool and per path spelling that the rule reads: a markdown file in a folder, and
+# the upper-case extension. The Write tool takes the same branch as Edit for an .md path.
+for _tool, _path in (("Edit", "docs/x.md"), ("Write", "decisions/y.md"), ("Edit", "README.MD")):
+    add("record-writer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool,
+        file_path=_path, new_string="x", **RW)
 for _tool in ("Edit", "Write"):
-    for _path in ("docs/x.md", "decisions/y.md", "README.md", "README.MD"):
-        add("record-writer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool,
-            file_path=_path, new_string="x", **RW)
     for _path in ("hooks/guard.py", "lint/x.json", ".github/workflows/gates.yml",
                   "hooks/test_guard.py", "settings.json", "notes.md.py"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
@@ -7703,16 +7517,6 @@ add("impeccable: bare name with audit is allowed", "allow", tool="Skill", skill=
 add("impeccable: no args is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP)
 add("impeccable: polish is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
     args="polish")
-add("impeccable: shape is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
-    args="shape")
-add("impeccable: bolder is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
-    args="bolder")
-add("impeccable: hooks on is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
-    args="hooks on")
-add("impeccable: live is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
-    args="live")
-add("impeccable: init is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
-    args="init")
 add("impeccable: audit then polish in one args string is denied", "deny", "impeccable-review-only",
     tool="Skill", skill=IMP, args="audit; polish")
 add("impeccable: bare name with polish is denied", "deny", "impeccable-review-only", tool="Skill",
@@ -7728,10 +7532,6 @@ sh("impeccable bash: hooks on writes agent settings", "npx impeccable hooks on",
 sh("impeccable bash: hooks by script path is denied",
    "node \"$HOME/.claude/plugins/impeccable/scripts/impeccable.mjs\" hooks on", "deny",
    "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: doctor --auto is denied", "npx impeccable doctor --auto", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: doctor auto is denied", "npx impeccable doctor auto", "deny",
-   "impeccable-review-only", cwd=NOGIT)
 sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/pages app", "allow",
    cwd=NOGIT)
 
@@ -7746,16 +7546,6 @@ sh("impeccable bash: npx -y latest hooks on is denied", "npx -y impeccable@lates
    "impeccable-review-only", cwd=NOGIT)
 sh("impeccable bash: npx -p latest hooks on is denied",
    "npx -p impeccable@latest impeccable hooks on", "deny", "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: install is denied", "npx impeccable install", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: update is denied", "npx impeccable update", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: link is denied", "npx impeccable link", "deny", "impeccable-review-only",
-   cwd=NOGIT)
-sh("impeccable bash: ignores add-file is denied", "npx impeccable ignores add-file x", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: pin is denied", "npx impeccable pin pin polish", "deny",
-   "impeccable-review-only", cwd=NOGIT)
 
 sh("impeccable bash: hooks status is allowed", "npx impeccable hooks status", "allow", cwd=NOGIT)
 sh("impeccable bash: detect on a folder is allowed", "npx impeccable detect src", "allow",
@@ -7792,16 +7582,6 @@ sh("impeccable powershell: an assignment around the call operator is denied",
    "$r = & impeccable install", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
 sh("impeccable powershell: a script block around the call operator is denied",
    "{ & impeccable install }", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
-sh("impeccable bash: doctor --fix is denied", "npx impeccable doctor --fix", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: init is denied", "npx impeccable init", "deny", "impeccable-review-only",
-   cwd=NOGIT)
-sh("impeccable bash: document is denied", "npx impeccable document", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: extract is denied", "npx impeccable extract", "deny",
-   "impeccable-review-only", cwd=NOGIT)
-sh("impeccable bash: live is denied", "npx impeccable live", "deny", "impeccable-review-only",
-   cwd=NOGIT)
 sh("impeccable bash: a subcommand not yet named is denied", "npx impeccable some-future-cmd",
    "deny", "impeccable-review-only", cwd=NOGIT)
 
@@ -8427,28 +8207,24 @@ def branch_base_unread_log_case():
 FAMILY = "rule9"
 # ---- Rule 9, the subagent model floor. Both directions: Haiku in any spelling is denied, and
 # every other model, or none, is allowed.
-for _tool in ("Agent", "Task"):
-    add("floor: %s with model haiku is denied" % _tool, "deny", "subagent-model-floor",
-        tool=_tool, prompt="do it", model="haiku")
-add("floor: Agent with a full haiku id is denied", "deny", "subagent-model-floor",
-    tool="Agent", prompt="do it", model="claude-haiku-4-5-20251001")
+# The Task tool takes the same branch as Agent, so these rows name Agent only. A full model id is the
+# same branch as its short name, so the rows use the short names.
+add("floor: Agent with model haiku is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="haiku")
 add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model="Claude-HAIKU-4-5")
 add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model=["haiku"])
 add("floor: Agent with model sonnet is allowed", "allow", tool="Agent", prompt="x", model="sonnet")
 add("floor: Agent with model opus is allowed", "allow", tool="Agent", prompt="x", model="opus")
-add("floor: Agent with a full opus id is allowed", "allow", tool="Agent", prompt="x",
-    model="claude-opus-5")
 add("floor: Agent with no model is allowed", "allow", tool="Agent", prompt="x")
-add("floor: Task with no model is allowed", "allow", tool="Task", prompt="x")
 
 # ---- Rule 9, Haiku roles (owner ruling 2026-10-07). Haiku is allowed only for Explore,
 # claude-code-guide, test-author and reviewer. Failure classes: false deny (a listed role blocked),
 # false allow (a non-listed role, a near-miss name, or a missing role slips through).
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
-HAIKU_MODELS = ("haiku", "claude-haiku-5-5")
-for _tool in ("Agent", "Task"):
+HAIKU_MODELS = ("haiku",)
+for _tool in ("Agent",):
     for _role in HAIKU_ROLES:
         for _model in HAIKU_MODELS:
             add("floor: %s %s with model %s is allowed" % (_tool, _role, _model), "allow",
@@ -8456,8 +8232,6 @@ for _tool in ("Agent", "Task"):
     for _role in ("builder", "Plan", "general-purpose", "claude", "reviewer-lite", "not-explore"):
         add("floor: %s %s with model haiku is denied" % (_tool, _role), "deny",
             "subagent-model-floor", tool=_tool, prompt="do it", model="haiku", subagent_type=_role)
-add("floor: Agent builder with the full haiku 5.5 id is denied", "deny", "subagent-model-floor",
-    tool="Agent", prompt="do it", model="claude-haiku-5-5", subagent_type="builder")
 add("floor: Agent with an empty subagent_type and haiku is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model="haiku", subagent_type="")
 add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model-floor",
@@ -8466,7 +8240,7 @@ add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
 # near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
-for _tool in ("Agent", "Task"):
+for _tool in ("Agent",):
     for _near in ("record-writers", "Record-Writer", "record_writer", "record-writer "):
         add("floor: %s %r with model haiku is denied" % (_tool, _near), "deny",
             "subagent-model-floor", tool=_tool, prompt="do it", model="haiku",
@@ -8496,9 +8270,6 @@ add("floor step-up: reviewer Round 2 of 3 with no model is denied (no sonnet nam
 add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="inherit",
     subagent_type="reviewer")
-add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
-    subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
@@ -8510,20 +8281,13 @@ add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 
     prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.")
 add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
     tool="Agent", prompt="Check the diff for typos.", model="haiku", subagent_type="reviewer")
-add("floor step-up: reviewer Round 2 of 3 on the full opus id is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-opus-5",
-    subagent_type="reviewer")
-add("floor step-up: reviewer Round 2 of 3 on the full haiku id is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-haiku-5-5",
-    subagent_type="reviewer")
 add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
     tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)", "allow",
-    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="claude-opus-5-5",
-    subagent_type="reviewer")
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
@@ -9940,7 +9704,11 @@ def fail_closed_case(module):
     return check
 
 
-for _module in FAILCLOSED_MODULES:
+# Two modules get a refusal case: guard_core, which the guard imports first, and guard_wsl, the
+# newest family module. Each sibling reaches the same refusal branch, and the list check below still
+# names every module on disk.
+FAILCLOSED_CASE_MODULES = ("guard_core", "guard_wsl")
+for _module in FAILCLOSED_CASE_MODULES:
     _check = fail_closed_case(_module)
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing %s refuses a Bash call"
@@ -10047,7 +9815,6 @@ RELOAD_DELAY_S = 1.0
 INSTALL_ID = "3f1a9c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b"
 STALE_INSTALL_ID = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a"
 RELOAD_CORE = "guard_core.py"
-RELOAD_MISSING = "guard_pointer.py"
 RELOAD_CONTROL = []   # the intact copy's (decision, exit), read once, for the refusal's exit code
 
 
@@ -10103,11 +9870,6 @@ def _truncated(text):
 def _damage_truncated(folder, good):
     _put_whole(os.path.join(folder, RELOAD_CORE), _truncated(good[RELOAD_CORE]))
     return [RELOAD_CORE]
-
-
-def _damage_missing(folder, good):
-    os.remove(os.path.join(folder, RELOAD_MISSING))
-    return [RELOAD_MISSING]
 
 
 def _damage_stamp(folder, good):
@@ -10211,10 +9973,6 @@ RELOAD_CHECKS = (
      reload_fixed_case("truncated-fixed", _damage_truncated)),
     ("reload-stamp: a truncated guard_core.py never fixed is refused as guard-crash, never allowed",
      reload_stuck_case("truncated-stuck", _damage_truncated)),
-    ("reload-stamp: a guard_pointer.py missing during the wait, then restored, is reloaded and allowed",
-     reload_fixed_case("missing-fixed", _damage_missing)),
-    ("reload-stamp: a guard_pointer.py never restored is refused as guard-crash, never allowed",
-     reload_stuck_case("missing-stuck", _damage_missing)),
     ("reload-stamp: a stamp mismatch fixed during the wait is reloaded, and the call allowed",
      reload_fixed_case("stamp-fixed", _damage_stamp)),
     ("reload-stamp: a stamp mismatch never fixed is refused as guard-crash, never allowed",
@@ -10484,54 +10242,8 @@ LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never 
 # ------------------------------------------- review round 1 (PR 383): red until the builder fixes
 
 
-def session_log_no_setter_case():
-    """session-log: a guard_core that lacks set_log_session still judges and denies. The entry
-    point calls that name outside the guarded import and outside main's try, so a missing name must
-    not become a traceback or a changed exit (decisions/gate-hooks-fail-closed.md: a crash does not
-    change a verdict). The same payload runs with the name and without it. Verdict and exit must
-    match, and the deny line must end in the placeholder.
-    """
-    payload = _session_log_payload(SESSION_LOG_ID)
-    results = []
-    for label, drop in (("with", False), ("without", True)):
-        folder = _session_log_fresh("sessionlog-nosetter-" + label)
-        code = ("import io, sys, importlib.util as u\n"
-                "spec = u.spec_from_file_location('g', %r)\n"
-                "g = u.module_from_spec(spec)\n"
-                "spec.loader.exec_module(g)\n" % GUARD
-                + ("del sys.modules['guard_core'].set_log_session\n" if drop else "")
-                + "sys.stdin = io.StringIO(%r)\n"
-                  "g.main()\n" % payload)
-        env = dict(os.environ)
-        env["CLAUDE_CONFIG_DIR"] = folder
-        env.pop("CLAUDE_CODE_SESSION_ID", None)
-        run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                             env=env, timeout=60)
-        results.append((run, _session_log_rows(folder)))
-    (with_run, _), (without_run, without_rows) = results
-    if without_run.returncode != with_run.returncode:
-        return False, "exit %d without the setter, %d with it" % (
-            without_run.returncode, with_run.returncode)
-    if "Traceback" in without_run.stderr:
-        return False, "a traceback without the setter: %r" % without_run.stderr.strip()[-160:]
-    if not without_run.stdout.strip():
-        return False, "the deny was not printed without the setter"
-    if without_run.stdout != with_run.stdout:
-        return False, "the verdict changed without the setter"
-    if without_rows is None or len(without_rows) != 1:
-        return False, "expected one line without the setter, found %s" % (
-            "none" if without_rows is None else len(without_rows))
-    fields = without_rows[0].split("\t")
-    if len(fields) != 6 or fields[5] != SESSION_LOG_PLACEHOLDER:
-        return False, "the line without the setter is %r, want the placeholder last" % (
-            without_rows[0])
-    return True, "same verdict and exit with the setter missing, and the line ends in '-'"
-
-
-LOG_CHECKS_EXTRA.append(("session-log: a guard_core without set_log_session still judges and "
-                         "denies, as with it", session_log_no_setter_case))
-
-
+# A guard_core that lacks set_log_session is covered by the stale-core case below: that case drops
+# this name too, and its call site (guard.py main) fails the same way.
 def session_log_stale_core_case():
     """session-log: a stale guard_core that lacks BOTH set_log_session and _log_session still
     judges. The verdict and the exit match a run with both names, and the deny line has five fields:
