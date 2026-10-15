@@ -1506,5 +1506,28 @@ class DropsLinesHint(unittest.TestCase):
         self.assertLessEqual(fault.n, 2, "git spawns for 50 candidate commits: %d" % fault.n)
 
 
+class RecordsPage(unittest.TestCase):
+    """docs/records.md is excused only when it equals the generator's output for the head. Here the generator
+    writes the d-one row, the debt file still stands, and a hand edit drops the row: an undo, so it is refused."""
+
+    def test_a_page_that_differs_from_the_generator_is_still_refused(self):
+        import hook_catalog as gen
+        debts = "## Debts\n\n| Slug | Gist | Link |\n|---|---|---|\n"
+        row = "| `d-one` | Keep the page honest. | [`debts/d-one.md`](../debts/d-one.md) |\n"
+        r = base_repo()
+        r.commit("records index", **{"docs/records.md": gen.RECORDS_INTRO})
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("add debt d-one", **{"debts/d-one.md": "**What.** Keep the page honest.\n", "docs/records.md": gen.RECORDS_INTRO + debts + row})
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("drop the d-one row by hand", **{"docs/records.md": gen.RECORDS_INTRO})
+        got = r.verdict()
+        self.assertTrue(any("docs/records.md" in p for p in got), got)
+        self.assertEqual(C.generated_page(r.dir, "HEAD", {"docs/records.md"}), ("docs/records.md", False))
+
+
 if __name__ == "__main__":
     unittest.main()
