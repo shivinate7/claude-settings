@@ -34,8 +34,13 @@ Per question with two or more options (a clarifying question passes first):
   says how many. A ruling under another heading is not read.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
-- A failed model call, unreadable transcript, or malformed input lets the question through,
-  with one systemMessage saying the check did not run. It never echoes the prompt.
+- The judge reads each option on one line: its label, description and preview, each defanged and
+  cut to OPTION_PART_CAP (800) chars. A cut part ends in OPTION_CUT, and the prompt names that mark.
+  The question text is defanged the same way.
+- A failed model call, an unreadable transcript, or hook input that is not readable lets the
+  question through, with one systemMessage saying the check did not run. It never echoes the
+  prompt. An options value that is not a list counts as no options: the question passes with
+  no model call and no message, as a clarifying question does.
 
 Deny: stdout one PreToolUse deny JSON, exit 0. Allow: empty stdout, exit 0.
 """
@@ -72,6 +77,10 @@ SPAN_BUDGET = 20000
 # unmeasured: debt model-clip-unmeasured.
 PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
+# Chars of one option's label, description or preview; a longer part is cut and ends in OPTION_CUT.
+# Real descriptions run to 375 chars at p99 (605 max), and the Loss text sits at the end.
+OPTION_PART_CAP = 800
+OPTION_CUT = " [cut]"
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
 RELAY_TAG = re.compile(r"<cross-session-message\b[^>]*>(.*?)</cross-session-message>", re.DOTALL)
 # The two labels. Each sits in its style-file rule bullet; every use below reads these.
@@ -125,11 +134,12 @@ PROMPT = (
     "(a decision id, a branch, a sha, a key, a rule name) explained in plain words; (5) does the "
     "question point at anything the box does not show, such as an earlier message, a time that refers to "
     "an earlier message, or an item number like \"item 4\"; (6) does each option say what the owner gains and what "
-    "the owner loses, each as a change for the owner and not for a record. A goal line is a paraphrase of the goal in plain words; "
+    "the owner loses, each as a change for the owner and not for a record. An option part that ends in "
+    "`%s` was cut for length: that mark is not a missing part. A goal line is a paraphrase of the goal in plain words; "
     "a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
-    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL)
+    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL, OPTION_CUT.strip())
 )
 
 
@@ -288,7 +298,7 @@ def owner_messages(path):
     return [text for kind, _, text in _scan(path) if kind == "owner"]
 
 
-FENCE_TOKEN = re.compile(r"<{3,}(?=BEGIN|END)")  # any run of 3+ "<" before BEGIN or END
+FENCE_TOKEN = re.compile(r"<{3,}(?=\s*(?:BEGIN|END))")  # any run of 3+ "<" before BEGIN or END, spaces allowed
 
 
 def _defang(s, one_line=False):
@@ -504,7 +514,17 @@ def _deny(reason):
 
 
 def _options(q):
-    return [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)]
+    """One line per option for the judge: label, then its description and preview when it has them.
+    Check (6) asks what each option gains and loses, and the description holds that. Every part is
+    defanged and capped, so no option text can forge a fence or crowd out the owner's messages.
+    Each line is one line, so the "\n" between options is the only option boundary."""
+    def part(o, k):
+        t = _defang(str(o.get(k) or ""), one_line=True)
+        return t[:OPTION_PART_CAP] + OPTION_CUT if len(t) > OPTION_PART_CAP else t
+    opts = q.get("options")
+    opts = opts if isinstance(opts, list) else []  # a malformed options value is no options: the ask is not judged
+    return [" - ".join(t for t in (part(o, k) for k in ("label", "description", "preview")) if t)
+            for o in opts if isinstance(o, dict)]
 
 
 def _did_not_run(why):
@@ -524,7 +544,7 @@ def main():
         _did_not_run("the deny state could not be cleared, so the question was not judged.")
     if passed:
         sys.exit(0)  # the retry after a deny passes, whatever its text
-    todo = [(str(q.get("question", "")), _options(q)) for q in questions]
+    todo = [(_defang(str(q.get("question", ""))), _options(q)) for q in questions]
     todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
     absent = [(t, [lab for lab, rx in ((GOAL_LABEL, GOAL_LINE), (PROBLEM_LABEL, PROBLEM_LINE))
                    if not rx.search(t)]) for t, _ in todo]
@@ -553,7 +573,7 @@ def main():
         entries = []
     if not any(kind == "owner" for kind, _, _ in entries):
         _did_not_run("no owner messages readable.")
-    body = "\n\n".join("Question: %s\nOptions: %s" % (t, " | ".join(ls)) for t, ls in todo)
+    body = "\n\n".join("Question: %s\nOptions: %s" % (t, "\n".join(ls)) for t, ls in todo)
     rules = _style_rules()
     rules = "Question rules, from the style file:\n%s\n\n" % rules if rules else ""
     cwd = hook.get("cwd")

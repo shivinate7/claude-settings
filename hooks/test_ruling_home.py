@@ -118,19 +118,27 @@ def new_session(name):
 # A written memory section with no home: line at all: blocks.
 
 def case_a_no_home_line():
-    session_dir, memory_dir = new_session("case_a")
-    mem_path = os.path.join(memory_dir, "notes.md")
-    write(mem_path, "# Note\n\nSomething happened, no home line here.\n")
-    records = [
-        human_record("do the thing", T0),
-        assistant_record(tool_use=write_tool_use(mem_path)),
-    ]
-    path = write_transcript(session_dir, records)
-    hook = {"transcript_path": path, "cwd": ROOT}
-    reason = rh.run(hook)
-    check("case_a: blocks", bool(reason), reason)
-    check("case_a: names the file", "notes.md" in reason, reason)
-    check("case_a: names the section", "Note" in reason, reason)
+    # Rows: (row id, file text, mtime or None). mtime plays no part in the verdict, so the old row
+    # reaches the same tool-use branch as the fresh one. A Write tool use names the file in both.
+    for prefix, text, mtime in (
+        ("case_a", "# Note\n\nSomething happened, no home line here.\n", None),
+        ("tool_use_alone_old_mtime", "# Note\n\nNo home line.\n", OLD_MTIME),
+    ):
+        session_dir, memory_dir = new_session(prefix)
+        mem_path = os.path.join(memory_dir, "notes.md")
+        write(mem_path, text)
+        if mtime is not None:
+            os.utime(mem_path, (mtime, mtime))
+        records = [
+            human_record("do the thing", T0),
+            assistant_record(tool_use=write_tool_use(mem_path)),
+        ]
+        path = write_transcript(session_dir, records)
+        hook = {"transcript_path": path, "cwd": ROOT}
+        reason = rh.run(hook)
+        check(prefix + ": blocks", bool(reason), reason)
+        check(prefix + ": names the file", "notes.md" in reason, reason)
+        check(prefix + ": names the section", "Note" in reason, reason)
 
 
 # --------------------------------------------------------------------------- case b
@@ -293,23 +301,6 @@ def case_idle_turn_never_parses_the_whole_transcript():
 
 
 # --------------------------------------------------------------------------- finding 1
-# The tool-use path alone: an OLD mtime, but a Write tool use naming the file, still blocks.
-
-def case_tool_use_alone_old_mtime_blocks():
-    session_dir, memory_dir = new_session("case_tool_use_old_mtime")
-    mem_path = os.path.join(memory_dir, "notes.md")
-    write(mem_path, "# Note\n\nNo home line.\n")
-    os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
-    records = [
-        human_record("do the thing", T0),
-        assistant_record(tool_use=write_tool_use(mem_path)),
-    ]
-    path = write_transcript(session_dir, records)
-    hook = {"transcript_path": path, "cwd": ROOT}
-    reason = rh.run(hook)
-    check("tool_use_alone_old_mtime: blocks", bool(reason), reason)
-    check("tool_use_alone_old_mtime: names the file", "notes.md" in reason, reason)
-
 
 # --------------------------------------------------------------------------- finding 1
 # The Bash path, naming a specific file: a FRESH mtime, a Bash command naming that one
@@ -363,34 +354,26 @@ def case_bash_names_folder_only():
 # A read (`cat`/`ls`) never changes mtime. An OLD file a Bash command reads must stay
 # silent, whether named specifically or only through the folder.
 
-def case_bash_read_only_old_file_silent():
-    session_dir, memory_dir = new_session("case_bash_read_only")
-    mem_path = os.path.join(memory_dir, "old.md")
-    write(mem_path, "# Note\n\nNo home line.\n")
-    os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
-    records = [
-        human_record("check the note", T0),
-        assistant_record(tool_use=bash_tool_use("cat %s" % mem_path)),
-    ]
-    path = write_transcript(session_dir, records)
-    hook = {"transcript_path": path, "cwd": ROOT}
-    reason = rh.run(hook)
-    check("bash_read_only_named: silent", reason == "", reason)
-
-
-def case_bash_ls_folder_old_files_silent():
-    session_dir, memory_dir = new_session("case_bash_ls_old")
-    mem_path = os.path.join(memory_dir, "old.md")
-    write(mem_path, "# Note\n\nNo home line.\n")
-    os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
-    records = [
-        human_record("look around", T0),
-        assistant_record(tool_use=bash_tool_use("ls %s" % memory_dir)),
-    ]
-    path = write_transcript(session_dir, records)
-    hook = {"transcript_path": path, "cwd": ROOT}
-    reason = rh.run(hook)
-    check("bash_ls_folder_old_files: silent", reason == "", reason)
+def case_bash_read_only_old_files_silent():
+    # Rows: (row id, session slug, command template). The template takes the file ("mem") or the
+    # folder ("folder"), so a cat of the named file and an ls of its folder are two rows.
+    for label, slug, template in (
+        ("bash_read_only_named: silent", "case_bash_read_only", "cat %(mem)s"),
+        ("bash_ls_folder_old_files: silent", "case_bash_ls_old", "ls %(folder)s"),
+    ):
+        session_dir, memory_dir = new_session(slug)
+        mem_path = os.path.join(memory_dir, "old.md")
+        write(mem_path, "# Note\n\nNo home line.\n")
+        os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
+        command = template % {"mem": mem_path, "folder": memory_dir}
+        records = [
+            human_record("check the note", T0),
+            assistant_record(tool_use=bash_tool_use(command)),
+        ]
+        path = write_transcript(session_dir, records)
+        hook = {"transcript_path": path, "cwd": ROOT}
+        reason = rh.run(hook)
+        check(label, reason == "", reason)
 
 
 # --------------------------------------------------------------------------- finding 3
@@ -460,40 +443,31 @@ def case_bash_whole_component_not_substring():
 
 
 # --------------------------------------------------------------------------- finding 3
-# Every absolute path is refused now, even one that exists on disk.
+# A home value that is no home is refused: every absolute path (even one that exists on disk),
+# ".", "..", a path that leaves the repo, git pathspec-magic values, and a directory with or
+# without a trailing slash. Rows: (row id, home value, cwd). The row id prints on FAIL.
 
-def case_absolute_value_refused():
+def case_values_that_are_no_home():
     real_target = os.path.join(ROOT, "a_real_brief.md")
     write(real_target, "some brief text\n")
-    session_dir, memory_dir = new_session("case_absolute")
-    mem_path = os.path.join(memory_dir, "notes.md")
-    write(mem_path, "# Note\n\nhome: %s\n" % real_target)
-    records = [
-        human_record("file it", T0),
-        assistant_record(tool_use=write_tool_use(mem_path)),
-    ]
-    path = write_transcript(session_dir, records)
-    hook = {"transcript_path": path, "cwd": ROOT}
-    reason = rh.run(hook)
-    check("absolute_value_refused: blocks", bool(reason), reason)
-
-
-# --------------------------------------------------------------------------- finding 4
-# Refuse ".", "..", a path that leaves the repo, and git pathspec-magic values.
-
-def case_refuses_dot_dotdot_and_glob():
-    repo = make_repo("case_refuse_repo")
+    repo = make_repo("case_invalid_home_repo")
     write(os.path.join(repo, "decisions", "real.md"), "# Real\n")
     commit_all(repo)
-
-    for label, value in (
-        ("dot", "."),
-        ("dotdot", ".."),
-        ("leaves_repo", "../outside.md"),
-        ("glob_star", "*"),
-        ("glob_syntax", ":(glob)**"),
-    ):
-        session_dir, memory_dir = new_session("case_refuse_%s" % label)
+    rows = (
+        ("absolute_value_refused", real_target, ROOT),
+        # A tracked file in the repo, named by its absolute path. git also refuses the value, so
+        # this row does not isolate the isabs check on its own.
+        ("absolute_value_refused_in_repo", os.path.join(repo, "decisions", "real.md"), repo),
+        ("refuses_dot", ".", repo),
+        ("refuses_dotdot", "..", repo),
+        ("refuses_leaves_repo", "../outside.md", repo),
+        ("refuses_glob_star", "*", repo),
+        ("refuses_glob_syntax", ":(glob)**", repo),
+        ("dir_not_home_no_slash", "decisions", repo),
+        ("dir_not_home_trailing_slash", "decisions/", repo),
+    )
+    for label, value, cwd in rows:
+        session_dir, memory_dir = new_session("case_invalid_%s" % label)
         mem_path = os.path.join(memory_dir, "notes.md")
         write(mem_path, "# Note\n\nhome: %s\n" % value)
         records = [
@@ -501,31 +475,9 @@ def case_refuses_dot_dotdot_and_glob():
             assistant_record(tool_use=write_tool_use(mem_path)),
         ]
         path = write_transcript(session_dir, records)
-        hook = {"transcript_path": path, "cwd": repo}
+        hook = {"transcript_path": path, "cwd": cwd}
         reason = rh.run(hook)
-        check("refuses_%s: blocks" % label, bool(reason), reason)
-
-
-# --------------------------------------------------------------------------- decision item 6
-# A directory is not a home, with or without a trailing slash.
-
-def case_directory_is_not_a_home():
-    repo = make_repo("case_dir_not_home_repo")
-    write(os.path.join(repo, "decisions", "real.md"), "# Real\n")
-    commit_all(repo)
-
-    for label, value in (("no_slash", "decisions"), ("trailing_slash", "decisions/")):
-        session_dir, memory_dir = new_session("case_dir_%s" % label)
-        mem_path = os.path.join(memory_dir, "notes.md")
-        write(mem_path, "# Note\n\nhome: %s\n" % value)
-        records = [
-            human_record("file it", T0),
-            assistant_record(tool_use=write_tool_use(mem_path)),
-        ]
-        path = write_transcript(session_dir, records)
-        hook = {"transcript_path": path, "cwd": repo}
-        reason = rh.run(hook)
-        check("dir_not_home_%s: blocks" % label, bool(reason), reason)
+        check("%s: blocks" % label, bool(reason), reason)
 
 
 # --------------------------------------------------------------------------- finding 5
@@ -899,17 +851,13 @@ def main():
     case_f_no_memory_folder()
     case_g_stop_hook_active()
     case_h_two_sections_one_missing()
-    case_tool_use_alone_old_mtime_blocks()
     case_idle_turn_never_parses_the_whole_transcript()
     case_bash_names_specific_file()
     case_bash_names_folder_only()
-    case_bash_read_only_old_file_silent()
-    case_bash_ls_folder_old_files_silent()
+    case_bash_read_only_old_files_silent()
     case_bash_names_folder_tilde_and_home_forms()
     case_bash_whole_component_not_substring()
-    case_absolute_value_refused()
-    case_refuses_dot_dotdot_and_glob()
-    case_directory_is_not_a_home()
+    case_values_that_are_no_home()
     case_fence_hides_fake_content()
     case_home_only_inside_fence_blocks()
     case_frontmatter_home_passes()

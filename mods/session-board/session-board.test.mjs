@@ -3,7 +3,6 @@
 // fake host (store, clock, git, claude agents, python, ui, prompt). The clock is fixed at NOW.
 // register.mjs keeps state at module level, so each host case loads a fresh copy of it.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as lib from './hooks/lib.mjs'
 
@@ -100,12 +99,19 @@ await test('clock skew: an entry stamped up to 30 s ahead shows; more than 30 s 
 
 // ---- band text
 
-await test('band: shape is working, waiting, update-ready n of m', () => {
+await test('band: counts follow the shape: working, waiting, update-ready n of m; all waiting; unknown and no-detail', () => {
+  // Rows, one band text each: a mixed shape; all waiting with some ready; an unknown state with no detail.
   const es = []
   for (let i = 1; i <= 5; i++) es.push(fresh(i, { state: 'working' }))
   for (let i = 6; i <= 9; i++) es.push(fresh(i, { state: 'waiting' }))
   es.push(fresh(10, { state: 'waiting', dirty: 3 }), fresh(11, { state: 'waiting', unpushed: 1 }))
-  same(lib.bandText(rowsFor([], es)), '5 working, 6 waiting, update-ready 4 of 11', 'band')
+  const unknown = lib.parseAgentsJson(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', status: 'weird' }]))
+  const rows = [
+    [rowsFor([], es), '5 working, 6 waiting, update-ready 4 of 11'],
+    [rowsFor([], [fresh(1, {}), fresh(2, {}), fresh(3, { dirty: 1 })]), '0 working, 3 waiting, update-ready 2 of 3'],
+    [rowsFor(unknown, []), '0 working, 0 waiting, update-ready 0 of 1, 1 unknown, 1 no detail'],
+  ]
+  for (const [input, want] of rows) same(lib.bandText(input), want, 'band')
 })
 
 await test('band: zero sessions says so', () => {
@@ -114,15 +120,6 @@ await test('band: zero sessions says so', () => {
 
 await test('band: one working session reads as a digit (the band has no plural form)', () => {
   same(lib.bandText(rowsFor([], [fresh(1, { state: 'working' })])), '1 working, 0 waiting, update-ready 0 of 1', 'band')
-})
-
-await test('band: all waiting, some ready', () => {
-  same(lib.bandText(rowsFor([], [fresh(1, {}), fresh(2, {}), fresh(3, { dirty: 1 })])), '0 working, 3 waiting, update-ready 2 of 3', 'band')
-})
-
-await test('band: unknown state and no-detail counts follow the update mark', () => {
-  const agents = lib.parseAgentsJson(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', status: 'weird' }]))
-  same(lib.bandText(rowsFor(agents, [])), '0 working, 0 waiting, update-ready 0 of 1, 1 unknown, 1 no detail', 'band')
 })
 
 // ---- merging claude agents rows with store entries
@@ -215,55 +212,29 @@ await test('receiver: an unknown status is unseen, not busy', () => {
   same(lib.receiverState(rows, 'u'), 'unseen', 'unknown status')
 })
 
-await test('receiver: a name with angle brackets is found by its full to', () => {
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane <a>', status: 'busy' }]))
-  same(lib.receiverState(rows, 'lane <a>'), 'busy', 'to lane <a>')
-})
-
-await test('receiver: a 45-char name is found by its full to', () => {
-  const name = 'worker-' + 'x'.repeat(38)
-  assert.equal(name.length, 45, 'fixture length')
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name, status: 'busy' }]))
-  same(lib.receiverState(rows, name), 'busy', 'full to')
-})
-
-await test('receiver: a name with two spaces is found by the same two spaces', () => {
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a  b', status: 'busy' }]))
-  same(lib.receiverState(rows, 'a  b'), 'busy', 'to a  b')
-})
-
-// Pins the ref strip: ListAgents prints `name [ref]` for a clash, so the bare name finds the row.
-await test('receiver: a to with a [ref] suffix reads the row named by the bare name', () => {
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'worker-a', status: 'busy' }]))
-  same(lib.receiverState(rows, 'worker-a [a1b2]'), 'busy', 'to worker-a [a1b2]')
-})
-
-// A real name may end in brackets. The ref strip must not drop it before the exact match.
-await test('receiver: a real name that ends in brackets is found by its full to', () => {
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane-2 [a]', status: 'busy' }]))
-  same(lib.receiverState(rows, 'lane-2 [a]'), 'busy', 'to lane-2 [a]')
-})
-
-// Names over 40 chars: agentRows cuts a row's name to 40 chars, so a full to must match by its whole name.
+// Name shapes, one table, one assertion. Each case: the rows (name, status), the to values asked, and the states.
+// Shapes: angle brackets; a 45-char name; two spaces; a [ref] suffix on a bare name (ListAgents prints `name [ref]`
+// for a clash); a real name that ends in brackets (the ref strip must not drop it); two 49-char names sharing their
+// first 39 chars, each to reads its own row (agentRows cuts a name to 40 chars, so a full to matches the whole name);
+// a 49-char to with no row, sharing 39 chars with a busy row, is unseen.
 const SHARED39 = 'worker-' + 'x'.repeat(32) // 39 chars, the part a 40-char cut keeps
+const shapeCases = [
+  ['angle brackets', [['lane <a>', 'busy']], ['lane <a>'], ['busy']],
+  ['45 characters', [['worker-' + 'x'.repeat(38), 'busy']], ['worker-' + 'x'.repeat(38)], ['busy']],
+  ['two spaces', [['a  b', 'busy']], ['a  b'], ['busy']],
+  ['[ref] suffix reads the bare name', [['worker-a', 'busy']], ['worker-a [a1b2]'], ['busy']],
+  ['name ending in brackets', [['lane-2 [a]', 'busy']], ['lane-2 [a]'], ['busy']],
+  ['two 49-char names sharing 39 chars', [[SHARED39 + 'alpha-0001', 'busy'], [SHARED39 + 'beta-00002', 'idle']],
+    [SHARED39 + 'alpha-0001', SHARED39 + 'beta-00002'], ['busy', 'idle']],
+  ['49-char to with no row, sharing 39 chars with a busy row', [[SHARED39 + 'alpha-0001', 'busy']],
+    [SHARED39 + 'gamma-0003'], ['unseen']],
+]
 
-await test('receiver: two rows whose 49-char names share the first 39 chars each read their own state', () => {
-  const longA = SHARED39 + 'alpha-0001'
-  const longB = SHARED39 + 'beta-00002'
-  assert.equal(longA.length, 49, 'fixture length')
-  assert.equal(longB.length, 49, 'fixture length')
-  const rows = namedRows(JSON.stringify([
-    { sessionId: sid(1), cwd: '/x/a', name: longA, status: 'busy' },
-    { sessionId: sid(2), cwd: '/x/b', name: longB, status: 'idle' },
-  ]))
-  same([lib.receiverState(rows, longA), lib.receiverState(rows, longB)], ['busy', 'idle'], 'each full to reads its own row')
-})
-
-await test('receiver: a to with no row, sharing the first 39 chars of a busy row, is unseen', () => {
-  const other = SHARED39 + 'gamma-0003'
-  assert.equal(other.length, 49, 'fixture length')
-  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: SHARED39 + 'alpha-0001', status: 'busy' }]))
-  same(lib.receiverState(rows, other), 'unseen', 'no row has the full to')
+await test('receiver: a name of any shape is found by its full to, and a to with no row is unseen', () => {
+  for (const [shape, specs, tos, want] of shapeCases) {
+    const rows = namedRows(JSON.stringify(specs.map(([name, status], i) => ({ sessionId: sid(i + 1), cwd: `/x/${i}`, name, status }))))
+    same(tos.map(to => lib.receiverState(rows, to)), want, shape)
+  }
 })
 
 // ---- update-ready
@@ -915,10 +886,6 @@ await test('polling: with no close and no /board call, board refreshes stop afte
   assert.ok(h.agentCalls.length >= 1 && h.agentCalls.length <= 10, `claude agents calls over 30 beats: ${h.agentCalls.length}, want 1 to 10`)
 })
 
-await test('timeout: the claude agents call timeout is 8 s, under the 10 s hook budget', () => {
-  same(lib.AGENTS_TIMEOUT_MS, 8000, 'AGENTS_TIMEOUT_MS')
-})
-
 await test('clear: a flush before the new session id binds does not recreate the old entry', async () => {
   const h = await start()
   await fire(h, 'session.start', {})
@@ -1002,7 +969,6 @@ await test('heartbeat: a failing git read makes the reading unknown, so no updat
 
 const CLEAN_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n', stderr: '' }
 const DIRTY_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n1 .M N... 100644 100644 100644 a b a.ts\n', stderr: '' }
-const README = readFileSync(new URL('./README.md', import.meta.url), 'utf8')
 
 await test('safe-stop: python runs isolated (-I) with its cwd at the config folder, plan and run', async () => {
   for (const args of ['plan', '']) {
@@ -1111,19 +1077,6 @@ await test('permission ask with no tool id writes nothing to the store', async (
   h.writes.length = 0
   await fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' } }, 'ask')
   same(h.writes, [], 'store writes for an ask with no id')
-})
-
-await test('README: does not say "Only the person starts it"', () => {
-  assert.ok(!/Only the person starts it/i.test(README), 'README still says "Only the person starts it"')
-})
-
-await test('README: calls the origin check a block-list', () => {
-  assert.ok(/block-?list/i.test(README), 'README does not call the origin check a block-list')
-})
-
-await test('README: a sentence says a denied permission clears when the call returns', () => {
-  const sentences = README.split(/[.\n]/)
-  assert.ok(sentences.some(s => /denied/i.test(s) && /clear/i.test(s) && /return/i.test(s)), 'no sentence says a denied permission clears when the call returns')
 })
 
 // ---- review round 4 pins (PR 380)

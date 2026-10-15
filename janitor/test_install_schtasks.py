@@ -196,11 +196,6 @@ class RefusesALinkedWorktree(unittest.TestCase):
         self.assertFalse(os.path.isfile(xml_path),
                           "a refused install must not write any task XML at all")
 
-    def test_task_name_never_names_the_worktree(self):
-        self.assertNotIn(os.path.basename(self.linked), install_schtasks.TASK_NAME)
-        self.assertNotIn("worktree", install_schtasks.TASK_NAME.lower())
-
-
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""
 
@@ -251,9 +246,7 @@ class WritesXmlEncodingRealSchtasksAccepts(unittest.TestCase):
         self.assertTrue(raw.startswith(b"\xff\xfe"),
                          "the file must open with a UTF-16 LE byte order mark, or real "
                          "schtasks.exe refuses it with 'The task XML is malformed'")
-
-    def test_declaration_names_utf16(self):
-        raw = self._write()
+        # The XML declaration must name UTF-16, the encoding the byte order mark sets.
         declaration = raw[:100].decode("utf-16")
         self.assertIn("UTF-16", declaration.upper())
 

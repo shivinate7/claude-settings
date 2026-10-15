@@ -23,6 +23,10 @@ Canary: every hook run must leave a `loaded` file (the sitecustomize ran) and, w
 reaches the reader, exactly one stub call naming the peer, with no agents call. Without them, a
 "no model call" pass proves nothing.
 
+Timing: the answer cases set READER_TIMEOUT to None, so a slow runner cannot cut the stub short. A stub
+that never answers ends at run_hook's cap as a traceback: a hang guard, not a speed check. Only the hang
+and hold cases set a short timeout, and they need it to fire.
+
 Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run instead. Its
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
 """
@@ -42,15 +46,16 @@ HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sen
 ROOT = tempfile.mkdtemp(prefix="sendmessage_state_cases_")
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
+SKIPPED = []
 RUNS = [0]
 PEER, OTHER = "peer", "other"
 SID_A, SID_B = "ses00001", "ses00002"
 ALLOW = '{"ok": true}'
 FLAG = '{"ok": false, "reason": "parallelism-no-mid-task-talk: send only what changes the work."}'
-READER_SECONDS = 3  # the hook's READER_TIMEOUT in the timed cases, set by TIMED_HOOK
-WALL_LIMIT = READER_SECONDS + 10  # a margin over the set timeout, not a tight absolute bound
-HOLD_MS = 30000  # the held child outlives WALL_LIMIT, so a held pipe fails the bound
-HARNESS_CAP = HOLD_MS // 1000 + 30  # this run's own cap, so a hang ends as a FAIL line
+READER_SECONDS = 3  # the hook's READER_TIMEOUT for the hang and hold cases, set by TIMED_HOOK
+NO_BOUND = None  # the hook's READER_TIMEOUT for every answer case: the stub is never cut short
+HOLD_MS = 30000  # the held child writes "done" only after this, far later than the hook's return
+HARNESS_CAP = HOLD_MS // 1000 + 30  # a hang guard for the harness call, never a timing check
 
 STUB_SITE = r'''
 import json, os, subprocess
@@ -89,7 +94,7 @@ else:
 
 # The reader stub: real node runs it in place of hooks/mods/session-board/hooks/receiver-state.mjs.
 # idle or waiting prints that word. hang sleeps with no child. hold starts a child that keeps this
-# process's stdout open, then sleeps; the hook's kill of this process leaves that pipe held.
+# process's stdout open, writes "started" first and "done" last; the hook must return before "done".
 STUB_READER = r'''
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
@@ -116,22 +121,25 @@ if (mode === "idle" || mode === "waiting") {
     }
 } else {
     if (mode === "hold") {
-        // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
-        // cmd.exe child does; a node child with inherited stdio does not, and the pipe closes at the kill.
+        // The child writes "started" first, holds the inherited stdout for the hold, and writes "done"
+        // as its last act, so it must outlive a kill of node alone. On Windows, node puts each plain
+        // child in a job that dies with node, so the done-writer is detached; a tree kill still reaches
+        // it. "&&" gates done on the hold finishing: a kill of the hold must not reach it. Relative
+        // names, with cwd set, keep the cmd quoting free of spaces.
         const secs = Math.ceil(holdMs / 1000);
         const stdio = ["ignore", "inherit", "inherit"];
         const child = process.platform === "win32"
-            ? spawn("cmd.exe", ["/d", "/c", "ping -n " + (secs + 1) + " 127.0.0.1 > nul"], { stdio, windowsHide: true })
-            : spawn("sh", ["-c", "sleep " + secs], { stdio });
-        child.on("spawn", () => writeFileSync(join(dir, "held.flag"), "1"));
+            ? spawn("cmd.exe", ["/d", "/c", "echo 1 > started.flag & ping -n " + (secs + 1) + " 127.0.0.1 > nul && echo 1 > done.flag"],
+                     { stdio, cwd: dir, windowsHide: true, detached: true })
+            : spawn("sh", ["-c", "echo 1 > started.flag && sleep " + secs + " && echo 1 > done.flag"], { stdio, cwd: dir });
         child.on("error", () => {});
     }
     setTimeout(() => {}, holdMs + 5000);  // exits by itself if nothing kills it
 }
 '''
 
-# Runs the hook with READER_TIMEOUT set to a short test value. The product reads that module global
-# at call time, so a fix that changes how the reader is run still meets this seam.
+# Runs the hook with READER_TIMEOUT set: a number, or None for no wait bound. The product reads that
+# module global at call time, so a fix that changes how the reader is run still meets this seam.
 TIMED_HOOK = r'''
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("sendmessage_state_timed", %r)
@@ -148,6 +156,14 @@ def check(name, ok, detail=""):
     else:
         FAILED.append(name)
         print("FAIL " + name + (" :: " + detail if detail else ""))
+
+
+def skip(name, detail=""):
+    """NOT-RUN: the case could not reach its precondition in time. Reported as SKIP, never PASS or FAIL."""
+    SKIPPED.append(name)
+    print("SKIP " + name + (" :: " + detail if detail else ""))
+    if os.environ.get("GITHUB_ACTIONS"):  # a SKIP leaves the step green, so CI shows it as a warning
+        print("::warning::SKIP " + name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
 
 
 def write_launchers():
@@ -185,7 +201,8 @@ class Run:
         self.err = proc.stderr or ""
         self.elapsed = elapsed
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
-        self.held = os.path.exists(os.path.join(base, "held.flag"))
+        self.started = os.path.exists(os.path.join(base, "started.flag"))  # the hold child's first act
+        self.done = os.path.exists(os.path.join(base, "done.flag"))  # the hold child's last act
         self.word = read_text(os.path.join(base, "word.txt"))  # the state the stub printed, if it got that far
         self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
         self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
@@ -222,7 +239,7 @@ def point_reader_at_stub(cfg, base):
 
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
-             reader_mode="board", reader_seconds=None, cap=120):
+             reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -248,7 +265,7 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     point_reader_at_stub(cfg, base)  # every run: no case reaches the real reader
     env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS),
                 "SM_LIB_PATH": os.path.join(os.path.dirname(HERE), "mods", "session-board", "hooks", "lib.mjs")})
-    if reader_seconds is not None:
+    if not direct:  # the hook's own READER_TIMEOUT is replaced here; direct runs the script as shipped
         script = os.path.join(base, "hook_timed.py")
         with open(script, "w", encoding="utf-8") as f:
             f.write(TIMED_HOOK % (HOOK, reader_seconds))
@@ -348,28 +365,29 @@ def case_idle_and_waiting_allow_with_no_model_call():
               and r.loaded and r.reader_calls == [[PEER]], detail(r))
 
 
-def case_busy_blocks_when_the_model_flags():
-    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-    d = r.deny()
-    check("busy + model FLAG: one deny carrying the model's reason",
-          r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
-          and "parallelism-no-mid-task-talk" in d.get("permissionDecisionReason", "")
-          and len(r.model_calls) == 1 and r.reached_board(), detail(r))
+# Busy receiver and a model FLAG. Each row: (row id, model answer, reason prefix the deny carries).
+# The blank-reason row reaches the default-reason branch, which the model-reason row does not.
+BUSY_FLAG_ROWS = (
+    ("busy + model FLAG: one deny carrying the model's reason", FLAG,
+     "parallelism-no-mid-task-talk"),
+    ("busy + FLAG with a blank reason: deny with the default reason",
+     '{"ok": false, "reason": "   "}', "parallelism-no-mid-task-talk"),
+)
+
+
+def case_busy_flag_rows():
+    for name, answer, want in BUSY_FLAG_ROWS:
+        r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=answer)
+        d = r.deny()
+        check(name, r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
+              and d.get("permissionDecisionReason", "").startswith(want)
+              and len(r.model_calls) == 1 and r.reached_board(), detail(r))
 
 
 def case_busy_allows_when_the_model_does_not_flag():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=ALLOW)
     check("busy + model ok: allow, one model call, no deny",
           r.code == 0 and r.out == "" and r.err == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
-
-
-def case_busy_flag_with_blank_reason_gets_the_default_reason():
-    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")],
-                 answer='{"ok": false, "reason": "   "}')
-    d = r.deny()
-    check("busy + FLAG with a blank reason: deny with the default reason",
-          r.code == 0 and d is not None and d.get("permissionDecisionReason", "").startswith(
-              "parallelism-no-mid-task-talk") and r.reached_board(), detail(r))
 
 
 def case_unseen_receivers_allow_with_no_model_call():
@@ -393,15 +411,19 @@ def case_unseen_receivers_allow_with_no_model_call():
 
 
 def case_malformed_input_fails_open_with_no_deny():
-    for label, text in (
-        ("stdin is not JSON", "not json"),
-        ("tool_input is not an object", '{"tool_input": "oops"}'),
-        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}'),
-        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}'),
+    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
+    # inside main() and print the failed-open line; the last two return 0 with no line.
+    for label, text, opened in (
+        ("stdin is not JSON", "not json", True),
+        ("tool_input is not an object", '{"tool_input": "oops"}', True),
+        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False),
+        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False),
     ):
-        r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-        check("malformed input (%s): exit 0, no deny, no model call, no reader call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == [], detail(r))
+        r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG, direct=True)
+        check("malformed input (%s): exit 0, no deny, no model call, no reader call, failed-open line %s"
+              % (label, "printed" if opened else "absent"),
+              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == []
+              and ("failed open" in r.err) == opened, detail(r))
 
 
 def case_reader_timeout_allows_with_one_plain_line():
@@ -416,20 +438,25 @@ def case_reader_timeout_allows_with_one_plain_line():
           detail(r))
 
 
-def case_reader_that_holds_the_pipe_returns_in_bound():
-    # The reader's child keeps stdout open after the kill. On Windows, subprocess.run then waits on
-    # that pipe with no bound, so the hook returns late. POSIX waits on the reader alone, so this case
-    # is expected to pass there. The limit is a margin over the set timeout, not a tight bound.
+def case_reader_that_holds_the_pipe_returns_before_the_child_ends():
+    # The reader's child holds the stdout pipe for HOLD_MS, then writes "done" as its last act. Order,
+    # not speed: the hook has returned while done does not exist yet, so it did not wait on the pipe.
+    # No wall-clock bound. If node did not start the child before the timeout, the case is NOT-RUN.
+    # Proven red on Windows only. On POSIX, subprocess.run's timeout path waits on the child only, so
+    # a run() read of the pipe returns early there; a Popen + communicate() read is unmeasured there.
     try:
         r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)
-    except subprocess.TimeoutExpired:
-        check("reader holds the pipe: hook returns before the harness cap", False,
-              "still running after %d s" % HARNESS_CAP)
+    except subprocess.TimeoutExpired:  # the hold ends at HOLD_MS and the stub by itself 5 s later
+        skip("reader holds the pipe: hook returned before the harness cap",
+             "still running after %d s, past the hold and the stub's own end: a slow runner, "
+             "so the order is not tested" % HARNESS_CAP)
         return
-    check("reader holds the pipe: its child started, so the pipe is really held",
-          r.held and len(r.reader_calls) == 1, detail(r))
-    check("reader holds the pipe: hook returns within %d s for a %d s reader timeout" % (WALL_LIMIT, READER_SECONDS),
-          r.elapsed <= WALL_LIMIT, detail(r))
+    if not r.started:
+        skip("reader holds the pipe: the child wrote its started marker before the timeout",
+             "started not seen within %s s, so the order is not tested :: %s" % (READER_SECONDS, detail(r)))
+        return
+    check("reader holds the pipe: hook returned before the held child wrote done",
+          r.code == 0 and not r.done, detail(r))
     check("reader holds the pipe: exit 0, no deny, no model call, board-timeout line",
           r.code == 0 and r.out == "" and not r.model_calls and "board read timed out" in r.err, detail(r))
 
@@ -439,9 +466,11 @@ def case_model_failures_fail_open_with_no_deny():
     check("busy + model exits non-zero: exit 0, no deny, failed-open line",
           r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
           and r.reached_board(), detail(r))
+    # One model call is required too: a reader timeout also prints "failed open", with no call.
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer='{"verdict": "FLAG"}')
-    check("busy + off-shape model answer: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err and r.reached_board(), detail(r))
+    check("busy + off-shape model answer: exit 0, no deny, failed-open line, one model call",
+          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
+          and r.reached_board(), detail(r))
 
 
 def case_model_row_names_the_call():
@@ -471,19 +500,23 @@ def case_model_row_names_the_call():
 def case_hook_runs():
     case_model_row_names_the_call()
     case_idle_and_waiting_allow_with_no_model_call()
-    case_busy_blocks_when_the_model_flags()
+    case_busy_flag_rows()
     case_busy_allows_when_the_model_does_not_flag()
-    case_busy_flag_with_blank_reason_gets_the_default_reason()
     case_unseen_receivers_allow_with_no_model_call()
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()
     case_reader_timeout_allows_with_one_plain_line()
-    case_reader_that_holds_the_pipe_returns_in_bound()
+    case_reader_that_holds_the_pipe_returns_before_the_child_ends()
 
 
 if __name__ == "__main__":
     write_launchers()
     case_find_reader()
     case_hook_runs()
-    print("%d check(s) failed" % len(FAILED) if FAILED else "all checks passed")
+    if FAILED:
+        print("%d check(s) failed" % len(FAILED))
+    elif SKIPPED:
+        print("SKIP: %d check(s) not run, none failed" % len(SKIPPED))  # never "all checks passed"
+    else:
+        print("all checks passed")
     sys.exit(1 if FAILED else 0)

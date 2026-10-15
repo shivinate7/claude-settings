@@ -218,7 +218,9 @@ def case_model_ok_is_silent():
     check("ok: exactly one claude call", len(run.calls) == 1, len(run.calls))
 
 
-# Owner ruling: run model haiku at effort xhigh.
+# Owner ruling: run model haiku at effort xhigh. This case alone pins the model this hook passes
+# (reply_judge.py, the invoke_model call). test_decision_watch case_invoke_model_argv pins the
+# argv builder; neither covers the other's call site.
 
 def case_model_is_haiku_at_xhigh():
     run = run_hook(MARK, answer=json.dumps({"ok": True}))
@@ -704,6 +706,31 @@ def case_good_write_path_judges_stops_1_6_11():
     check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
 
 
+# Row tables. A row is one case body from above. A row that raises is red and names
+# itself, so it cannot hide behind its table.
+def run_rows(rows):
+    for body in rows:
+        try:
+            body()
+        except Exception as exc:
+            check("%s: case ran" % body.__name__, False, "%s: %s" % (type(exc).__name__, exc))
+
+
+def table_sampling():
+    run_rows((case_sampling_judges_stops_1_6_11, case_good_write_path_judges_stops_1_6_11,
+              case_skipped_stop_is_silent, case_counter_is_a_file_that_survives_between_processes))
+
+
+def table_failed_write():
+    run_rows((case_failed_write_does_not_freeze_the_count,
+              case_write_fails_remove_ok_judges_the_next_stop))
+
+
+def table_write_and_remove():
+    run_rows((case_write_and_remove_both_fail_judges_the_stop,
+              case_frozen_counter_judges_every_later_stop))
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_model_ok_is_silent,
@@ -715,19 +742,14 @@ CASES = (
     case_prompt_carries_reply_and_rules,
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_gate_is_not,
-    case_sampling_judges_stops_1_6_11,
-    case_skipped_stop_is_silent,
+    table_sampling,
     case_sessions_keep_separate_counters,
-    case_counter_is_a_file_that_survives_between_processes,
     case_damaged_counter_fails_open,
     case_counter_write_failure_never_blocks,
-    case_failed_write_does_not_freeze_the_count,
+    table_failed_write,
     case_empty_stop_writes_nothing_and_counts_nothing,
     case_empty_stops_between_replies_do_not_shift_samples,
-    case_write_and_remove_both_fail_judges_the_stop,
-    case_frozen_counter_judges_every_later_stop,
-    case_write_fails_remove_ok_judges_the_next_stop,
-    case_good_write_path_judges_stops_1_6_11,
+    table_write_and_remove,
 )
 
 

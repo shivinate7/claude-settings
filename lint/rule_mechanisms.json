@@ -667,7 +667,7 @@
     "roles-review-cap-three": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had."
+        "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had. The hold for a safety hole that main lacks rests on the reviewer's 'Safety hole vs main:' line in agents/reviewer.md, which the orchestrator reads. No check blocks the merge of a held lane."
       }
     },
     "roles-holes-are-debts": {

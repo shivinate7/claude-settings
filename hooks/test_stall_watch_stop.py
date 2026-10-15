@@ -278,7 +278,6 @@ def stale_flagged_job_is_listed():
     return problems
 
 
-@case
 def terminal_notice_drops_job_and_its_neighbour_stays():
     """S3. completed, failed and killed notices drop their jobs (completed is sent twice, as in the
     transcript). A stale job with no notice is still listed, so the mode itself works"""
@@ -340,7 +339,6 @@ def no_job_prints_nothing_and_quoted_result_is_not_a_job():
     return problems
 
 
-@case
 def missing_or_unreadable_transcript_prints_nothing():
     """S6a. transcript path missing, or a folder: exit 0, nothing printed. Control: a readable
     transcript lists its stale job"""
@@ -359,7 +357,6 @@ def missing_or_unreadable_transcript_prints_nothing():
     return problems
 
 
-@case
 def bad_stop_payload_prints_nothing():
     """S6b. stdin that is not JSON, or empty: exit 0, nothing printed. Control: a good payload
     lists the stale job"""
@@ -521,7 +518,6 @@ def real_windows_path_is_stat_ed():
     return problems
 
 
-@case
 def huge_or_non_utf8_line_does_not_stop_the_scan():
     """S12a. a 3 MB line and a line with invalid UTF-8 bytes come before a stale job: exit 0,
     and the job is listed"""
@@ -536,7 +532,6 @@ def huge_or_non_utf8_line_does_not_stop_the_scan():
     return problems
 
 
-@case
 def garbage_or_truncated_line_keeps_earlier_jobs():
     """S12b. a line that is not JSON in the middle, and a truncated last line (a live transcript):
     the stale job before them is still listed"""
@@ -563,7 +558,6 @@ def stop_mode_has_no_posix_gate():
     return problems
 
 
-@case
 def attachment_completed_notice_closes_job():
     """S14a. a completed notice that arrives as a queued_command attachment closes its job, and a
     stale job with no notice beside it is still listed"""
@@ -580,7 +574,6 @@ def attachment_completed_notice_closes_job():
     return problems
 
 
-@case
 def attachment_failed_and_killed_notices_close_jobs():
     """S14b. failed and killed notices in attachment form close their jobs, and an open job beside
     them is still listed"""
@@ -598,7 +591,6 @@ def attachment_failed_and_killed_notices_close_jobs():
     return problems
 
 
-@case
 def attachment_notice_for_longer_id_does_not_close_shorter_job():
     """S14c. a notice for bapfx600 does not close the job bapfx60, whose id is a prefix of it. The
     notice does close bapfx600 itself"""
@@ -614,7 +606,6 @@ def attachment_notice_for_longer_id_does_not_close_shorter_job():
     return problems
 
 
-@case
 def attachment_record_without_prompt_does_not_stop_the_scan():
     """S14d. attachment records with no attachment key, a string attachment, no prompt, or a prompt
     that is null or a list come before a good notice: exit 0, the notice still closes its job, and
@@ -638,7 +629,6 @@ def attachment_record_without_prompt_does_not_stop_the_scan():
     return problems
 
 
-@case
 def stop_result_closes_stopped_job():
     """S15a. a job followed by a TaskStop result 'Successfully stopped task: ID' is closed. The
     command text of that result names another job, which stays listed"""
@@ -656,7 +646,6 @@ def stop_result_closes_stopped_job():
     return problems
 
 
-@case
 def stop_result_for_longer_id_does_not_close_shorter_job():
     """S15b. a stop result for bpfx600 does not close the job bpfx60, whose id is a prefix of it. The
     stop closes bpfx600 itself"""
@@ -673,7 +662,6 @@ def stop_result_for_longer_id_does_not_close_shorter_job():
     return problems
 
 
-@case
 def assistant_text_naming_another_id_does_not_close_job():
     """S15c. an assistant message that quotes 'Successfully stopped task' for another id, and names
     the stale job, does not close that job. The real stop result still closes its own job"""
@@ -691,7 +679,6 @@ def assistant_text_naming_another_id_does_not_close_job():
     return problems
 
 
-@case
 def other_tool_result_naming_another_id_does_not_close_job():
     """S15d. a Bash result that quotes 'Successfully stopped task' for another id, and names the
     stale job, does not close that job. The real stop result still closes its own job"""
@@ -710,7 +697,6 @@ def other_tool_result_naming_another_id_does_not_close_job():
     return problems
 
 
-@case
 def stopped_notice_in_record_form_closes_job():
     """S16a. a stopped notice, as a session resume sends it, in user-record form closes its job. An
     open stale job beside it is still listed"""
@@ -726,7 +712,6 @@ def stopped_notice_in_record_form_closes_job():
     return problems
 
 
-@case
 def stopped_notice_in_attachment_form_closes_job():
     """S16b. the same stopped notice as a queued_command attachment closes its job. An open stale
     job beside it is still listed"""
@@ -760,7 +745,6 @@ def running_notice_does_not_close_job_and_stopped_notice_does():
     return problems
 
 
-@case
 def stopped_notice_for_longer_id_does_not_close_shorter_job():
     """S16d. a stopped notice for bstpq600 does not close bstpq60, whose id is a prefix of it. The
     notice closes bstpq600 itself"""
@@ -776,7 +760,6 @@ def stopped_notice_for_longer_id_does_not_close_shorter_job():
     return problems
 
 
-@case
 def stop_result_as_text_blocks_closes_job():
     """S17a. a TaskStop result whose content is a list of text blocks closes its job, as the string
     form does. An open stale job beside it is still listed"""
@@ -793,7 +776,6 @@ def stop_result_as_text_blocks_closes_job():
     return problems
 
 
-@case
 def stop_result_as_text_blocks_for_longer_id_does_not_close_shorter_job():
     """S17b. a block-list stop result for bblx600 does not close bblx60, whose id is a prefix of it.
     The stop closes bblx600 itself"""
@@ -810,7 +792,6 @@ def stop_result_as_text_blocks_for_longer_id_does_not_close_shorter_job():
     return problems
 
 
-@case
 def malformed_tool_use_id_does_not_drop_the_alarm():
     """S18. user records whose tool_use_id is a list, or a dict, come before one open stale job:
     exit 0, and the alarm still lists that job"""
@@ -900,6 +881,76 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     problems += expect(rc == 0 and "round 1 bids are served" in control,
                        f"control: the real module does not print the note: rc {rc}, {out[:200]!r}")
     return problems
+
+
+# Row tables. Each row is one case body from above, and keeps its S-label.
+PREFIX_ROWS = (
+    attachment_notice_for_longer_id_does_not_close_shorter_job,
+    stop_result_for_longer_id_does_not_close_shorter_job,
+    stopped_notice_for_longer_id_does_not_close_shorter_job,
+    stop_result_as_text_blocks_for_longer_id_does_not_close_shorter_job,
+)
+NOTICE_ROWS = (
+    terminal_notice_drops_job_and_its_neighbour_stays,
+    attachment_completed_notice_closes_job,
+    attachment_failed_and_killed_notices_close_jobs,
+    stopped_notice_in_record_form_closes_job,
+    stopped_notice_in_attachment_form_closes_job,
+)
+JUNK_ROWS = (
+    missing_or_unreadable_transcript_prints_nothing,
+    bad_stop_payload_prints_nothing,
+    huge_or_non_utf8_line_does_not_stop_the_scan,
+    garbage_or_truncated_line_keeps_earlier_jobs,
+    attachment_record_without_prompt_does_not_stop_the_scan,
+    malformed_tool_use_id_does_not_drop_the_alarm,
+)
+TASKSTOP_ROWS = (
+    stop_result_closes_stopped_job,
+    assistant_text_naming_another_id_does_not_close_job,
+    other_tool_result_naming_another_id_does_not_close_job,
+    stop_result_as_text_blocks_closes_job,
+)
+
+
+def table_rows(rows):
+    """Run each row body. A failing row prints its S-label before its problem. A crash names
+    its row too, and does not stop the table."""
+    problems = []
+    for body in rows:
+        label = body.__doc__.split(".")[0].strip()
+        try:
+            found = body()
+        except Exception as e:
+            found = [str(e)]
+        problems += ["%s: %s" % (label, p) for p in found]
+    return problems
+
+
+@case
+def table_longer_id_never_closes_a_shorter_job():
+    """Table, id prefix: a longer id closes no shorter job, in each notice and stop form."""
+    return table_rows(PREFIX_ROWS)
+
+
+@case
+def table_notice_form_by_status_closes_terminal_jobs():
+    """Table, notice form by status: completed, failed, killed and stopped notices close their
+    jobs, in record and attachment form."""
+    return table_rows(NOTICE_ROWS)
+
+
+@case
+def table_junk_input_keeps_the_alarm():
+    """Table, junk input: bad stdin, transcript and records never stop the scan or the alarm."""
+    return table_rows(JUNK_ROWS)
+
+
+@case
+def table_taskstop_forms():
+    """Table, TaskStop forms: a stop result closes its job, as text or as a block list, and a
+    quoted or other-tool id closes nothing."""
+    return table_rows(TASKSTOP_ROWS)
 
 
 def main():

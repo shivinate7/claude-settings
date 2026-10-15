@@ -118,6 +118,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-command-position` | One resolver finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
 | `guard-log-read-weekly` | `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
 | `haiku-prompt-hooks` | The owner ruled on 2026-10-07 which hooks may call a model. | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
+| `hold-unsafe-after-round-3` | Owner rulings, 2026-10-14, CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
 | `janitor-dirty-test-stays` | Owner word, 2026-10-13 15:56 CDT: option A. | [`decisions/janitor-dirty-test-stays.md`](../decisions/janitor-dirty-test-stays.md) |
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
@@ -259,6 +260,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `drops-reads-msg-unlike-git` | Three round-3 false refusals. | [`debts/drops-reads-msg-unlike-git.md`](../debts/drops-reads-msg-unlike-git.md) |
 | `drops-stdin-message-unread` | A message from `-F -` stdin is never read, so a prose cite there passes. | [`debts/drops-stdin-message-unread.md`](../debts/drops-stdin-message-unread.md) |
 | `drops-whole-token-no-mutant` | No mutant removes the whole-token match. | [`debts/drops-whole-token-no-mutant.md`](../debts/drops-whole-token-no-mutant.md) |
+| `dw-bare-stop-row-blind` | Case M5c was cut. | [`debts/dw-bare-stop-row-blind.md`](../debts/dw-bare-stop-row-blind.md) |
 | `dw-busy-stop-skipped` | A Stop that lands while a judge runs is skipped (`SKIP busy`). | [`debts/dw-busy-stop-skipped.md`](../debts/dw-busy-stop-skipped.md) |
 | `dw-ffff-regex-literal` | The `asciiJson` regex holds a literal U+FFFF character. | [`debts/dw-ffff-regex-literal.md`](../debts/dw-ffff-regex-literal.md) |
 | `dw-log-keeps-model-text` | The log keeps the FLAG `why` up to 2000 characters. | [`debts/dw-log-keeps-model-text.md`](../debts/dw-log-keeps-model-text.md) |
@@ -287,10 +289,15 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-indirect-forms` | The guard reads literal set forms only. | [`debts/git-env-set-indirect-forms.md`](../debts/git-env-set-indirect-forms.md) |
 | `git-env-set-untested-forms` | No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in a heredoc body. | [`debts/git-env-set-untested-forms.md`](../debts/git-env-set-untested-forms.md) |
 | `git-env-warn-session-start` | The warning runs at session start only, so damage done mid-session shows at the next start. | [`debts/git-env-warn-session-start.md`](../debts/git-env-warn-session-start.md) |
+| `guard-abtests-test-path` | The test-path rule reads `native/ABTests/` as a test folder, so a builder cannot edit product code there. | [`debts/guard-abtests-test-path.md`](../debts/guard-abtests-test-path.md) |
 | `guard-audit-subagent-stop-open` | On SubagentStop, a missing guard module still fails open, and one log line records it. | [`debts/guard-audit-subagent-stop-open.md`](../debts/guard-audit-subagent-stop-open.md) |
+| `guard-bash-c-silent-write` | A silent git write inside `bash -c '...'` is allowed. | [`debts/guard-bash-c-silent-write.md`](../debts/guard-bash-c-silent-write.md) |
 | `guard-cd-walk-extra-reading` | When a command ends inside an open quote, the guard also judges a second reading. | [`debts/guard-cd-walk-extra-reading.md`](../debts/guard-cd-walk-extra-reading.md) |
+| `guard-env-read-grep` | The guard's env rule allows the Read and Grep tools on an environment file. | [`debts/guard-env-read-grep.md`](../debts/guard-env-read-grep.md) |
 | `guard-first-c-reads-wrong-tree` | The discard rule judges each git call in its own checkout. | [`debts/guard-first-c-reads-wrong-tree.md`](../debts/guard-first-c-reads-wrong-tree.md) |
 | `guard-glob-three-tools` | `lint/rule_audit.py`, `lint/check_landed_dirs.py` and `hooks/mutate_shared.py` each glob `hooks/guard*.py`. | [`debts/guard-glob-three-tools.md`](../debts/guard-glob-three-tools.md) |
+| `guard-heredoc-os-system` | `python - <<EOF` with a body that calls `os.system("git stash")` is allowed. | [`debts/guard-heredoc-os-system.md`](../debts/guard-heredoc-os-system.md) |
+| `guard-home-delete-literal` | `rm -rf /home/x` and `rd /s /q C:\Users\x` are allowed. | [`debts/guard-home-delete-literal.md`](../debts/guard-home-delete-literal.md) |
 | `guard-interp-heredoc-lone-quote` | If an interpreter heredoc body such as `python3 - <<'PY'` holds a lone `'`, the guard reads the rest of the command as quoted. | [`debts/guard-interp-heredoc-lone-quote.md`](../debts/guard-interp-heredoc-lone-quote.md) |
 | `guard-log-extra-ci` | An edit to `lint/guard_log_report.py` selects `gates_windows_merge` and the `guard` suite, as well as `code`. | [`debts/guard-log-extra-ci.md`](../debts/guard-log-extra-ci.md) |
 | `guard-log-install-skew` | A new `hooks/guard_core.py` writes six fields. | [`debts/guard-log-install-skew.md`](../debts/guard-log-install-skew.md) |
@@ -322,9 +329,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `harness-scope-mods-flag-missing` | `STEP_FLAGS` (line 24 of `lint/test_harness_scope.py`) lacks `mods`. | [`debts/harness-scope-mods-flag-missing.md`](../debts/harness-scope-mods-flag-missing.md) |
 | `harness-scope-pipe-regex-quotes` | The pipe regex in `mods_step_problems` ignores quotes and comments. | [`debts/harness-scope-pipe-regex-quotes.md`](../debts/harness-scope-pipe-regex-quotes.md) |
 | `harness-scope-stale-comment` | `lint/test_harness_scope.py` lines 215-217 hold the stale comment "ALL stays as it is". | [`debts/harness-scope-stale-comment.md`](../debts/harness-scope-stale-comment.md) |
+| `headroom-check-no-caller` | The headroom tests and mutant were cut. | [`debts/headroom-check-no-caller.md`](../debts/headroom-check-no-caller.md) |
 | `here-string-scan-quadratic` | The guard finds PowerShell here-strings with a lazy match. | [`debts/here-string-scan-quadratic.md`](../debts/here-string-scan-quadratic.md) |
 | `heredoc-indented-close` | `_split_heredocs` matches the closing line after `.strip()`, so an indented ` EOF` closes a heredoc. | [`debts/heredoc-indented-close.md`](../debts/heredoc-indented-close.md) |
 | `hint-signed-commit-sha` | With `log.showSignature=true` in config, git prints a signature line before a signed commit's record. | [`debts/hint-signed-commit-sha.md`](../debts/hint-signed-commit-sha.md) |
+| `hold-own-hole-unrecorded` | The rule turns each open finding after round 3 into a debt. | [`debts/hold-own-hole-unrecorded.md`](../debts/hold-own-hole-unrecorded.md) |
 | `impeccable-piped-shell-body` | The impeccable rule keeps a heredoc body only when the shell word stands before `<<`. | [`debts/impeccable-piped-shell-body.md`](../debts/impeccable-piped-shell-body.md) |
 | `impeccable-python-body` | The impeccable rule reads a heredoc body when a shell word (`bash`, `sh`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`) stands before the `<<` on its header line. | [`debts/impeccable-python-body.md`](../debts/impeccable-python-body.md) |
 | `inbox-done-forms` | While capture is open, `fb:done` and `` `fb done` `` in backticks are captured and do not close it. | [`debts/inbox-done-forms.md`](../debts/inbox-done-forms.md) |
@@ -348,6 +357,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `judge-cap-drops-old-rulings` | Measured 2026-10-14 (review round 1): 87 rulings, 100,887 chars uncapped. | [`debts/judge-cap-drops-old-rulings.md`](../debts/judge-cap-drops-old-rulings.md) |
 | `judge-cut-mark-reserve-over` | `fit_span` keeps 37 chars for the cut mark even when no owner message can be cut. | [`debts/judge-cut-mark-reserve-over.md`](../debts/judge-cut-mark-reserve-over.md) |
 | `judge-cuts-long-ruling` | A ruling over 800 chars is cut at a sentence end, so a settled point late in a long ruling may be missed. | [`debts/judge-cuts-long-ruling.md`](../debts/judge-cuts-long-ruling.md) |
+| `judge-fence-lookalikes` | `_defang` changes only a run of 3 or more ASCII `<` before `BEGIN` or `END` in upper case. | [`debts/judge-fence-lookalikes.md`](../debts/judge-fence-lookalikes.md) |
 | `judge-heading-false-match` | The ruling-heading pattern also matches a heading such as "Ruling out ...", so a heading that is not a ruling is read as one. | [`debts/judge-heading-false-match.md`](../debts/judge-heading-false-match.md) |
 | `judge-skips-other-headings` | Rulings under another heading are not read. | [`debts/judge-skips-other-headings.md`](../debts/judge-skips-other-headings.md) |
 | `judge-title-stem-collision` | A `decisions/` record and a `deferred/` record with the same file stem collide in the rulings titles, because the title names the stem only. | [`debts/judge-title-stem-collision.md`](../debts/judge-title-stem-collision.md) |
@@ -363,7 +373,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `liveness-windows-arm-unproven` | The repository has no Windows machine to run the Windows arm on. | [`debts/liveness-windows-arm-unproven.md`](../debts/liveness-windows-arm-unproven.md) |
 | `local-time-hard-coded-dst` | The rule is the US rule in force since 2007, and it is coded in `hooks/local_time.py`. | [`debts/local-time-hard-coded-dst.md`](../debts/local-time-hard-coded-dst.md) |
 | `local-time-line-cost-unmeasured` | The token cost of one line per prompt is unmeasured. | [`debts/local-time-line-cost-unmeasured.md`](../debts/local-time-line-cost-unmeasured.md) |
-| `lock-expiry-read-no-retry` | The merge lock reads its commit message once, with no retry. | [`debts/lock-expiry-read-no-retry.md`](../debts/lock-expiry-read-no-retry.md) |
+| `lock-delete-retry-window` | When `GhLock.acquire` finds an expired lock, it deletes it. | [`debts/lock-delete-retry-window.md`](../debts/lock-delete-retry-window.md) |
+| `lock-read-error-never-expires` | When `GhLock.read` cannot read the lock commit for a reason that is not a network or rate error, it returns an expiry of infinity. | [`debts/lock-read-error-never-expires.md`](../debts/lock-read-error-never-expires.md) |
+| `lock-ttl-rate-wait` | Every `GhLock` call retries a rate limit up to 3 times with a 60 s wait, so one call can wait 180 s. | [`debts/lock-ttl-rate-wait.md`](../debts/lock-ttl-rate-wait.md) |
 | `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
 | `merge-head-any-check-licenses` | Any passing check licenses a skipped required job, not only `scope`. | [`debts/merge-head-any-check-licenses.md`](../debts/merge-head-any-check-licenses.md) |
 | `merge-head-empty-reads-green` | With no required names, zero checks and zero runs, the wait reads green after its 30 s settle. | [`debts/merge-head-empty-reads-green.md`](../debts/merge-head-empty-reads-green.md) |
@@ -402,6 +414,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-keyvalue-misses` | The `KEY=value` rule skips all-digit values, values under 8 characters, and values with characters outside `A-Za-z0-9/+_=-`. | [`debts/plain-diff-keyvalue-misses.md`](../debts/plain-diff-keyvalue-misses.md) |
 | `plain-diff-limiter-slot-early` | A call that outlasts the 25 s limiter timeout frees its slot while the host call may still run. | [`debts/plain-diff-limiter-slot-early.md`](../debts/plain-diff-limiter-slot-early.md) |
 | `plain-diff-long-line-anchor` | On a line over 3000 characters, the end-of-line anchor can match at a chunk end. | [`debts/plain-diff-long-line-anchor.md`](../debts/plain-diff-long-line-anchor.md) |
+| `plain-diff-model-error-note` | Case F8 was cut. | [`debts/plain-diff-model-error-note.md`](../debts/plain-diff-model-error-note.md) |
 | `plain-diff-quoted-path-label` | A quoted path with an emoji shows a wrong label, so no turn note matches it. | [`debts/plain-diff-quoted-path-label.md`](../debts/plain-diff-quoted-path-label.md) |
 | `plain-diff-secret-file-names` | Some secret file names are not caught by name. | [`debts/plain-diff-secret-file-names.md`](../debts/plain-diff-secret-file-names.md) |
 | `plain-diff-trimnote-regex` | The table-row regex in `trimNote` was quadratic only on absurd input. | [`debts/plain-diff-trimnote-regex.md`](../debts/plain-diff-trimnote-regex.md) |
@@ -419,12 +432,15 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
 | `question-problem-line-forms` | `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as Problem lines. | [`debts/question-problem-line-forms.md`](../debts/question-problem-line-forms.md) |
-| `question-text-not-defanged` | The question text and option labels go into the judge prompt with no fence and no defang, so an asker can forge an Owner block. | [`debts/question-text-not-defanged.md`](../debts/question-text-not-defanged.md) |
+| `rate-retry-budget-short` | The merge tool retries a rate limit 3 times with a 60 s wait. | [`debts/rate-retry-budget-short.md`](../debts/rate-retry-budget-short.md) |
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
+| `ruling-home-isabs-unproven` | `value_resolves` refuses each absolute `home:` value. | [`debts/ruling-home-isabs-unproven.md`](../debts/ruling-home-isabs-unproven.md) |
 | `ruling-kind-dir-equals-open` | `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name. | [`debts/ruling-kind-dir-equals-open.md`](../debts/ruling-kind-dir-equals-open.md) |
+| `safety-hole-test-is-judgment` | No check decides whether a change holds a safety hole that main lacks. | [`debts/safety-hole-test-is-judgment.md`](../debts/safety-hole-test-is-judgment.md) |
+| `safety-line-unread-at-merge` | No check makes the orchestrator read the round-3 line `Safety hole vs main:` before a merge. | [`debts/safety-line-unread-at-merge.md`](../debts/safety-line-unread-at-merge.md) |
 | `sb-agents-json-cost` | `claude agents --json` runs on each board refresh. | [`debts/sb-agents-json-cost.md`](../debts/sb-agents-json-cost.md) |
 | `sb-auto-approve-unseen` | An auto-approve mode can answer an "ask" with no person present. | [`debts/sb-auto-approve-unseen.md`](../debts/sb-auto-approve-unseen.md) |
 | `sb-backoff-cap` | A quick git read resets the back-off. | [`debts/sb-backoff-cap.md`](../debts/sb-backoff-cap.md) |
@@ -453,6 +469,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `skill-rows-test-gaps` | No test covers a tilde line inside a backtick fence. | [`debts/skill-rows-test-gaps.md`](../debts/skill-rows-test-gaps.md) |
 | `skill-rows-unclosed-fence-silent` | An unclosed fence or comment hides every later row. | [`debts/skill-rows-unclosed-fence-silent.md`](../debts/skill-rows-unclosed-fence-silent.md) |
 | `slug-lint-skips-abs-and-md` | `lint/check_record_slugs.py` and `lint/check_ruling_kind.py` do not judge an absolute file argument or a name ending in `.MD`. | [`debts/slug-lint-skips-abs-and-md.md`](../debts/slug-lint-skips-abs-and-md.md) |
+| `smstate-answer-timeout-unrun` | The answer cases run with no reader timeout, so no case uses the shipped value. | [`debts/smstate-answer-timeout-unrun.md`](../debts/smstate-answer-timeout-unrun.md) |
+| `smstate-hold-deadlock-skips` | When the hold case hits the harness cap, it prints SKIP and a warning. | [`debts/smstate-hold-deadlock-skips.md`](../debts/smstate-hold-deadlock-skips.md) |
+| `smstate-hold-posix-unproven` | No run shows the hold case red on a POSIX host with a hook that waits on the held pipe. | [`debts/smstate-hold-posix-unproven.md`](../debts/smstate-hold-posix-unproven.md) |
+| `smstate-run-cap-traceback` | The 120 s cap in `run_hook` raises an uncaught `TimeoutExpired`. | [`debts/smstate-run-cap-traceback.md`](../debts/smstate-run-cap-traceback.md) |
+| `smstate-temp-root-kept` | Each run makes a folder in the temp directory and never removes it. | [`debts/smstate-temp-root-kept.md`](../debts/smstate-temp-root-kept.md) |
+| `source-prose-scanner-cases` | Rule `building-scanner-respects-strings` asks each scanner for two test shapes. | [`debts/source-prose-scanner-cases.md`](../debts/source-prose-scanner-cases.md) |
 | `split-comment-shapes-unmeasured` | The comment rule is unmeasured against every quoting shape a real shell accepts. | [`debts/split-comment-shapes-unmeasured.md`](../debts/split-comment-shapes-unmeasured.md) |
 | `split-reader-misses-cd-forms` | `split_segments` does not model `$'...'` ANSI-C quoting, `$(...)`, or backtick substitution. | [`debts/split-reader-misses-cd-forms.md`](../debts/split-reader-misses-cd-forms.md) |
 | `stall-closes-on-quoted-notice` | The closing match also reads the text of user tool_result blocks. | [`debts/stall-closes-on-quoted-notice.md`](../debts/stall-closes-on-quoted-notice.md) |
@@ -491,11 +513,18 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `subagent-workflow-model-unasked` | The guard asks on a write of `CLAUDE_CODE_SUBAGENT_MODEL` or its `_FORCE` form only. | [`debts/subagent-workflow-model-unasked.md`](../debts/subagent-workflow-model-unasked.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
 | `sweep-no-deadline-many-trees` | The sweep checks each worktree in turn, with eight or more git calls per tree. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
+| `sweep-test-symlink-privilege` | On a Windows host with no symlink right, two tests in `janitor/test_sweep.py` stop with WinError 1314. | [`debts/sweep-test-symlink-privilege.md`](../debts/sweep-test-symlink-privilege.md) |
 | `symrun-link-gap-unmeasured` | The symrun case wants at least one mixed-id window during run 2. | [`debts/symrun-link-gap-unmeasured.md`](../debts/symrun-link-gap-unmeasured.md) |
+| `test-guard-posix-gates-no-skip` | Two case blocks in the guard test suite run only on one platform: Windows (`os.name == "nt"`) and macOS (`sys.platform == "darwin"`). | [`debts/test-guard-posix-gates-no-skip.md`](../debts/test-guard-posix-gates-no-skip.md) |
 | `timeout-moved-server-unchecked` | A foreground server that the harness moves to background at its 120 s timeout is not checked. | [`debts/timeout-moved-server-unchecked.md`](../debts/timeout-moved-server-unchecked.md) |
 | `undo-scan-cr-nul-false-alarm` | The scan reads `git log -p` as text. | [`debts/undo-scan-cr-nul-false-alarm.md`](../debts/undo-scan-cr-nul-false-alarm.md) |
+| `unknown-reads-nonbool-skips` | The check prints PASS for True, FAIL for False, and SKIP for any other answer. | [`debts/unknown-reads-nonbool-skips.md`](../debts/unknown-reads-nonbool-skips.md) |
 | `unknown-stash-word-tree-only` | An unknown stash word is read as a push, so the guard judges it on the working tree only. | [`debts/unknown-stash-word-tree-only.md`](../debts/unknown-stash-word-tree-only.md) |
 | `until-note-unjudged` | The `background-end` rule accepts any non-empty `until:` text, such as `until: n/a`. | [`debts/until-note-unjudged.md`](../debts/until-note-unjudged.md) |
+| `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
+| `walk-curly-quotes-plain` | PowerShell can take the curly quotes U+2018 to U+201E as quote marks. | [`debts/walk-curly-quotes-plain.md`](../debts/walk-curly-quotes-plain.md) |
+| `win-slice-hides-skip-rows` | Nine guard cases skip on Windows: 2 subject, 6 kill and 1 simulator. | [`debts/win-slice-hides-skip-rows.md`](../debts/win-slice-hides-skip-rows.md) |
+| `win-split-min-jobs-untested` | Case `test_suites_spread_over_enough_jobs` was cut. | [`debts/win-split-min-jobs-untested.md`](../debts/win-split-min-jobs-untested.md) |
 | `wsl-bare-bash-not-refused` | A bare `bash.exe -c` is not refused. | [`debts/wsl-bare-bash-not-refused.md`](../debts/wsl-bare-bash-not-refused.md) |
 | `wsl-distro-exes-not-refused` | `debian.exe` and `kali.exe` are not refused. | [`debts/wsl-distro-exes-not-refused.md`](../debts/wsl-distro-exes-not-refused.md) |
 | `wsl-env-path-form-untested` | No test pins the `env:` path form or the quoted-name form of WSLENV. | [`debts/wsl-env-path-form-untested.md`](../debts/wsl-env-path-form-untested.md) |
@@ -509,6 +538,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | Banchi build steps are not claimed by the shared stamp | [`deferred/banchi-build-steps.md`](../deferred/banchi-build-steps.md) |
 | `bare-gh-merge-refusal` | A bare `gh pr merge` in a repo that uses `merge` | [`deferred/bare-gh-merge-refusal.md`](../deferred/bare-gh-merge-refusal.md) |
 | `build-disk-guard` | Low-disk guard refuses builds below 20 GB | [`deferred/build-disk-guard.md`](../deferred/build-disk-guard.md) |
+| `hold-rule-owner-confirm` | The owner confirms how the hold rule reads | [`deferred/hold-rule-owner-confirm.md`](../deferred/hold-rule-owner-confirm.md) |
 | `install-copies-from-main` | Install copies from main, not links into the clone | [`deferred/install-copies-from-main.md`](../deferred/install-copies-from-main.md) |
 | `measured-time-table` | A measured-time table for machine steps | [`deferred/measured-time-table.md`](../deferred/measured-time-table.md) |
 | `merge-retarget-before-merge` | A base change just before the merge command is not caught | [`deferred/merge-retarget-before-merge.md`](../deferred/merge-retarget-before-merge.md) |
