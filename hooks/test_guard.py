@@ -2194,6 +2194,8 @@ sh("agent worktree: a bare stash there still denies, the stack is clone-wide",
 # alone, and a stash push's subject does not.
 sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
 
 # THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
 # restore of one staged file is allowed whichever tree the call runs in.
@@ -5039,11 +5041,13 @@ sh("env: the accessor search in the other shell",
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
 # refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
 # wrapper, and a read stays refused behind any wrapper.
-# One row per wrapper shape: the time keyword, a `--flag=value` timeout, a Windows launcher path,
-# the py launcher, a loop body, and a quoted apostrophe ahead of a loop.
+# One row per wrapper shape: the time keyword and its -p, a `--flag=value` timeout of each name, a
+# Windows launcher path, the py launcher, a loop body, and a quoted apostrophe ahead of a loop.
 for _cmd in (
     "time node --env-file=" + ENV + " app.js",
+    "time -p node --env-file=" + ENV + " app.js",
     "timeout --signal=TERM 5 node --env-file=" + ENV + " app.js",
+    "timeout --kill-after=2 5 node --env-file=" + ENV + " app.js",
     "bin/verdict.cmd node --env-file=" + ENV + " app.js",
     "py -3 bin/verdict node --env-file=" + ENV + " app.js",
     "for f in a; do node --env-file=" + ENV + " t.js; done",
@@ -5069,10 +5073,12 @@ for _cmd in (
 # multi-line shape is the scanner's own case: a quoted string that holds a newline. Each one is red
 # on 13cebec. The shapes the owner named are green controls below.
 # Pattern shapes, one row each: a quoted pattern with a space, the scanner's quote and comment
-# openers inside a pattern, a multi-line pattern, a value flag of each kind, and the awk assignment.
+# openers inside a pattern, a multi-line pattern, the `--` end of flags, a value flag of each kind
+# (`--context` too), and the awk assignment.
 for _cmd in (
     'grep -n "def .*" f',
     "grep -rn 'node --env-file=.* x' docs/",
+    "grep -rn -- --env-file=.* hooks/",
     'grep -n "/\\* .* \\*/" src/a.js',
     'grep -n "don\'t .*" notes.md',
     'grep -n "a .* # b" f',
@@ -5080,6 +5086,7 @@ for _cmd in (
     "sed -n '/.* err/p' log.txt",
     "awk '/.* x/' f",
     "grep --max-count 5 '.*' file",
+    "grep --context 3 '.*' file",
     "grep --include '*.js' '.*' src/",
     "rg -g '*.ts' '.*' src/",
     'for f in a; do grep ".*" "$f"; done',
@@ -5151,11 +5158,20 @@ sh("guard-command-position: playwright, two heredoc headers on one line write th
 FAMILY = "git-env"  # GIT_ENV_RULE, the rule id, is set in the shared-tree section above
 _GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
-# A per-file restore from a worktree, with a GIT_WORK_TREE setter in front of it: one bash prefix
-# row and one PowerShell $env: row. The loops below set each variable alone.
+# A per-file restore from a worktree, with a GIT_WORK_TREE setter in front of it: a bash prefix row,
+# a lower-case prefix row, a bare-name export row and one PowerShell $env: row. The loops below set
+# each variable alone.
 sh("per-file deny: GIT_WORK_TREE set to the shared checkout by a prefix assignment, from a worktree",
    "GIT_WORK_TREE=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", GIT_ENV_RULE,
    cwd=GITWT)
+sh("per-file deny: late probe, lower-case git_work_tree prefix sets GIT_WORK_TREE to the shared "
+   "checkout, from a worktree",
+   "git_work_tree=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", GIT_ENV_RULE,
+   cwd=GITWT)
+sh("per-file deny: late probe, read -r then export sets GIT_WORK_TREE to the shared checkout, "
+   "from a worktree",
+   "read -r GIT_WORK_TREE <<< \"" + slash(GITMAIN) + "\"; export GIT_WORK_TREE; " + VCS
+   + " restore f.txt", "deny", GIT_ENV_RULE, cwd=GITWT)
 sh("per-file deny: late probe, PowerShell $env: assignment sets GIT_WORK_TREE to the shared checkout",
    '$env:GIT_WORK_TREE = "' + slash(GITMAIN) + '"; ' + VCS + " restore f.txt", "deny",
    GIT_ENV_RULE, tool="PowerShell", cwd=GITWT)
@@ -5435,6 +5451,8 @@ for _cmd in (
 _SPLIT = "GIT_INDE$(echo X)_FILE"
 sh("git env set: Bash, a name split by a substitution, export, denies",
    "export %s=/x; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash, a name split by a substitution, typeset -x, denies",
+   "typeset -x %s=/x; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE, cwd=NOGIT)
 sh("git env set: PowerShell, a name split by a substitution, New-Item, denies",
    r"New-Item env:%s -Value C:\x\index; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE,
    tool="PowerShell", cwd=NOGIT)
@@ -5640,6 +5658,7 @@ for _name, _command in (
     ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
+    ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
     ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
@@ -8349,7 +8368,8 @@ add("floor step-up: round line after a lone quote on line two is denied", "deny"
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)", "allow",
-    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="claude-opus-5-5",
+    subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
