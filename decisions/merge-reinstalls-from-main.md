@@ -27,6 +27,8 @@ Owner, 2026-10-11, and owner, 2026-10-15 (the pinned checkout):
 6. A plain `settings.json` is backed up before the install replaces it. See decision
    copy-mode-overwrites-no-backup.
 
+Kind: build
+
 ## The incidents
 
 - 2026-10-11: after the merges of #321 to #325, the skills `design-review` and `impeccable`
