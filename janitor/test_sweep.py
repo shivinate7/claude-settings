@@ -17,6 +17,7 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import concurrent.futures
 import contextlib
 import hashlib
 import io
@@ -2591,15 +2592,57 @@ class ParallelPreviewTests(unittest.TestCase):
         finally:
             undo()
 
-    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
-    def test_pmap_returns_results_in_input_order_in_a_preview(self):
-        undo = sweep._begin_preview_cache()
+    def test_pmap_returns_results_in_input_order_when_the_second_finishes_first(self):
+        # fn(0) returns only after item 1's future is marked done: the done-callback sets the event
+        # then. So item 1 finishes first, and a pool that returns results in completion order gives
+        # [1, 0]. The wait(10) is a hang guard only, for a pool that never runs item 1.
+        first_may_return = threading.Event()
+
+        class Pool(concurrent.futures.ThreadPoolExecutor):
+            def submit(self, fn, *args, **kwargs):
+                future = super().submit(fn, *args, **kwargs)
+                if args[0] == 1:
+                    future.add_done_callback(lambda _done: first_may_return.set())
+                return future
+
+        def first_waits_for_second(i):
+            if i == 0:
+                first_may_return.wait(10)
+            return i
+        pool = Pool(max_workers=2)
         try:
-            got = list(sweep._pmap(lambda i: i, [0, 1], False))
+            got = list(sweep._pmap(first_waits_for_second, [0, 1], False, pool))
         finally:
-            undo()
+            pool.shutdown(wait=True)
         self.assertEqual(got, [0, 1])
-        self.assertIsNone(sweep._POOL)
+
+    def test_a_cached_read_runs_once_when_workers_ask_together(self):
+        # Worker 0 is inside its read, past the cache check, when worker 1 asks for the same key.
+        # With the lock, worker 1 waits for worker 0 to store, so the read runs once. Without it,
+        # worker 1 misses the key and runs it again. The events are hand-offs between the two
+        # workers, not timing; the wait(10) only guards a hang.
+        in_read, second_asked, runs = threading.Event(), threading.Event(), []
+
+        def first_read():
+            in_read.set()
+            second_asked.wait(10)
+            runs.append(0)
+
+        def worker(i):
+            if i == 0:
+                sweep._memo("k", first_read)
+            else:
+                in_read.wait(10)
+                second_asked.set()
+                sweep._memo("k", lambda: runs.append(1))
+        undo = sweep._begin_preview_cache()
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        try:
+            list(sweep._pmap(worker, [0, 1], False, pool))
+        finally:
+            pool.shutdown(wait=True)
+            undo()
+        self.assertEqual(len(runs), 1)
 
     def test_a_parallel_preview_reports_what_a_plain_one_does(self):
         root = os.path.join(ROOT, "parallel-preview-repo")
