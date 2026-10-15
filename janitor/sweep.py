@@ -339,10 +339,13 @@ def parse_worktree_list(where: str):
             "detached": False,
             "locked_reason": None,
             "prunable": False,
+            "head": None,
         }
         for line in lines[1:]:
             if line.startswith("branch "):
                 entry["branch"] = _short_branch_ref(line[len("branch "):].strip())
+            elif line.startswith("HEAD "):
+                entry["head"] = line[len("HEAD "):].strip()
             elif line == "bare":
                 entry["bare"] = True
             elif line == "detached":
@@ -474,14 +477,20 @@ def stale_agent_lock_verdict(reason: str):
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
 
+def _common_dir_key(path: str):
+    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common is None or common.returncode != 0 or not common.stdout.strip():
+        return None
+    return os.path.normcase(common.stdout.strip())
+
+
 def _live_remote_heads(path: str):
     """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`,
     read-only: never a fetch, never a prune), or None when any read failed. Local
     refs/remotes/* are not used: a branch deleted on the remote leaves its tracking ref behind."""
-    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if common is None or common.returncode != 0 or not common.stdout.strip():
+    key = _common_dir_key(path)
+    if key is None:
         return None
-    key = os.path.normcase(common.stdout.strip())
     if _LIVE_HEADS is not None and key in _LIVE_HEADS:
         return _LIVE_HEADS[key]
     shas = set()
@@ -506,24 +515,74 @@ def _live_remote_heads(path: str):
     return shas
 
 
-def fully_pushed(path: str):
-    """True when every commit on HEAD is reachable from a head the remote lists now (a detached
-    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
-    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
-    stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone."""
-    live = _live_remote_heads(path)
-    if live is None:
-        return None
+def _unpushed_among(path: str, heads, live):
+    """The subset of HEADS (commit SHAs) with a commit no head in LIVE reaches, or None when git
+    could not tell: ONE `rev-list --stdin` for all of HEADS. rev-list names every commit
+    reachable from HEADS and not from LIVE; a head is pushed exactly when it is not named."""
+    heads = sorted(set(heads))
+    if not heads:
+        return set()
+    if not live:  # no remote head at all: nothing is pushed, and no walk is needed to say so
+        return set(heads)
     try:
         answer = subprocess.run(
-            ["git", "-C", path, "rev-list", "-n", "1", "--stdin"],
-            input="HEAD\n--not\n" + "".join(sha + "\n" for sha in sorted(live)),
-            capture_output=True, text=True, timeout=10)
+            ["git", "-C", path, "rev-list", "--stdin"],
+            input="".join(h + "\n" for h in heads) + "--not\n" + "".join(
+                sha + "\n" for sha in sorted(live)),
+            capture_output=True, text=True, timeout=30)
     except Exception:
         return None
     if answer.returncode != 0:
         return None
-    return not answer.stdout.strip()
+    named = set(answer.stdout.split())
+    return {h for h in heads if h in named}
+
+
+def _pushed_cache(path: str):
+    """This run's {commit SHA: pushed?} for the repository PATH is in, or None with no run."""
+    if _LIVE_HEADS is None:
+        return None
+    key = _common_dir_key(path)
+    return None if key is None else _LIVE_HEADS.setdefault((key, "pushed"), {})
+
+
+def prime_pushed(root: str, entries):
+    """Settle every worktree HEAD of ROOT's repository in one rev-list, so `fully_pushed` does
+    not run one per tree (measured: the per-tree reads are why a sweep outran its 25 s). Only
+    inside a `main` run. A failed read caches nothing: each tree then asks for itself."""
+    cache = _pushed_cache(root)
+    live = _live_remote_heads(root) if cache is not None else None
+    if live is None:
+        return
+    heads = {e["head"] for e in entries
+             if not e.get("bare") and e.get("head") and set(e["head"]) != {"0"}}
+    unpushed = _unpushed_among(root, heads - set(cache), live)
+    if unpushed is not None:
+        cache.update({h: h not in unpushed for h in heads if h not in cache})
+
+
+def fully_pushed(path: str):
+    """True when every commit on HEAD is reachable from a head the remote lists now (a detached
+    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
+    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
+    stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
+    HEAD is read now; `prime_pushed` may already have settled that commit this run."""
+    live = _live_remote_heads(path)
+    if live is None:
+        return None
+    head = guard._git(path, "rev-parse", "HEAD")
+    if head is None or head.returncode != 0 or not head.stdout.strip():
+        return None
+    head = head.stdout.strip()
+    cache = _pushed_cache(path)
+    if cache is not None and head in cache:
+        return cache[head]
+    unpushed = _unpushed_among(path, [head], live)
+    if unpushed is None:
+        return None
+    if cache is not None:
+        cache[head] = head not in unpushed
+    return head not in unpushed
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
@@ -638,11 +697,11 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if dirty:
         return {"path": path, "action": "keep", "reason": "dirty"}
-    locked = guard.worktree_locked(where, path)
-    if locked is None:
-        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh
+    # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).
+    # `remove_worktree` still has git refuse a locked tree.
     stale_agent_lock = False
-    if locked:
+    if entry.get("locked_reason") is not None:
         holder = entry.get("locked_reason") or "locked"
         stale_agent_lock = stale_agent_lock_verdict(holder)
         if stale_agent_lock is not True:
@@ -2512,6 +2571,26 @@ def run_repo_reaper(root: str):
     return None
 
 
+# A pass judges trees until this many seconds after it started (owner ruling 2026-10-15: the sweep
+# must finish). session_end_sweep.py kills the sweep at 25 s, and a tree judged at the last moment
+# still costs about 7.5 s (measured), then the branch, leftover-folder and listener work follows.
+# A tree the pass did not reach is kept ("not judged: deadline") and the next run judges it.
+JUDGE_BUDGET_SECONDS = 12
+_now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
+_DEADLINE = None  # a `_now()` time while `main` runs; None means no deadline
+
+
+def _past_deadline() -> bool:
+    return _DEADLINE is not None and _now() >= _DEADLINE
+
+
+def _oldest_idle_first(entries):
+    """ENTRIES with the longest-idle tree first: the likeliest removals come before the deadline.
+    A tree whose idle time cannot be read goes last; it is kept either way."""
+    idle = {e["path"]: None if e.get("bare") else worktree_idle_seconds(e["path"]) for e in entries}
+    return sorted(entries, key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
@@ -2593,9 +2672,13 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
+        if _past_deadline():
+            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}
         return decide_worktree(root, entry, attended, agent_rule)
 
-    judged = entries if mode == "full" else []
+    judged = _oldest_idle_first(entries) if mode == "full" else []
+    if judged:
+        prime_pushed(root, judged)
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
@@ -2905,13 +2988,14 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
-    global _LIVE_HEADS
+    global _LIVE_HEADS, _DEADLINE
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
+    _DEADLINE = _now() + JUDGE_BUDGET_SECONDS
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
-        _LIVE_HEADS = None
+        _LIVE_HEADS = _DEADLINE = None
         undo()
 
 
