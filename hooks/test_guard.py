@@ -6803,6 +6803,88 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
+# ================================================================ 6a-2. cap-ask-fix review round 2 (frozen)
+# Three holes the branch allowed. Each is a frozen write the guard reads as text, so each case names
+# its hole. Each DENIES. Main denies each one too, except the H2 `${F@P}` shape, which main allows as
+# well. The cap-key twins of H2 and H3 are in the model-cap section below.
+#
+# H1: `_words_of` cuts a word at each quote, so a frozen path with a quote inside it reads as two
+# words, and neither word is a frozen path. One case per writer in hooks/, then one per folder.
+# H2: `printf` is a printer, so its quoted text is data. The text still runs: through `eval`, `bash -c`,
+# a bare `$D`, or a `${F@P}` prompt expansion, which runs the `$(...)` inside its value.
+# H3: `_name` reads only the basename of a command word. A function, a local script or a PATH entry
+# named `cat` reads as the printer `cat`, so the text piped into it is data, and the function runs it.
+R2_HOOK_SQ = slash(os.path.join(CFG, "hooks")) + "/'g.py'"        # the path with a quote pair in it
+R2_HOOK_DQ = '"' + slash(os.path.join(CFG, "hooks")) + '/"g.py'   # the same, with the pair double-quoted
+R2_WRITE = "echo 1 > " + CFG_SETTINGS                             # a frozen write, held as text
+R2_PS_WRITE = "Set-Content -Path " + CFG_SETTINGS + " -Value 1"
+
+
+def r2_printf_forms(write):
+    """H2: a printf stores `write` in a variable, and each form runs the variable."""
+    return (
+        ("eval", "printf -v D '%s' '" + write + "'; eval \"$D\""),
+        ("bash -c", "printf -v D '%s' '" + write + "'; bash -c \"$D\""),
+        ("a bare $D", "printf -v D '%s' '" + write + "'; $D"),
+        ("the ${F@P} prompt expansion",
+         "printf -v F '%s' '$(" + write + ")'; echo \"${F@P}\""),
+    )
+
+
+def r2_function_forms(write):
+    """H3: a command named `cat` that runs its input, or a local `cat`, takes the piped text."""
+    return (
+        ("a shell function named cat", "cat() { sh; }; echo '" + write + "' | cat"),
+        ("a function declared with the function keyword",
+         "function cat { sh; }; echo '" + write + "' | cat"),
+        ("a local script named cat", "echo '" + write + "' | ./cat"),
+        ("a PATH entry named cat", "PATH=./b:$PATH; echo '" + write + "' | cat"),
+    )
+
+
+for _writer, _command in (
+    ("cp", "cp a " + R2_HOOK_SQ),
+    ("echo redirect", "echo x > " + R2_HOOK_DQ),
+    ("tee", "echo x | tee " + R2_HOOK_SQ),
+    ("rm", "rm " + R2_HOOK_SQ),
+    ("mv", "mv a " + R2_HOOK_SQ),
+    ("sed -i", "sed -i 's/x/y/' " + R2_HOOK_SQ),
+    ("install", "install a " + R2_HOOK_SQ),
+):
+    sh("frozen path: fix H1, " + _writer + " onto a hook path with a quote in it denies "
+       "[cap-ask-fix r2 red]", _command, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen path: fix H1, Set-Content onto a hook path with a quote in it denies [cap-ask-fix r2 red]",
+   "Set-Content -Path " + R2_HOOK_SQ + " -Value 1", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+for _folder, _name in (("lint", "prose.py"), ("state", "entry.json"), ("agents", "builder.md"),
+                       ("bin", "merge.py"), ("output-styles", "shiv.md")):
+    sh("frozen path: fix H1, cp a " + _folder + " file with a quote in its name denies "
+       "[cap-ask-fix r2 red]", "cp a " + slash(os.path.join(CFG, _folder)) + "/'" + _name + "'",
+       "deny", "frozen-path", cwd=NOGIT)
+
+for _how, _command in r2_printf_forms(R2_WRITE):
+    sh("frozen shell: fix H2, printf stores a frozen write and " + _how + " runs it, denies "
+       "[cap-ask-fix r2 red]", _command, "deny", "frozen-path", cwd=NOGIT)
+for _how, _command in r2_function_forms(R2_WRITE):
+    sh("frozen shell: fix H3, " + _how + " takes the piped frozen write, denies [cap-ask-fix r2 red]",
+       _command, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: fix H3, Set-Alias maps echo to iex, a Set-Content onto the config settings denies "
+   "[cap-ask-fix r2 red]", "Set-Alias echo iex; echo '" + R2_PS_WRITE + "'", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+
+# THE FIVE GREEN PINS of this lane (the false-alarm win of round 2). Each names a frozen path or a
+# settings copy in text a reader or a message carries, and each stays allowed.
+sh("frozen pin: grep -n of a hooks file allows [cap-ask-fix r2 pin]",
+   "grep -n \"tee\" " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen pin: jq of the settings file allows [cap-ask-fix r2 pin]",
+   "jq . " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: git commit -m naming a hooks path allows [cap-ask-fix r2 pin]",
+   VCS + " commit -m \"edit " + CFG_HOOK + "\"", "allow", cwd=NOGIT)
+sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
+   "echo \"cp a " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
+sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
+   "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
 #
@@ -7175,6 +7257,23 @@ sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allo
 # ROUND 2 COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
 chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask step [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("subagent-model-cap",))
+
+# ROUND 2, THE CAP-KEY TWINS of H2 and H3 (cap-ask-fix r2). The same shapes, with a cap write held as text.
+# Each shape chains the write with a second step, so the guard DENIES it as ask-alone, never asks. Main
+# measures the same deny for each eval, bash -c, bare $D and H3 shape (a PowerShell Set-Alias too). Main
+# ALLOWS the ${F@P} shape, so that one is red on main as well as on the branch.
+R2_CAP_WRITE = "echo " + CAP_KEY + "=" + OPUS + " > " + PROJ_SETTINGS
+R2_CAP_PS = "Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS
+for _how, _command in r2_printf_forms(R2_CAP_WRITE):
+    chained_ask("cap shell: fix H2, printf stores a cap write and " + _how + " runs it, denies as a chained "
+                "ask step [cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+for _how, _command in r2_function_forms(R2_CAP_WRITE):
+    chained_ask("cap shell: fix H3, " + _how + " takes the piped cap write, denies as a chained ask step "
+                "[cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the cap into a project local "
+            "settings file denies as a chained ask step [cap-ask-fix r2 red]",
+            "Set-Alias echo iex; echo '" + R2_CAP_PS + "'", tool="PowerShell", cwd=NOGIT,
+            carries=("subagent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
