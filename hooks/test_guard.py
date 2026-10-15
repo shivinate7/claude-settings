@@ -6537,11 +6537,13 @@ sh("frozen: a heredoc writing prose that names the environment file",
    "cat > notes.md <<'DOC'\nThe guard refuses any command naming " + ENV + ".\nDOC", "allow",
    cwd=NOGIT)
 # THE QUOTED SIBLING of the model-cap data cases. The same _shell_write_hit reads a frozen path inside
-# a quoted echo as a write, so a probe that names the config settings file in data is denied today.
-# A quoted path piped to a program is data: the frozen file is not written, so it allows. A real
-# cat-write onto that file stays denied. (Red on main: the quoted form denies.)
-sh("frozen data: a quoted cat-write onto the config settings, piped to python, allows",
-   "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
+# a quoted echo as a write. A quoted path piped into a pure printer is data, and allows (the wc pin
+# below). Piped into an interpreter it denies: an interpreter may run the text, so a pipe into one
+# fails closed, as main does (cap-ask-fix review round 1, the orchestrator's design call). A real
+# cat-write onto that file stays denied.
+sh("frozen data: a quoted cat-write onto the config settings, piped to python, denies "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a real cat-write onto the config settings stays denied",
    "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
@@ -6669,8 +6671,9 @@ sh("frozen shell: a lone apostrophe in text does not hide a real write after it,
    "echo don't ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: a lone apostrophe, a line break, then a real write, denies [r1 cov]",
    "echo don't\ncat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
-sh("frozen data: a /* in double quotes naming a cat-write, piped to python, allows [r1 cov]",
-   'echo "/* cat > ' + CFG_SETTINGS + '" | python hooks/guard.py', "allow", cwd=NOGIT)
+sh("frozen data: a /* in double quotes naming a cat-write, piped to python, denies "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   'echo "/* cat > ' + CFG_SETTINGS + '" | python hooks/guard.py', "deny", "frozen-path", cwd=NOGIT)
 sh("frozen data: a // in a multi-line double-quoted string naming a cat-write allows [r1 cov]",
    'printf "%s\n// cat > ' + CFG_SETTINGS + '" x > notes.txt', "allow", cwd=NOGIT)
 sh("frozen data: a multi-line commit message with a # naming a cat-write allows [r1 cov]",
@@ -6736,8 +6739,8 @@ sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a re
 
 # ROUND 3 (cap-ask-data review, item 4). A program piped into python that reads its program from stdin
 # runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
-# /proc/self/fd/0 and CON forms name the same stdin. Today guard_frozen.py _runs_a_file counts each one
-# as a script file and allows it, so these four are RED on the product. The `python -` twin is a GREEN pin.
+# /proc/self/fd/0 and CON forms name the same stdin, and on 8a83d89 each denies (_STDIN_FILES names
+# it). The `python -` twin is a GREEN pin, and the four are GREEN pins too.
 FROZEN_PY_WRITE = "import os; os.system('tee " + CFG_SETTINGS + " </dev/null')"
 sh("frozen stdin: a python program echoed into python -, writes the config settings, denies [r3 pin]",
    "echo \"" + FROZEN_PY_WRITE + "\" | python -", "deny", "frozen-path", cwd=NOGIT)
@@ -6745,6 +6748,59 @@ for _dev in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "CON"):
     sh("frozen stdin: r3, a python program echoed into python " + _dev + ", writes the config settings, "
        "denies [r3 red]",
        "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
+
+# CAP-ASK-FIX REVIEW ROUND 1: F1 to F4 are holes the branch allowed. Each is a frozen write that reaches
+# the guard as data, so each case names the form in its name. Each case DENIES, and each denies on main.
+# A pipe into an interpreter fails closed, the orchestrator's design call. (The F-letters here are this
+# lane's, not the cap-ask-data F1 to F5 above.)
+#
+# F1: `_runs_a_file` compared raw words, so a quoted, empty, escaped or variable operand read as a
+# script file, and the text piped into it became data.
+for _name, _arg in (
+    ("a quoted dash", '"-"'),
+    ("an empty quote then a dash", '""-'),
+    ("a backslash-escaped dash", "\\-"),
+    ("an unset variable", '"$X"'),
+    ("a quoted stdin path", '"/dev/stdin"'),
+):
+    sh("frozen stdin: fix F1, a python program piped into python " + _name + " (" + _arg + "), writes the "
+       "config settings, denies [cap-ask-fix r1 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _arg, "deny", "frozen-path", cwd=NOGIT)
+# F2: `python FILE` was a data sink, so text piped into a script file allowed. The text came from an
+# echo, from a git commit message, from a gh body, or from a file on a descriptor.
+sh("frozen data: fix F2, an echo of a cat-write piped to python run.py, denies [cap-ask-fix r1 red]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python run.py", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, a git commit message naming a cat-write piped to python run.py, denies "
+   "[cap-ask-fix r1 red]",
+   VCS + " commit -m \"cat > " + CFG_SETTINGS + "\" | python run.py", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, a gh pr create body naming a cat-write piped to python run.py, denies "
+   "[cap-ask-fix r1 red]",
+   "gh pr create --draft --title \"note\" --body \"cat > " + CFG_SETTINGS + "\" | python run.py",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: fix F2, an echo of a cat-write piped to python on descriptor 3, read from run.py, "
+   "denies [cap-ask-fix r1 red]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python /dev/fd/3 3<run.py", "deny", "frozen-path", cwd=NOGIT)
+# F3: `_STDIN_FILES` named four stdin spellings and missed four more: a double slash, a doubled zero,
+# and a thread-self path. Each is stdin, so each denies.
+for _dev in ("/proc/thread-self/fd/0", "//dev/stdin", "/dev/fd/00", "/proc/self/fd/00"):
+    sh("frozen stdin: fix F3, a python program piped into python " + _dev + ", writes the config settings, "
+       "denies [cap-ask-fix r1 red]",
+       "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
+# F4: the PowerShell tool reads U+201C and U+201D as double quotes, and reads the text of a `<# #>` block
+# comment as nothing. The guard reads the smart quotes as plain text, so an ASCII quote pair around a
+# Set-Content is data to it. A comment's ASCII quotes can pair the same way, with no smart quote at all.
+# Each shape is a Set-Content that PowerShell runs and the branch reads as echo data. Each DENIES, and
+# each is allowed on 8a83d89 and denied on main.
+_F4_WRITE = "Set-Content -Path " + CFG_SETTINGS + " -Value 1"
+sh("frozen shell: fix F4, an echo whose smart-quoted argument holds a Set-Content onto the config settings, "
+   "denies [cap-ask-fix r1 red]",
+   "echo “ \"; " + _F4_WRITE + "; echo \" ”", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: fix F4, an echo with a smart close after x, then a Set-Content, then an echo of y, "
+   "denies [cap-ask-fix r1 red]",
+   "echo “x\"; " + _F4_WRITE + "; echo \"y”", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs them, so a Set-Content "
+   "between two echoes is echo data, denies [cap-ask-fix r1 red]",
+   "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -6981,37 +7037,47 @@ sh("cap: a grep for the variable in a settings file is not a write",
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
-# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or a JSON payload
-# piped in. A heredoc body fed to an interpreter is code, not data, and stays in view (review round 1, F5).
-# Incident 2026-10-14: a reviewer's probe piped a
-# JSON tool-call sample holding a cap write into `python hooks/guard.py`, and the owner was asked to
-# approve a call that wrote nothing. Each case names the write the way a probe would: the path, a
-# redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
+# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
+# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view (review round 1,
+# F5). So is text piped into an interpreter: the interpreter may run it, so a pipe into one fails closed,
+# as main does (cap-ask-fix review round 1). Incident 2026-10-14: a reviewer's probe piped a JSON tool-call
+# sample holding a cap write into `python hooks/guard.py`, and the owner was asked to approve a call that
+# wrote nothing. The branch allowed that shape; under the design call it denies again, as main does. Whether
+# that friction is acceptable is the owner's call, not the test's. Each case names the write the way a
+# probe would: the path, a redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
 sh("cap data: a grep naming a cat-write onto a settings file with the cap key allows",
    "grep -n \"cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" docs/notes.md", "allow", cwd=NOGIT)
 sh("cap data: an echo naming a tee onto a settings file, piped to wc, allows",
    "echo 'tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | wc -l", "allow", cwd=NOGIT)
-sh("cap data: an && inside double quotes naming a cat-write, piped to python, allows",
-   "echo \"ok && cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
-sh("cap data: a comment opener inside double quotes naming a cat-write, piped to python, allows",
-   "echo \"# cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
+chained_ask("cap data: an && inside double quotes naming a cat-write, piped to python, denies as a chained ask step "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"ok && cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+chained_ask("cap data: a comment opener inside double quotes naming a cat-write, piped to python, denies as a "
+   "chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "echo \"# cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
 sh("cap data: a lone apostrophe inside double quotes naming a cat-write, piped to jq, allows",
    "echo \"don't cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | jq .", "allow", cwd=NOGIT)
-sh("cap data: a multi-line quoted string naming a cat-write, piped to python, allows",
-   "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py",
-   "allow", cwd=NOGIT)
+chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to python, denies as a chained ask "
+   "step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
 sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
    + CAP_KEY + "\"}}\nPAYLOAD", "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
    "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
-sh("cap data: a JSON tool-call sample holding the cap write, piped to python, allows",
+chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask step "
+   "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' '" + json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > " + PROJ_LOCAL
-   + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
-sh("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, allows",
+   + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
+chained_ask("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, "
+   "denies as a chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
-   + CAP_KEY}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
+   + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("subagent-model-cap",))
 
 # ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asked, as main did.
 # Ask-alone chains the tee, cp and Out-File forms with a step, so those deny. The lone Set-Content asks.
@@ -7047,13 +7113,16 @@ sh("cap: a /* in a multi-line quoted string does not hide a redirect that writes
 chained_ask("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
    "echo don't ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
    cwd=NOGIT, carries=("subagent-model-cap",))
-sh("cap data: a /* in double quotes naming a cat-write, piped to python, allows [r1 cov]",
-   'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', "allow", cwd=NOGIT)
+chained_ask("cap data: a /* in double quotes naming a cat-write, piped to python, denies as a chained ask step "
+   "[r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', cwd=NOGIT,
+   carries=("subagent-model-cap",))
 sh("cap data: a // in single quotes naming a tee onto a settings file, piped to jq, allows [r1 cov]",
    "echo '// tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | jq .", "allow", cwd=NOGIT)
-sh("cap data: a // in a multi-line quoted string naming a cat-write, piped to python, allows [r1 cov]",
-   "printf 'a note\n// cat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py",
-   "allow", cwd=NOGIT)
+chained_ask("cap data: a // in a multi-line quoted string naming a cat-write, piped to python, denies as a chained "
+   "ask step [r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "printf 'a note\n// cat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
+   carries=("subagent-model-cap",))
 
 # FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
 # wrong type, and a payload with no tool name at all: each allows the call.
