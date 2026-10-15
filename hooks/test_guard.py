@@ -3871,9 +3871,15 @@ add("background-end: pnpm --filter web dev under run_in_background with no note 
 add("background-end: npm.cmd run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm.cmd run dev", run_in_background=True)
+add("background-end: python.exe -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python.exe -m http.server", run_in_background=True)
 add("background-end: python -u -m http.server under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="python -u -m http.server", run_in_background=True)
+add("background-end: py -3 -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="py -3 -m http.server", run_in_background=True)
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
@@ -3889,6 +3895,9 @@ add("background-end: a PowerShell call operator before npm run dev is refused",
 add("background-end: npm run dev in a subshell under run_in_background is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="(npm run dev)", run_in_background=True)
+add("background-end: npx vite@5 under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite@5", run_in_background=True)
 add("background-end: npx vite build --watch under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npx vite build --watch", run_in_background=True)
@@ -8319,6 +8328,9 @@ add("floor step-up: reviewer Round 2 of 3 with no model is denied (no sonnet nam
     STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="inherit",
+    subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
     subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
