@@ -44,18 +44,10 @@ On 2026-10-13 at 12:09 CDT, a spike ran a mod's `$.model.complete` in the deskto
 
 ## Holes, named
 
-- HOLE 1, closed. Phase 1 prints a `key`. The mod gives it back to phase 2 as `--key` after the reply. A key the live evidence no longer gives reads UNKNOWN, and so does a phase 1 with no key.
-- HOLE 2. A new human message between the phases moves the baseline. A real FLAG then prints `verdict lost`. The output is loud and correct, but the README named one cause only. Fix: the README now names this cause.
-- HOLE 3. `/dw` prints `nothing to say (no protected change, no model call)` on a cache hit too. A second `/dw` after a FLAG reads like a clean turn. No fix is named.
-- HOLE 4. The log is the only output for an ALLOW, and the toast shows a FLAG or UNKNOWN too. A lost log write is silent: an empty catch and a 2 s cap, so START may have no END. Any read error resets the log to one line. Whether `$.fs.write` is atomic is unverified. No fix is named.
-- HOLE 5. Each step that holds the slot has a mod timer: each python finder 6 s (two per run), each python run 31 s (a 30 s host limit, unmeasured against a real run), the model call 50 s, each toast 5 s (a verdict and up to three notices), each log write 2 s (up to six). The sum is about 168 s, computed, not measured. A timer frees the slot but does not stop the host call or kill the child. The `$.env.get` reads have no timer. No fix is named.
-- HOLE 6. The log keeps the FLAG `why` up to 2000 characters. That text is model words about a diff, and it may quote a secret. The log also keeps the first 200 characters of non-JSON phase-1 output, which is fixed prompt text only. No fix is named.
-- HOLE 7. A bad flag combination on `decision_watch.py` makes the script use `invoke_model` instead. That can start a 120 s `claude -p` call. Fix: none. The fallback is pinned on purpose.
-- HOLE 8. `Stops seen` counts only lines still in the 500-line log, so N is at most 500. A second `/dw` on the same turn says `nothing to say`, because `/dw` keeps its own cache. No fix is named.
-- HOLE 9 (minor). `textOf` drops `r.reason`, so an aborted call reads `no text`. The `asciiJson` regex holds a literal U+FFFF character. `pickPython` runs `where.exe` in both phases. No fix is named.
-- HOLE 10. The Stop row is removed, but it is unproven live that `classic.Stop` reaches a mod in the desktop app. The drop is unproven until the mod log shows `STOP seen` lines after merge. The orchestrator measures that and restores the Stop row if none show.
-- HOLE 11. A Stop that lands while a judge runs is skipped (`SKIP busy`). `decision_watch.py` scopes a turn by file time after the last human message, so for a new turn that Stop is never judged: the next Stop of that turn judges it only if one comes. No fix is named.
-- HOLE 15 (minor). The log drops whitespace at the very start of a notice; the toast keeps it. Debt: dw-notice-lead-space-lost.
+Debts: `dw-slash-cache-hit-reads-clean` (a /dw cache hit reads like a clean turn, and Stops seen caps at 500), `dw-log-write-failures-silent` (a lost log write is silent), `dw-slot-timers-unmeasured` (the slot timers are computed, not measured), `dw-log-keeps-model-text` (the log keeps model text that may hold a secret), `dw-text-of-drops-reason` (textOf drops the abort reason), `dw-ffff-regex-literal` (asciiJson holds a literal U+FFFF), `dw-where-exe-both-phases` (pickPython runs where.exe in both phases), `dw-stop-row-unproven` (the Stop row drop is unproven live), `dw-busy-stop-skipped` (a Stop during a judge is never judged), `dw-notice-lead-space-lost` (the log drops a notice's leading whitespace).
+## Named limits
+
+- HOLE 7: a bad flag combination on `decision_watch.py` makes the script use `invoke_model` instead, which can start a 120 s `claude -p` call. The fallback is pinned on purpose.
 
 ## Deferred, not built
 
