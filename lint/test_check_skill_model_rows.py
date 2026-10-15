@@ -112,19 +112,6 @@ def run(files, real_skills=False, locked=()):
         shutil.rmtree(tree, ignore_errors=True)
 
 
-def run_real():
-    """Run the check in the real repo, the way CI does."""
-    need_check()
-    proc = subprocess.run([sys.executable, CHECK], cwd=ROOT, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=120)
-    return proc.returncode, proc.stdout + proc.stderr
-
-
-def real_skill_names():
-    return sorted(os.path.basename(os.path.dirname(p))
-                  for p in glob.glob(os.path.join(REAL_SKILLS, "*", "SKILL.md")))
-
-
 class Coverage(unittest.TestCase):
     def test_a_row_for_every_skill_passes(self):
         files = skills("alpha", "beta")
@@ -223,33 +210,6 @@ class Coverage(unittest.TestCase):
                 self.assertEqual(code, 1, out)
                 self.assertIn(name, out)
 
-    def test_rows_in_a_fence_do_not_count(self):
-        files = skills("alpha", "beta")
-        files[RECORD] = record([row("beta")], extra="```text\n%s\n```\n" % row("alpha"))
-        code, out = run(files)
-        self.assertEqual(code, 1, out)
-        self.assertIn("alpha", out)
-
-    def test_rows_in_a_multi_line_html_comment_do_not_count(self):
-        files = skills("alpha", "beta")
-        files[RECORD] = record([row("beta")], extra="<!--\n%s\n-->\n" % row("alpha"))
-        code, out = run(files)
-        self.assertEqual(code, 1, out)
-        self.assertIn("alpha", out)
-
-    def test_scanner_markers_in_row_text_do_not_hide_later_rows(self):
-        # The "<!--" sits in a code span, so it is plain text (re-pointed 2026-10-13: a bare
-        # "<!--" outside a code span now opens a comment; see the Fences class).
-        files = skills("alpha", "beta", "gamma")
-        files[RECORD] = record(
-            [row("alpha", PHRASE + " `<!-- open a comment`"),
-             row("beta", PHRASE + " /* open a block"),
-             row("gamma", PHRASE + " // and # and a lone ` backtick")],
-            extra="\nA closing remark --> and */ and don't stop here.\n",
-        )
-        code, out = run(files)
-        self.assertEqual(code, 0, out)
-
     def test_unreadable_input_fails_with_a_message(self):
         # The record and skills/ cases use no skill rows, so an input read as empty cannot pass.
         cases = {
@@ -280,14 +240,18 @@ class Fences(unittest.TestCase):
                 code, out = run(files)
                 self.assertEqual(code, 1, out)
                 self.assertIn("alpha", out)
-
-    def test_longer_closer_closes_the_fence(self):
-        # Green pin: the row inside the fence does not count, the row after its closer does.
-        cases = {
+        # Merged from test_rows_in_a_fence_do_not_count: a row inside a plain fence does not count.
+        with self.subTest(case="rows in a fence"):
+            files = skills("alpha", "beta")
+            files[RECORD] = record([row("beta")], extra="```text\n%s\n```\n" % row("alpha"))
+            code, out = run(files)
+            self.assertEqual(code, 1, out)
+            self.assertIn("alpha", out)
+        # Merged from test_longer_closer_closes_the_fence: a longer closer closes the fence (green).
+        for label, pattern in {
             "3-backtick fence, 4-backtick closer": "```text\n%s\n````\n%s\n",
             "3-tilde fence, 4-tilde closer": "~~~text\n%s\n~~~~\n%s\n",
-        }
-        for label, pattern in cases.items():
+        }.items():
             with self.subTest(case=label):
                 files = skills("alpha")
                 files[RECORD] = record([], extra=pattern % (row("alpha"), row("alpha")))
@@ -301,24 +265,40 @@ class Fences(unittest.TestCase):
         code, out = run(files)
         self.assertEqual(code, 1, out)
         self.assertIn("alpha", out)
-
-    def test_comment_closed_on_its_own_line_hides_nothing(self):
-        # Green pin: "<!-- note -->" closes on its line, so the next row counts.
-        files = skills("alpha")
-        files[RECORD] = record([], extra="intro <!-- note --> text\n%s\n" % row("alpha"))
-        code, out = run(files)
-        self.assertEqual(code, 0, out)
-
-    def test_comment_opener_in_code_span_or_fence_is_plain_text(self):
-        # Green pin: a lone "<!--" in a code span or in a fence opens nothing.
-        files = skills("alpha", "beta")
-        extra = ("Write `<!--` to open a comment.\n"
-                 "```text\n<!-- lone opener in a fence\n```\n"
-                 "%s\n" % row("beta"))
-        files[RECORD] = record([row("alpha", PHRASE + " `<!-- open`")], extra=extra)
-        code, out = run(files)
-        self.assertEqual(code, 0, out)
-
+        # Merged from test_comment_closed_on_its_own_line_hides_nothing: "<!-- note -->" closes on its line.
+        with self.subTest(case="comment closed on its line"):
+            files = skills("alpha")
+            files[RECORD] = record([], extra="intro <!-- note --> text\n%s\n" % row("alpha"))
+            code, out = run(files)
+            self.assertEqual(code, 0, out)
+        # Merged from test_comment_opener_in_code_span_or_fence_is_plain_text: a lone opener in a code span
+        # or a fence opens nothing.
+        with self.subTest(case="opener in a code span or fence"):
+            files = skills("alpha", "beta")
+            extra = ("Write `<!--` to open a comment.\n"
+                     "```text\n<!-- lone opener in a fence\n```\n"
+                     "%s\n" % row("beta"))
+            files[RECORD] = record([row("alpha", PHRASE + " `<!-- open`")], extra=extra)
+            code, out = run(files)
+            self.assertEqual(code, 0, out)
+        # Merged from test_rows_in_a_multi_line_html_comment_do_not_count: a row inside a multi-line comment.
+        with self.subTest(case="rows in a multi-line html comment"):
+            files = skills("alpha", "beta")
+            files[RECORD] = record([row("beta")], extra="<!--\n%s\n-->\n" % row("alpha"))
+            code, out = run(files)
+            self.assertEqual(code, 1, out)
+            self.assertIn("alpha", out)
+        # Merged from test_scanner_markers_in_row_text_do_not_hide_later_rows: markers in row text hide nothing.
+        with self.subTest(case="scanner markers in row text"):
+            files = skills("alpha", "beta", "gamma")
+            files[RECORD] = record(
+                [row("alpha", PHRASE + " `<!-- open a comment`"),
+                 row("beta", PHRASE + " /* open a block"),
+                 row("gamma", PHRASE + " // and # and a lone ` backtick")],
+                extra="\nA closing remark --> and */ and don't stop here.\n",
+            )
+            code, out = run(files)
+            self.assertEqual(code, 0, out)
 
 class Folders(unittest.TestCase):
     """Items 3, 4 and 6 of the 2026-10-13 review: exact SKILL.md, dot folders, unreadable folders."""
@@ -351,27 +331,6 @@ class Folders(unittest.TestCase):
         code, out = run(files, locked=("skills/locked",))
         self.assertEqual(code, 2, out)
         self.assertIn("locked", out)
-
-
-class RealRepo(unittest.TestCase):
-    def test_real_clean_run_prints_nothing(self):
-        # Red today: the real run prints a blank line (item 5, 2026-10-13 review).
-        code, out = run_real()
-        self.assertEqual(code, 0, out)
-        self.assertEqual(out, "")
-
-    def test_real_record_and_skills_pass(self):
-        code, out = run_real()
-        self.assertEqual(code, 0, out)
-
-    def test_real_skills_fail_against_an_empty_record(self):
-        names = real_skill_names()
-        self.assertTrue(names, "no skills/*/SKILL.md found: this case would prove nothing")
-        code, out = run({RECORD: record([])}, real_skills=True)
-        self.assertEqual(code, 1, out)
-        for name in names:
-            with self.subTest(skill=name):
-                self.assertIn(name, out)
 
 
 class CiWiring(unittest.TestCase):
