@@ -414,8 +414,31 @@ def _walk_wrappers(tokens):
 # Other quoted text still counts: the shell word of `ssh host "bash -s" <<EOF` runs its body.
 # SHELL_HEREDOC names the shells alone: a rule that reads shell lines keeps only a body a shell
 # runs, never a Python or Node script.
-# The delimiter is the whole shell word (`E-F`), so the body ends at that word and no earlier one.
-HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][^\s'\"|&;<>()]*)\1")
+# The delimiter is the whole shell word, read as bash reads it: a backslash, a single-quoted run or a
+# double-quoted run inside it is dequoted, so `E\OF`, `E'OF'` and `"E"OF` all close at a line `EOF`
+# (heredoc_delimiter). An unquoted word ends at a blank or a shell operator.
+HEREDOC_HEADER = re.compile(
+    r"""<<-?[ \t]*((?:\\.|'[^'\n]*'|"(?:\\.|[^"\\\n])*"|[A-Za-z_])(?:\\.|'[^'\n]*'|"(?:\\.|[^"\\\n])*"|[^\s'"\\|&;<>()])*)""")
+_WORD_PART = re.compile(r"""\\(.)|'([^']*)'|"((?:\\.|[^"\\])*)"|(.)""", re.S)
+
+
+def heredoc_delimiter(word: str):
+    """Return (quote, delimiter): the word as bash reads it. `quote` is "'" when any part of the
+    word is quoted or escaped (the body is then text, no substitution runs), else ''."""
+    quote = ""
+    out = []
+    for escaped, single, double, plain in _WORD_PART.findall(word):
+        if plain:
+            out.append(plain)
+            continue
+        quote = "'"
+        if single or double:
+            out.append(re.sub(r"\\([$`\"\\])", r"\1", double) if double else single)
+        else:
+            out.append(escaped)
+    return quote, "".join(out)
+
+
 _SEGMENT_BREAK = re.compile(r"(&&|\|\||[;|\n])")
 
 
@@ -434,8 +457,21 @@ def _interpreter_header(words: str):
     return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
-SHELL_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell")
-INTERPRETER_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell|python[\\d.]*|perl|ruby|node")
+_SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
+# A header whose heredoc pipes into a shell (`cat <<EOF | sh`, `... | ssh host bash -s`): the shell runs the body.
+_PIPED_SHELL = re.compile(
+    r"<<[^\n]*\|\s*(?:(?:sudo|env|exec)\s+)?(?:[^\s|;&]*[/\\])?(?:" + _SHELLS + r")(?:\.exe|\.cmd)?(?![\w.-])"
+    r"|<<[^\n]*\|\s*ssh\b[^\n|]*(?<!\w)(?:" + _SHELLS + r")(?![\w.-])").search
+_SHELL_FIRST = _interpreter_header(_SHELLS)
+_INTERPRETER_FIRST = _interpreter_header(_SHELLS + "|python[\\d.]*|perl|ruby|node")
+
+
+def SHELL_HEREDOC(text: str) -> bool:
+    return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text))
+
+
+def INTERPRETER_HEREDOC(text: str) -> bool:
+    return bool(_INTERPRETER_FIRST(text) or _PIPED_SHELL(text))
 
 
 # The only characters heredoc_heads acts on when nothing is open.
@@ -482,7 +518,7 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
         elif char == "<":
             header = HEREDOC_HEADER.match(text, index)
             if header:
-                heads.append(header.groups())
+                heads.append(heredoc_delimiter(header.group(1)))
                 index = header.end()
                 continue
         index += 1
@@ -490,7 +526,13 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
 
 
 def _split_heredocs(cmd: str, contractions_are_text: bool = False):
-    """Return (kept lines, [(quote, body, header)]): every header line kept, every body set apart,
+    """`_walk_heredocs` without its `unclosed` flag: (kept lines, [(quote, body, header)])."""
+    kept, bodies, _ = _walk_heredocs(cmd, contractions_are_text)
+    return kept, bodies
+
+
+def _walk_heredocs(cmd: str, contractions_are_text: bool = False):
+    """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
     `contractions_are_text` it is the second reading of split_segments: every contraction-shaped
@@ -503,6 +545,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
     kept = []
     bodies = []
+    unclosed = False
     index = 0
     stack = ""
     while index < len(lines):
@@ -517,7 +560,9 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
-    return kept, bodies
+            else:
+                unclosed = True   # bash reads to the end of input, so a caller that judges runs reads on
+    return kept, bodies, unclosed
 
 
 def _drop_heredoc_bodies(cmd: str) -> str:
@@ -535,6 +580,8 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         return cmd  # no heredoc: nothing to drop
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
         return cmd  # the body may be executed, so keep it under inspection
+    if _walk_heredocs(cmd)[2]:
+        return cmd  # a body with no closer runs to the end of input: every line stays in view
     return _drop_heredoc_bodies(cmd)
 
 

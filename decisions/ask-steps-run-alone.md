@@ -7,11 +7,13 @@ steps in one command. The guard rule `ask-alone` denies such a command. The same
 still asks. A move into a folder first (`cd X && <step>`, `Set-Location`, `export ...;`) is a
 chain too, and the guard denies it.
 
+Owner ruling, 2026-10-14 22:25 CDT. An inline interpreter script (a python, node, perl or ruby
+heredoc) is one step, and it asks once. A chain around it still counts. A shell body (bash, sh, a
+heredoc piped to a shell) counts each line. A body with no closing line counts each line. A deny
+in the body still wins. Owner rule, 22:27: no safety hole that main lacks.
+
 The steps that ask today: a worktree prune, a worktree discard, a forced push, and a shell write
 to the model-cap settings. The deny names the kind of step, never the command text.
-
-- Owner, 2026-10-14 22:25 CDT: an interpreter heredoc (python, node, perl, ruby) counts as one step
-  and asks once. A chain around it still counts. A shell heredoc still counts each line.
 
 Kind: process
 Home: hooks/guard.py
