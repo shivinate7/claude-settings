@@ -197,11 +197,9 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(char)   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
-        # The quote walk owns each escape that can move a quote: \' \" \\ \$ and $'. Any other
-        # backslash pair stays two characters here, so `\;` still cuts a segment (an over-read).
+        # The quote walk owns every bash escape and `$'`, so `\;` is text and cuts no segment.
         if char in ("'", '"') or (not POWERSHELL_CALL[0] and (
-                (char == "\\" and cmd[index + 1:index + 2] in ("'", '"', "\\", "$"))
-                or cmd[index:index + 2] == "$'")):
+                char == "\\" or cmd[index:index + 2] == "$'")):
             width, quote = quote_advance(cmd, index, "")
             current.append(cmd[index:index + width])
             index += width

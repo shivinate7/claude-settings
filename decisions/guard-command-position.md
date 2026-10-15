@@ -28,7 +28,7 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 - A substitution inside a token is not read: `$(`, backticks and `x=$(...)`. Debt: guard-substitution-in-token.
 - Only the WSL rule reads the script of `env -S 'cmd'`. The impeccable-review-only, draft-pr, detached-launch and rm-var-unguarded rules do not see inside it. Debt: env-split-string-wsl-only.
 - The wrapper and value-flag lists are closed. An unlisted wrapper, such as `stdbuf` or `chrt`, or an unlisted value flag hides the command word. Debt: guard-wrapper-lists-closed.
-- No kill-rule test pins the split's backslash escapes, as in `echo \'; pkill foo; echo 'x'`. Debt: guard-split-ignores-backslash.
+- No guard test denies the split's `\'` and `\"` escape forms, as in `echo \'; pkill foo; echo 'x'`. Debt: guard-split-ignores-backslash.
 - The second reading can show a `cd` that bash never runs, as in `git restore f.txt` then `echo don't; cd <lane>`. The run-folder walk then judges the restore in the lane. Debt: guard-cd-walk-extra-reading.
 - An odd count of `'` doubles guard time, so a 6,001-word command takes about 15 to 32 s here. That fits inside the 60 s guard hook timeout (`gate-hooks-fail-closed`). A longer command can run unjudged (debt guard-timeout-fails-open).
 - Commit-message rules read heredoc bodies by both readings (lane gcp-heredoc-two-read). With an unclosed lone `'` line, a later body can be read for the wrong command. The cost is an over-deny: bash stops at the open quote, and a fuzz of 300k cases found no bypass.
