@@ -32,7 +32,7 @@ deletes trash names a child left.
 Worktrees (owner ruling 2026-10-15): when the gates above hold for the whole worktree, the hook then
 removes the ending agent's OWN worktree, and every other `.claude/worktrees/agent-*` worktree idle
 30 minutes or more. `sweep.decide_agent_end_worktree` decides each one: clean (no dirty or untracked
-file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot prove keeps.
+file), no process inside, no live lock (the own tree's lock goes when it names the hook's host pid), HEAD on a remote-tracking ref. A tree it cannot prove keeps.
 The own tree goes first, and the stage stops at WORKTREE_SECONDS or the hook's own budget, so the
 hook stays inside its 60 s timeout. A removed own tree has no build folders left to reap.
 
@@ -290,6 +290,23 @@ def reap_build_dirs(target: str, cwds):
     return renamed
 
 
+def host_pids():
+    """The pids of the host claude process this hook runs under. MEASURED 2026-10-15: the tool shell's
+    CLAUDE_PID names the nearest claude.exe ancestor (shell -> cmd -> claude.exe), the pid the agent
+    lock names. Not measured for a SubagentStop hook's env, so the ancestors of this process count
+    too: a lock pid that is an ancestor is the process running the hook."""
+    pids = set()
+    if os.environ.get("CLAUDE_PID", "").isdigit():
+        pids.add(int(os.environ["CLAUDE_PID"]))
+    current = os.getpid()
+    for _ in range(MAX_CLIMB):
+        current = parent_pid(current)
+        if not current or current in pids:
+            break
+        pids.add(current)
+    return pids
+
+
 WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits for the next agent end
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
@@ -312,6 +329,8 @@ def reap_worktrees(target: str, deadline: float):
             queue.append((entry, sweep.AGENT_END_IDLE_SECONDS))
     rows = []
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
+    # The own tree's host lock goes (its agent-<id> equals the payload agent_id); every other lock stays.
+    sweep._OWN_AGENT = {"id": os.path.basename(target)[len("agent-"):], "hosts": host_pids()}
     try:
         for done, (entry, min_idle) in enumerate(queue):
             if time.monotonic() > deadline:
@@ -323,6 +342,7 @@ def reap_worktrees(target: str, deadline: float):
             rows.append(decision)
     finally:
         sweep._LIVE_HEADS = None
+        sweep._OWN_AGENT = None
     return rows
 
 

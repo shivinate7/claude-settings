@@ -445,29 +445,43 @@ def _is_primary_checkout(entry_path: str):
     return own == common
 
 
-AGENT_LOCK_RE = re.compile(r"^claude agent agent-\w+ \(pid (\d+) start (.+)\)$")
+AGENT_LOCK_RE = re.compile(r"^claude agent agent-([\w-]+) \(pid (\d+)(?: start (.+))?\)$")
+# Set by the agent-end hook for one stage, like _LIVE_HEADS: {"id": the ending agent's id, "hosts":
+# the pids of the host claude process running the hook}. A lock naming that id and a host pid goes.
+_OWN_AGENT = None
 
 
 def stale_agent_lock_verdict(reason: str):
-    """True when REASON is a claude agent lock (`claude agent agent-<id> (pid N start <date>)`,
-    MEASURED from the Agent tool's own lock) whose pid is dead, or alive with a different start
-    time (pid reuse). The pid is the HOST claude process, not the agent. False when it still
-    runs, or the reason is any other lock. None when the start time or the process read could
-    not tell. Only True lets a lock go."""
+    """True when REASON is a claude agent lock that may go. Two forms, MEASURED: the Agent tool's own
+    lock `claude agent agent-<id> (pid N start <date>)`, and, on this machine since 2026-10-15,
+    `claude agent agent-<id> (pid N)` with no start time. N is the HOST claude process, not the agent.
+    A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
+    reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
+    process now holds keeps its lock. The ending agent's own tree (`_OWN_AGENT`) also goes when N is
+    the hook's host: the host is alive at SubagentStop, so no other rule could lift it. False when
+    the holder still runs, or the reason is any other lock. None when the start time or the process
+    read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
-    try:
-        # MEASURED: the lock's date is UTC (this machine's own `ps` read 5 hours earlier for
-        # the same pid), so it is read with timegm, never mktime.
-        locked_ms = calendar.timegm(time.strptime(found.group(2), "%a %b %d %H:%M:%S %Y")) * 1000
-    except Exception:
-        return None
-    actual = guard._process_start_ms(int(found.group(1)))
+    agent, pid, start = found.group(1), int(found.group(2)), found.group(3)
+    if _OWN_AGENT and agent == _OWN_AGENT["id"] and pid in _OWN_AGENT["hosts"]:
+        return True
+    locked_ms = None
+    if start is not None:
+        try:
+            # MEASURED: the lock's date is UTC (this machine's own `ps` read 5 hours earlier for
+            # the same pid), so it is read with timegm, never mktime.
+            locked_ms = calendar.timegm(time.strptime(start, "%a %b %d %H:%M:%S %Y")) * 1000
+        except Exception:
+            return None
+    actual = guard._process_start_ms(pid)
     if actual is guard.PROCESS_START_UNREADABLE:
         return None
     if actual is None:
         return True
+    if locked_ms is None:
+        return False
     return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
 
 
