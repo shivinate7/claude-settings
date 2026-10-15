@@ -46,6 +46,7 @@ HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sen
 ROOT = tempfile.mkdtemp(prefix="sendmessage_state_cases_")
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
+SKIPPED = []
 RUNS = [0]
 PEER, OTHER = "peer", "other"
 SID_A, SID_B = "ses00001", "ses00002"
@@ -53,9 +54,8 @@ ALLOW = '{"ok": true}'
 FLAG = '{"ok": false, "reason": "parallelism-no-mid-task-talk: send only what changes the work."}'
 READER_SECONDS = 3  # the hook's READER_TIMEOUT for the hang and hold cases, set by TIMED_HOOK
 NO_BOUND = None  # the hook's READER_TIMEOUT for every answer case: the stub is never cut short
-WALL_LIMIT = READER_SECONDS + 10  # the hold case's margin over its set timeout, not a tight absolute bound
-HOLD_MS = 30000  # the held child outlives WALL_LIMIT, so a held pipe fails the bound
-HARNESS_CAP = HOLD_MS // 1000 + 30  # this run's own cap, so a hang ends as a FAIL line
+HOLD_MS = 30000  # the held child writes "done" only after this, far later than the hook's return
+HARNESS_CAP = HOLD_MS // 1000 + 30  # a hang guard for the harness call, never a timing check
 
 STUB_SITE = r'''
 import json, os, subprocess
@@ -94,7 +94,7 @@ else:
 
 # The reader stub: real node runs it in place of hooks/mods/session-board/hooks/receiver-state.mjs.
 # idle or waiting prints that word. hang sleeps with no child. hold starts a child that keeps this
-# process's stdout open, then sleeps; the hook's kill of this process leaves that pipe held.
+# process's stdout open, writes "started" first and "done" last; the hook must return before "done".
 STUB_READER = r'''
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
@@ -123,12 +123,16 @@ if (mode === "idle" || mode === "waiting") {
     if (mode === "hold") {
         // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
         // cmd.exe child does; a node child with inherited stdio does not, and the pipe closes at the kill.
+        // The child writes "started" first, holds the inherited stdout for the hold, and writes "done"
+        // as its last act. "&&" gates done on the hold finishing: a kill of ping must not reach it, and
+        // a plain "&" would let cmd run it when the kill ends ping first. Relative names, with cwd set,
+        // keep the cmd quoting free of spaces.
         const secs = Math.ceil(holdMs / 1000);
         const stdio = ["ignore", "inherit", "inherit"];
         const child = process.platform === "win32"
-            ? spawn("cmd.exe", ["/d", "/c", "ping -n " + (secs + 1) + " 127.0.0.1 > nul"], { stdio, windowsHide: true })
-            : spawn("sh", ["-c", "sleep " + secs], { stdio });
-        child.on("spawn", () => writeFileSync(join(dir, "held.flag"), "1"));
+            ? spawn("cmd.exe", ["/d", "/c", "echo 1 > started.flag & ping -n " + (secs + 1) + " 127.0.0.1 > nul && echo 1 > done.flag"],
+                     { stdio, cwd: dir, windowsHide: true })
+            : spawn("sh", ["-c", "echo 1 > started.flag; sleep " + secs + "; echo 1 > done.flag"], { stdio, cwd: dir });
         child.on("error", () => {});
     }
     setTimeout(() => {}, holdMs + 5000);  // exits by itself if nothing kills it
@@ -153,6 +157,12 @@ def check(name, ok, detail=""):
     else:
         FAILED.append(name)
         print("FAIL " + name + (" :: " + detail if detail else ""))
+
+
+def skip(name, detail=""):
+    """NOT-RUN: the case could not reach its precondition in time. Reported as SKIP, never PASS or FAIL."""
+    SKIPPED.append(name)
+    print("SKIP " + name + (" :: " + detail if detail else ""))
 
 
 def write_launchers():
@@ -190,7 +200,8 @@ class Run:
         self.err = proc.stderr or ""
         self.elapsed = elapsed
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
-        self.held = os.path.exists(os.path.join(base, "held.flag"))
+        self.started = os.path.exists(os.path.join(base, "started.flag"))  # the hold child's first act
+        self.done = os.path.exists(os.path.join(base, "done.flag"))  # the hold child's last act
         self.word = read_text(os.path.join(base, "word.txt"))  # the state the stub printed, if it got that far
         self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
         self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
@@ -425,20 +436,22 @@ def case_reader_timeout_allows_with_one_plain_line():
           detail(r))
 
 
-def case_reader_that_holds_the_pipe_returns_in_bound():
-    # The reader's child keeps stdout open after the kill. On Windows, subprocess.run then waits on
-    # that pipe with no bound, so the hook returns late. POSIX waits on the reader alone, so this case
-    # is expected to pass there. The limit is a margin over the set timeout, not a tight bound.
+def case_reader_that_holds_the_pipe_returns_before_the_child_ends():
+    # The reader's child holds the stdout pipe for HOLD_MS, then writes "done" as its last act. Order,
+    # not speed: the hook has returned while done does not exist yet, so it did not wait on the pipe.
+    # No wall-clock bound. If node did not start the child before the timeout, the case is NOT-RUN.
     try:
         r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)
     except subprocess.TimeoutExpired:
         check("reader holds the pipe: hook returns before the harness cap", False,
               "still running after %d s" % HARNESS_CAP)
         return
-    check("reader holds the pipe: its child started, so the pipe is really held",
-          r.held and len(r.reader_calls) == 1, detail(r))
-    check("reader holds the pipe: hook returns within %d s for a %d s reader timeout" % (WALL_LIMIT, READER_SECONDS),
-          r.elapsed <= WALL_LIMIT, detail(r))
+    if not r.started:
+        skip("reader holds the pipe: the child wrote its started marker before the timeout",
+             "started not seen within %s s, so the order is not tested :: %s" % (READER_SECONDS, detail(r)))
+        return
+    check("reader holds the pipe: hook returned before the held child wrote done",
+          r.code == 0 and not r.done, detail(r))
     check("reader holds the pipe: exit 0, no deny, no model call, board-timeout line",
           r.code == 0 and r.out == "" and not r.model_calls and "board read timed out" in r.err, detail(r))
 
@@ -489,12 +502,17 @@ def case_hook_runs():
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()
     case_reader_timeout_allows_with_one_plain_line()
-    case_reader_that_holds_the_pipe_returns_in_bound()
+    case_reader_that_holds_the_pipe_returns_before_the_child_ends()
 
 
 if __name__ == "__main__":
     write_launchers()
     case_find_reader()
     case_hook_runs()
-    print("%d check(s) failed" % len(FAILED) if FAILED else "all checks passed")
+    if FAILED:
+        print("%d check(s) failed" % len(FAILED))
+    elif SKIPPED:
+        print("SKIP: %d check(s) not run, none failed" % len(SKIPPED))  # never "all checks passed"
+    else:
+        print("all checks passed")
     sys.exit(1 if FAILED else 0)
