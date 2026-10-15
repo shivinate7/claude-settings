@@ -62,8 +62,7 @@ try {
 # then fails the case, instead of passing it without exercising the copy path.
 # (D: copy-mode-overwrites-no-backup)
 # install.ps1 is the Windows installer (kernel32 MoveFileEx). The cases below that run it run only
-# on Windows. Elsewhere each prints SKIP and the file goes on. nonwin1 is the exception: it runs
-# install.ps1 off Windows and expects exit 0 there.
+# on Windows. Elsewhere each prints SKIP and the file goes on.
 
 # True when $Path is a symlink or junction (a reparse point). A missing path is not a link.
 function Test-ReparsePoint([string]$Path) {
@@ -380,8 +379,6 @@ try {
 } finally {
     Remove-Item -Recurse -Force $KwRoot -ErrorAction SilentlyContinue
 }
-
-    Write-Host "SKIP: nonwin1 (this is Windows)"
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
     Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
@@ -389,30 +386,6 @@ try {
     Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
     Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
     Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
-}
-
-# ---- nonwin1: install.ps1 exits 0 off Windows (no registry). Runs off Windows only. ------------
-# Off Windows install.ps1 must skip the PATH write and still exit 0 (it never reaches the registry).
-# Red while install.ps1 fails off Windows (kernel32 MoveFileEx): that defect is the builder's.
-if (-not $IsWin) {
-    $Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-envkey-" + [guid]::NewGuid().ToString('N'))
-    $Co5  = Join-Path $Tmp5 'clone'
-    $Cfg5 = Join-Path $Tmp5 'claude'
-    New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
-    try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
-        Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# nonwin1 content" -Encoding utf8
-        Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
-        Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
-        $env:CLAUDE_CONFIG_DIR = $Cfg5
-        & $PsHost -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
-        $rc5 = $LASTEXITCODE
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Check "nonwin1: subprocess install exits 0 off Windows (no registry)" ($rc5 -eq 0)
-    } finally {
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
-    }
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------

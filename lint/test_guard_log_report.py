@@ -119,6 +119,9 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(lines[fence[0] + 1:fence[1]], [REVERTED])
         self.assertEqual([l for l in lines if l.strip()][-1], "unreadable: 3")
         self.assertGreater(len(lines) - 1, fence[1])  # unreadable line comes after the fence
+        # Old five-field lines (no session column) render byte-identical to the golden.
+        # Named failure: the stable table render.
+        self.assertEqual(glr.render(glr.summarize(OLD_ONLY, 7, NOW)), GOLDEN_OLD_ONLY)
 
 
 class MainTests(unittest.TestCase):
@@ -278,9 +281,24 @@ class SessionColumnReadTests(unittest.TestCase):
             "merge-main": {"deny": 0, "ask": 1, "noted": 0},
         })
         self.assertEqual(s["other"], [lines[3]])  # the reverted line, verbatim, once
-
-    def test_old_only_output_is_byte_identical(self):
-        self.assertEqual(glr.render(glr.summarize(OLD_ONLY, 7, NOW)), GOLDEN_OLD_ONLY)
+        # The same lines through the CLI. The session value is a
+        # label in the by-session table too. Named failure: a session id spelled "deny" counted as a decision.
+        cli_now = datetime.now()
+        cli = [
+            session_line(hours_ago(cli_now, 1), "deny", "shared-tree", "git stash", "deny"),
+            session_line(hours_ago(cli_now, 2), "noted", "shared-tree", "git stash", "shared-tree"),
+            session_line(hours_ago(cli_now, 3), "ask", "merge-main", "gh pr merge 5", "ask"),
+            session_line(hours_ago(cli_now, 4), "reverted", "shared-tree", "git stash drop", "noted"),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), cli)
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(by_session_rows(out), {
+            ("deny", "shared-tree", 1, 0, 0),
+            ("shared-tree", "shared-tree", 0, 0, 1),
+            ("ask", "merge-main", 0, 1, 0),
+        })
 
     def test_crlf_old_only_matches_lf_and_counts_a_partial_last_line(self):
         now = datetime.now().replace(microsecond=0)
@@ -341,25 +359,6 @@ class SessionBySessionTests(unittest.TestCase):
             rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
         self.assertEqual(rc, 0)
         self.assertEqual(by_session_rows(out), EXPECTED_BY_SESSION)
-
-    def test_session_value_shaped_like_a_rule_or_decision_is_a_label(self):
-        now = datetime.now()
-        lines = [
-            session_line(hours_ago(now, 1), "deny", "shared-tree", "git stash", "deny"),
-            session_line(hours_ago(now, 2), "noted", "shared-tree", "git stash", "shared-tree"),
-            session_line(hours_ago(now, 3), "ask", "merge-main", "gh pr merge 5", "ask"),
-            session_line(hours_ago(now, 4), "reverted", "shared-tree", "git stash drop", "noted"),
-        ]
-        with tempfile.TemporaryDirectory() as folder:
-            path = write_log(os.path.join(folder, "guard.log"), lines)
-            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
-        self.assertEqual(rc, 0)
-        # The reverted line is `other`, so the session "noted" has no counted row.
-        self.assertEqual(by_session_rows(out), {
-            ("deny", "shared-tree", 1, 0, 0),
-            ("shared-tree", "shared-tree", 0, 0, 1),
-            ("ask", "merge-main", 0, 1, 0),
-        })
 
 
 def reads_guard_log(source):
@@ -633,64 +632,6 @@ class PlaceholderHomeTests(unittest.TestCase):
         self.assertIn("SESSION_LOG_PLACEHOLDER", named)
 
 
-class ReaderImporterTests(unittest.TestCase):
-    # decision_watch imports this reader lazily in collect_unread. With the import failing, its
-    # config report must keep the config-edit and merge messages (the fail-open contract). The
-    # import is blocked by a None entry in sys.modules, which makes `import` raise ImportError.
-    def test_config_report_survives_an_unimportable_reader(self):
-        spec = importlib.util.spec_from_file_location(
-            "decision_watch_fail_open", os.path.join(REPO_ROOT, "hooks", "decision_watch.py"))
-        dw = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(dw)
-        records = [
-            {"type": "user", "timestamp": "2026-09-22T10:00:00.000Z",
-             "message": {"role": "user", "content": [
-                 {"type": "text", "text": "tune the settings and merge"}]}},
-            {"type": "assistant", "message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Edit", "input": {}}]}},
-            {"type": "assistant", "message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Bash",
-                 "input": {"command": "gh pr merge 5 --squash"}}]}},
-        ]
-        with tempfile.TemporaryDirectory() as folder:
-            proj = os.path.join(folder, "proj")
-            os.makedirs(os.path.join(proj, ".claude"))
-            target = os.path.join(proj, ".claude", "settings.local.json")
-            for rec in records[1:2]:  # the Edit names the real settings file
-                rec["message"]["content"][0]["input"]["file_path"] = target
-            transcript = os.path.join(folder, "transcript.jsonl")
-            with open(transcript, "w", encoding="utf-8") as handle:
-                handle.write("".join(json.dumps(rec) + "\n" for rec in records))
-            hook = {"transcript_path": transcript, "cwd": proj}
-            saved_env = os.environ.get("CLAUDE_CONFIG_DIR")
-            # collect_unread returns before the import unless guard.log exists, so the log is here,
-            # holding one line that is not an unread subject.
-            config = os.path.join(folder, "config")
-            os.makedirs(config)
-            with open(os.path.join(config, "guard.log"), "w", encoding="utf-8") as handle:
-                handle.write("2026-10-12T10:00:00\tBash\tdeny\tshared-tree\tgit stash\t-\n")
-            os.environ["CLAUDE_CONFIG_DIR"] = config
-            had = "guard_log_report" in sys.modules
-            saved = sys.modules.get("guard_log_report")
-            try:
-                healthy = dw.config_report(hook)
-                sys.modules["guard_log_report"] = None  # the reader's import now fails
-                blocked = dw.config_report(hook)
-            finally:
-                if had:
-                    sys.modules["guard_log_report"] = saved
-                else:
-                    sys.modules.pop("guard_log_report", None)
-                if saved_env is None:
-                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
-                else:
-                    os.environ["CLAUDE_CONFIG_DIR"] = saved_env
-        self.assertIn("Config files changed this turn", healthy)  # the fixture is live
-        self.assertIn("Merges into main this turn", healthy)
-        self.assertIn("Config files changed this turn", blocked)
-        self.assertIn("Merges into main this turn", blocked)
-
-
 # ------------------------------------ review round 2 hole 1: unread notes survive an unimportable reader
 #
 # collect_unread names the unread subjects of a turn from guard.log. When the reader cannot be
@@ -817,13 +758,12 @@ class FixedDecisionTests(unittest.TestCase):
         s = glr.summarize(self.LINES, 7, NOW)
         self.assertEqual(s["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 2})
         self.assertEqual(s["by_rule"]["STE-fallback"], {"deny": 0, "ask": 0, "noted": 1})
-
-    def test_fixed_is_never_a_verbatim_other_line(self):
-        self.assertEqual(glr.summarize(self.LINES, 7, NOW)["other"], [])
-
-    def test_session_filter_keeps_only_that_sessions_fixed_lines(self):
-        s = glr.summarize(self.LINES, 7, NOW, SID)
-        self.assertEqual(s["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 1})
+        # A fixed line is never an other line.
+        self.assertEqual(s["other"], [])
+        # The session filter
+        # keeps only that session's fixed lines. Named failure: a fixed line lost or moved to another session.
+        one = glr.summarize(self.LINES, 7, NOW, SID)
+        self.assertEqual(one["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 1})
 
     def test_report_and_by_session_show_fixed_in_the_noted_column(self):
         now = datetime.now().replace(microsecond=0)

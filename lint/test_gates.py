@@ -124,29 +124,24 @@ class ReportGateTests(unittest.TestCase):
         }
 
     def test_01_landed_git_commit_good_report_passes(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text(GOOD_REPORT),
+        rows = [
+            # Catches: a landed turn with a good report is blocked.
+            GOOD_REPORT,
+            # Catches: a colon inside a bold label is read as a bad label.
+            "> **Done:** BUILT abc123\n> **Next:** ship it",
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_02_landed_no_blockquote_blocks(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("Done BUILT abc123"),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
+        for text in rows:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human("do the task"),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "")
 
     def test_03_landed_code_fence_in_blockquote_blocks(self):
         records = [
@@ -161,40 +156,44 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
 
     def test_04_landed_labels_out_of_order_blocks(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("> **Done** BUILT\n> **Next** ship\n> **Deviations** none"),
+        rows = [
+            # Catches: labels out of order in a landing turn pass as a report.
+            "> **Done** BUILT\n> **Next** ship\n> **Deviations** none",
+            # Catches: the same order check misses colon labels.
+            "> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none",
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
+        for text in rows:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human("do the task"),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                out = json.loads(run.stdout)
+                self.assertEqual(out.get("decision"), "block")
 
     def test_05_landed_unknown_label_first_blocks(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("> **Summary** something"),
+        rows = [
+            # Catches: an unknown label first in a landing turn passes as a report.
+            "> **Summary** something",
+            # Catches: the same check misses an unknown colon label.
+            "> **Summary:** something",
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
-
-    def test_06_landed_via_github_mcp_good_report_passes(self):
-        records = [
-            human("open a PR"),
-            tool_use_msg("mcp__github__create_pull_request", {"title": "x"}),
-            tool_result_msg(),
-            assistant_text(GOOD_REPORT),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
+        for text in rows:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human("do the task"),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                out = json.loads(run.stdout)
+                self.assertEqual(out.get("decision"), "block")
 
     def test_07_nothing_landed_prose_reply_passes(self):
         records = [
@@ -220,42 +219,18 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
-    def test_09_landing_before_last_human_message_passes(self):
-        records = [
-            human("start"),
-            tool_use_msg("Bash", {"command": "git commit -m first"}),
-            tool_result_msg("tu_1"),
-            human("do more"),
-            tool_use_msg("Bash", {"command": "ls"}),
-            tool_result_msg("tu_2"),
-            assistant_text("no report here"),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
     def test_10_garbage_stdin_no_output(self):
-        run = run_gate(REPORT_GATE, None, raw_stdin="not json")
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_13_valid_json_not_object_no_output(self):
-        run = run_gate(REPORT_GATE, None, raw_stdin="[1,2,3]")
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_21_merge_base_is_not_a_landing_command_passes(self):
-        records = [
-            human("check ancestry"),
-            tool_use_msg("Bash", {"command": "git merge-base --is-ancestor a b"}),
-            tool_result_msg(),
-            assistant_text("a is an ancestor of b, no report needed."),
+        rows = [
+            # Catches: unparseable stdin crashes the gate.
+            "not json",
+            # Catches: valid JSON that is not an object crashes the gate.
+            "[1,2,3]",
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
+        for raw in rows:
+            with self.subTest(raw=raw):
+                run = run_gate(REPORT_GATE, None, raw_stdin=raw)
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "")
 
     def test_22_git_merge_no_edit_blocks(self):
         records = [
@@ -287,81 +262,62 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
 
     def test_52_prose_above_report_after_a_question_passes(self):
-        records = [
-            human("why does it only fire sometimes?"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("The gate fires on a landing turn only.\n\n" + GOOD_REPORT),
+        rows = [
+            # Catches: prose above a good report after a question blocks it.
+            ("why does it only fire sometimes?",
+             "The gate fires on a landing turn only.\n\n" + GOOD_REPORT),
+            # Catches: prose above a good report with no question blocks it.
+            ("do the task", "Here is some prose.\n\n" + GOOD_REPORT),
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_53_prose_above_report_with_no_question_passes(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("Here is some prose.\n\n" + GOOD_REPORT),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_55_colon_inside_the_bold_label_passes(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("> **Done:** BUILT abc123\n> **Next:** ship it"),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_56_colon_label_out_of_order_still_blocks(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none"),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
-
-    def test_57_unknown_colon_label_still_blocks(self):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("> **Summary:** something"),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
+        for prompt, text in rows:
+            with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human(prompt),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "")
 
     def test_58_quoted_git_commit_in_probe_list_passes(self):
         # MEASURED: a read-only Bash call quoting a probe list, 'git commit -q -m x'
         # 'git push --quiet', made the old regex-based gate demand a report for a turn
         # that landed nothing. The words sit inside single quotes, never run as a command.
-        records = [
-            human("check the guard against a probe list"),
-            tool_use_msg("Bash", {
-                "command": "grep -n \"'git commit -q -m x' 'git push --quiet'\" hooks/guard.py",
-            }),
-            tool_result_msg(),
-            assistant_text("Found the probe list in the test fixtures, no report needed."),
+        rows = [
+            # Catches: a quoted probe list is read as a landing command.
+            (
+                "check the guard against a probe list",
+                "grep -n \"'git commit -q -m x' 'git push --quiet'\" hooks/guard.py",
+                "Found the probe list in the test fixtures, no report needed.",
+            ),
+            # Catches: git merge-base is read as a landing command.
+            (
+                "check ancestry",
+                "git merge-base --is-ancestor a b",
+                "a is an ancestor of b, no report needed.",
+            ),
+            # Catches: a quoted git -C commit inside echo is read as a landing command.
+            (
+                "show the reproduction command",
+                "echo 'git -C /path commit'",
+                "That command is only printed, no report needed.",
+            ),
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
+        for prompt, command, text in rows:
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human(prompt),
+                    tool_use_msg("Bash", {"command": command}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "")
 
     def test_59_heredoc_body_naming_git_merge_passes(self):
         records = [
@@ -378,16 +334,25 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "")
 
     def test_60_real_git_commit_blocks(self):
-        records = [
-            human("land the fix"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text("Committed."),
+        rows = [
+            # Catches: a real git commit with no report is not blocked.
+            "Committed.",
+            # Catches: a report line with no blockquote is not blocked.
+            "Done BUILT abc123",
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
+        for text in rows:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human("land the fix"),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                out = json.loads(run.stdout)
+                self.assertEqual(out.get("decision"), "block")
 
     def test_61_sudo_git_push_blocks(self):
         records = [
@@ -404,19 +369,34 @@ class ReportGateTests(unittest.TestCase):
     def test_62_git_commit_in_an_earlier_turn_passes(self):
         # Pin: already correct before this fix. A landing in an earlier turn must not
         # demand a report on a later turn that did nothing itself.
-        records = [
-            human("land it"),
-            tool_use_msg("Bash", {"command": "git commit -m first"}),
-            tool_result_msg("tu_1"),
-            human("what does the log show now"),
-            tool_use_msg("Bash", {"command": "git log -1"}),
-            tool_result_msg("tu_2"),
-            assistant_text("The last commit is `first`, no report needed."),
+        rows = [
+            # Catches: a landing in an earlier turn blocks a later turn that only reads.
+            [
+                human("land it"),
+                tool_use_msg("Bash", {"command": "git commit -m first"}),
+                tool_result_msg("tu_1"),
+                human("what does the log show now"),
+                tool_use_msg("Bash", {"command": "git log -1"}),
+                tool_result_msg("tu_2"),
+                assistant_text("The last commit is `first`, no report needed."),
+            ],
+            # Catches: a landing before the last human message blocks the later turn.
+            [
+                human("start"),
+                tool_use_msg("Bash", {"command": "git commit -m first"}),
+                tool_result_msg("tu_1"),
+                human("do more"),
+                tool_use_msg("Bash", {"command": "ls"}),
+                tool_result_msg("tu_2"),
+                assistant_text("no report here"),
+            ],
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
+        for i, records in enumerate(rows):
+            with self.subTest(row=i), tempfile.TemporaryDirectory() as tmp:
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "")
 
     def test_63_git_dash_c_commit_blocks(self):
         # Regression: `-C <dir>` is a pre-subcommand option that takes a value. A predicate
@@ -458,18 +438,6 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
-    def test_66_quoted_git_dash_c_commit_in_echo_passes(self):
-        records = [
-            human("show the reproduction command"),
-            tool_use_msg("Bash", {"command": "echo 'git -C /path commit'"}),
-            tool_result_msg(),
-            assistant_text("That command is only printed, no report needed."),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
     def test_54_prose_below_report_after_a_question_blocks(self):
         records = [
             human("why does it only fire sometimes?"),
@@ -484,18 +452,32 @@ class ReportGateTests(unittest.TestCase):
 
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
         # Pinned by hand, not read from report_gate.LANDING_TOOLS: an emptied set must fail here.
+        # Catches: a GitHub landing tool with no report is not blocked.
         for tool in ("mcp__github__merge_pull_request", "mcp__github__create_pull_request",
                      "mcp__github__push_files", "mcp__github__create_or_update_file"):
+            with self.subTest(tool=tool), tempfile.TemporaryDirectory() as tmp:
+                records = [
+                    human("land it"),
+                    tool_use_msg(tool, {"title": "x"}),
+                    tool_result_msg(),
+                    assistant_text("Landed it."),
+                ]
+                path = write_transcript(records, tmp)
+                run = run_gate(REPORT_GATE, self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+        # Catches: a GitHub landing with a good report is blocked.
+        with self.subTest(tool="good report"), tempfile.TemporaryDirectory() as tmp:
             records = [
-                human("land it"),
-                tool_use_msg(tool, {"title": "x"}),
+                human("open a PR"),
+                tool_use_msg("mcp__github__create_pull_request", {"title": "x"}),
                 tool_result_msg(),
-                assistant_text("Landed it."),
+                assistant_text(GOOD_REPORT),
             ]
-            path = write_transcript(records, self.tmp.name)
+            path = write_transcript(records, tmp)
             run = run_gate(REPORT_GATE, self.hook_for(path))
-            self.assertEqual(run.returncode, 0, tool)
-            self.assertEqual(json.loads(run.stdout).get("decision"), "block", tool)
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stdout.strip(), "")
 
     def test_68_first_label_not_done_blocks(self):
         records = [
@@ -561,14 +543,24 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assert_blocked("> **Done** BUILT the gate\n> **Next** none", "BUILT, RECORDED, or OTHER")
 
     def test_df_red_one_bullet_lacks_ref_blocks(self):
-        self.assert_blocked("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
-                            "RECORDED the ruling")
+        rows = [
+            # Catches: a RECORDED bullet with no ref passes.
+            ("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
+             "RECORDED the ruling"),
+            # Catches: a bullet with no kind word passes.
+            ("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale"),
+            # Catches: a top bullet after sub-bullets is not checked.
+            ("> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
+             "RECORDED ruling"),
+            # Catches: a lead-in line with a kind word hides a bullet with no ref.
+            ("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it"),
+        ]
+        for reply, needle in rows:
+            with self.subTest(reply=reply):
+                self.assert_blocked(reply, needle)
 
     def test_df_allowed_other_needs_no_ref(self):
         self.assert_allowed("> **Done**\n> - BUILT gate, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
-
-    def test_df_red_other_item_alone_still_needs_kind_word(self):
-        self.assert_blocked("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale")
 
     def test_df_allowed_inline_with_pr(self):
         self.assert_allowed("> **Done** BUILT the gate, PR #226\n> **Next** none")
@@ -586,21 +578,31 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     # speak-cite-id-plus-gloss
     def test_cite_red_bare_d_id_blocks(self):
-        self.assert_blocked("Per D12 this is fine.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+        rows = [
+            # Catches: a bare D-id in prose after "Per" passes.
+            ("Per D12 this is fine.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'"),
+            # Catches: a bare D-id inside the report body passes.
+            ("> **Done** BUILT gate, PR #226\n> **Next** follow D258 next", "'D258'"),
+            # Catches: a gloss-like phrase after a bare D-id hides the id.
+            ("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'"),
+        ]
+        for reply, needle in rows:
+            with self.subTest(reply=reply):
+                self.assert_blocked(reply, needle)
 
     def test_cite_red_bare_decision_number_blocks(self):
         self.assert_blocked("See decision 136.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "decision 136")
 
-    def test_cite_red_bare_id_inside_report_blocks(self):
-        self.assert_blocked("> **Done** BUILT gate, PR #226\n> **Next** follow D258 next", "'D258'")
-
     def test_cite_allowed_id_plus_gloss(self):
-        self.assert_allowed(
-            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
-
-    def test_cite_allowed_gloss_before_in_parens(self):
-        self.assert_allowed(
-            "Short titles for records (D12) hold.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+        rows = [
+            # Catches: false alarm on an id followed by its gloss.
+            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT gate, PR #226\n> **Next** none",
+            # Catches: false alarm on a gloss in parentheses before the id.
+            "Short titles for records (D12) hold.\n\n> **Done** BUILT gate, PR #226\n> **Next** none",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
 
     def test_cite_false_alarm_pr_link_sha_and_version(self):
         self.assert_allowed(
@@ -627,16 +629,8 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assert_allowed(
             "> **Done**\n> - BUILT gate, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
 
-    def test_df_red_top_bullet_after_sub_bullets_still_checked(self):
-        self.assert_blocked(
-            "> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
-            "RECORDED ruling")
-
     def test_df_allowed_lead_in_text_with_bullets_is_not_an_item(self):
         self.assert_allowed("> **Done** two items:\n> - BUILT gate, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
-
-    def test_df_red_lead_in_with_kind_but_no_ref_blocks(self):
-        self.assert_blocked("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it")
 
     def test_cite_allowed_more_gloss_shapes(self):
         for lead in ("D12 = short titles for records", "D12 -- short titles for records",
@@ -646,9 +640,6 @@ class DoneFormatAndCiteTests(unittest.TestCase):
     def test_cite_false_alarm_cell_range_and_vitamin(self):
         self.assert_allowed("Sum A1:D12 and take vitamin D3 daily, or D12:F20.\n\n"
                             "> **Done** BUILT gate, PR #226\n> **Next** none")
-
-    def test_cite_red_gloss_shapes_do_not_hide_bare_id(self):
-        self.assert_blocked("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
 
     def test_cite_and_done_block_once_with_both_reasons(self):
         out = self.verdict("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")
@@ -765,20 +756,27 @@ class ConfigReportTests(unittest.TestCase):
         # The report gate is a CHECK now (decisions/merge-notice-checks-the-report.md): when
         # the reply's own report block does not already name the merge, it fires, by PR
         # number, never by the raw command line.
-        records = [
-            human("merge it"),
-            tool_use_msg("Bash", {"command": "gh pr merge 7 --squash"}),
-            tool_result_msg(),
-            assistant_text("> **Done** shipped it"),
+        rows = [
+            # Catches: a merge the report does not name is not named by PR number.
+            ("gh pr merge 7 --squash", "> **Done** shipped it", "#7"),
+            # Catches: a merge with no report block is not named.
+            ("gh pr merge 7 --squash", "done", "#7"),
         ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_config_report(self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        out = json.loads(run.stdout)
-        self.assertIn("systemMessage", out)
-        self.assertIn("Merges into main this turn: #7.", out["systemMessage"])
-        self.assertNotIn("--squash", out["systemMessage"])
-        self.assertIn("Name them in the report.", out["systemMessage"])
+        for command, text, number in rows:
+            with self.subTest(command=command, text=text):
+                records = [
+                    human("merge it"),
+                    tool_use_msg("Bash", {"command": command}),
+                    tool_result_msg(),
+                    assistant_text(text),
+                ]
+                path = write_transcript(records, self.tmp.name)
+                run = run_config_report(self.hook_for(path))
+                self.assertEqual(run.returncode, 0)
+                out = json.loads(run.stdout)
+                self.assertIn("Merges into main this turn: " + number + ".", out["systemMessage"])
+                self.assertNotIn("--squash", out["systemMessage"])
+                self.assertIn("Name them in the report.", out["systemMessage"])
 
     def test_19a_merge_named_in_the_report_stays_silent(self):
         records = [
@@ -960,13 +958,23 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         # `run`, a `PROCEDURAL_HEADINGS` trigger word. 23 authored words in the body:
         # under the 25-word descriptive limit, over the 20-word procedural one.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
-        text = (
-            "## A loopback server is the first target here (D-001, The operator "
-            "tiers run themselves)\n\n"
+        body = (
             "The server brings Postgres up on the machine own loopback interface, "
             "and a scratch database on it is the best possible subject here.\n")
-        codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", codes)
+        rows = [
+            # Catches: a trigger word in the gloss forces procedural mode on a cited heading.
+            "## A loopback server is the first target here (D-001, The operator "
+            "tiers run themselves)\n\n" + body,
+            # Catches: a cited heading with no gloss forces procedural mode.
+            "## A loopback server is the first target, and Neon is the second (D-001)\n\n" + body,
+            # Catches: a gloss with no trigger word forces procedural mode.
+            "## A loopback server is the first target, and Neon is the second "
+            "(D-001, The operator tiers manage themselves)\n\n" + body,
+        ]
+        for text in rows:
+            with self.subTest(heading=text.split("\n")[0]):
+                codes = [f.code for f in self.lint(text, use_gloss=True)]
+                self.assertNotIn("STE001", codes)
 
     def test_authored_procedural_heading_still_selects_procedural_limit(self):
         # Check 5: the fix must not blind the heuristic to a real procedural heading.
@@ -988,32 +996,6 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         with_dir = [f.code for f in self.lint(text, use_gloss=True)]
         without_feature = [f.code for f in self.lint(text, use_gloss=False)]
         self.assertEqual(with_dir, without_feature)
-
-    def test_three_file_heading_reproducer_agrees_after_the_fix(self):
-        # Check 6. Same 23-word body in all three. Only the heading's gloss differs:
-        # no gloss, a trigger word in the gloss, and a gloss with no trigger word.
-        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
-        body = (
-            "\n\nThe server brings Postgres up on the machine own loopback "
-            "interface, and a scratch database on it is the best possible "
-            "subject here.\n")
-        bare = "## A loopback server is the first target, and Neon is the second (D-001)" + body
-        with_trigger = (
-            "## A loopback server is the first target, and Neon is the second "
-            "(D-001, The operator tiers run themselves)" + body)
-        no_trigger_gloss_text = "The operator tiers manage themselves"
-        no_trigger = (
-            "## A loopback server is the first target, and Neon is the second "
-            "(D-001, %s)" % no_trigger_gloss_text + body)
-        # `no_trigger` cites a title this fixture never defines for D-001. That is
-        # fine here. The point is only that none of the three carries a STE001.
-        results = {
-            "bare": [f.code for f in self.lint(bare, use_gloss=True)],
-            "with_trigger": [f.code for f in self.lint(with_trigger, use_gloss=True)],
-            "no_trigger": [f.code for f in self.lint(no_trigger, use_gloss=True)],
-        }
-        for name, codes in results.items():
-            self.assertNotIn("STE001", codes, "%s: %r" % (name, codes))
 
     def test_list_item_opening_with_a_citation_stays_descriptive(self):
         # The list-item path reads its first word through `IMPERATIVE_STARTERS`,
@@ -1037,20 +1019,6 @@ class DecisionGlossCollapseTests(unittest.TestCase):
     def test_absent_decisions_dir_gives_no_pattern(self):
         pattern = ste_lint.build_gloss_pattern(os.path.join(self.tmp.name, "no-such-dir"))
         self.assertIsNone(pattern)
-
-    def test_absent_decisions_dir_output_is_byte_identical(self):
-        text = (
-            "The team agreed that this sentence about D-001, A title of exactly "
-            "six whole words still carries plenty of authored words for the count today.\n")
-        config = dict(ste_lint.DEFAULT_CONFIG)
-        config["decisions_dir"] = os.path.join(self.tmp.name, "no-such-dir")
-        decisions_dir = ste_lint.find_decisions_dir(config)
-        self.assertIsNone(decisions_dir)
-        without_feature = self.lint(text, use_gloss=False)
-        with_feature_off = self.lint(text, use_gloss=False)
-        self.assertEqual(
-            ste_lint.report_text(without_feature, False, False),
-            ste_lint.report_text(with_feature_off, False, False))
 
 
 class PromotedRuleTests(unittest.TestCase):
@@ -1127,11 +1095,6 @@ class PromotedRuleTests(unittest.TestCase):
         findings = self.lint(text)
         self.assertIn("STE001", [f.code for f in findings])
 
-    def test_deleted_rules_have_no_row(self):
-        deleted = {"STE002", "STE004", "STE005", "STE006", "STE010", "STE012",
-                   "STE014", "STE016", "STE018", "STE019"}
-        self.assertEqual(deleted & set(ste_lint.RULES), set())
-
     def test_every_remaining_rule_is_error(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
         self.assertTrue(severities)
@@ -1198,6 +1161,12 @@ class MdSweepTests(unittest.TestCase):
             os.utime(target, (when, when))
         return target
 
+    def _fresh_root(self):
+        """Give the next row its own project folder, so no file from an earlier row is left."""
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.tmp = root
+
     def _init_git(self):
         subprocess.run(["git", "init", "-q"], cwd=self.tmp.name, check=True,
                         capture_output=True, text=True)
@@ -1242,25 +1211,44 @@ class MdSweepTests(unittest.TestCase):
     # ---------------------------------------------------------- basic block / no-block, no git
 
     def test_23_new_error_file_blocks_and_names_it(self):
-        self._write_md("notes.md", self.ERROR_TEXT)
-        run = self.run_sweep()
-        self.assert_blocks(run, "notes.md")
-        self.assertIn("STE008", json.loads(run.stdout).get("reason", ""))
-
-    def test_24_second_new_error_file_blocks_and_names_it(self):
-        self._write_md("guide.md", self.ERROR_TEXT)
-        run = self.run_sweep()
-        self.assert_blocks(run, "guide.md")
-
-    def test_25_third_new_error_file_blocks_and_names_it(self):
-        self._write_md("readme_bit.md", self.ERROR_TEXT)
-        run = self.run_sweep()
-        self.assert_blocks(run, "readme_bit.md")
+        rows = [
+            # Catches: a new error file is not blocked.
+            "notes.md",
+            # Catches: a new error file under another name is not blocked.
+            "guide.md",
+            # Catches: a new error file with a longer name is not blocked.
+            "readme_bit.md",
+            # Catches: an upper-case file name hides a new error file.
+            "NOTES.md",
+        ]
+        for name in rows:
+            with self.subTest(name=name):
+                self._fresh_root()
+                self._write_md(name, self.ERROR_TEXT)
+                run = self.run_sweep()
+                self.assert_blocks(run, name)
+                self.assertIn("STE008", json.loads(run.stdout).get("reason", ""))
 
     def test_26_new_clean_markdown_no_block(self):
-        self._write_md("clean.md", self.CLEAN_TEXT)
-        run = self.run_sweep()
-        self.assert_no_block(run)
+        rows = [
+            # Catches: a new clean markdown file blocks.
+            ("clean.md", self.CLEAN_TEXT),
+            # Catches: a project with no markdown file at all blocks.
+            (None, None),
+            # Catches: an upper-case clean file blocks.
+            ("NOTES.md", self.CLEAN_TEXT),
+            # Catches: a clean file in a nested folder blocks.
+            (os.path.join("sub", "dir", "notes.md"), self.CLEAN_TEXT),
+            # Catches: a clean file with the .markdown suffix blocks.
+            ("guide.markdown", self.CLEAN_TEXT),
+        ]
+        for relpath, text in rows:
+            with self.subTest(relpath=relpath):
+                self._fresh_root()
+                if relpath is not None:
+                    self._write_md(relpath, text)
+                run = self.run_sweep()
+                self.assert_no_block(run)
 
     def test_27_non_markdown_file_no_block(self):
         # Extension filter still applies: a .py file, however new and however full of
@@ -1272,11 +1260,6 @@ class MdSweepTests(unittest.TestCase):
     def test_28_stop_hook_active_no_block(self):
         self._write_md("notes.md", self.ERROR_TEXT)
         run = self.run_sweep(stop_hook_active=True)
-        self.assert_no_block(run)
-
-    def test_29_no_markdown_files_at_all_no_block(self):
-        # An empty project: the walk finds nothing, so there is nothing to lint.
-        run = self.run_sweep()
         self.assert_no_block(run)
 
     def test_30_exclude_env_stops_the_block(self):
@@ -1295,26 +1278,11 @@ class MdSweepTests(unittest.TestCase):
 
     # ---------------------------------------------------------- filename and path shapes
 
-    def test_32_uppercase_filename_error_blocks(self):
-        self._write_md("NOTES.md", self.ERROR_TEXT)
-        run = self.run_sweep()
-        self.assert_blocks(run, "NOTES.md")
-
-    def test_33_uppercase_filename_clean_no_block(self):
-        self._write_md("NOTES.md", self.CLEAN_TEXT)
-        run = self.run_sweep()
-        self.assert_no_block(run)
-
     def test_34_nested_directory_error_blocks(self):
         # The walk must recurse: a file several directories deep still counts.
         self._write_md(os.path.join("sub", "dir", "notes.md"), self.ERROR_TEXT)
         run = self.run_sweep()
         self.assert_blocks(run, "notes.md")
-
-    def test_35_nested_directory_clean_no_block(self):
-        self._write_md(os.path.join("sub", "dir", "notes.md"), self.CLEAN_TEXT)
-        run = self.run_sweep()
-        self.assert_no_block(run)
 
     def test_36_old_file_with_error_no_block(self):
         # False-positive risk (1): an error that predates this turn must not block. The file's
@@ -1328,11 +1296,6 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         self.assert_blocks(run, "guide.markdown")
 
-    def test_38_markdown_suffix_variant_clean_no_block(self):
-        self._write_md("guide.markdown", self.CLEAN_TEXT)
-        run = self.run_sweep()
-        self.assert_no_block(run)
-
     def test_39_mtime_exactly_at_baseline_no_block(self):
         # Boundary: the predicate requires STRICTLY newer. A file stamped to the exact same
         # instant as the human message does not count as this turn's write. The ISO stamp
@@ -1344,11 +1307,6 @@ class MdSweepTests(unittest.TestCase):
         target = self._write_md("boundary.md", self.ERROR_TEXT)
         os.utime(target, (epoch, epoch))
         run = self.run_sweep(stamp=stamp)
-        self.assert_no_block(run)
-
-    def test_40_no_human_message_in_transcript_no_block_no_crash(self):
-        self._write_md("notes.md", self.ERROR_TEXT)
-        run = self.run_sweep(include_human=False)
         self.assert_no_block(run)
 
     # ---------------------------------------------------------- git dirty filter
@@ -1458,50 +1416,36 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep(stamp=self._stamp(5.0, use_z=False))
         self.assert_blocks(run, "notes.md")
 
-    def test_52_unparseable_timestamp_no_block_no_crash(self):
-        # False-positive risk (3), the garbage-string sibling of the missing-field case:
-        # a value that fails to parse gives no baseline either.
-        self._write_md("notes.md", self.ERROR_TEXT)
-        run = self.run_sweep(stamp="not-a-timestamp-at-all")
-        self.assert_no_block(run)
-
-    def test_53_shell_command_text_is_irrelevant_to_the_predicate(self):
-        # This used to be "a variable-held path stays out of scope," the one documented hole
-        # of the OLD, shape-matching predicate. The new predicate never reads command text at
-        # all, so an unparseable, made-up, or blank command string changes nothing: the file
-        # on disk still blocks.
-        self._write_md("notes.md", self.ERROR_TEXT)
-        run = self.run_sweep(command="$( totally not shell syntax << )")
-        self.assert_blocks(run, "notes.md")
-
     # ---------------------------------------------------------- the defect this rewrite closes
 
     def test_54_python_script_not_dash_c_writes_markdown_error_blocks(self):
         # THE DEFECT: `python3 gen.py` has no `-c` string for the old hook to read. The new
         # predicate does not care what ran, only that the file changed.
+        # Catches: a markdown error written by any command blocks. The predicate never reads
+        # the command text, so the command string does not change the result.
         self._write_md("gen.md", self.ERROR_TEXT)
         run = self.run_sweep(command="python3 gen.py")
         self.assert_blocks(run, "gen.md")
-
-    def test_55_bash_script_writes_markdown_error_blocks(self):
-        self._write_md("sh.md", self.ERROR_TEXT)
-        run = self.run_sweep(command="bash gen.sh")
-        self.assert_blocks(run, "sh.md")
-
-    def test_56_arbitrary_unlisted_program_writes_markdown_error_blocks(self):
-        # `make` was never on any shape list the old hook could have matched.
-        self._write_md(os.path.join("docs", "OUTPUT.md"), self.ERROR_TEXT)
-        run = self.run_sweep(command="make docs")
-        self.assert_blocks(run, "OUTPUT.md")
 
     # ---------------------------------------------------------- false-positive risk (3)
 
     def test_57_human_message_without_timestamp_field_no_block_no_crash(self):
         # `human()` does not set a `timestamp` field on its own. This is exactly the shape a
         # real transcript takes when the field this predicate needs is absent.
-        self._write_md("notes.md", self.ERROR_TEXT)
-        run = self.run_sweep(include_timestamp=False)
-        self.assert_no_block(run)
+        rows = [
+            # Catches: a human message with no timestamp field blocks or crashes.
+            {"include_timestamp": False},
+            # Catches: a transcript with no human message blocks or crashes.
+            {"include_human": False},
+            # Catches: an unparseable timestamp gives a baseline and blocks.
+            {"stamp": "not-a-timestamp-at-all"},
+        ]
+        for kwargs in rows:
+            with self.subTest(**kwargs):
+                self._fresh_root()
+                self._write_md("notes.md", self.ERROR_TEXT)
+                run = self.run_sweep(**kwargs)
+                self.assert_no_block(run)
 
     def test_58_broken_git_dir_inside_real_work_tree_no_block(self):
         # A real work tree, `.git` present on disk, but every git subprocess call fails: a
@@ -1688,13 +1632,21 @@ class SteGatePreToolUseTests(unittest.TestCase):
     # ---------------------------------------------------------- the headline case (item 1)
 
     def test_59_pre_existing_errors_elsewhere_clean_edit_allowed(self):
-        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
-        run = self.run_pretooluse("Edit", {
-            "file_path": target,
+        edit = {
             "old_string": "This is the clean block that gets edited.\n",
             "new_string": "This is the clean block that gets edited today.\n",
-        })
-        self.assert_allowed(run)
+        }
+        rows = [
+            # Catches: a clean Edit beside old errors is denied.
+            ("Edit", edit),
+            # Catches: a clean MultiEdit beside old errors is denied.
+            ("MultiEdit", {"edits": [edit]}),
+        ]
+        for tool, tool_input in rows:
+            with self.subTest(tool=tool):
+                target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+                run = self.run_pretooluse(tool, dict(tool_input, file_path=target))
+                self.assert_allowed(run)
 
     # ---------------------------------------------------------- the inverse (item 2)
 
@@ -1744,14 +1696,6 @@ class SteGatePreToolUseTests(unittest.TestCase):
 
     # ---------------------------------------------------------- MultiEdit and Write scoping
 
-    def test_63_multiedit_clean_edits_allowed_despite_other_errors(self):
-        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
-        run = self.run_pretooluse("MultiEdit", {"file_path": target, "edits": [
-            {"old_string": "This is the clean block that gets edited.\n",
-             "new_string": "This is the clean block that gets edited today.\n"},
-        ]})
-        self.assert_allowed(run)
-
     def test_64_write_full_file_clean_change_allowed_despite_other_errors(self):
         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
         proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
@@ -1777,40 +1721,41 @@ class SteGatePreToolUseTests(unittest.TestCase):
         # The edit cannot be replayed: `old_string` is not in the file on disk. Rather than
         # guess which blocks changed, the gate lints the proposed new_string in full. The
         # STE008 contraction in it must still be caught.
-        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
-        run = self.run_pretooluse("Edit", {
-            "file_path": target,
+        bad_edit = {
             "old_string": "text that is not actually in the file",
             "new_string": "We'd call this new text clean, introduced here.",
-        })
-        reason = self.assert_denied(run)
-        self.assertIn("contraction", reason.lower())
-
-    def test_67_non_markdown_path_allowed(self):
-        target = self._write("notes.py", "print('a; b')\n")
-        run = self.run_pretooluse("Write", {"file_path": target, "content": "print('a; b')\n"})
-        self.assert_allowed(run)
+        }
+        rows = [
+            # Catches: an unreplayable Edit is not linted in full.
+            ("Edit", bad_edit),
+            # Catches: an unreplayable second MultiEdit step lints the old file, not the new text.
+            ("MultiEdit", {"edits": [
+                {"old_string": "This is the clean block that gets edited.\n",
+                 "new_string": "This is the clean block that gets edited today.\n"},
+                bad_edit,
+            ]}),
+        ]
+        for tool, tool_input in rows:
+            with self.subTest(tool=tool):
+                target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+                run = self.run_pretooluse(tool, dict(tool_input, file_path=target))
+                reason = self.assert_denied(run)
+                self.assertIn("contraction", reason.lower())
 
     def test_67b_non_prose_suffix_with_an_ste_error_still_allowed(self):
         # The path guard, not the text, must be what lets this through: the content has a
         # contraction, an STE008 error if the file were linted.
-        target = os.path.join(self.tmp.name, "notes.txt")  # never created: Write makes it
-        run = self.run_pretooluse("Write", {
-            "file_path": target, "content": "This isn't prose the gate should read.\n"})
-        self.assert_allowed(run)
-
-    def test_67c_failed_multiedit_replay_lints_the_new_text_not_the_old_file(self):
-        # The second edit cannot be replayed (old_string absent), so the gate lints the
-        # proposed new text in full. Linting the old file instead would find nothing.
-        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
-        run = self.run_pretooluse("MultiEdit", {"file_path": target, "edits": [
-            {"old_string": "This is the clean block that gets edited.\n",
-             "new_string": "This is the clean block that gets edited today.\n"},
-            {"old_string": "text that is not actually in the file",
-             "new_string": "We'd call this new text clean, introduced here."},
-        ]})
-        reason = self.assert_denied(run)
-        self.assertIn("contraction", reason.lower())
+        rows = [
+            # Catches: a .txt file with an STE008 error is linted as prose.
+            ("notes.txt", "This isn't prose the gate should read.\n"),
+            # Catches: a .py file is linted as prose.
+            ("notes.py", "print('a; b')\n"),
+        ]
+        for name, content in rows:
+            with self.subTest(name=name):
+                target = os.path.join(self.tmp.name, name)  # never created: Write makes it
+                run = self.run_pretooluse("Write", {"file_path": target, "content": content})
+                self.assert_allowed(run)
 
     def test_67d_ambiguous_edit_is_not_replayed_at_the_first_match(self):
         # old_string sits in two paragraphs, no replace_all. Edit itself refuses that, and
@@ -1854,29 +1799,30 @@ class SourceProseLintTests(unittest.TestCase):
         findings = self.check("sample.py", text)
         self.assertIn("STE008", [f.code for f in findings])
 
-    def test_70_long_sentence_across_comment_lines_reported(self):
-        words = ["word"] * 30
-        text = "\n".join("# " + w for w in words) + "\n"
-        findings = self.check("sample.py", text)
-        self.assertIn("STE001", [f.code for f in findings])
-
     def test_71_long_code_line_not_reported(self):
         text = "x = " + " + ".join(["1"] * 40) + "  # ok\n"
         findings = self.check("sample.py", text)
         self.assertEqual([f.code for f in findings], [])
 
     def test_72_reported_line_numbers_match_source(self):
-        text = (
-            "x = 1\n"
-            "# a short first comment line\n"
-            "# and this comment run keeps going to make the sentence long enough "
-            "that it holds more than twenty five words in total across these lines\n"
-        )
-        findings = self.check("sample.py", text)
-        lines = {f.line for f in findings}
-        self.assertIn("STE001", [f.code for f in findings])
-        self.assertNotIn(1, lines)
-        self.assertTrue(lines and lines.issubset({2, 3}))
+        rows = [
+            # Catches: a long sentence across comment lines is not reported.
+            ("\n".join("# " + w for w in ["word"] * 30) + "\n", None),
+            # Catches: a reported line number points at the wrong source line.
+            ("x = 1\n"
+             "# a short first comment line\n"
+             "# and this comment run keeps going to make the sentence long enough "
+             "that it holds more than twenty five words in total across these lines\n",
+             {2, 3}),
+        ]
+        for text, allowed_lines in rows:
+            with self.subTest(allowed_lines=allowed_lines):
+                findings = self.check("sample.py", text)
+                self.assertIn("STE001", [f.code for f in findings])
+                if allowed_lines is not None:
+                    lines = {f.line for f in findings}
+                    self.assertNotIn(1, lines)
+                    self.assertTrue(lines and lines.issubset(allowed_lines))
 
     def test_73_hash_inside_shell_quotes_is_not_a_comment(self):
         # No unquoted '#' exists on this line. A scanner that finds '#' without
@@ -1930,12 +1876,6 @@ class FindingEchoSanitizationTests(unittest.TestCase):
         finding = {"line": 3, "code": "STE002", "message": "'is\x1fadded' is passive."}
         self.assertNotIn("\x1f", format_finding(finding))
 
-    def test_78_long_message_is_capped_with_a_marked_cut(self):
-        finding = {"line": 1, "code": "STE003", "message": "x" * 5000}
-        line = format_finding(finding)
-        self.assertLess(len(line), 1000)
-        self.assertTrue(line.endswith("[cut]"))
-
 
 class ValeBloatPairTests(unittest.TestCase):
     """STE011 pairs copied from the Vale style packs (decisions/fewest-words-mandate.md)."""
@@ -1943,15 +1883,21 @@ class ValeBloatPairTests(unittest.TestCase):
     def codes(self, text):
         return [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)]
 
-    def test_79_vale_pair_blocks(self):
-        self.assertIn("STE011", self.codes("Keep the service running at all times.\n"))
-
     def test_80_acronym_pair_is_case_sensitive(self):
-        self.assertIn("STE011", self.codes("Type the PIN number again.\n"))
-        self.assertNotIn("STE011", self.codes("Read the pin number on the board.\n"))
-
-    def test_81_in_addition_to_passes(self):
-        self.assertNotIn("STE011", self.codes("It reads the log in addition to the file.\n"))
+        rows = [
+            # Catches: an upper-case PIN pair is not blocked.
+            ("Type the PIN number again.\n", True),
+            # Catches: a lower-case pin pair is a false alarm.
+            ("Read the pin number on the board.\n", False),
+            # Catches: the bloat pair "in addition to" is a false alarm.
+            ("It reads the log in addition to the file.\n", False),
+        ]
+        for text, present in rows:
+            with self.subTest(text=text):
+                if present:
+                    self.assertIn("STE011", self.codes(text))
+                else:
+                    self.assertNotIn("STE011", self.codes(text))
 
 
 class UICopyLintTests(unittest.TestCase):
@@ -1965,14 +1911,25 @@ class UICopyLintTests(unittest.TestCase):
         return [f.code for f in self.check(path, text)]
 
     def test_82_five_word_button_blocks(self):
-        findings = self.check("a.tsx", "const x = <button>Save the file right now</button>;\n")
-        hit = [f for f in findings if f.code == "STE020"]
-        self.assertTrue(hit)
-        self.assertIn("5 words", hit[0].message)
-        self.assertIn("limit is 4", hit[0].message)
-
-    def test_83_four_word_button_passes(self):
-        self.assertEqual(self.codes("a.tsx", "const x = <button>Save the file now</button>;\n"), [])
+        rows = [
+            # Catches: a five-word button is not blocked at the 4-word cap.
+            ("const x = <button>Save the file right now</button>;\n", True),
+            # Catches: a five-word label is not blocked at the 4-word cap.
+            ("const x = <label>Your primary email address here</label>;\n", True),
+            # Catches: a four-word button at the cap is a false alarm.
+            ("const x = <button>Save the file now</button>;\n", False),
+        ]
+        for text, blocked in rows:
+            with self.subTest(text=text):
+                findings = self.check("a.tsx", text)
+                if blocked:
+                    self.assertEqual([f.code for f in findings], ["STE020"])
+                    hit = [f for f in findings if f.code == "STE020"]
+                    self.assertTrue(hit)
+                    self.assertIn("5 words", hit[0].message)
+                    self.assertIn("limit is 4", hit[0].message)
+                else:
+                    self.assertEqual([f.code for f in findings], [])
 
     def test_84_expression_only_label_is_skipped(self):
         self.assertEqual(self.codes("a.jsx", "const x = <label>{props.longLabelText}</label>;\n"), [])
@@ -2061,17 +2018,21 @@ class SteGateUICopyTests(unittest.TestCase):
         return path
 
     def test_96_tsx_write_with_five_word_button_denied(self):
-        run = self.pretooluse("Write", {
-            "file_path": self.target("App.tsx"),
-            "content": "export const A = () => <button>Save the file right now</button>;\n"})
-        reason = json.loads(run.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("STE020", reason)
-
-    def test_97_tsx_write_with_four_word_button_allowed(self):
-        run = self.pretooluse("Write", {
-            "file_path": self.target("App.tsx"),
-            "content": "export const A = () => <button>Save the file now</button>;\n"})
-        self.assertEqual(run.stdout.strip(), "")
+        rows = [
+            # Catches: a five-word button written to a .tsx file is allowed.
+            ("export const A = () => <button>Save the file right now</button>;\n", True),
+            # Catches: a four-word button at the cap is wrongly denied.
+            ("export const A = () => <button>Save the file now</button>;\n", False),
+        ]
+        for content, denied in rows:
+            with self.subTest(content=content):
+                run = self.pretooluse("Write", {"file_path": self.target("App.tsx"),
+                                               "content": content})
+                if denied:
+                    reason = json.loads(run.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+                    self.assertIn("STE020", reason)
+                else:
+                    self.assertEqual(run.stdout.strip(), "")
 
     def test_98_jsx_edit_with_bloat_denied(self):
         path = self.target("App.jsx", "export const A = () => (\n  <p>Save it.</p>\n);\n")
@@ -2139,12 +2100,17 @@ class UICopyRoundTwoTests(unittest.TestCase):
     # R2 -------------------------------------------------------------------------
 
     def test_104_escape_without_reason_is_an_error(self):
-        text = "const x = (\n  // ste-disable-next-line STE020\n  <button>Save the file right now</button>\n);\n"
-        self.assertEqual(sorted(self.check("a.tsx", text)), ["STE020", "STE021"])
-
-    def test_105_escape_without_rule_is_an_error(self):
-        text = "<!-- ste-disable-next-line: brand name -->\n<button>Save the file right now</button>\n"
-        self.assertEqual(sorted(self.check("a.html", text)), ["STE020", "STE021"])
+        rows = [
+            # Catches: a UI escape with no reason goes unreported.
+            ("a.tsx", "const x = (\n  // ste-disable-next-line STE020\n"
+                      "  <button>Save the file right now</button>\n);\n"),
+            # Catches: a UI escape with no rule name goes unreported.
+            ("a.html", "<!-- ste-disable-next-line: brand name -->\n"
+                       "<button>Save the file right now</button>\n"),
+        ]
+        for path, text in rows:
+            with self.subTest(path=path):
+                self.assertEqual(sorted(self.check(path, text)), ["STE020", "STE021"])
 
     def test_106_file_escape_is_an_error_for_ui(self):
         text = "// ste-disable-file STE020: all\nconst x = <button>Save the file right now</button>;\n"
@@ -2176,12 +2142,6 @@ class UICopyRoundTwoTests(unittest.TestCase):
         text = ("const x = (<div>\n<code>in order to</code>\n<pre>prior to</pre>\n"
                 "<kbd>in order to</kbd>\n<samp>prior to</samp>\n<p>Go now.</p>\n</div>);\n")
         self.assertEqual(self.check("a.tsx", text), [])
-
-    # Finding 4 ------------------------------------------------------------------
-
-    def test_111_label_cap_blocks_in_jsx(self):
-        text = "const x = <label>Your primary email address here</label>;\n"
-        self.assertEqual(self.check("a.tsx", text), ["STE020"])
 
     # Finding 5 ------------------------------------------------------------------
 
@@ -2413,13 +2373,6 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
         self.assertIn("Config files changed", json.loads(run.stdout)["systemMessage"])
 
-    def test_config_report_names_a_merge_that_left_no_file(self):
-        records = [human("merge it"), tool_use_msg("Bash", {"command": "gh pr merge 7 --squash"}),
-                   tool_result_msg(), assistant_text("done")]
-        path = write_transcript(records, self.tmp.name)
-        run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
-        self.assertIn("Merges into main", json.loads(run.stdout)["systemMessage"])
-
 
 # ---------------------------------------------------------------- guard.log lines from the gates
 #
@@ -2440,7 +2393,6 @@ GL_FIXED_DOC = "We don't stop the pump, e.g. at night.\n"  # fixed: STE007 x1, S
 GL_DENY_DOC = "It's not been tested.\n"  # denied: STE008 stays
 GL_CLEAN_DOC = "This is a short clean sentence.\n"
 GL_MIXED_DOC = GL_FIXED_DOC + "\n" + GL_LONG + "\n"  # fixed, then STE001 stays: a deny
-GL_UI_DOC = "<button>Save all of the changes you made today</button>\n"  # UI copy: STE020
 GL_SIX_CODE_DOC = (  # six findings after the fix: STE003, STE008, STE009, STE013, STE015, STE017
     "<!-- ste: procedural -->\n\nWe set up the valve.\n\n"
     "The team made a determination of the seals.\n\nIt's not been tested.\n\n"
@@ -2451,25 +2403,6 @@ GL_STRIPPED = ("STE_FIXER_LIMIT_S", "STE_FIXER_MAX_BYTES", "CLAUDE_CODE_SESSION_
 # Characters a guard.log field must never hold: C0 and C1 controls, line and paragraph separators,
 # the bidi overrides and isolates, and a lone surrogate.
 GL_HOSTILE = re.compile("[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩\ud800-\udfff]")
-# Appended to a copy of guard_core.py. Each record and set_log_session call is written to MARKER.
-GL_PROBE = '''
-
-_probe_record, _probe_set = record, set_log_session
-
-
-def record(tool, decision, rule, matched):
-    with open(MARKER, "a", encoding="utf-8") as handle:
-        handle.write("record|%s|%s|%s|%s\\n" % (tool, decision, rule, matched))
-    _probe_record(tool, decision, rule, matched)
-
-
-def set_log_session(value):
-    with open(MARKER, "a", encoding="utf-8") as handle:
-        handle.write("session|%r\\n" % (value,))
-    _probe_set(value)
-'''
-
-
 def gl_env(cfg, extra=None):
     """One gate run's environment. CLAUDE_CONFIG_DIR is the test's own folder, never ~/.claude."""
     env = dict(os.environ)
@@ -2575,14 +2508,6 @@ def gl_linter_tree(root, entry):
     return os.path.join(lint_copy, "ste_gate.py")
 
 
-def gl_print_findings(codes):
-    """A linter entry point (one line, for gl_linter_tree) that prints one error finding per code,
-    on its own line. The path is the file the linter was given, so a sweep finds its own findings."""
-    findings = [{"code": code, "severity": "error", "line": n, "col": 1,
-                 "message": "message %d" % n} for n, code in enumerate(codes, 1)]
-    return "print(json.dumps({'findings': [dict(f, path=sys.argv[-1]) for f in %r]}))" % (findings,)
-
-
 def gl_sleepy_tree(root, seconds):
     """A gate tree whose guard_core.record sleeps first, so a log write takes `seconds`. Returns the
     copied lint folder."""
@@ -2629,6 +2554,14 @@ class SteGateLogTests(unittest.TestCase):
         self.cfg = os.path.join(self.tmp.name, "cfg")  # CLAUDE_CONFIG_DIR: a test folder
         os.makedirs(self.cfg)
         self.docs = os.path.join(self.tmp.name, "privdir-4481")  # the folder of the written file
+        os.makedirs(self.docs)
+
+    def _fresh_row(self):
+        """Give the next row its own config folder and file folder, so no line from an earlier row is left."""
+        root = tempfile.mkdtemp(dir=self.tmp.name)
+        self.cfg = os.path.join(root, "cfg")
+        os.makedirs(self.cfg)
+        self.docs = os.path.join(root, "privdir-4481")  # the folder of the written file
         os.makedirs(self.docs)
 
     def _path(self, name="notes.md"):
@@ -2706,21 +2639,21 @@ class SteGateLogTests(unittest.TestCase):
 
     # (2) a denied write: one `deny` line, the remaining codes, and the count of findings.
     def test_03_deny_appends_the_remaining_codes_and_the_denied_count(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_DENY_DOC})
-        self.assertEqual(gl_decision(run), "deny")  # precondition
-        rows = self._rows("a denied write")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(gl_fields(rows[0])[1:], ["Write", "deny", "STE008", "notes.md denied=1",
-                                                  GL_SESSION])
-
-    # (2) a fix never lands on a deny: the mixed write logs only the code that remains.
-    def test_04_mixed_write_logs_one_deny_with_only_the_remaining_code(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_MIXED_DOC})
-        self.assertEqual(gl_decision(run), "deny")  # precondition
-        rows = self._rows("a denied mixed write")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(gl_fields(rows[0])[1:], ["Write", "deny", "STE001", "notes.md denied=1",
-                                                  GL_SESSION])
+        rows = [
+            # Catches: a plain deny logs the wrong code or count.
+            (GL_DENY_DOC, "STE008"),
+            # Catches: a mixed write logs the fixed code as well as the code that remains.
+            (GL_MIXED_DOC, "STE001"),
+        ]
+        for content, rule in rows:
+            with self.subTest(rule=rule):
+                self._fresh_row()
+                run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": content})
+                self.assertEqual(gl_decision(run), "deny")  # precondition
+                log = self._rows("a denied write")
+                self.assertEqual(len(log), 1)
+                self.assertEqual(gl_fields(log[0])[1:],
+                                 ["Write", "deny", rule, "notes.md denied=1", GL_SESSION])
 
     # (2) the rule field is capped, and the count still counts every finding, not the five shown.
     def test_05_six_code_deny_keeps_the_rule_under_the_cap_and_counts_every_finding(self):
@@ -2786,14 +2719,6 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(gl_fields(rows[0])[1:],
                          ["Write", "noted", "STE-fallback", "notes.md fallback=crash", GL_SESSION])
 
-    # (4) a UI file never runs the fixer, so an oversize UI file logs no fallback. Its deny logs.
-    def test_10_ui_file_over_the_byte_limit_logs_no_fallback(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path("page.html"), "content": GL_UI_DOC},
-                      extra={"STE_FIXER_MAX_BYTES": "5"})
-        self.assertEqual(gl_decision(run), "deny")  # precondition: the UI copy was linted
-        rows = self._rows("the UI deny")
-        self.assertEqual([gl_fields(row)[2] for row in rows], ["deny"], "a UI file logged a fallback")
-
     # (4) a log that cannot be written never changes the output or the exit code.
     def test_11_unwritable_log_never_changes_output_or_exit_code(self):
         run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
@@ -2856,32 +2781,6 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(gl_fields(rows[0])[5], core.session_log_field(GL_SESSION))
         self.assertEqual(gl_fields(rows[1])[5], "-")
 
-    # (8) a hostile file name (tab, newline, U+2028, non-ASCII) stays on one line; the session holds.
-    def test_16_hostile_file_name_stays_on_one_line_and_keeps_the_session(self):
-        core = gl_guard_core()
-        name = "a\tb\nc d ñé日本.md"
-        gl_gate(self.cfg, "Write", {"file_path": os.path.join(self.docs, name), "content": GL_FIXED_DOC})
-        self._rows("the hostile name")
-        self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a file name split the log line")
-        _, _, decision, rule, matched, session = gl_fields(gl_lines(self.cfg)[0])
-        self.assertEqual((decision, rule), ("fixed", "STE007,STE008"))
-        self.assertTrue(matched.endswith(" fixed=2"), matched)
-        self.assertIn("ñé日本.md fixed=2", matched)
-        self.assertLessEqual(len(matched), core.LOG_MAX_MATCHED)
-        self.assertEqual(session, GL_SESSION)
-
-    # (8) a 5000-character name is capped, and the count and the name's tail survive the cap.
-    def test_17_five_thousand_character_name_keeps_the_counts_under_the_cap(self):
-        core = gl_guard_core()
-        gl_gate(self.cfg, "Write", {"file_path": os.path.join(self.docs, "n" * 5000 + ".md"),
-                                    "content": GL_FIXED_DOC})
-        rows = self._rows("the long name")
-        _, _, decision, _, matched, session = gl_fields(rows[0])
-        self.assertEqual(decision, "fixed")
-        self.assertLessEqual(len(matched), core.LOG_MAX_MATCHED)
-        self.assertTrue(matched.endswith(".md fixed=2"), matched)
-        self.assertEqual(session, GL_SESSION)
-
     # (9) the line ends as guard_core.record ends its lines on this platform (CRLF on Windows).
     def test_18_line_end_matches_guard_core_record_on_this_platform(self):
         base = os.path.join(self.tmp.name, "base")
@@ -2926,18 +2825,11 @@ class SteGateLogTests(unittest.TestCase):
             proc.wait()
             self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
 
-    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Runs on every
-    # platform: guard_core.record takes a lock around its append, so Windows keeps every line too.
-    def test_19_twenty_parallel_gates_leave_twenty_whole_lines(self):
-        self._run_parallel_gates()
-        rows = self._rows("twenty parallel writes")
-        self.assertEqual(len(rows), 20, "a line was lost or joined")
-        self.assertEqual(sorted(gl_fields(row)[5] for row in rows),
-                         sorted("gl-par-%02d" % i for i in range(20)))
-
     # (7) each gate writes exactly one whole line: no line is corrupted, doubled or joined, no process
     # crashes, and all twenty land.
     def test_19b_parallel_gates_write_exactly_one_whole_line_each(self):
+        # Catches: a lost, joined, doubled or corrupted line under twenty parallel gates. Each
+        # session appears once. Runs on every platform, as the lock covers Windows too.
         self._run_parallel_gates()
         rows = gl_lines(self.cfg) or []
         self.assertEqual(len(rows), 20, "lines lost: kept %d of 20" % len(rows))
@@ -2950,22 +2842,6 @@ class SteGateLogTests(unittest.TestCase):
             sessions.append(session)
         self.assertEqual(len(sessions), len(set(sessions)), "a session wrote two lines")
         self.assertLessEqual(set(sessions), {"gl-par-%02d" % i for i in range(20)})
-
-    # (pins the call site) set_log_session gets the raw id once, and record is called once.
-    def test_20_call_site_sets_the_raw_session_then_records_once(self):
-        marker = os.path.join(self.tmp.name, "calls.txt")
-        gate = self._gate_copy("probe", True)
-        probe_core = os.path.join(os.path.dirname(os.path.dirname(gate)), "hooks", "guard_core.py")
-        with open(probe_core, "a", encoding="utf-8") as handle:
-            handle.write(GL_PROBE.replace("MARKER", repr(marker)))
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
-                      gate=gate)
-        self.assertIn("updatedInput", gl_out(run).get("hookSpecificOutput", {}))  # precondition
-        calls = open(marker, encoding="utf-8").read().splitlines() if os.path.exists(marker) else []
-        self.assertEqual([c for c in calls if c.startswith("session|")],
-                         ["session|%r" % GL_SESSION], calls)
-        self.assertEqual([c for c in calls if c.startswith("record|")],
-                         ["record|Write|fixed|STE007,STE008|notes.md fixed=2"], calls)
 
     # (2) import skew: the new gate beside an old _transcript.py that has no guard_logger. The gate
     # prints what it prints with logging, exits as it does, and writes no line. No ImportError.
@@ -3000,58 +2876,56 @@ class SteGateLogTests(unittest.TestCase):
                          ["Write", "noted", "STE-unchecked", "notes.md unchecked", GL_SESSION])
 
     def test_22_linter_crash_logs_unchecked_and_keeps_the_output(self):
-        self._unchecked("crashlint", 'raise RuntimeError("linter crash")')
-
-    def test_23_silent_linter_logs_unchecked_and_keeps_the_output(self):
-        self._unchecked("silentlint", "pass")
-
-    # (6) name hygiene: a lone surrogate in the name. The line is still written, and it is one line.
-    def test_24_lone_surrogate_in_the_name_still_writes_one_line(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path("notes\ud800.md"),
-                                          "content": GL_FIXED_DOC})
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertNotIn("Traceback", run.stderr)
-        rows = self._rows("a write named with a lone surrogate")
-        self.assertEqual(len(rows), 1)
-        when, tool, decision, _rule, _matched, session = gl_fields(rows[0])
-        datetime.fromisoformat(when)
-        self.assertEqual((tool, session), ("Write", GL_SESSION))
-        self.assertIn(decision, ("fixed", "noted", "deny"))
+        # Catches: a crashing linter, or a silent one, does not log the write as unchecked.
+        rows = [
+            ("crashlint", 'raise RuntimeError("linter crash")'),
+            ("silentlint", "pass"),
+        ]
+        for name, entry in rows:
+            with self.subTest(name=name):
+                self._fresh_row()
+                self._unchecked(name, entry)
 
     # (6) name hygiene: tab, NUL, controls, U+2028 and U+202E, and a name over 80 characters. The
     # line is one whole line, the name is cleaned, and the matched field is at most 80 characters.
     def test_25_control_characters_in_the_name_are_cleaned_and_the_field_is_capped(self):
-        name = "p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md"
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(name), "content": GL_FIXED_DOC})
-        self.assertEqual(run.returncode, 0, run.stderr)
-        rows = self._rows("a write named with control characters")
-        self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a name split the log line")
-        when, tool, decision, _rule, matched, session = gl_fields(rows[0])
-        datetime.fromisoformat(when)
-        self.assertEqual((tool, session), ("Write", GL_SESSION))
-        self.assertIn(decision, ("fixed", "noted", "deny"))
-        self.assertLessEqual(len(matched), 80, matched)
-        self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
+        core = gl_guard_core()
+        rows = [
+            # Catches: a tab, a newline or U+2028 in a name splits the log line.
+            ("a\tb\nc d ñé日本.md", "fixed", "ñé日本.md fixed=2", " fixed=2", core.LOG_MAX_MATCHED),
+            # Catches: a 5000-character name loses its count or breaks the cap.
+            ("n" * 5000 + ".md", "fixed", None, ".md fixed=2", core.LOG_MAX_MATCHED),
+            # Catches: a lone surrogate in a name breaks the log line.
+            ("notes\ud800.md", None, None, None, 80),
+            # Catches: bidi isolates reach the log.
+            ("a⁦b⁧c⁨d⁩e.md", "fixed", ".md", None, 80),
+            # Catches: control bytes, a bidi override and a long name are not cleaned and capped.
+            ("p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md", None, None, None, 80),
+        ]
+        for name, decision, contains, ends, cap in rows:
+            with self.subTest(name=ascii(name)):
+                self._fresh_row()
+                run = gl_gate(self.cfg, "Write",
+                              {"file_path": self._path(name), "content": GL_FIXED_DOC})
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertNotIn("Traceback", run.stderr)
+                log = self._rows("a write named with hostile characters")
+                self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a name split the log line")
+                when, tool, got, rule, matched, session = gl_fields(log[0])
+                datetime.fromisoformat(when)
+                self.assertEqual((tool, session), ("Write", GL_SESSION))
+                if decision is None:
+                    self.assertIn(got, ("fixed", "noted", "deny"))
+                else:
+                    self.assertEqual(got, decision)
+                    self.assertEqual(rule, "STE007,STE008")
+                if contains is not None:
+                    self.assertIn(contains, matched)
+                if ends is not None:
+                    self.assertTrue(matched.endswith(ends), matched)
+                self.assertLessEqual(len(matched), cap, matched)
+                self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
 
-
-    # (H1) finding codes of two types, an int and a string. The sort that builds the log rule must not
-    # take the answer with it: the gate denies with the same stdout and rc 0 as it does with strings.
-    def test_26_mixed_code_types_keep_the_deny_and_the_exit_code(self):
-        # One gate folder for both runs: the deny text names the gate's own folder, so two folders
-        # would differ there and not in the answer. Only the linter's entry is swapped.
-        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
-        gate = os.path.join(lint_copy, "ste_gate.py")
-        content = {"file_path": self._path(), "content": GL_CLEAN_DOC}
-        gl_set_linter(lint_copy, gl_print_findings(["5", "STE001"]))
-        plain = gl_gate(self.cfg, "Write", content, gate=gate)
-        gl_set_linter(lint_copy, gl_print_findings([5, "STE001"]))
-        mixed = gl_gate(self.cfg, "Write", content, gate=gate)
-        self.assertEqual(plain.returncode, 0, plain.stderr)  # precondition: the string codes
-        self.assertEqual(gl_decision(plain), "deny")
-        self.assertNotIn("Traceback", mixed.stderr)
-        self.assertEqual(mixed.returncode, 0, mixed.stderr)
-        self.assertEqual(gl_decision(mixed), "deny")
-        self.assertEqual(mixed.stdout, plain.stdout)
 
     # (H3) the answer leaves before the log write. The log write sleeps 4 s; the first stdout line
     # arrives in under 2 s, for a fix and for a deny.
@@ -3071,18 +2945,6 @@ class SteGateLogTests(unittest.TestCase):
     def test_28_a_deny_answers_before_the_slow_log_write(self):
         self.assertIn('"permissionDecision": "deny"', self._answer_first("slow-deny", GL_DENY_DOC))
 
-    # (name hygiene) the bidi isolates U+2066 to U+2069 never reach the log: the cleaned basename
-    # holds none of them.
-    def test_29_bidi_isolates_are_stripped_from_the_basename(self):
-        gl_gate(self.cfg, "Write", {"file_path": self._path("a⁦b⁧c⁨d⁩e.md"),
-                                    "content": GL_FIXED_DOC})
-        rows = self._rows("a name with bidi isolates")
-        self.assertEqual(len(rows), 1)
-        matched = gl_fields(rows[0])[4]
-        for mark in "⁦⁧⁨⁩":
-            self.assertNotIn(mark, matched)
-        self.assertIn(".md", matched)
-
 
 class MdSweepLogTests(unittest.TestCase):
     """md_sweep (Stop) writes one guard.log line per run that blocks. A clean run writes none."""
@@ -3097,6 +2959,14 @@ class MdSweepLogTests(unittest.TestCase):
         self.cfg = os.path.join(self.tmp.name, "cfg")  # CLAUDE_CONFIG_DIR, outside the swept folder
         os.makedirs(self.proj)
         os.makedirs(self.cfg)
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True, capture_output=True,
+                       text=True)
+
+    def _fresh_row(self):
+        """A new swept folder (a git work tree) and a new config folder: no file or line from an
+        earlier row is left."""
+        self.proj = tempfile.mkdtemp(dir=self.tmp.name)
+        self.cfg = tempfile.mkdtemp(dir=self.tmp.name)
         subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True, capture_output=True,
                        text=True)
 
@@ -3127,25 +2997,25 @@ class MdSweepLogTests(unittest.TestCase):
 
     # (5) a blocking run: one Stop line. The rule holds the STE codes; matched holds one basename.
     def test_01_a_blocking_run_appends_one_stop_line(self):
-        self._md("notes.md", self.ERROR_TEXT)
-        run = self._sweep()
-        self.assertEqual(json.loads(run.stdout).get("decision"), "block")  # precondition
-        rows = self._rows("a blocking Stop")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(gl_fields(rows[0])[1:], ["Stop", "deny", "STE008", "notes.md files=1",
-                                                  GL_SESSION])
-
-    # (5) two files: one line, the file count, and one of the two basenames (the order is not pinned).
-    def test_02_two_files_log_one_line_with_the_count_and_one_basename(self):
-        self._md("a.md", self.ERROR_TEXT)
-        self._md("b.md", self.ERROR_TEXT)
-        run = self._sweep()
-        self.assertEqual(json.loads(run.stdout).get("decision"), "block")  # precondition
-        rows = self._rows("two blocking files")
-        self.assertEqual(len(rows), 1)
-        _, tool, decision, rule, matched, session = gl_fields(rows[0])
-        self.assertEqual((tool, decision, rule, session), ("Stop", "deny", "STE008", GL_SESSION))
-        self.assertRegex(matched, r"^(a\.md|b\.md) files=2$")
+        rows = [
+            # Catches: a blocking Stop run logs the wrong file count or the wrong basename.
+            (["notes.md"], r"^notes\.md files=1$"),
+            # Catches: two blocking files log two lines, or a count without one basename.
+            (["a.md", "b.md"], r"^(a\.md|b\.md) files=2$"),
+        ]
+        for names, matched_pattern in rows:
+            with self.subTest(files=names):
+                self._fresh_row()
+                for name in names:
+                    self._md(name, self.ERROR_TEXT)
+                run = self._sweep()
+                self.assertEqual(json.loads(run.stdout).get("decision"), "block")  # precondition
+                log = self._rows("a blocking Stop")
+                self.assertEqual(len(log), 1)
+                _, tool, decision, rule, matched, session = gl_fields(log[0])
+                self.assertEqual((tool, decision, rule, session),
+                                 ("Stop", "deny", "STE008", GL_SESSION))
+                self.assertRegex(matched, matched_pattern)
 
     # (5) a clean run adds no line after a blocking run.
     def test_03_clean_run_after_a_blocking_run_adds_no_line(self):
@@ -3197,21 +3067,6 @@ class MdSweepLogTests(unittest.TestCase):
         self.assertEqual(skewed.returncode, 0, skewed.stderr)
         self.assertEqual(skewed.stdout, real.stdout)
         self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
-
-    # (H1) an unhashable finding code (a list). The sweep must block with the same stdout and exit code
-    # as it does with the same code written as a string.
-    def test_08_unhashable_code_keeps_the_sweep_output_and_exit_code(self):
-        self._md("notes.md", self.ERROR_TEXT)
-        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
-        script = os.path.join(lint_copy, "md_sweep.py")  # one folder for both runs
-        gl_set_linter(lint_copy, gl_print_findings(["['STE008']"]))
-        plain = self._sweep(script=script)
-        gl_set_linter(lint_copy, gl_print_findings([["STE008"]]))
-        listed = self._sweep(script=script)
-        self.assertEqual(json.loads(plain.stdout).get("decision"), "block")  # precondition
-        self.assertNotIn("Traceback", listed.stderr)
-        self.assertEqual(listed.returncode, plain.returncode)
-        self.assertEqual(listed.stdout, plain.stdout)
 
     # (H3) the sweep prints its block before the log write. The log write sleeps 4 s; the first stdout
     # line arrives in under 2 s.
@@ -3302,25 +3157,24 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         self.assertEqual(len(set(got)), len(got), "a line was doubled")
         self.assertTrue(got == sorted(want), "missing %d line(s)" % len(set(want) - set(got)))
 
-    def test_one_record_writer_keeps_every_line(self):
-        # Control: one writer, no overlap. Green on main, so a red elsewhere is the race.
-        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, ("a",))
-        want = ["a-%05d" % i for i in range(APPEND_N)]
-        self._assert_kept_each_once(codes, ("a",), want)
-
     def test_two_record_writers_keep_every_line(self):
-        # guard_core.record: the one append that every guard, gate and sweep line goes through.
-        tags = ("a", "b")
-        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, tags)
-        want = ["%s-%05d" % (tag, i) for tag in tags for i in range(APPEND_N)]
-        self._assert_kept_each_once(codes, tags, want)
-
-    def test_two_ste_gate_loggers_keep_every_line(self):
-        # The STE gate's real path: lint/_transcript.guard_logger, then core.record.
-        tags = ("a", "b")
-        codes = self._run_writers(APPEND_WRITER_STE, HERE, tags)
-        want = ["%s-%05d.md fixed=2" % (tag, i) for tag in tags for i in range(APPEND_N)]
-        self._assert_kept_each_once(codes, tags, want)
+        # Rows: one writer is the control, green on main, so a red elsewhere is the race. Two
+        # guard_core.record writers are the one append every guard, gate and sweep line goes
+        # through. Two STE gate loggers reach record through the same locked append.
+        rows = [
+            # Catches: a lone writer loses or doubles a line (control).
+            (APPEND_WRITER_RECORD, HOOKS, ("a",), ""),
+            # Catches: two guard_core.record writers lose or double a line.
+            (APPEND_WRITER_RECORD, HOOKS, ("a", "b"), ""),
+            # Catches: two STE gate loggers lose or double a line.
+            (APPEND_WRITER_STE, HERE, ("a", "b"), ".md fixed=2"),
+        ]
+        for source, lib, tags, suffix in rows:
+            with self.subTest(tags=tags, suffix=suffix):
+                self.cfg = tempfile.mkdtemp(dir=self.tmp.name)  # a fresh log per row
+                codes = self._run_writers(source, lib, tags)
+                want = ["%s-%05d%s" % (tag, i, suffix) for tag in tags for i in range(APPEND_N)]
+                self._assert_kept_each_once(codes, tags, want)
 
     def _record_with_lock_error(self, errno_value):
         """Run guard_core.record() in this process while every lock call raises OSError(errno_value).

@@ -365,28 +365,29 @@ def case_idle_and_waiting_allow_with_no_model_call():
               and r.loaded and r.reader_calls == [[PEER]], detail(r))
 
 
-def case_busy_blocks_when_the_model_flags():
-    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-    d = r.deny()
-    check("busy + model FLAG: one deny carrying the model's reason",
-          r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
-          and "parallelism-no-mid-task-talk" in d.get("permissionDecisionReason", "")
-          and len(r.model_calls) == 1 and r.reached_board(), detail(r))
+# Busy receiver and a model FLAG. Each row: (row id, model answer, reason prefix the deny carries).
+# The blank-reason row reaches the default-reason branch, which the model-reason row does not.
+BUSY_FLAG_ROWS = (
+    ("busy + model FLAG: one deny carrying the model's reason", FLAG,
+     "parallelism-no-mid-task-talk"),
+    ("busy + FLAG with a blank reason: deny with the default reason",
+     '{"ok": false, "reason": "   "}', "parallelism-no-mid-task-talk"),
+)
+
+
+def case_busy_flag_rows():
+    for name, answer, want in BUSY_FLAG_ROWS:
+        r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=answer)
+        d = r.deny()
+        check(name, r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
+              and d.get("permissionDecisionReason", "").startswith(want)
+              and len(r.model_calls) == 1 and r.reached_board(), detail(r))
 
 
 def case_busy_allows_when_the_model_does_not_flag():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=ALLOW)
     check("busy + model ok: allow, one model call, no deny",
           r.code == 0 and r.out == "" and r.err == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
-
-
-def case_busy_flag_with_blank_reason_gets_the_default_reason():
-    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")],
-                 answer='{"ok": false, "reason": "   "}')
-    d = r.deny()
-    check("busy + FLAG with a blank reason: deny with the default reason",
-          r.code == 0 and d is not None and d.get("permissionDecisionReason", "").startswith(
-              "parallelism-no-mid-task-talk") and r.reached_board(), detail(r))
 
 
 def case_unseen_receivers_allow_with_no_model_call():
@@ -499,9 +500,8 @@ def case_model_row_names_the_call():
 def case_hook_runs():
     case_model_row_names_the_call()
     case_idle_and_waiting_allow_with_no_model_call()
-    case_busy_blocks_when_the_model_flags()
+    case_busy_flag_rows()
     case_busy_allows_when_the_model_does_not_flag()
-    case_busy_flag_with_blank_reason_gets_the_default_reason()
     case_unseen_receivers_allow_with_no_model_call()
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()

@@ -242,12 +242,8 @@ def dispatch(case):
     return case["check"](text)
 
 
-# SHAPE: every type, and the general case, print one JSON object of the documented shape.
-for _t in TYPES:
-    add("shape: %s output is one JSON object with the documented shape" % _t, "context",
-        payload(_t), lambda text: None)
-add("shape: a missing agent type output is one JSON object with the documented shape",
-    "context", payload(), lambda text: None)
+# SHAPE: no case of its own. context_for() checks the one-line JSON shape on every "context"
+# case. The scope rows (one per type) and the general row for a missing type cover the same inputs.
 
 # RULES: each standing rule is in the context. The rule lines are the same for every type.
 RULES = [
@@ -344,8 +340,18 @@ GENERAL_CASES = [
     ("a JSON array on stdin gets the general line", "[1, 2]"),
     ("a JSON string on stdin gets the general line", '"builder"'),
 ]
-for _name, _stdin in GENERAL_CASES:
-    add("general: " + _name, "context", _stdin, scope_check("general"))
+def general_rows_check():
+    """One case for the ten general-line rows. A failing row names itself in the note."""
+    check = scope_check("general")
+    for name, stdin in GENERAL_CASES:
+        note = dispatch({"kind": "context", "stdin": stdin, "check": check})
+        if note is not None:
+            return "general: %s: %s" % (name, note)
+    return None
+
+
+add("general: %d odd-input rows each get the general scope line" % len(GENERAL_CASES),
+    "custom", fn=general_rows_check)
 
 # BUILDER ROUND 2 (F2): the push, trailer and record-path lines are for the write-capable types
 # and the general case, and never for reviewer or Explore.
