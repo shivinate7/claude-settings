@@ -10,6 +10,7 @@ the page cannot drift from it.
     python3 lint/hook_catalog.py            write every page the root owns
     python3 lint/hook_catalog.py --print    write the catalog page to stdout, exit 1 while a problem stands
     python3 lint/hook_catalog.py --check    exit 0 and print nothing when each page is current
+    python3 lint/hook_catalog.py --records-only   write docs/records.md alone (with --check, check it alone); the merge tool runs this
 
 The root is `--root DIR`, else the folder in the environment variable HOOK_CATALOG_ROOT, else the repo
 this script is in. It is never the working folder.
@@ -740,12 +741,15 @@ def main(argv):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--print", action="store_true", dest="show", help="write the catalog page to stdout, exit 1 on a problem")
     mode.add_argument("--check", action="store_true", help="exit 1 when a page is stale or a source is empty or keeps overruled text")
+    parser.add_argument("--records-only", action="store_true", help="write or check docs/records.md alone: no catalog, no settings.json read. The merge tool runs this mode")
     parser.add_argument("--root", help="the repo root. The default is the environment variable HOOK_CATALOG_ROOT, else the repo this script is in")
     args = parser.parse_args(argv)
+    if args.records_only and args.show:
+        parser.error("--records-only and --print cannot go together: --print writes the catalog")
     ROOT = os.path.abspath(args.root or os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
     try:
         pages, problems = {}, []
-        if has_catalog_parts():
+        if has_catalog_parts() and not args.records_only:
             pages[PAGE], problems = render()
         if args.show:
             emit(pages.get(PAGE, ""))

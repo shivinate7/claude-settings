@@ -15,7 +15,10 @@ import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, temp
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
 sys.path.insert(0, os.path.dirname(RECORDS))
-from hook_catalog import RECORDS_PAGE  # noqa: E402  the page the generator writes; one home, so a conflict on the page is told from any other
+try:
+    from hook_catalog import RECORDS_PAGE  # noqa: E402  the page the generator writes; one home, so a conflict on the page is told from any other
+except Exception as e:  # a missing or broken module: one line, no traceback
+    sys.exit("merge: cannot load the records generator, module hook_catalog (lint/hook_catalog.py): " + " ".join(f"{type(e).__name__}: {e}".split()))
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -695,13 +698,13 @@ def commit_claim(wt, trailer):
     return git(wt, "rev-parse", "HEAD")[1]
 
 def rebuild_records(wt):
-    """Run the records generator on the worktree: `python3 <RECORDS> --root <wt>`, nothing else. -> True when it changed a file.
+    """Run the records generator on the worktree: `python3 <RECORDS> --root <wt> --records-only`, nothing else. -> True when it changed a file.
     The tree hash before and after is the proof: `git add -A` first, so the claim's own edits are not the generator's."""
     def tree():
         git(wt, "add", "-A")
         return git(wt, "write-tree")[1]
     before = tree()
-    c, out = sh([sys.executable, RECORDS, "--root", wt])
+    c, out = sh([sys.executable, RECORDS, "--root", wt, "--records-only"])
     if c:
         why = "; ".join(l.strip() for l in out.splitlines() if l.strip()) or "no output"
         raise Stop(f"the records page cannot be rebuilt, so nothing was pushed: {why}")
@@ -719,6 +722,13 @@ def records_proof(wt, base_ref):
             if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
                 raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
             rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
+            try:  # a repo with no record folders gets no generated page, so a hand-written page keeps its conflict markers
+                with open(os.path.join(wt, *RECORDS_PAGE.split("/")), encoding="utf-8", errors="replace") as f:
+                    marked = re.search(r"^(<{7}|>{7})( |$)", f.read(), re.M)
+            except OSError:
+                marked = None
+            if marked:
+                raise Stop(f"the records page {RECORDS_PAGE} has a merge conflict with {base_ref} that the rebuild did not clear, so nothing was merged. Resolve the page by hand on the branch.")
             # the rebuilt page drops lines a side added; the silent-undo check after the next wait must read that as generated
             c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page",
                          "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt on the merged tree")

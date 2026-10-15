@@ -249,6 +249,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
 | `blind-git-fixtures-unaudited` | The entry does not audit every blind-command fixture in the repository for the PATH shim gap. | [`debts/blind-git-fixtures-unaudited.md`](../debts/blind-git-fixtures-unaudited.md) |
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
+| `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
 | `debt-decision-link-unchecked` | No check confirms that a debt's decision still names its gap. | [`debts/debt-decision-link-unchecked.md`](../debts/debt-decision-link-unchecked.md) |
 | `debts-no-check-reads-parts` | No check reads the four parts of a debt file. | [`debts/debts-no-check-reads-parts.md`](../debts/debts-no-check-reads-parts.md) |
@@ -364,7 +365,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `local-time-line-cost-unmeasured` | The token cost of one line per prompt is unmeasured. | [`debts/local-time-line-cost-unmeasured.md`](../debts/local-time-line-cost-unmeasured.md) |
 | `lock-expiry-read-no-retry` | The merge lock reads its commit message once, with no retry. | [`debts/lock-expiry-read-no-retry.md`](../debts/lock-expiry-read-no-retry.md) |
 | `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
-| `merge-catalog-import-traceback` | `merge/merge.py` imports `lint/hook_catalog.py` at start, with no guard. | [`debts/merge-catalog-import-traceback.md`](../debts/merge-catalog-import-traceback.md) |
 | `merge-head-any-check-licenses` | Any passing check licenses a skipped required job, not only `scope`. | [`debts/merge-head-any-check-licenses.md`](../debts/merge-head-any-check-licenses.md) |
 | `merge-head-empty-reads-green` | With no required names, zero checks and zero runs, the wait reads green after its 30 s settle. | [`debts/merge-head-empty-reads-green.md`](../debts/merge-head-empty-reads-green.md) |
 | `merge-head-neutral-split` | `neutral` reads red in `classify` and green in `judge_runs`. | [`debts/merge-head-neutral-split.md`](../debts/merge-head-neutral-split.md) |
@@ -423,9 +423,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
-| `records-gen-runs-catalog` | The merge tool runs `lint/hook_catalog.py`, which also builds the hook catalog. | [`debts/records-gen-runs-catalog.md`](../debts/records-gen-runs-catalog.md) |
-| `records-heal-keeps-markers` | In a repo with no record folders, a hand-written `docs/records.md` that both sides edited stays as it is: the generator writes nothing. | [`debts/records-heal-keeps-markers.md`](../debts/records-heal-keeps-markers.md) |
-| `records-heal-wait-untested` | After a heal, the merge waits for checks again. | [`debts/records-heal-wait-untested.md`](../debts/records-heal-wait-untested.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
 | `ruling-kind-dir-equals-open` | `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name. | [`debts/ruling-kind-dir-equals-open.md`](../debts/ruling-kind-dir-equals-open.md) |
 | `sb-agents-json-cost` | `claude agents --json` runs on each board refresh. | [`debts/sb-agents-json-cost.md`](../debts/sb-agents-json-cost.md) |
