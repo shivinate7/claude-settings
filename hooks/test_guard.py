@@ -6840,9 +6840,10 @@ FAMILY = "ask-alone"
 # cd, export, PowerShell, pipe and `-C` shapes of the same rules.
 #
 # RED TODAY, by design: every case that expects a deny from a lone ask step, every case that expects
-# an ask for a harmless lead or tail (section j), and every case where an ask step stands ahead of a
-# later deny (the ask exits first). GREEN TODAY, by design: the lone
-# asks, the allows, and the deny-before-ask order. Those pin what the build must not change.
+# an ask for a harmless lead or tail (section j), the two round-2 holes at the end of section j, and
+# every case where an ask step stands ahead of a later deny (the ask exits first). GREEN TODAY, by
+# design: the lone asks, the allows, and the deny-before-ask order. Those pin what the build must not
+# change.
 
 PRUNE = VCS + " worktree prune"
 
@@ -7094,6 +7095,16 @@ chained_ask("ask-alone: the prune piped to sh, a command with effects, still den
             ASK_PRUNE + " | sh", cwd=WTPRUNE)
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
+
+# ROUND 2 HOLES (owner review, 2026-10-15). Both are RED today: the lane asks, and both must DENY, as
+# main does. The first: the `\"` inside the echo is an escaped quote, so the `; rm -rf y` after it is
+# a real step. The lane reads the `\"` as a close, so it hides that step and counts only the echo tail.
+# The second: `cd -` moves to the previous folder, which no path in the command names, so it is no
+# harmless lead, and the prune after it is a chained ask step.
+chained_prune("ask-alone: an escaped quote in an echo tail does not hide a removal after it, the prune denies",
+              ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
+chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
+              "cd - && " + ASK_PRUNE)
 
 
 # =========================================================================== ordinary work
