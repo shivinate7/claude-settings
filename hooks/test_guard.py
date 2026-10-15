@@ -3631,6 +3631,9 @@ sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "all
 sh("waiter: a PowerShell while-loop with Start-Sleep is refused",
    "while (-not (Test-Path f)) { Start-Sleep -Seconds 2 }", "deny", "waiter",
    tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell for-loop with Start-Sleep is refused",
+   "for ($i = 0; $i -lt 5; $i++) { Start-Sleep -Seconds 2 }", "deny", "waiter",
+   tool="PowerShell", cwd=NOGIT)
 sh("waiter: timeout /t on Windows cmd", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 
 # A watcher blocks the foreground call. The same watcher is allowed under run_in_background,
@@ -3674,6 +3677,10 @@ sh("waiter: a sleep then a foreground watcher, joined by &, is refused",
    "sleep 5 & gh run watch 1", "deny", "detached-launch", cwd=NOGIT)
 sh("waiter: a PowerShell while-loop with Start-Sleep in braces is refused",
    "while(1){Start-Sleep 1}", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
+   "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
+   "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 sh("waiter: gh.exe run watch in the foreground is refused", "gh.exe run watch 1", "deny",
    "waiter", cwd=NOGIT)
 sh("waiter: gh pr checks --watch=true in the foreground is refused",
@@ -3808,6 +3815,15 @@ add("background-end: a server named in a comment line is not run, allowed", "all
 add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm --prefix web run dev", run_in_background=True)
+add("background-end: npm -w web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm -w web run dev", run_in_background=True)
+add("background-end: pnpm -C web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm -C web dev", run_in_background=True)
+add("background-end: pnpm --filter web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm --filter web dev", run_in_background=True)
 add("background-end: npm.cmd run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm.cmd run dev", run_in_background=True)
@@ -3859,6 +3875,39 @@ add("background-end: deno task dev under run_in_background with no note is refus
 add("background-end: flask run under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command="flask run", run_in_background=True)
+add("background-end: deno serve main.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno serve main.ts", run_in_background=True)
+add("background-end: uvicorn app:app --reload under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="uvicorn app:app --reload", run_in_background=True)
+add("background-end: jupyter lab under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="jupyter lab", run_in_background=True)
+add("background-end: webpack serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="webpack serve", run_in_background=True)
+add("background-end: astro dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="astro dev", run_in_background=True)
+add("background-end: rails s under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="rails s", run_in_background=True)
+add("background-end: streamlit run app.py under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="streamlit run app.py", run_in_background=True)
+add("background-end: npm run build:watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run build:watch", run_in_background=True)
+add("background-end: npm run dev:frontend under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run dev:frontend", run_in_background=True)
+add("background-end: npm run dev-server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run dev-server", run_in_background=True)
+add("background-end: npm run start-api under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run start-api", run_in_background=True)
 
 add("background-end: jest --watch=false under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="jest --watch=false", run_in_background=True)
@@ -4951,6 +5000,7 @@ for _cmd in (
        cwd=NOGIT)
 for _cmd in (
     "time cat " + ENV,
+    "for f in a; do cat " + ENV + "; done",
     "timeout --signal=TERM 5 cat --env-file=" + ENV,
     "verdict pytest --env-file=" + ENV,
     "time node --env-file=" + ENV + " app.js && cat " + ENV,
@@ -5074,7 +5124,8 @@ sh("git env set: the incident shape in Bash, two variables exported before a tes
 sh("git env set: the incident shape in Bash, two prefixes on a test run, denies",
    "GIT_DIR=/c/x/.git GIT_WORK_TREE=/c/scratch python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
-# PowerShell forms that set one of the three, the env drive in every spelling, and a New-Item.
+# PowerShell forms that set one of the three: the env drive in every spelling, and the ni alias.
+# The full New-Item cmdlet is in the split-name rows below.
 for _cmd in (
     r'$env:GIT_DIR = "C:\x\.git"; python -m pytest',
     r'$env:GIT_WORK_TREE = "C:\scratch"; python -m pytest',
@@ -5331,6 +5382,9 @@ for _cmd in (
 _SPLIT = "GIT_INDE$(echo X)_FILE"
 sh("git env set: Bash, a name split by a substitution, export, denies",
    "export %s=/x; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: PowerShell, a name split by a substitution, New-Item, denies",
+   r"New-Item env:%s -Value C:\x\index; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
 
 # Round 2 review of a01afb0 (guard-speed): a name split by a printf directive. `%s` and `%b` with
 # no argument print nothing, so the profile gets `GIT_DIR=/x`. The walk drops the directives
@@ -5534,6 +5588,7 @@ for _name, _command in (
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
+    ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
 ):
     sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
@@ -8156,10 +8211,12 @@ def branch_base_unread_log_case():
 FAMILY = "rule9"
 # ---- Rule 9, the subagent model floor. Both directions: Haiku in any spelling is denied, and
 # every other model, or none, is allowed.
-# The Task tool takes the same branch as Agent, so these rows name Agent only. A full model id is the
-# same branch as its short name, so the rows use the short names.
+# SPAWN_TOOLS lists Task as well as Agent, so Task keeps one floor row. The rest name Agent.
+# A full model id is the same branch as its short name, so the rows use the short names.
 add("floor: Agent with model haiku is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model="haiku")
+add("floor: Task with model haiku is denied", "deny", "subagent-model-floor",
+    tool="Task", prompt="do it", model="haiku")
 add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model="Claude-HAIKU-4-5")
 add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
@@ -9653,11 +9710,8 @@ def fail_closed_case(module):
     return check
 
 
-# Two modules get a refusal case: guard_core, which the guard imports first, and guard_wsl, the
-# newest family module. Each sibling reaches the same refusal branch, and the list check below still
-# names every module on disk.
-FAILCLOSED_CASE_MODULES = ("guard_core", "guard_wsl")
-for _module in FAILCLOSED_CASE_MODULES:
+# A refusal case for each sibling module on disk, one per module the guard loads.
+for _module in FAILCLOSED_MODULES:
     _check = fail_closed_case(_module)
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing %s refuses a Bash call"
