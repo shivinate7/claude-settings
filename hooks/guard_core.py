@@ -109,18 +109,46 @@ def _split_segments_cached(cmd: str, powershell: bool):
 # a rule that must know whether a character sits inside quotes. `quote` is "", `'`, `"`, or `$'` (a
 # bash ANSI-C string). A backslash escapes the next character outside quotes and inside `"..."` or
 # `$'...'`, a backslash too, so `\"` neither opens nor closes a quote and `\\'` opens one; inside
-# `'...'` it escapes nothing. In PowerShell the escape is the backtick, inside `"..."` only, and a
-# backslash is a path separator.
+# `'...'` it escapes nothing. PowerShell text takes PowerShell's rules: a backslash is a path
+# character; a backtick escapes the next character outside quotes and inside `"..."`; `''` inside
+# `'...'` and `""` inside `"..."` are one literal quote; `<# ... #>` is a comment (state `<#`) and
+# `@"` or `@'` at a line's end opens a here-string that ends at `"@` or `'@` on a line's start
+# (state `@"` or `@'`). Quotes inside either span open nothing. An opener with no closer is a
+# parse PowerShell cannot finish, and the walk cannot tell where it ends: the rest reads BLIND,
+# with no quote, escape or comment, so every redirect and `;` after it stays visible.
+BLIND = "?"
+HERE_OPEN = re.compile(r"@(['\"])[ \t]*\r?\n")
+
+
 def quote_advance(text: str, index: int, quote: str):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
     pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
     char = text[index]
     powershell = is_powershell(text)
+    if quote == BLIND:
+        return 1, BLIND
+    if quote and powershell:
+        if quote == "<#":
+            return (2, "") if text.startswith("#>", index) else (1, quote)
+        if quote[0] == "@":
+            closer = "\n" + quote[1] + "@"
+            return (len(closer), "") if text.startswith(closer, index) else (1, quote)
+        if (char == "`" and quote == '"') or (char == quote and text[index + 1:index + 2] == quote):
+            return 2, quote
+        return 1, ("" if char == quote else quote)
     if quote:
-        if (char == "\\" and quote != "'" and not powershell) or (
-                char == "`" and quote == '"' and powershell):
+        if char == "\\" and quote != "'":
             return 2, quote
         return 1, ("" if char == quote[-1] else quote)
+    if powershell:
+        if char == "`":
+            return 2, ""
+        if text.startswith("<#", index):
+            return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
+        opener = HERE_OPEN.match(text, index)
+        if opener:
+            closer = "\n" + opener.group(1) + "@"
+            return 2, ("@" + opener.group(1) if text.find(closer, index + 2) >= 0 else BLIND)
     if char == "\\" and not powershell:
         return 2, ""   # `\\` is one escaped backslash, so a quote after the pair opens
     if char == "$" and not powershell and text[index + 1:index + 2] == "'":
@@ -132,14 +160,15 @@ def quote_advance(text: str, index: int, quote: str):
 
 def walk_quotes(text: str):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
-    that bash never closes is text, as in `_split_reading`'s second reading."""
+    that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
+    unquoted."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
             width, after = quote_advance(text, index, quote)
-        yield index, text[index], quote
+        yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
 
 
@@ -198,9 +227,18 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     length = len(cmd)
     while index < length:
         char = cmd[index]
-        if quote:
-            width, quote = quote_advance(cmd, index, quote)
-            current.append(cmd[index:index + width])
+        if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
+            if char in ("'", '"', "`", "#", "<", "@"):
+                current.append(char)
+                index += 1
+                continue
+        elif quote:
+            width, after = quote_advance(cmd, index, quote)
+            if quote != "<#":
+                current.append(cmd[index:index + width])
+            elif not after:
+                current.append(" ")   # a block comment is dropped, and it ends a word
+            quote = after
             index += width
             continue
         if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
@@ -216,11 +254,15 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(char)   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
-        # The quote walk owns every bash escape and `$'`, so `\;` is text and cuts no segment.
+        # The quote walk owns every escape, `$'`, and each PowerShell span, so `\;` and `` `; `` are
+        # text and cut no segment.
         if char in ("'", '"') or (not powershell and (
-                char == "\\" or cmd[index:index + 2] == "$'")):
+                char == "\\" or cmd[index:index + 2] == "$'")) or (
+                powershell and (char == "`" or cmd.startswith("<#", index)
+                                or HERE_OPEN.match(cmd, index))):
             width, quote = quote_advance(cmd, index, "")
-            current.append(cmd[index:index + width])
+            if quote != "<#":
+                current.append(cmd[index:index + width])
             index += width
             # Escaped ampersand, then `&`: the pair is a literal `&`, and the second `&` is bash's
             # own background operator, which ends the command. `&&` and `&>` are read as they stand.
@@ -258,7 +300,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
-    return segments, quote, shaped
+    return segments, ("" if quote == BLIND else quote), shaped
 
 
 # A leading `VAR=value` assignment, which is not a segment's command. Shared with the
@@ -307,6 +349,19 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
 
 
+def _single_quote_pairs(segment: str) -> str:
+    """PowerShell text with each `''` inside `'...'`, one literal quote there, spelled `'\\''` for
+    posix shlex. Read as it stands, shlex drops the pair, and the script a `pwsh -c` hands on loses
+    a quote. The quote walk finds the pairs (the one width-2 step inside `'...'`)."""
+    segment = PowerShellScript(segment)
+    out, quote, index = [], "", 0
+    while index < len(segment):
+        width, after = quote_advance(segment, index, quote)
+        out.append("'\\''" if quote == "'" and width == 2 else segment[index:index + width])
+        quote, index = after, index + width
+    return "".join(out)
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 
@@ -317,6 +372,8 @@ def segment_tokens(segment: str):
     # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
     if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
+        if "''" in segment:
+            segment = _single_quote_pairs(segment)
     found = _segment_tokens(segment)
     if found is None:
         return None
