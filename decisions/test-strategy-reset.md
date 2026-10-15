@@ -19,6 +19,8 @@ Rules for the work:
 - No effort goes into a test that a later step deletes.
 - A test stays only when it names the real failure it catches: a wrong allow or deny, lost work, a stuck merge, or a wrong record.
 - A test that pins a known gap becomes a debt entry, not a test.
+- A merge of look-alike tests keeps one row for each item in a guard's list, each part of its pattern, and each filter. A row that alone fails when that item goes stays. Owner, 2026-10-15 12:00 CDT.
+- Speed: one test checks that the code follows a speed best practice, such as a count of calls or cache hits. No test times a run on a local device, because device load makes the time vary. The 8 speed-only sweep mutants go. Owner, 2026-10-15 12:40 CDT.
 - Each CI job runs only when a file that its suites read changes.
 
 Kind: process
