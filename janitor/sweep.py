@@ -2197,7 +2197,33 @@ def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):
         )
 
 
+_LOCK_UNREADABLE = object()
+
+
+def _lock_unlockable(root: str, path: str, decision: dict):
+    """Re-read the lock of this one tree just before `git worktree unlock`: an agent may have
+    taken a live lock since the pass listed it. True when the lock is still stale (or gone), so
+    the removal goes ahead; otherwise False, and DECISION becomes a keep."""
+    named = os.path.normcase(os.path.realpath(path))
+    found = [e for e in parse_worktree_list(root) or []
+             if os.path.normcase(os.path.realpath(e["path"])) == named]
+    reason = found[0]["locked_reason"] if found else _LOCK_UNREADABLE
+    if reason is None:
+        decision.pop("unlock", None)  # nobody holds a lock now: nothing to take off
+        return True
+    if reason is not _LOCK_UNREADABLE and stale_agent_lock_verdict(reason) is True:
+        decision["lock_reason"] = reason
+        return True
+    decision.pop("unlock", None)
+    decision["action"] = "keep"
+    decision["reason"] = ("unreadable-subject" if reason is _LOCK_UNREADABLE
+                          else "locked: %s" % reason)
+    return False
+
+
 def remove_worktree(root: str, path: str, decision: dict):
+    if decision.get("unlock") and not _lock_unlockable(root, path, decision):
+        return
     if decision.get("unlock"):  # a stale agent lock; never --force
         unlocked = guard._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
@@ -2587,7 +2613,10 @@ def _past_deadline() -> bool:
 def _oldest_idle_first(entries):
     """ENTRIES with the longest-idle tree first: the likeliest removals come before the deadline.
     A tree whose idle time cannot be read goes last; it is kept either way."""
-    idle = {e["path"]: None if e.get("bare") else worktree_idle_seconds(e["path"]) for e in entries}
+    idle = {}
+    for e in entries:  # a read past the deadline never starts; that tree is "not judged"
+        idle[e["path"]] = (None if e.get("bare") or _past_deadline()
+                           else worktree_idle_seconds(e["path"]))
     return sorted(entries, key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
@@ -2631,6 +2660,8 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             agent_rule = False
             if reaper == "unreadable":
                 result["reaper"] = why
+            elif confirm and _past_deadline():
+                result["reaper"] = "not run: deadline"
             elif confirm:
                 result["reaper"] = run_repo_reaper(root) or "ran"
             else:
@@ -2677,14 +2708,17 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         return decide_worktree(root, entry, attended, agent_rule)
 
     judged = _oldest_idle_first(entries) if mode == "full" else []
-    if judged:
+    if judged and not _past_deadline():
         prime_pushed(root, judged)
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
-            remove_worktree(root, entry["path"], decision)
+            if _past_deadline():
+                decision.update(action="keep", reason="not removed: deadline")
+            else:
+                remove_worktree(root, entry["path"], decision)
         gone = decision["action"] == "reap"
         gone = gone and not decision.get("error")
         if gone:
@@ -2693,8 +2727,17 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     checked_out_branches = {e["branch"] for e in entries
                             if e.get("branch") and e["path"] not in removed}
 
+    def judge_branch(b):
+        # The clock is read before the decision starts and again after it: a reap follows at
+        # once, so a decision that ended past the deadline is not reaped.
+        late = {"name": b, "action": "keep", "reason": "not judged: deadline"}
+        if _past_deadline():
+            return late
+        decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches)
+        return late if decision["action"] == "reap" and _past_deadline() else decision
+
     for branch, decision in zip(branches, _pmap(
-            lambda b: decide_branch(root, base, b, protected_prefixes, checked_out_branches),
+            judge_branch,
             branches, confirm)):
         result["branches"].append(decision)
         if confirm and decision["action"] == "reap":
@@ -2722,6 +2765,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         return result
 
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
+    if _past_deadline():
+        result["listeners"] = None  # not read; the report says UNREADABLE, the next run reads
+        return result
     listener_entries = find_swept_listeners(checkout_paths)
     if listener_entries is None:
         result["listeners"] = None  # the machine-wide listener enumeration itself failed
@@ -2730,7 +2776,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             decision = decide_listener(entry)
             result["listeners"].append(decision)
             if confirm and decision["action"] == "reap":
-                reap_listener(decision)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_listener(decision)
 
     return result
 
@@ -3019,17 +3068,25 @@ def _sweep_roots(args, roots, restore_log_path, mode):
                 print("  free disk: unknown")
     if mode != "full":
         return 0
+    if _past_deadline():
+        print("\njanitor: past the time budget; dead-rooted, loose-process and simulator "
+              "reads not run (the next run does them)")
+        return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    print_loose_processes_report(find_loose_processes())
+    if not _past_deadline():
+        print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:
             if d["action"] == "reap" and d["pid"] not in {r["pid"] for r in reaped}:
+                if _past_deadline():
+                    break  # the next run reaps it
                 reap_listener(d)
                 reaped.append(d)
         print_grace_period_report(reaped)
-    print_sim_report(sim_tier(args.confirm), args.confirm)
+    if not _past_deadline():
+        print_sim_report(sim_tier(args.confirm), args.confirm)
     return 0
 
 
