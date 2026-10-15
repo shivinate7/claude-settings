@@ -3873,6 +3873,31 @@ for _label, _form in (
     sh("heredoc r3-fed: a kill in the body of a heredoc that %s runs, denies" % _label, _form,
        "deny", "machine-wide-kill", cwd=PROJ)
 
+# ---- heredoc-hole (round 3, lane heredoc-one-step). Two heredocs in one command. The FIRST delimiter is one that
+# main reads SHORT: `E-F` and `"E"OF` and `E'OF'` as `E`, `EOF-1`, `EOF.1` and `EOF{` as `EOF`. Main closes the first body
+# at a line the second body holds, so the payload lands outside every body and main denies it. The lane reads each
+# delimiter whole, keeps the payload in the second body, and that body is a `cat <<EOF2 > x.sh` that `sh x.sh` runs.
+# The lane allows it. Main denies only by that misread: one such body alone allows on main too. So each case is RED on
+# the lane head and DENY on origin/main. One case per delimiter shape. The payload is a kill or a wsl shutdown.
+HOLE_WSL = "wsl" + " --shutdown"
+for _label, _open, _close, _mw in (
+        ("E-F", "E-F", "E-F", "E"),
+        ("E'OF'", "E'OF'", "EOF", "E"),
+        ("EOF{", "EOF{", "EOF{", "EOF"),
+):
+    sh("heredoc-hole: delimiter %s, a kill in the second body that sh runs, denies" % _label,
+       "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + R3_KILL + "\nEOF2\nsh x.sh",
+       "deny", "machine-wide-kill", cwd=PROJ)
+FAMILY = "wsl"
+for _label, _open, _close, _mw in (
+        ("EOF-1", "EOF-1", "EOF-1", "EOF"),
+        ('"E"OF', '"E"OF', "EOF", "E"),
+        ("EOF.1", "EOF.1", "EOF.1", "EOF"),
+):
+    sh("heredoc-hole: delimiter %s, a wsl shutdown in the second body that sh runs, denies" % _label,
+       "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + HOLE_WSL + "\nEOF2\nsh x.sh",
+       "deny", "wsl-allow-list", cwd=NOGIT)
+
 
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
