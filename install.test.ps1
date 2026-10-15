@@ -294,7 +294,7 @@ function New-WtFixture([string]$Root) {
     $sk = Join-Path $main 'skills\sample-skill'
     New-Item -ItemType Directory -Force -Path $sk | Out-Null
     Set-Content -Path (Join-Path $sk 'SKILL.md') -Value 'v1' -Encoding utf8
-    git -C $main init -q | Out-Null
+    git -C $main init -q -b main | Out-Null
     git -C $main add -A | Out-Null
     git -C $main -c user.email=t@example.com -c user.name=t commit -q -m init | Out-Null
     git -C $main worktree add -q --detach $wt | Out-Null
@@ -370,10 +370,10 @@ try {
     } else {
         $kwRes  = Invoke-InstallProc (Join-Path $kwFix.Main 'install.ps1') $KwCfg $KwHome $KwLogs
         $kwPtr  = Join-Path $KwCfg 'CLAUDE.md'
-        $kwWant = '@' + ($kwFix.Main -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+        $kwWant = '@' + (($kwFix.Main + '-live') -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
         $kwGot  = if (Test-Path -LiteralPath $kwPtr) { [IO.File]::ReadAllText($kwPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
         Check "keepwt1: main clone of a repo with a linked worktree exits 0" ($kwRes.Exit -eq 0)
-        Check "keepwt1: that run points the config CLAUDE.md at the main clone" ($kwGot -eq $kwWant)
+        Check "keepwt1: that run points the config CLAUDE.md at the pinned checkout <clone>-live" ($kwGot -eq $kwWant)
         if ($kwRes.Exit -ne 0) { Write-Host "  keepwt1 output: $($kwRes.Text)" }
     }
 } finally {

@@ -196,9 +196,10 @@ case2() {
 
 # ---- Case 3: local ./install.sh from a clone -> unchanged, SRC is the clone --------------
 case3() {
-  name="case3: local install.sh from a clone uses the clone"
+  name="case3: local install.sh from a clone points the pointer at the pinned checkout <clone>-live"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
   make_checkout "$co" "# repo CLAUDE.md case3"
+  git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
@@ -210,8 +211,8 @@ case3() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
-    bad "$name" "pointer target [$pointer] != clone [$co]"
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co-live")" ]; then
+    bad "$name" "pointer target [$pointer] != pinned checkout [$co-live]"
   else
     ok "$name"
   fi
@@ -1967,16 +1968,17 @@ keep_check() {
 }
 
 keep_wt1() {
-  name="keep_wt1: main clone of a repo with a linked worktree still installs"
+  name="keep_wt1: main clone of a repo with a linked worktree still installs and points at its pinned checkout"
   co="$work/keep_wt1-main"; wt="$work/keep_wt1-wt"; cfg="$work/keep_wt1-cfg"
   h=$(mktemp -d); h=$(realpwd "$h")
   make_checkout "$co" "# keep_wt1 main"
+  git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
   git -C "$co" worktree add -q --detach "$wt" >/dev/null 2>&1 \
     || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
   rc=$?
-  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$co"
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$co-live"
   rm -rf "$h"
 }
 
