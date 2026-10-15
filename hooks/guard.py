@@ -1548,9 +1548,9 @@ def count_steps(text: str) -> int:
 # extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
-# and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution, a `&` or a
-# backslash in the segment makes it a step. Only a run of them at the head and a run at the tail count.
-UNSAFE_TEXT = re.compile(r"[<>`&\\]|\$\(|\$\{")  # a backslash may escape a quote the splitter read as a close
+# and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution, a `&` or an
+# escaped quote (`\"`, `\'`) in the segment makes it a step. Only a run of them at the head and a run at the tail count.
+UNSAFE_TEXT = re.compile(r"""[<>`&]|\\["']|\$\(|\$\{""")  # an escaped quote may hide a step; a backslash in a path is fine
 ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
 
