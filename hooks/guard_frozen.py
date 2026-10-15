@@ -293,13 +293,17 @@ def _is_redirect(word: str) -> bool:
     return bool(word) and set(word) <= _REDIRECT_CHARS
 
 
+_STDIN_FILES = {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "con"}   # operands that name stdin
+
+
 def _runs_a_file(args) -> bool:
     """True for `python [-flags] script ...`: it runs a file and reads stdin as data. `-c`, `-m`,
-    `-i`, `-` and a flag not known here fail closed."""
+    `-i`, `-`, a stdin operand (`/dev/stdin`, `/dev/fd/0`, `/proc/self/fd/0`, `CON`, which Windows
+    matches in any case) and a flag not known here fail closed."""
     args = iter(args)
     for arg in args:
         if not arg.startswith("-"):
-            return True
+            return arg.lower() not in _STDIN_FILES
         if arg == "-" or arg.startswith("--"):
             return False
         for place, letter in enumerate(arg[1:], 2):
