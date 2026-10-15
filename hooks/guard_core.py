@@ -486,13 +486,14 @@ def INTERPRETER_HEREDOC(text: str) -> bool:
 _HEAD_MARKS = re.compile(r"""['"(#<]""")
 
 
-def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
+def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
     quotes and parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does:
     a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
     only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
-    opens none. A mark read as text could show a header bash quotes, and drop a body bash runs."""
+    opens none. A mark read as text could show a header bash quotes, and drop a body bash runs.
+    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there)."""
     if not quote and not _HEAD_MARKS.search(text):
         return [], ""   # no quote, paren, comment or `<` to read: nothing opens, nothing is open
     heads = []
@@ -524,9 +525,9 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
             index += 3
             continue
         elif char == "<":
-            header = HEREDOC_HEADER.match(text, index)
+            header = (_MAIN_HEADER if legacy else HEREDOC_HEADER).match(text, index)
             if header:
-                heads.append(heredoc_delimiter(header.group(1)))
+                heads.append(header.groups() if legacy else heredoc_delimiter(header.group(1)))
                 index = header.end()
                 continue
         index += 1
@@ -539,7 +540,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     return kept, bodies
 
 
-def _walk_heredocs(cmd: str, contractions_are_text: bool = False):
+def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -559,7 +560,7 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False):
     while index < len(lines):
         kept.append(lines[index])
         header_line = lines[index]
-        heads, stack = heredoc_heads(header_line, stack, index < last)   # a later line holds a `'`
+        heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
         index += 1
         for quote, delimiter in heads:
             start = index
@@ -579,7 +580,7 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
     if any(_main_kept(header, body) for _, body, header in _walk_heredocs(cmd)[1]):
-        return cmd  # BANDAID, see _MAIN_HEADER
+        return "\n".join(_walk_heredocs(cmd, legacy=True)[0])  # BANDAID: main's own walk, see _MAIN_HEADER
     return "\n".join(_split_heredocs(cmd)[0])
 
 
@@ -599,8 +600,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 # header pattern was this one. It finds no header at a word such as `'EOF-1'` or `\EOF`. At `EOF-1` or `"E"OF`
 # it reads a shorter word, which closes the body early at a line `EOF` or `E`. Either way main kept body lines
 # in view, so a run path that no rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line,
-# `| python3 -`) still denied. heredoc_delimiter reads those words right. So _drop_heredoc_bodies keeps the
-# whole command when main kept a line of the body: every drop, the unconditional one too.
+# `| python3 -`) still denied. heredoc_delimiter reads those words right. So when main kept a line of a body,
+# _drop_heredoc_bodies returns main's own walk: every drop, the unconditional one too, sees what main saw.
+# The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
 # Retire it when each run path reads its body (debt heredoc-run-other-path).
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
