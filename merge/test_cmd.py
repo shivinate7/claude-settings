@@ -33,28 +33,23 @@ class Launcher(unittest.TestCase):
     def origin(self, url):
         subprocess.run(["git", "-C", self.co, "remote", "add", "origin", url], check=True)
 
-    def test_wrong_origin_stops_before_any_run(self):
-        self.origin("https://github.com/someone/else")
-        r = self.run_launcher("12", "--confirm")
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr)
-        self.assertNotIn("ARGS", r.stdout)
-
     def test_near_match_origins_stop_before_any_run(self):
-        # Owner swapped, repo swapped, and names that only start or end like the real one.
+        # Another owner and another repo (the wrong origin), owner swapped, repo swapped, and names that only start or end like the real one.
         self.origin("https://github.com/shivinate7/claude-settings")
-        for url in ("https://github.com/someone/claude-settings",
+        for url in ("https://github.com/someone/else",
+                    "https://github.com/someone/claude-settings",
                     "git@github.com:someone/claude-settings.git",
                     "https://github.com/shivinate/claude-settings",
                     "https://github.com/shivinate71/claude-settings",
                     "https://github.com/xshivinate7/claude-settings",
                     "https://github.com/shivinate7/claude-settings-fork",
                     "https://github.com/shivinate7/other-repo"):
-            subprocess.run(["git", "-C", self.co, "remote", "set-url", "origin", url], check=True)
-            r = self.run_launcher("12", "--confirm")
-            self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
-            self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr, url)
-            self.assertNotIn("ARGS", r.stdout, url)
+            with self.subTest(url=url):
+                subprocess.run(["git", "-C", self.co, "remote", "set-url", "origin", url], check=True)
+                r = self.run_launcher("12", "--confirm")
+                self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
+                self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr, url)
+                self.assertNotIn("ARGS", r.stdout, url)
 
     def test_arguments_and_exit_code_pass_through(self):
         self.origin(URL)
