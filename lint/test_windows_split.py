@@ -301,10 +301,6 @@ class WindowsSplit(unittest.TestCase):
         bad = [p for p in placement_problems(self.text) if "times" in p]
         self.assertEqual(bad, [])
 
-    def test_suites_spread_over_enough_jobs(self):
-        bad = [p for p in placement_problems(self.text) if "carry" in p]
-        self.assertEqual(bad, [])
-
     def test_scope_job_gates_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
 

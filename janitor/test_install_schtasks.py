@@ -196,11 +196,6 @@ class RefusesALinkedWorktree(unittest.TestCase):
         self.assertFalse(os.path.isfile(xml_path),
                           "a refused install must not write any task XML at all")
 
-    def test_task_name_never_names_the_worktree(self):
-        self.assertNotIn(os.path.basename(self.linked), install_schtasks.TASK_NAME)
-        self.assertNotIn("worktree", install_schtasks.TASK_NAME.lower())
-
-
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""
 

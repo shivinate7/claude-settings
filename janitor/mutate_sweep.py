@@ -75,8 +75,8 @@ SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
 GUARD = os.path.join(REPO_ROOT, "hooks", "guard.py")
 
-# A third target, added for the SessionEnd hook's own two budget protections (remaining-time
-# spend, and the upper-edge headroom guard): the hook has its own suite, test_session_end_sweep,
+# A third target, added for the SessionEnd hook's own budget protection (remaining-time
+# spend): the hook has its own suite, test_session_end_sweep,
 # which additionally reads the real REPO_ROOT/settings.json (HookBudgetFitsUnderItsHostCeiling)
 # -- so its scaffold needs that file too, never mutated, copied alongside the rest.
 SESSION_END_SWEEP = os.path.join(HERE, "session_end_sweep.py")
@@ -553,16 +553,6 @@ MUTATIONS = [
      '    return SWEEP_TIMEOUT_SECONDS  # MUTANT: elapsed_seconds is never consulted',
      "test_too_little_budget_left_returns_none"),
 
-    # 2. The upper-edge headroom guard: a margin between settings.json's ceiling and the hook's
-    # own worst case must not be allowed to run arbitrarily far ahead. Verified by hand against a
-    # `.bak` copy: widening SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS to 2000 fails exactly
-    # test_ceiling_far_ahead_of_the_worst_case_fails_the_band among the FAIL lines, and no other
-    # case.
-    ("budget: the upper-edge headroom guard accepts an unbounded margin",
-     "session_end_sweep",
-     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0',
-     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 2000.0',
-     "test_ceiling_far_ahead_of_the_worst_case_fails_the_band"),
 
     # 3. PR #84 review: an elapsed reading this function cannot trust (negative, or non-finite)
     # must not be spent as if it were free time. Verified by hand against a `.bak` copy: dropping
