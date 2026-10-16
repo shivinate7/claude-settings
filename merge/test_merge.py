@@ -126,6 +126,15 @@ def wait_sites(src):
     walk(ast.parse(src), False)
     return len(found), any(found)
 
+class PipeOut(io.TextIOWrapper):
+    """A Windows stdout piped to a reader (no PYTHONUTF8): cp1252, errors strict. getvalue() reads back what the pipe got."""
+    def __init__(self):
+        super().__init__(io.BytesIO(), encoding="cp1252", errors="strict")
+
+    def getvalue(self):
+        self.flush()
+        return self.buffer.getvalue().decode("cp1252", errors="replace")
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
@@ -149,8 +158,8 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
-    def run_merge(self, *args, host=None, lock=None):
-        out, err = io.StringIO(), io.StringIO()
+    def run_merge(self, *args, host=None, lock=None, stdout=None):
+        out, err = stdout or io.StringIO(), io.StringIO()
         cwd = os.getcwd()
         os.chdir(self.co)
         try:
@@ -566,6 +575,27 @@ class ClaudeMdFlag(Env):
         self.pr_writes({"output-styles/café.md": "a\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, "output-styles/café.md")
+
+    @windows_slice
+    def test_a_name_outside_cp1252_on_a_piped_stdout_still_flags_and_runs_every_step_after_the_merge(self):  # N1: say() raises after the merge landed
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
+        sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+        self.pr_writes({"output-styles/日本.md": "a\n"})  # not in cp1252, unlike café
+        try:
+            rc, out = self.run_merge("7", "--confirm", stdout=PipeOut())
+        except UnicodeEncodeError as e:
+            self.fail(f"the run died with a traceback after the merge landed: {e}")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        flags = self.flags(out)
+        self.assertEqual(len(flags), 1, out)  # one line, in any escaped form: only that it names the file
+        self.assertTrue("output-styles/" in flags[0] and ".md" in flags[0], out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), sh(self.co, "git", "rev-parse", "origin/main"), out)  # ff_main ran
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), out)  # afterMerge ran
+        self.assertNotIn("refs/heads/feat", self.refs(), out)  # cut_branch ran
+        self.assertFalse(self.lock_ref(), out)
 
     def test_a_lower_case_root_claude_md_is_flagged(self):  # Windows loads claude.md as CLAUDE.md
         self.pr_writes({"claude.md": "rules\n", "docs/claude.md": "x\n"})
