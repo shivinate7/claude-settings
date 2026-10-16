@@ -1730,12 +1730,12 @@ class GhHalf(Env):
         self.merge_reply_is_retried_then_stops(RATE_GQL_403)
 
     def test_a_rate_wait_that_would_pass_the_lock_expiry_stops_the_run_and_keeps_the_claim(self):  # lane merge-rate-wait
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock expires (3 * 1 + 10) * 60 = 780 s after it is taken
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock lasts (3 * 1 + 10) * 60 = 780 s: 180 s of checks waits and a 600 s spare
         self.set(merge_replies=[[RATE_GQL_403, False]])  # every merge try is rate limited, nothing lands
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertNotIn("reverted on", out)  # a rate limit is no refusal: the claim stays
-        self.assertEqual(self.calls().count("pr merge"), 3, out)  # one try and two retries: the 900 s wait would pass the 780 s lock
+        self.assertEqual(self.calls().count("pr merge"), 3, out)  # one try and two retries: the 900 s wait would pass the 600 s spare
         self.assertIn(300, self.paused)
         self.assertNotIn(900, self.paused)
         self.assertIn("Claim record numbers", self.feat_subjects())
@@ -3212,7 +3212,8 @@ class RateLimitWait(unittest.TestCase):
         return merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=self.pauses.append)
 
     def clocked_host(self, until=None):
-        """-> (host, clock). The pauses move the clock on. `until` is the lock's expiry (epoch s), as confirm hands it to the host once the lock is taken."""
+        """-> (host, clock). The pauses move the clock on. `until` is the latest time a rate wait may end (epoch s), as confirm hands it to the host
+        once the lock is taken: the end of the lock's spare (see LockExpiryReachesHost)."""
         clock = Clock(self.NOW)
         host = merge.Host(required=["gates"], base="main", minute=60, now=clock.now, pause=clock.pause)
         host.until = until
@@ -4579,7 +4580,7 @@ class GhLockRateRetry(unittest.TestCase):
     read answers [rate limit, then success]: the step is retried with the first rate wait, 60 s. A permission 403 stops at once. merge.sh is the
     seam, so the test holds wherever the retry sits. self.pauses records every pause; nothing sleeps.
     Lane merge-rate-wait: GitHub's reset time is readable on this path only, because `gh api -i` prints the headers and no other gh command here does.
-    So every lock call must ask for them (-i), read the wait from them (Retry-After in seconds, or the X-Ratelimit-Reset epoch against the lock's
+    So every lock call must ask for them (-i), read the wait from them (Retry-After in seconds, or the X-Ratelimit-Reset epoch when X-Ratelimit-Remaining is 0, against the lock's
     clock), and drop the block before it reads the reply. The fake prints that block whenever it sees -i (see fake_sh)."""
     NOW = 1000.0
     OLD, NEW, BASE, TREE = "oldlock", "newlock", "base1", "tree1"
@@ -4856,12 +4857,12 @@ class GhLockRateRetry(unittest.TestCase):
         for delta, want in ((120, 120), (3600, 900)):  # the lock's clock reads NOW. A reset an hour on is capped at 900 s
             with self.subTest(reset_in=delta):
                 self.calls, self.pauses, self.replies = {}, [], {}
-                self.reply("lock-commit-post", (1, RATE_API_403, {"X_Ratelimit_Reset": int(self.NOW) + delta}), self.OK["lock-commit-post"])
+                self.reply("lock-commit-post", (1, RATE_API_403, {"X_Ratelimit_Remaining": 0, "X_Ratelimit_Reset": int(self.NOW) + delta}), self.OK["lock-commit-post"])
                 self.assertEqual(self.acquire(), self.NEW)
                 self.assertEqual((self.calls["lock-commit-post"], self.pauses), (2, [want]))
 
     def test_a_reset_time_already_past_is_never_a_negative_wait(self):  # a guard: the exact wait is the builder's call, bounded by 0 and 900
-        for headers in ({"Retry_After": -5}, {"X_Ratelimit_Reset": int(self.NOW) - 100}):
+        for headers in ({"Retry_After": -5}, {"X_Ratelimit_Remaining": 0, "X_Ratelimit_Reset": int(self.NOW) - 100}):
             with self.subTest(headers=headers):
                 self.calls, self.pauses, self.replies = {}, [], {}
                 self.reply("lock-commit-post", (1, RATE_API_403, headers), self.OK["lock-commit-post"])
@@ -4940,14 +4941,16 @@ class UntilHost(FakeHost):
         return super().wait_checks(n, sha, d, prior)
 
 class LockExpiryReachesHost(Env):
-    """Lane merge-rate-wait: a rate wait in a Host call must stop short of the lock's expiry, so confirm hands the host the expiry (host.until, epoch
-    seconds, the lock's own `until`) as soon as the lock is taken. Without it the host cannot know how long it may wait."""
-    def test_the_run_hands_the_host_the_lock_expiry_before_its_first_wait(self):
+    """Lane merge-rate-wait (debt lock-ttl-rate-wait): the lock lasts WAITS x deadline + 600 s, and only the 600 s spare is for rate waits. The checks
+    waits keep their whole budget. So once the lock is taken, confirm hands the host (host.until, epoch seconds) the latest time a rate wait may end:
+    after now, and no later than the lock's expiry less WAITS x deadline. Otherwise the rate waits and a full checks wait can pass the lock's expiry."""
+    def test_the_run_hands_the_host_the_end_of_the_lock_spare_before_its_first_wait(self):
         host = UntilHost(self.co, self.other)
         rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertEqual(rc, 0, out)
-        self.assertIsNotNone(host.seen, "the host was never given the lock expiry")
-        self.assertEqual(host.seen, self.lock.until)
+        self.assertIsNotNone(host.seen, "the host was never told how long it may wait")
+        spare_end = self.lock.until - merge.WAITS * CONFIG["merge"]["deadlineMinutes"] * 60
+        self.assertTrue(self.now < host.seen <= spare_end, f"host.until {host.seen}: want after {self.now} and no later than {spare_end}")
 
 class HostDefaultBranchRateRetry(unittest.TestCase):
     """host_default_branch (`gh repo view`) on a rate-limit error (lane merge-rate-limit, review round 1; lane merge-rate-wait). It retries like Host.gh:
