@@ -2,7 +2,8 @@
 
 **What.** The guard still allows `gh pr checks --watch` in the background. Its API cost is
 unmeasured. The guard also does not read a `gh run watch` wrapped in `bash -c`, `cmd /c` or
-`pwsh -Command`, or one inside `{ ... }` or `$( ... )`.
+`pwsh -Command`, a captured one such as `x=$(gh run watch 7)`, or PowerShell
+`& { gh run watch 7 }`.
 
 **Where.** `hooks/guard_stream.py`, `gh_watches` and `waiter_verdict`.
 

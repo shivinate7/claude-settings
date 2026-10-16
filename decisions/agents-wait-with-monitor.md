@@ -20,9 +20,9 @@ refuses only real waste:
 - `gh run watch` in the foreground or the background (decision ci-wait-reads-run-status, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
 
-It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a watcher run
-with `run_in_background`. A word inside a quoted string or a heredoc body is not a call. The
-remedy names a background watcher run once, or Monitor.
+It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background
+`gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The
+remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
 
 Why: Claude Code's own check refuses only a leading `sleep` of 25 s or more (flag
 `tengu_amber_sentinel`, threshold 25, read from claude.exe 2.1.295). Of 468 measured refusals,

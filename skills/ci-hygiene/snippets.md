@@ -172,7 +172,8 @@ gh pr ready <pr-number>                               # the CI-wake hook waits a
 gh run view <run-id> --json status,conclusion         # one read, after the notice
 ```
 
-Never run `gh run watch`: it makes about 131 API calls a minute. Read each log in full. Never send the output to `/dev/null`.
+Never run `gh run watch`: it makes about 131 API calls a minute. Never send a command's output
+to `/dev/null`.
 
 ## 10. Prove a gate red
 
