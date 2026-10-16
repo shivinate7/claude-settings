@@ -269,3 +269,14 @@ gives 1 of 596 cases wrong, and that case is the only one. The full harness ran 
 - A process in another tree that the reaper stops.
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A batch read, or a full run on about 1,300 pids, that takes 60 s or more.
+
+## Holes, named
+
+Lane `sweep-fast` passed review round 3 with a positive net safety value. Each open finding is a debt:
+
+- `sweep-no-deadline-many-trees`: the husk and trash scans run to their end once started. The per-root setup has no deadline check. Review round 3, item 1.
+- `sweep-no-deadline-many-trees`: idle time is read for every tree before any judgment. Old kept trees can use the budget, so younger trees go unjudged. Review round 3, item 2.
+- `sweep-skip-reads-as-clean`: a skipped scan reads as clean. The run log has no not-judged count. The summary has no trash UNKNOWN line. The listener line gives the wrong cause. The hook drops stdout. Review round 3, item 3.
+- `sweep-no-deadline-many-trees`: idle is read up to about 12-20 s before a decision, against 1-3 s on main. Dirty, unpushed, live-session and process checks still keep a tree. Review round 3, item 4.
+- `sweep-attended-idle-unused`: an attended run reads idle time it does not use. A preview may lose its thread pool. Review round 3, item 5.
+- `sweep-no-deadline-many-trees`: the deadline is a fixed 12 s for any `--confirm` without `--attended`, until lane `sweep-budget` lands.
