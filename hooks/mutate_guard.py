@@ -199,7 +199,7 @@ MUTATIONS = [
      '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
      'worktree prune: a stale record asks, never denies'),
     ("ask-alone: a chained ask step asks instead of denying",
-     '    if count_steps(stripped) > 1:',
+     '    if count_steps(text) > 1:',
      '    if False:', "guard",
      'ask-alone: the incident, prune then worktree add then grep, denies and names the prune'),
     ("ask-alone: background_steps reads no quotes, so a & inside a quoted value splits",
@@ -431,8 +431,8 @@ MUTATIONS = [
      "detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED "
      "wrongly missed before _skip_assignments_and_keywords learned $name ="),
     ("shell segments: a quote never closes, so a real call after it is swallowed whole",
-     '            if char == quote:\n                quote = ""\n            index += 1',
-     '            if False:\n                quote = ""\n            index += 1', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
+     '        return 1, ("" if char == quote[-1] else quote)',
+     '        return 1, quote', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
     ("shared-tree: a conflict-side flag no longer exempts the checkout",
      'CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}',
      'CHECKOUT_CONFLICT_FLAGS = set()', "guard", 'checkout: --theirs resolves a real, unresolved merge conflict'),
@@ -793,16 +793,16 @@ MUTATIONS = [
     #   carve-outs undone"
     #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
     ("silent-write: the rule never denies at all",
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
-     '        if matched:\n'
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")\n'
+     '        if matched and not in_throwaway(segments, number, cwd, ends):\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
-     '            refuse(tool, "deny", "silent-write", reason, matched)',
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
+     '            refuse(tool, "deny", "silent-write",',
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")\n'
      '        if False:\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
-     '            refuse(tool, "deny", "silent-write", reason, matched)', "guard",
+     '            refuse(tool, "deny", "silent-write",', "guard",
      "silent-write: a discarded proof of landing, stdout alone"),
     ("silent-write: the quiet-flag arm no longer fires for any subcommand",
      '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
@@ -817,12 +817,12 @@ MUTATIONS = [
      '        if False:\n            continue', "guard",
      'silent-write: an abort lands nothing, so it is carved out'),
     ("silent-write: every fetch is a write, not only a refspec fetch",
-     '            if not any(":" in a and not a.startswith("-") for a in args):\n                continue',
+     '            if not fetch_moves_branch(args):\n                continue',
      '            if False:\n                continue', "guard",
      "silent-write: fetch discarding both streams is a carve-out"),
     ("silent-write: a pipe's tail is no longer followed",
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")',
-     '        matched, mechanism = silent_write_hit(segment)', "guard",
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")',
+     '        matched, mechanism, kind = silent_write_hit(segment)', "guard",
      "silent-write pipe: cat discards the piped output"),
     ("silent-write: >&/dev/null no longer silences",
      '\\d?>>?&?)', '\\d?>>?)', "guard",
@@ -840,7 +840,7 @@ MUTATIONS = [
      'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")', "guard",
      "silent-write gap: pull's own quiet flag"),
     ("silent-write: --dry-run no longer carves out",
-     '        if subcommand in ("fetch", "pull") and "--dry-run" in args:\n            continue',
+     '        if read_verb(subcommand, args):\n            continue',
      '        if False:\n            continue', "guard",
      "silent-write gap, allow: a dry-run fetch into a local ref moves nothing"),
     ("silent-write: make merge is no longer a write",
@@ -864,6 +864,23 @@ MUTATIONS = [
      'QUIET_FLAG_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
      '"pull", "fetch")', "guard",
      "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"),
+    # Review round 1 (lane silent-write-narrow). The two allow paths the narrowed rule added, each
+    # made to allow everything. Each required case is a DENY that the mutant must lose.
+    #   "silent-write: the throwaway test always passes, so a real checkout is never judged"
+    #     -> "silent-write real: a discarded commit in a real checkout"
+    #   "silent-write: the quote walk is quote-blind, so a redirect named in a message counts"
+    #     -> "silent-write scanner: a discard named before a space inside a message is text"
+    #        (SILENT_WRITE_REDIRECT needs a boundary after the null device, so the older case's
+    #        `>/dev/null"` never matched and passed on a quote-blind walk; a space after the target
+    #        makes only the quote walk keep this one an allow)
+    ("silent-write: the throwaway test always passes, so a real checkout is never judged",
+     'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:',
+     'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:\n    return True', "guard",
+     "silent-write real: a discarded commit in a real checkout"),
+    ("silent-write: the quote walk is quote-blind, so a redirect named in a message counts",
+     'def unquoted_at(text: str, index: int) -> bool:',
+     'def unquoted_at(text: str, index: int) -> bool:\n    return True', "guard",
+     "silent-write scanner: a discard named before a space inside a message is text"),
 
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
@@ -1216,7 +1233,7 @@ MUTATIONS = [
      '        paras = ["", "\\n\\n".join(texts)]',
      "guard", 'cite-by-id: a Drops-lines line in a middle paragraph is denied'),
     ("powershell: a backslash is eaten as under Bash",
-     '    if POWERSHELL_CALL[0]:\n        segment = segment.replace("\\\\", "\\\\\\\\")',
+     '    if is_powershell(segment):\n        segment = segment.replace("\\\\", "\\\\\\\\")',
      '    if False:\n        segment = segment.replace("\\\\", "\\\\\\\\")', "guard",
      'powershell: a backslash path survives tokenizing'),
     ("cite-by-id: an environment file is opened as a message file",

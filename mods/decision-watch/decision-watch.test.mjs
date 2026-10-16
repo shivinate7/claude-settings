@@ -23,6 +23,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mock } from 'node:test'
+// The scanners are shared: lint/test_scanner_traps.mjs runs their self-tests. Two source checks below use them.
+import { codeNouns, machinePaths } from '../../lint/test_scanner_traps.mjs'
 
 const REGISTER = fileURLToPath(new URL('./hooks/register.mjs', import.meta.url))
 const REAL_CFG = '/cfg/real'
@@ -77,101 +79,6 @@ async function test(name, fn) {
     results.push(`FAIL ${name}: ${String(e && e.message ? e.message : e).split('\n')[0]}`)
   }
 }
-
-// Machine-path scan over the whole text, comments included, on purpose: it does not parse the source.
-const MACHINE = [
-  /(?<![A-Za-z])[A-Za-z]:(?!\/\/)[\\/]/,
-  /ShivamSemwal|SHIVAM~1|AppData|Clones|claude-settings|scratchpad|C--Users/,
-  /\/Users\/|\/home\//,
-  /\\Users\\/,
-]
-const machinePaths = text => MACHINE.map(re => text.match(re)).filter(Boolean).map(m => m[0])
-
-// Code only: comments are dropped, and string and template text are blanked. A ${...} inside a template
-// is code, so it is kept. A small lexer for the shapes the scanner rule names: comment openers inside
-// strings, multi-line template literals, and a lone quote in text.
-function codeOf(src) {
-  const out = []
-  const frames = [{ tpl: false, braces: 0, interp: false }]
-  let i = 0
-  while (i < src.length) {
-    const top = frames[frames.length - 1]
-    const c = src[i]
-    const d = src[i + 1]
-    if (top.tpl) {
-      if (c === '\\') { out.push('  '); i += 2; continue }
-      if (c === '`') { frames.pop(); i++; continue }
-      if (c === '$' && d === '{') { frames.push({ tpl: false, braces: 0, interp: true }); out.push('  '); i += 2; continue }
-      out.push(c === '\n' ? '\n' : ' ')
-      i++
-      continue
-    }
-    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') i++; continue }
-    if (c === '/' && d === '*') { const end = src.indexOf('*/', i + 2); i = end < 0 ? src.length : end + 2; out.push(' '); continue }
-    if (c === '"' || c === "'") {
-      let j = i + 1
-      while (j < src.length && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1
-      out.push(' ')
-      i = j + 1
-      continue
-    }
-    if (c === '`') { frames.push({ tpl: true, braces: 0, interp: false }); i++; continue }
-    if (c === '{') { top.braces++; out.push(c); i++; continue }
-    if (c === '}') {
-      if (top.interp && top.braces === 0) { frames.pop(); i++; continue }
-      top.braces--
-      out.push(c)
-      i++
-      continue
-    }
-    out.push(c)
-    i++
-  }
-  return out.join('')
-}
-
-// Bare noun reads: $.noun.method that is not called. The \b stops a longer name matching a prefix.
-const BARE_NOUN = /\$\.[A-Za-z_]\w*\.[A-Za-z_]\w*\b(?!\s*\()/g
-const bareNouns = text => [...text.matchAll(BARE_NOUN)].map(m => m[0])
-const codeNouns = text => bareNouns(codeOf(text))
-
-// ---- the scanners, on the shapes the scanner rule names
-
-await test('machine-path scan: flags a path after // in a string, in a multi-line template literal, and beside a lone quote', () => {
-  assert.ok(machinePaths('const u = "http://a.test/"; const p = "D:/work/x"').length > 0, 'path after // in a string')
-  assert.ok(machinePaths('const t = `first\nD:/work/x\nlast`').length > 0, 'path in a multi-line template literal')
-  assert.ok(machinePaths("const q = \"<p>Don't</p>\"; const p = 'C:\\\\Work\\\\y'").length > 0, 'path beside a lone quote')
-})
-
-await test('machine-path scan: passes clean text, a lone quote in text, and the WindowsApps store name', () => {
-  same(machinePaths("const s = \"<p>Don't</p>\"; const w = 'WindowsApps'"), [], 'clean text')
-})
-
-await test('code-only scan: a line comment, a block comment, and template text hide a bare noun; code and ${} do not', () => {
-  same(codeNouns('// do not call $.fs.mkdir here\nconst x = 1'), [], 'line comment')
-  same(codeNouns('/* $.fs.mkdir */ const x = 1'), [], 'block comment')
-  same(codeNouns('const t = `text $.fs.mkdir text`'), [], 'template text')
-  same(codeNouns('const t = `${$.fs.mkdir}`'), ['$.fs.mkdir'], 'interpolation is code')
-})
-
-await test('code-only scan: comment openers inside strings do not hide a bare noun in the code after them', () => {
-  same(codeNouns('const u = "http://a.test/"; typeof $.fs.mkdir'), ['$.fs.mkdir'], 'after // in a string')
-  same(codeNouns('const s = "/* not a comment"; $.fs.mkdir'), ['$.fs.mkdir'], '/* inside a string')
-})
-
-await test('code-only scan: a multi-line template literal keeps its text out of code, and its interpolation in', () => {
-  same(codeNouns('const t = `first\n$.fs.mkdir text\nlast ${$.fs.mkdir}`'), ['$.fs.mkdir'], 'only the interpolation')
-})
-
-await test('code-only scan: a lone quote in a comment or in a string does not hide the code after it', () => {
-  same(codeNouns("// Don't call it\ntypeof $.fs.mkdir"), ['$.fs.mkdir'], 'lone quote in a comment')
-  same(codeNouns('const q = "<p>Don\'t</p>"; typeof $.fs.mkdir'), ['$.fs.mkdir'], 'lone quote in a string')
-  same(codeNouns("await $.fs.write(file, text); // Don't\n"), [], 'called method and a comment with a quote')
-})
-
-await test('code-only scan: a called $.fs.write and a called $.model.complete are not bare reads', () => {
-  same(codeNouns('await $.fs.write(file, text); await $.model.complete({ model });'), [], 'called methods')
-})
 
 // ---- the mod file
 

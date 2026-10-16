@@ -57,7 +57,6 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BEFORE_SHA: ${{ github.event.before }}
         run: bash .github/scripts/harness-scope.sh
 
   gates:
@@ -150,6 +149,9 @@ jobs:
 
       - name: Gate wrappers fixture suite
         run: python3 hooks/test_wrappers.py
+
+      - name: Session start notice suite
+        run: python3 hooks/test_session_start.py
 
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
@@ -283,6 +285,9 @@ jobs:
 
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
+
+      - name: Scanner trap lint
+        run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
         shell: bash
@@ -487,6 +492,10 @@ jobs:
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_wrappers.py
+
+      - name: Session start notice suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_session_start.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
@@ -791,6 +800,10 @@ jobs:
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_wrappers.py
+
+      - name: Session start notice suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_session_start.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}

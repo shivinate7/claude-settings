@@ -1710,15 +1710,10 @@ test("correct cite: DEBT‹debt-one› passes under a multi-character prefix", (
   assert.deepEqual(docProblems(NEAR_MISS.debt, "Cites DEBT‹debt-one›, a gloss.\n"), []);
 });
 
-// Scanner cases (building-scanner-respects-strings). The near-miss must be found even when a
-// comment opener sits inside a string, a lone quote sits in prose, or a backtick sits inside a
-// quoted string on the same line. A scan that pairs backticks, or stops at a comment opener,
-// would hide the near-miss that follows.
-test("scanner: comment openers inside a string do not hide a near-miss on the same line", () => {
-  const problems = docProblems(NEAR_MISS.prefixed, "Use \"//\", \"/*\" and \"#\" as openers, then D`one`, a gloss.\n");
-  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
-});
-
+// Scanner cases (building-scanner-respects-strings). The comment-opener and multi-line template cases
+// for every scanner live in lint/test_scanner_traps.mjs. The near-miss must be found even when a lone
+// quote sits in prose, or a backtick sits inside a quoted string on the same line. A scan that pairs
+// backticks would hide the near-miss that follows.
 test("scanner: a lone quote in text (Don't) does not hide a near-miss", () => {
   const problems = docProblems(NEAR_MISS.prefixed, "Don't cite D`one` by slug.\n");
   assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));

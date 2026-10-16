@@ -5,15 +5,12 @@
 #   the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, BEFORE_SHA. decisions/docs-only-prs-skip-code-suites.md.
+# BASE_SHA. decisions/docs-only-prs-skip-code-suites.md.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
 ALL="$JOBS code mods guard sweep"
 range=""
-case "${EVENT:-}" in
-  pull_request) [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD" ;;
-  push) [ -n "${BEFORE_SHA//0/}" ] && range="$BEFORE_SHA...HEAD" ;;
-esac
+[ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
@@ -50,6 +47,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Mod tests: no other CI job reads mods/.
       mods/*) on="$on mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
+      # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.
+      lint/test_scanner_traps.mjs) on="$on mods code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
       # Docs: nothing runs on them but the lints in `gates`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
