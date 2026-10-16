@@ -7,16 +7,19 @@ missing, short or mixed set of hook files?
 
 ## The ruling
 
-- The installer writes each file to a temp name in the same folder, then renames it over the
-  target. A rename held up by an open reader is retried briefly.
-- Each installed guard file carries the same `INSTALL_ID`, stamped at install time. The repo
-  copy holds a placeholder line. Only an all-placeholder set matches. A placeholder or a missing
-  line beside a real id is mixed.
+- The installer writes each non-guard file to a temp name in the same folder, then renames it
+  over the target. A rename held up by an open reader is retried briefly.
+- Guard files no longer follow a per-file rule. The guard set switches as one stamped folder,
+  `hooks/guard.d/<id>/`, and one rename of `guard.py`. In link mode it is one rename of the
+  `<clone>-live` link. See merge-reinstalls-from-main (owner, 2026-10-15 17:40 CDT).
 - The guard checks the `INSTALL_ID` of the modules it loaded. On an import failure, a load failure
   or a stamp mismatch, it waits in short steps for about 5 s and loads again. After the wait it
-  fails closed with guard-crash, never open.
+  fails closed with guard-crash, never open. This wait stays in the guard.
 - No moment may leave a hook file, `CLAUDE.md`, `settings.json`, `agents`, `lint` or `skills`
-  missing. A folder swap is out, because it leaves `hooks` absent for an instant.
+  missing. A folder swap of `hooks` is out, because it leaves `hooks` absent for an instant.
+  Adding the subfolder `hooks/guard.d/<id>/` is not a swap of `hooks`. Named exception: in link
+  mode, the first move from a plain `<clone>-live` directory leaves that path absent for a
+  moment (named in merge-reinstalls-from-main).
 
 Incident: 2026-10-14, about 03:25 CDT. After PR 420 merged, the post-merge hook copied the hooks
 in place. For a few seconds every session's Bash call got guard-crash, and the arbiter's merges
@@ -33,6 +36,8 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
 ## Holes, named
 
 Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-stamp-line-unpinned` (no test pins the stampers' placeholder text), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand).
+
+Guard-set and pin-move holes are named in merge-reinstalls-from-main.
 
 ## Named limits
 
