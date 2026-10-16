@@ -3773,12 +3773,14 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertTrue(sweep.pid_alive(grand), "a process the host did not start was stopped")
             self.assertKept(own)
 
-    def test_an_unreadable_pid_cwd_keeps_the_own_worktree_at_agent_end(self):
-        """Review point 2. A pid whose cwd cannot be read may sit inside the tree, so at agent
-        end it keeps the tree. Red on abf5f8e: processes_in lists the pid as unreadable and
-        decide_worktree drops it (sweep.py ~2040, ~714). Driven through handle(), because the fault is
-        a faked cwd read. The control twin runs on the real reads, which hold unreadable pids of their
-        own (measured 2026-10-15: 252 of 612 live pids), so a literal rule keeps the twin too."""
+    def test_an_unreadable_host_descendant_keeps_the_own_worktree_at_agent_end(self):
+        """Review point 2, re-pointed 2026-10-15 on the coordinator's ruling. An unreadable pid that
+        descends from the host may sit inside the tree, so at agent end it keeps the tree. An
+        unreadable pid outside the host is out of scope (the next case). Red on abf5f8e: processes_in
+        lists the pid as unreadable and decide_worktree drops it (sweep.py ~2040, ~714). Driven through
+        handle(), because the fault is a faked cwd read. The control twin runs on the real reads: 252 of
+        612 live pids are unreadable here (measured), none descend from the host, so a rule that keeps
+        on any unreadable pid keeps the twin too."""
         if sys.platform == "darwin":
             self.skipTest("macOS reads every cwd in one lsof call; process_cwd is not on that path")
         twin, subject = self.add("unrtwin"), self.add("unr")
@@ -3793,12 +3795,48 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertRemoved(twin)
         with mock.patch.object(sweep, "process_cwd", new=hidden):
             record = self.run_in_process("unr", subject)
-        with self.subTest(arm="one pid's cwd is unreadable"):
+        with self.subTest(arm="unreadable pid that descends from the host"):
             row = self.row_for(record, subject)
             self.assertIsNotNone(row, "the stage wrote no row for the own tree")
             self.assertEqual(row.get("action"), "keep",
-                             "the own tree was reaped past an unreadable pid: %s" % row.get("reason"))
+                             "the own tree was reaped past an unreadable host descendant: %s"
+                             % row.get("reason"))
             self.assertKept(subject)
+
+    def test_an_unreadable_pid_outside_the_host_is_out_of_scope(self):
+        """Review point 2, guard: green on abf5f8e. An unreadable pid that does not descend from the
+        host is out of scope at agent end, as WorktreeProcessPreCheckTests states for the pre-check.
+        The pid's parent is a sponsor that has exited, so no host sits on its chain. Windows reads an
+        exited parent as no parent. POSIX reparents such an orphan to init, which host_pids() holds as
+        an ancestor of the hook, so this arm runs on Windows only."""
+        if sys.platform != "win32":
+            self.skipTest("POSIX reparents an orphan to init, which host_pids() holds as an ancestor")
+        subject = self.add("unrout")
+        pidfile = os.path.join(self.root, "unrout.pid")
+        sponsor_code = ("import subprocess, sys\n"
+                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
+                        " cwd=sys.argv[2])\n"
+                        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, self.root],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        sponsor.wait(timeout=30)  # the sponsor exits; its child is now an orphan
+        orphan = int(_read_when_ready(pidfile))
+        self.addCleanup(sweep.send_signal, orphan)  # the fixture's own process
+        real = sweep.process_cwd
+
+        def hidden(pid):
+            return None if pid == orphan else real(pid)
+
+        with mock.patch.object(sweep, "process_cwd", new=hidden):
+            record = self.run_in_process("unrout", subject)
+        with self.subTest(arm="unreadable pid outside the host"):
+            row = self.row_for(record, subject)
+            self.assertIsNotNone(row, "the stage wrote no row for the own tree")
+            self.assertEqual(row.get("action"), "reap",
+                             "an unreadable pid outside the host kept the tree: %s" % row.get("reason"))
+            self.assertRemoved(subject)
 
     def test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock(self):
         """Review point 3. decide_worktree reads a stale lock early (sweep.py ~666), and
