@@ -55,3 +55,6 @@ check is required, and a skipped draft run blocks nothing.
 - Unmeasured: that `ready_for_review` starts this workflow. It comes from GitHub's documented
   behavior, not from a run here.
 - Unmeasured: the saving in runs.
+
+Kind: process
+Home: rule:git-draft-until-reviewed

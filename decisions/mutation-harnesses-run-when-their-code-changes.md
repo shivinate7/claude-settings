@@ -37,3 +37,6 @@ other step took under 2 min. A pull request that changed one sentence in
 main has no branch protection and no required check, so a skipped step blocks nothing.
 A regression that reaches a harness only through a file outside the sets above is
 caught by the nightly run, not by the pull request.
+
+Kind: process
+Home: .github/scripts/harness-scope.sh
