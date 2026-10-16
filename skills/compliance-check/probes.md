@@ -14,7 +14,7 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 
 `check_record_slugs.py` matches only paths that start with `decisions/`, `deferred/` or `debts/`.
 For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
-file arguments. Its `--dir` and its git diff read this repo's tree, so neither can target a child.
+file arguments. Its git diff reads this repo's tree, so it cannot target a child.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
 `check_landed_dirs.py`, `check_unknown_reads_contract.py`. `md_sweep.py`, `ste_gate.py` and

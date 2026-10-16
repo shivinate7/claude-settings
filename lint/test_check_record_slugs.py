@@ -3,9 +3,8 @@
 
     python3 lint/test_check_record_slugs.py
 
-A record file that a change adds must have a slug of 32 characters or fewer. With no flag the
-check reads decisions/, deferred/ and debts/. `--dir FOLDER` points it at another folder instead, as
-lint/check_ruling_kind.py does. A folder that cannot be read fails closed.
+A record file that a change adds must have a slug of 32 characters or fewer. The check reads
+decisions/, deferred/ and debts/ from the diff, or the files it is given.
 
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
@@ -25,9 +24,7 @@ MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_
 OK = "a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
 VERY_LONG = "a" * 44 + ".md"  # a slug of 44 characters fails, for the ./ path case
-DOCS = "docs/decisions"  # a repo whose records live here passes --dir DOCS
-LOOKALIKE_SIBLING = "docs/decisionsX"  # a folder that starts with the word
-LOOKALIKE_WORD = "docs/notdecisions"  # a folder that only contains the word
+DOCS = "docs/decisions"  # a folder the default run does not read
 
 
 def flagged(out):
@@ -115,35 +112,6 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DOCS + "/" + LONG)
         self.assert_passes(DOCS + "/" + LONG)
 
-    def test_dir_passes_a_short_slug_in_the_named_folder(self):
-        self.put(DOCS + "/" + OK)
-        self.assert_passes("--dir", DOCS, DOCS + "/" + OK)
-
-    def test_dir_flags_a_long_slug_in_the_named_folder(self):
-        self.put(DOCS + "/" + LONG)
-        rc, out = self.lint("--dir", DOCS, DOCS + "/" + LONG)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(flagged(out), [DOCS + "/" + LONG])
-
-    def test_dir_replaces_the_default_folders(self):
-        # --dir points the check at one folder. decisions/ is no longer read, as with check_ruling_kind.
-        self.put(DOCS + "/" + OK)  # the named folder must exist, or --dir fails closed
-        self.put("decisions/" + LONG)
-        self.assert_passes("--dir", DOCS, "decisions/" + LONG)
-
-    def test_dir_ignores_folders_that_only_look_like_it(self):
-        self.put(DOCS + "/" + OK)  # the named folder must exist, or --dir fails closed
-        for rel in (LOOKALIKE_SIBLING, LOOKALIKE_WORD):
-            with self.subTest(rel=rel):
-                self.put(rel + "/" + LONG)
-                self.assert_passes("--dir", DOCS, rel + "/" + LONG)
-
-    def test_named_decisions_folder_matches_the_default(self):
-        self.put("decisions/" + LONG)
-        rc, out = self.lint("--dir", "decisions", "decisions/" + LONG)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(flagged(out), ["decisions/" + LONG])
-
     def test_default_diff_flags_only_the_default_folders(self):
         self.commit_base()
         self.put("decisions/" + LONG)
@@ -153,61 +121,12 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), ["decisions/" + LONG])
 
-    def test_dir_diff_flags_only_the_named_folder(self):
-        self.commit_base()
-        self.put("decisions/" + LONG)
-        self.put(DOCS + "/" + LONG)
-        self.commit_change()
-        rc, out = self.lint("--dir", DOCS)
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(flagged(out), [DOCS + "/" + LONG])
-
-    # --dir must name a folder that exists under the checkout, spelled as it is on disk. A check
-    # that cannot read its own input exits non-zero, and names the folder it was given.
-    # Case: on a case-insensitive disk "Decisions" resolves, so the spelling must be compared too.
-
-    def test_dir_that_names_no_usable_folder_fails(self):
-        self.put("decisions/" + OK)
-        self.put("README.md")
-        for value in ("decision", "docs/decisions-old", ".", "", "Decisions",
-                      "README.md", "decisions/" + OK):
-            with self.subTest(dir=value):
-                rc, out = self.lint("--dir", value, "decisions/" + OK)
-                self.assertNotEqual(rc, 0, out)
-                self.assertIn("'%s'" % value, out)
-                self.assertNotIn("Traceback", out)
-
-    def test_dir_without_a_value_fails(self):
-        self.put("decisions/" + OK)
-        rc, out = self.lint("decisions/" + OK, "--dir")  # --dir is last: no folder is given
-        self.assertNotEqual(rc, 0, out)
-        self.assertIn("''", out)
-        self.assertNotIn("Traceback", out)
-
-    def test_dir_that_names_no_usable_folder_fails_in_the_diff(self):
-        self.commit_base()
-        self.put("decisions/" + OK)
-        self.commit_change()
-        rc, out = self.lint("--dir", "decision")
-        self.assertNotEqual(rc, 0, out)
-        self.assertIn("'decision'", out)
-        self.assertNotIn("Traceback", out)
-
-
     def test_backslash_path_is_checked_like_a_slash_path(self):
         # A Windows-style path names the same record, so its folder must still be read.
         self.assert_passes("decisions\\" + OK)
         rc, out = self.lint("decisions\\" + LONG)
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), ["decisions\\" + LONG])
-
-    def test_dir_given_twice_fails(self):
-        self.put("decisions/" + OK)
-        rc, out = self.lint("--dir", "decisions", "--dir", "bogus", "decisions/" + OK)
-        self.assertNotEqual(rc, 0, out)
-        self.assertIn("given more than once", out)
-        self.assertNotIn("Traceback", out)
-
 
     def test_unknown_or_malformed_option_fails(self):
         # An option the check does not know must fail closed. Read as a file name, it would

@@ -57,7 +57,6 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BEFORE_SHA: ${{ github.event.before }}
         run: bash .github/scripts/harness-scope.sh
 
   gates:
@@ -283,6 +282,9 @@ jobs:
 
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
+
+      - name: Scanner trap lint
+        run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
         shell: bash
