@@ -584,6 +584,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `unknown-reads-nonbool-skips` | The check prints PASS for True, FAIL for False, and SKIP for any other answer. | [`debts/unknown-reads-nonbool-skips.md`](../debts/unknown-reads-nonbool-skips.md) |
 | `unknown-stash-word-tree-only` | An unknown stash word is read as a push, so the guard judges it on the working tree only. | [`debts/unknown-stash-word-tree-only.md`](../debts/unknown-stash-word-tree-only.md) |
 | `until-note-unjudged` | The `background-end` rule accepts any non-empty `until:` text, such as `until: n/a`. | [`debts/until-note-unjudged.md`](../debts/until-note-unjudged.md) |
+| `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`debts/upgrade-strips-name-port.md`](../debts/upgrade-strips-name-port.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
 | `walk-curly-quotes-plain` | PowerShell can take the curly quotes U+2018 to U+201E as quote marks. | [`debts/walk-curly-quotes-plain.md`](../debts/walk-curly-quotes-plain.md) |
 | `win-slice-hides-skip-rows` | Nine guard cases skip on Windows: 2 subject, 6 kill and 1 simulator. | [`debts/win-slice-hides-skip-rows.md`](../debts/win-slice-hides-skip-rows.md) |
