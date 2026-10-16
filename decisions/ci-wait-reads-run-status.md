@@ -21,7 +21,8 @@ passes.
 
 Owner, 2026-10-16 03:00 CDT: "Change them too." Claude and its agents do not run
 `gh run watch` either, in the foreground or the background. A session waits on CI through
-the CI-wake hook or `bin/merge`. Lane own-ci-wait changes the guard's remedy text in
+the CI-wake notice that follows `gh pr ready`. A push starts no notice. `bin/merge` waits on
+its own, but the guard's remedy never names it, because it merges when the wait ends. Lane own-ci-wait changes the guard's remedy text in
 hooks/guard_stream.py and the two guides that name the watch (skills/ci-hygiene,
 agents/test-author.md).
 
@@ -63,7 +64,8 @@ another repo on the same account several times.
 - A background `gh pr checks --watch` is still allowed, because the ruling names only
   `gh run watch`. Its API cost is unmeasured. Debt `pr-checks-watch-unmeasured` (the
   background checks watch is unmeasured).
-- The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`. Guards
+- The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`, or one
+  inside `{ ... }` or `$( ... )`, as main did not. Guards
   stop Claude's mistakes, not an attacker (decision guard-guards-mistakes-only). Same debt.
 
 Kind: build

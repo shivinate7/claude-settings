@@ -3986,8 +3986,8 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
 #
 # Owner ruling 2026-10-16 03:00 CDT, "Change them too" (decision ci-wait-reads-run-status, "Claude's
 # own waits"). Claude and its agents run no `gh run watch`, in the foreground or the background. A
-# session waits on CI through the CI-wake hook (it fires after `git push` and `gh pr ready`) or
-# `bin/merge`. Incident: one `gh run watch` made 131 API calls in 60 s (MEASURED 2026-10-16 06:28
+# session waits on CI through the CI-wake hook (it fires after `gh pr ready`; a push starts
+# none). Incident: one `gh run watch` made 131 API calls in 60 s (MEASURED 2026-10-16 06:28
 # UTC), and merges failed on GitHub limits all night. The ruling names `gh run watch` only, so
 # `gh pr checks --watch` stays allowed in the background, as on main.
 # Rule name: waiter. Case names start "ci-wait:", so MUTATE_ONLY=ci-wait picks them out.

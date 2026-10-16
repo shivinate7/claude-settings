@@ -50,9 +50,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
    lane passes its local checks at about the same time, offer one integration branch. A repo may
    name one session to batch PRs and run each merge, on the owner's word.
-9. **Wait without loops.** Wait for the CI-wake notice that follows a push or `gh pr ready`, or
-   run `bin/merge` in the background. Never run `gh run watch`: one watch made 131 API calls a
-   minute (decision ci-wait-reads-run-status, CI waits read the run status). Never poll with a sleep loop. A repeated `gh run view` or
+9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push
+   starts no notice. Never run `gh run watch`: one watch made 131 API calls a minute (decision
+   ci-wait-reads-run-status, CI waits read the run status). Never poll with a sleep loop. A repeated `gh run view` or
    `gh pr checks` without `--watch` is a poll. (Decision
    agents-wait-with-monitor: of 468 measured refusals of `sleep` waits, about 130 were real
    loops. Agents wait with the Monitor tool.) See `snippets.md`.
