@@ -3847,7 +3847,8 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 
 # Narrowed by the owner, 2026-10-12. One foreground sleep under 25 seconds is allowed, anywhere
 # in the command. A loop, two sleeps with a check between them, and a sleep of 25 seconds or
-# more are refused. A watcher is refused in the foreground and allowed in the background.
+# more are refused. `gh pr checks --watch` is refused in the foreground and allowed in the
+# background. `gh run watch` is refused in both (decision ci-wait-reads-run-status, below).
 # "waiter: a bare sleep" keeps its name: hooks/mutate_guard.py selects this case by that name.
 sh("waiter: a bare sleep", "sleep 30", "deny", "waiter", cwd=NOGIT)
 sh("waiter: one sleep 5 is allowed", "sleep 5", "allow", cwd=NOGIT)
@@ -3873,18 +3874,23 @@ sh("waiter: a PowerShell for-loop with Start-Sleep is refused",
    tool="PowerShell", cwd=NOGIT)
 sh("waiter: timeout /t on Windows cmd", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 
-# A watcher blocks the foreground call. The same watcher is allowed under run_in_background,
+# A watcher blocks the foreground call. `gh pr checks --watch` is allowed under run_in_background,
 # because the harness tracks that job and the session waits for its completion notice.
+# `gh run watch` is refused there too: owner ruling 2026-10-16 03:00 CDT, "Change them too"
+# (decision ci-wait-reads-run-status, "Claude's own waits"). The cases of that ruling are in the
+# block "ci-wait" below this one.
 sh("waiter: a foreground gh pr checks --watch is refused", "gh pr checks 12 --watch", "deny",
    "waiter", cwd=NOGIT)
 sh("waiter: a foreground gh run watch is refused", "gh run watch 7", "deny", "waiter",
    cwd=NOGIT)
-add("waiter: gh run watch under run_in_background is allowed", "allow", cwd=NOGIT,
+add("waiter: gh run watch under run_in_background is refused", "deny", "waiter", cwd=NOGIT,
     command="gh run watch 7", run_in_background=True)
 add("waiter: gh pr checks --watch under run_in_background is allowed", "allow", cwd=NOGIT,
     command="gh pr checks 5 --watch", run_in_background=True)
-add("waiter: a short sleep before a background watcher is allowed", "allow", cwd=NOGIT,
-    command="sleep 5; gh run watch 7", run_in_background=True)
+add("waiter: a short sleep before a background gh run watch is refused", "deny", "waiter",
+    cwd=NOGIT, command="sleep 5; gh run watch 7", run_in_background=True)
+add("waiter: a short sleep before a background gh pr checks --watch is allowed", "allow",
+    cwd=NOGIT, command="sleep 5; gh pr checks 5 --watch", run_in_background=True)
 
 # A sleep, a timeout /t, or a loop inside quoted text or a heredoc body is data, not a command.
 # Each shape is one that split_segments could cut in the wrong place.
@@ -3946,8 +3952,8 @@ sh("waiter: gh run -R o/r watch in the foreground is refused", "gh run -R o/r wa
    "waiter", cwd=NOGIT)
 sh("waiter: gh pr -R o/r checks --watch in the foreground is refused",
    "gh pr -R o/r checks 5 --watch", "deny", "waiter", cwd=NOGIT)
-add("waiter: gh run -R o/r watch under run_in_background is allowed", "allow", cwd=NOGIT,
-    command="gh run -R o/r watch 1", run_in_background=True)
+add("waiter: gh run -R o/r watch under run_in_background is refused", "deny", "waiter",
+    cwd=NOGIT, command="gh run -R o/r watch 1", run_in_background=True)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
@@ -3975,14 +3981,104 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
    "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
 
 
+# ------------------------------------------------------------------ ci-wait: no gh run watch at all
+#
+# Owner ruling 2026-10-16 03:00 CDT, "Change them too" (decision ci-wait-reads-run-status, "Claude's
+# own waits"). Claude and its agents run no `gh run watch`, in the foreground or the background. A
+# session waits on CI through the CI-wake hook (it fires after `git push` and `gh pr ready`) or
+# `bin/merge`. Incident: one `gh run watch` made 131 API calls in 60 s (MEASURED 2026-10-16 06:28
+# UTC), and merges failed on GitHub limits all night. The ruling names `gh run watch` only, so
+# `gh pr checks --watch` stays allowed in the background, as on main.
+# Rule name: waiter. Case names start "ci-wait:", so MUTATE_ONLY=ci-wait picks them out.
+# Red on the code before the change: the background deny cases (the guard allows each one), and the
+# two remedy checks (both remedy texts name `gh run watch <id> --exit-status`). Green before and
+# after: the foreground deny cases, the read-only allow cases, and the data cases. They pin that the
+# change refuses no read and no text that only names the command.
+# A refusal's reason may name no pause (`sleep` is in FORBIDDEN_IN_A_REASON) and no settings file.
+CI_WAIT_REMEDY = ("CI-wake", "bin/merge")  # any-of: the CI-wake notice, or the merge tool
+NO_RUN_WATCH = ("run watch", "--exit-status")  # the remedy never names the refused call or its flag
+
+for _tool, _command in (
+        ("Bash", "gh run watch 7"),
+        ("Bash", "gh run watch 7 --exit-status"),
+        ("Bash", "gh run watch 7 --exit-status -R owner/repo"),
+        ("Bash", "gh run --repo owner/repo watch 7 --exit-status"),
+        ("Bash", "verdict gh run watch 7 --exit-status"),
+        ("Bash", "gh run watch 7 --exit-status && echo done"),
+        ("Bash", 'echo "it\'s # fine"; gh run watch 7'),  # a quote and a # ahead do not hide it
+        ("PowerShell", "gh run watch 7"),
+        ("PowerShell", "gh run watch 7 --exit-status"),
+        ("PowerShell", "gh.exe run watch 7 --exit-status -R owner/repo"),
+        ("PowerShell", "gh run watch 7; Write-Host done"),
+):
+    add("ci-wait: %s %s under run_in_background is refused, remedy names a CI-wake wait"
+        % (_tool, _command), "deny", "waiter", tool=_tool, cwd=NOGIT,
+        carries=(CI_WAIT_REMEDY,), lacks=NO_RUN_WATCH, command=_command, run_in_background=True)
+
+for _tool, _command in (
+        ("Bash", "gh run watch 7 --exit-status"),
+        ("Bash", "gh run watch 7 --exit-status -R owner/repo"),
+        ("Bash", "gh run --repo owner/repo watch 7"),
+        ("PowerShell", "gh run watch 7 --exit-status"),
+        ("PowerShell", "gh.exe run watch 7 -R owner/repo"),
+):
+    add("ci-wait: foreground %s %s stays refused" % (_tool, _command), "deny", "waiter",
+        tool=_tool, cwd=NOGIT, command=_command)
+
+# Every remedy the stream family prints, reached by its own trigger. The two checks are apart, so
+# each goes red alone: the refused call is named, and the CI-wake wait is not named.
+for _label, _trigger in (
+        ("a foreground gh run watch", "gh run watch 7 --exit-status"),
+        ("a loop around a pause", "until [ -s f ]; do sleep 2; done"),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done"),
+):
+    add("ci-wait: the remedy of %s never names the refused call" % _label, "deny", "waiter",
+        cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
+    add("ci-wait: the remedy of %s names the CI-wake notice or bin/merge" % _label, "deny",
+        "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
+
+# Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
+# `--watch` is allowed on main, and stays so.
+for _tool, _command in (
+        ("Bash", "gh run view 7 --json status"),
+        ("Bash", "gh run view 7 --json status,conclusion -R owner/repo"),
+        ("Bash", "gh run list --limit 5"),
+        ("Bash", "gh run list -R owner/repo --branch main --json status,conclusion"),
+        ("Bash", "gh pr checks 5"),
+        ("PowerShell", "gh run view 7 --json status"),
+        ("PowerShell", "gh pr checks 5"),
+):
+    for _bg in (False, True):
+        add("ci-wait: %s %s%s is allowed" % (_tool, _command, " under run_in_background" if _bg else ""),
+            "allow", tool=_tool, cwd=NOGIT, command=_command,
+            **({"run_in_background": True} if _bg else {}))
+
+# The text of a command is data. A scanner that finds `gh run watch` in these would refuse a note, a
+# commit message or an issue title. Shapes: quoted text, a lone apostrophe in a heredoc body, a
+# multi-line quoted string, a comment line, an argument, and a quoted `#` ahead of a read.
+for _label, _command in (
+        ("quoted text", 'echo "gh run watch 7"'),
+        ("a heredoc body with a lone apostrophe", "cat > notes.txt <<'EOF'\nDon't gh run watch here\nEOF"),
+        ("a multi-line quoted string", 'echo "first line\ngh run watch 7 later"'),
+        ("a comment line", "# start gh run watch 7 later\necho ready"),
+        ("an issue title", 'gh issue create --title "gh run watch"'),
+        ("a read after a quoted comment opener", 'echo "# x"; gh run view 7 --json status'),
+):
+    for _bg in (False, True):
+        add("ci-wait: gh run watch named in %s is data, allowed%s"
+            % (_label, " under run_in_background" if _bg else ""), "allow", cwd=NOGIT,
+            command=_command, **({"run_in_background": True} if _bg else {}))
+
+
 # =========================================================================== background end condition
 #
 # Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
 # an `until: <condition>` note in the Bash call's `description`. A refusal without one names the note
 # in its remedy. stall_watch.py --stop shows the note beside each quiet shell (its cases are in
 # test_stall_watch_stop.py). Incident: a file server on port 3202 ran 27 h unnoticed.
-# A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is not a
-# long-runner either: it ends by itself.
+# A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is no
+# long-runner case either: the waiter rule refuses it under run_in_background, with or without a
+# note (decision ci-wait-reads-run-status, "Claude's own waits").
 # Rule name: background-end. The deny cases are the red proof on the code before the rule. The allow
 # cases pass on that code too. They pin that the rule refuses no finished job, and that a note does
 # not unlock a rule that already refuses (`tail -f`, live-stream).
@@ -4035,8 +4131,11 @@ add("background-end: a build under run_in_background needs no note, allowed", "a
     cwd=NOGIT, command="npm run build", run_in_background=True)
 add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
-add("background-end: gh run watch under run_in_background needs no note, allowed", "allow",
-    cwd=NOGIT, command="gh run watch 7", run_in_background=True)
+add("background-end: gh run watch under run_in_background is refused by the waiter rule", "deny",
+    "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True)
+add("background-end: a note does not unlock gh run watch, the waiter rule still refuses it",
+    "deny", "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True,
+    description="until: run 7 ends")
 add("background-end: a server named in quoted text is data, allowed", "allow", cwd=NOGIT,
     command='echo "python3 -m http.server 3202"', run_in_background=True)
 add("background-end: a server named in a heredoc body is data, allowed", "allow", cwd=NOGIT,
