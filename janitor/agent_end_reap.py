@@ -328,15 +328,18 @@ def host_pid():
 
 
 def parent_table():
-    """{pid: ppid} for every process, from one read, or None when it could not be read."""
+    """{pid: ppid} for every process, from one read, or None when it could not be read. POSIX drops a
+    zombie: it holds no cwd, and an unwaited child of the host must not keep the tree."""
     if sys.platform.startswith("win"):
         return dict(sweep._toolhelp_process_entries()) or None
     try:
-        answer = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10)
+        answer = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,stat="], capture_output=True, text=True,
+                                timeout=10)
     except Exception:
         return None
     rows = [line.split() for line in answer.stdout.splitlines()] if answer.returncode == 0 else []
-    table = {int(r[0]): int(r[1]) for r in rows if len(r) == 2 and r[0].isdigit() and r[1].isdigit()}
+    table = {int(r[0]): int(r[1]) for r in rows
+             if len(r) == 3 and r[0].isdigit() and r[1].isdigit() and not r[2].startswith("Z")}
     return table or None
 
 
@@ -362,7 +365,8 @@ def host_descendants(pids, host):
         current, seen = table[pid], set()
         while current is not None and current not in seen and len(seen) < MAX_CLIMB:
             if current == host:
-                found.append(pid)
+                if sweep.pid_alive(pid):  # Windows lists an exited, handle-held pid; it reads as gone
+                    found.append(pid)
                 break
             seen.add(current)
             current = table.get(current)
