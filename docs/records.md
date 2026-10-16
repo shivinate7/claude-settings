@@ -348,6 +348,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-partial-write-fence` | A partial write can leave a fence open. | [`debts/inbox-partial-write-fence.md`](../debts/inbox-partial-write-fence.md) |
 | `inbox-path-drop-silent` | If the inbox path cannot be built, an `fb` message is dropped with one stderr line only. | [`debts/inbox-path-drop-silent.md`](../debts/inbox-path-drop-silent.md) |
 | `inbox-unreadable-drops-ids` | An unreadable inbox drops the open ids from the post-compaction note. | [`debts/inbox-unreadable-drops-ids.md`](../debts/inbox-unreadable-drops-ids.md) |
+| `index-row-drop-no-finding` | The records page can lose a row with no finding in two cases. | [`debts/index-row-drop-no-finding.md`](../debts/index-row-drop-no-finding.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
 | `install-family-list-by-hand` | The guard's module list `_FAMILY_MODULES` is kept by hand. | [`debts/install-family-list-by-hand.md`](../debts/install-family-list-by-hand.md) |
 | `install-hook-path-from-checkout` | The post-merge git hook runs the installer from the checkout that ran the pull. | [`debts/install-hook-path-from-checkout.md`](../debts/install-hook-path-from-checkout.md) |
@@ -416,6 +417,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `node-file-server-unchecked` | `node <file>` under `run_in_background` is not refused without an `until:` note. | [`debts/node-file-server-unchecked.md`](../debts/node-file-server-unchecked.md) |
 | `off-line-fork-reads-pre-cut` | A branch can be cut from a PR branch that merged later. | [`debts/off-line-fork-reads-pre-cut.md`](../debts/off-line-fork-reads-pre-cut.md) |
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
+| `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, the generator run for the records page fails, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
 | `plain-diff-4mib-unconfirmed` | Output over the host's limit is cut, and the header says "Diff truncated". | [`debts/plain-diff-4mib-unconfirmed.md`](../debts/plain-diff-4mib-unconfirmed.md) |
 | `plain-diff-desktop-untested` | The pane draw, and the turn-text match against a real `$.session.messages()`, are untested in the desktop app. | [`debts/plain-diff-desktop-untested.md`](../debts/plain-diff-desktop-untested.md) |
 | `plain-diff-env-innocent-name` | A `.env` body under an innocent name, such as `notes.txt`, passes the path test. | [`debts/plain-diff-env-innocent-name.md`](../debts/plain-diff-env-innocent-name.md) |
@@ -480,6 +482,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-write-miss-sort-output` | `sort -o P` writes P, but `sort` is not in `MUTATING_COMMAND` and `-o` is not a redirect, so the write is not seen. | [`debts/shell-write-miss-sort-output.md`](../debts/shell-write-miss-sort-output.md) |
 | `shell-write-miss-spaced-target` | `cat > "dir with space/.claude/settings.json"` writes the settings file, but the reader splits the quoted path on its space, and no fragment of it follows the `>`. | [`debts/shell-write-miss-spaced-target.md`](../debts/shell-write-miss-spaced-target.md) |
 | `shell-write-miss-subshell` | A write inside a subshell, `( ... > P)`, is not seen: the closing parenthesis stays glued to the path word, so the path never matches. | [`debts/shell-write-miss-subshell.md`](../debts/shell-write-miss-subshell.md) |
+| `silent-undo-oracle-hides-cause` | When the records page generator fails, is missing, or reports a problem, the silent-undo check reports only "hunk reversed" for `docs/records.md` and discards the generator's stderr. | [`debts/silent-undo-oracle-hides-cause.md`](../debts/silent-undo-oracle-hides-cause.md) |
 | `sim-boot-check-xcodebuild` | The ruling 5 boot check runs only after `simctl boot` and MCP `launch`. | [`debts/sim-boot-check-xcodebuild.md`](../debts/sim-boot-check-xcodebuild.md) |
 | `skill-rows-dir-named-skill-md` | A directory named `SKILL.md` counts as a skill. | [`debts/skill-rows-dir-named-skill-md.md`](../debts/skill-rows-dir-named-skill-md.md) |
 | `skill-rows-fence-indent` | In the check, a line of 4 spaces, then a fence mark, inside a fence closes it. | [`debts/skill-rows-fence-indent.md`](../debts/skill-rows-fence-indent.md) |
