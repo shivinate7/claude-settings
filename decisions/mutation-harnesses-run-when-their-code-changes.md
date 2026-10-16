@@ -28,13 +28,14 @@ other step took under 2 min. A pull request that changed one sentence in
 - A nightly `schedule:` run on main and `workflow_dispatch` run every harness. The guard harness
   runs on ubuntu only; the sweep harness runs on every OS.
 - A diff that cannot be read runs both harnesses.
-- The Guard harness runs on Ubuntu only (the `gates` job). macOS and Windows never run it: on
+- The Guard harness runs on Ubuntu only (the `gates-mutate-guard` job). macOS and Windows never run it: on
   main's push run 37086259145 it took 34.5 min on Windows and hit the 45 min job timeout. No
   mutant is marked `windows` or macOS-only, so no subset stays on those OSes.
 
 ## Accepted risk
 
-main has no branch protection and no required check, so a skipped step blocks nothing.
+main requires the `stamp.json` checks (decision main-branch-protection). A skipped step
+counts as passing there, so a skipped harness blocks nothing.
 A regression that reaches a harness only through a file outside the sets above is
 caught by the nightly run, not by the pull request.
 
