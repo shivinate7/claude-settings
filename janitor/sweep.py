@@ -734,7 +734,8 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
-    (`_restore_cut_short`) gets its deleted tracked files back first, so it can be decided again."""
+    (`_restore_cut_short`) gets its deleted tracked files back first, when no lock, session or
+    process holds it, so it can be decided again."""
     path = entry["path"]
     if min_idle is not None:
         idle = worktree_idle_seconds(path)
@@ -743,7 +744,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
         if idle < min_idle:
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
-    _restore_cut_short(path)
+    _restore_cut_short(where, entry)
     decision = decide_worktree(where, entry, attended=True)
     if decision["action"] != "reap":
         return decision
@@ -2198,20 +2199,33 @@ def _admin_dir(path: str):
     return answer.stdout.strip()
 
 
-def _restore_cut_short(path: str):
+def _restore_cut_short(where: str, entry: dict):
     """Owner ruling 2026-10-15, review point 4: `guard._git` stops `git worktree remove` at 10 s, which
     can leave a tree half deleted. `remove_worktree` writes REMOVAL_MARKER before each remove. When
     the marker is there and every dirty line is a deleted tracked file, this writes the missing
     files back from the index (`checkout-index` without -f never overwrites a file that exists), so
     `decide_worktree` sees a clean tree and the next remove finishes the job. No --force anywhere.
     LIMIT: when the cut-short remove already deleted the tree's `.git` file, git cannot read the
-    tree, so it is kept as unreadable and needs a person."""
+    tree, so it is kept as unreadable and needs a person.
+    Review round 2: a failed remove can leave the marker on an intact tree, where a deletion may be
+    a person's own. So the write-back runs only when the lock, session and process checks that
+    `decide_worktree` runs after its clean check would pass. Any failed read writes nothing."""
+    path = entry["path"]
     admin = _admin_dir(path)
     if not admin or not os.path.isfile(os.path.join(admin, REMOVAL_MARKER)):
         return
     dirty = guard.porcelain(path)
-    if dirty and all(line.startswith(" D ") for line in dirty):
-        guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
+    if not dirty or not all(line.startswith(" D ") for line in dirty):
+        return
+    locked = guard.worktree_locked(where, path)
+    if locked is None or (locked and stale_agent_lock_verdict(entry.get("locked_reason") or "") is not True):
+        return
+    if guard.worktree_live_session(path) is not False:
+        return
+    inside, _unreadable = processes_in(path)
+    if inside != []:
+        return
+    guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
 
 
 def _lock_reason_now(root: str, path: str):

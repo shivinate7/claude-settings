@@ -192,9 +192,12 @@ def decide(target: str, host=None):
     return reason, decisions
 
 
-def _decide(target: str, host=None):
+def _decide(target: str, host=None, chain=None):
     """`decide` plus the cwd of every process read, for the build-folder gate, and the pids whose cwd
-    could not be read, for the host-descendant gate. HOST: see `tree_root_orphaned`."""
+    could not be read, for the host-descendant gate. HOST: see `tree_root_orphaned`. CHAIN (`own_chain`)
+    is never stopped: review round 2 found the hook's own wrapper, cwd inside and child of the host,
+    read as host-started and signalled."""
+    chain = chain or set()
     primary = sweep._is_primary_checkout(target)
     if primary is None:
         return "unreadable-subject", [], [], []
@@ -228,6 +231,9 @@ def _decide(target: str, host=None):
         if not sweep._cwd_under_checkout(cwd, target):
             continue
         base = {"pid": pid, "cwd": cwd, "command": sweep.process_command(pid)}
+        if pid in chain:  # logged, so each run measures which of the hook's ancestors sit inside
+            decisions.append(dict(base, action="keep", reason="hook-chain"))
+            continue
         orphan = tree_root_orphaned(pid, target, cwd_of, host)
         if orphan is None:
             decisions.append(dict(base, action="keep", reason="unreadable-subject"))
@@ -343,21 +349,29 @@ def parent_table():
     return table or None
 
 
-def host_descendants(pids, host):
-    """The PIDS (cwd unreadable) that descend from HOST, or None when that cannot be told. Owner call,
-    2026-10-15: such a pid may sit inside the own tree, so it keeps the tree. A pid not in the table
-    has exited. The hook's own chain up to HOST is not a reason to keep."""
-    if not pids:
-        return []
-    table = parent_table() if host is not None else None
-    if table is None:
-        return None
-    chain, current = {host}, os.getpid()
+def own_chain(host, table):
+    """This hook's pid and its ancestors up to and including HOST, from TABLE ({pid: ppid}). With HOST
+    unset or never met, the climb goes to the top. The hook never stops these, and they never count
+    as host-started."""
+    chain, current = set(), os.getpid()
     for _ in range(MAX_CLIMB):
         if current is None or current in chain:
             break
         chain.add(current)
+        if current == host:
+            break
         current = table.get(current)
+    return chain
+
+
+def host_descendants(pids, host, table, chain):
+    """The PIDS (cwd unreadable) that descend from HOST, or None when that cannot be told. Owner call,
+    2026-10-15: such a pid may sit inside the own tree, so it keeps the tree. A pid not in TABLE
+    has exited. The hook's own CHAIN up to HOST is not a reason to keep."""
+    if not pids:
+        return []
+    if host is None or table is None:
+        return None
     found = []
     for pid in pids:
         if pid in chain or pid not in table:
@@ -443,7 +457,21 @@ def handle(raw: str, started=None):
     if not target:
         return record
     host = host_pid()
-    reason, decisions, cwds, unreadable = _decide(target, host)
+    table = parent_table()
+    if table is None:  # the hook's own chain cannot be told, so nothing may be stopped
+        record.update(reason="unreadable-subject: the process table could not be read", host=host)
+        return record
+    chain = own_chain(host, table)
+    # The harness runs the hook with its cwd inside the tree. A live cwd inside blocks git's delete
+    # on Windows (MEASURED 2026-10-15: rc 255, and git had already deleted every file), so the hook
+    # leaves first. LIMIT: its wrapper shells stay inside and keep the tree as process-inside.
+    left = None
+    try:
+        if sweep._cwd_under_checkout(os.getcwd(), target):
+            os.chdir(os.path.dirname(os.path.dirname(os.path.dirname(target))))
+    except OSError as exc:
+        left = "hook-cwd-inside: the hook could not leave the tree: %r" % exc
+    reason, decisions, cwds, unreadable = _decide(target, host, chain)
     stopped = []
     for decision in decisions:
         if decision["action"] == "reap":
@@ -453,8 +481,10 @@ def handle(raw: str, started=None):
     if reason is None:
         wait_gone(stopped, target)
         # A stopped pid can read as unreadable while it exits (a zombie), so it is not counted.
-        held = host_descendants([p for p in unreadable if p not in stopped], host)
-        if held is None:
+        held = host_descendants([p for p in unreadable if p not in stopped], host, table, chain)
+        if left:
+            own_keep = left
+        elif held is None:
             own_keep = "unreadable-subject: the host's descendants could not be read"
         elif held:
             own_keep = "unreadable-subject: pid %s descends from the host" % ", ".join(map(str, held))
