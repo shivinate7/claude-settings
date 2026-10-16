@@ -66,6 +66,7 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
+    "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "pointer": "the pointer HEAD checkout",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
@@ -10049,6 +10050,115 @@ def worktree_home_later_field_case():
     return True, "a later field outside the home is refused; two fields inside stay allowed"
 
 
+def _posix_form(path):
+    """The `/c/Users/...` spelling of a Windows path, as Git Bash and the Bash tool print it.
+    A path with no drive letter has no other spelling, so it comes back as itself."""
+    drive, rest = os.path.splitdrive(path)
+    if not drive:
+        return slash(path)
+    return "/" + drive[0].lower() + slash(rest)
+
+
+def _home_fixture(agent_id):
+    """One primary checkout, one linked worktree of it for `agent_id`, and that agent's first call
+    from inside the worktree, which records the home. Returns (primary, worktree, problems)."""
+    primary = os.path.join(ROOT, "wthome_" + agent_id + "_primary")
+    worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + agent_id)
+    got, reason = _decide_full("Bash", worktree, agent_id=agent_id, command="echo hi")
+    problems = []
+    if got != "allow":
+        problems.append("recording call: expected allow, got %s (%s)" % (got, reason[:120]))
+    return primary, worktree, problems
+
+
+def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=None):
+    """Run one call. A problem is recorded unless it gets `expect`, and a deny must name `rule`."""
+    got, reason = _decide_full(tool, cwd, agent_id=agent_id, command=command)
+    if got != expect:
+        problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+    elif rule and rule not in reason:
+        problems.append("%s: the deny does not name %s (%s)" % (label, rule, reason[:120]))
+
+
+# (shell, command template): the lone step that moves into a directory.
+MOVE_STEPS = (("Bash", "cd %s"), ("PowerShell", "Set-Location %s"))
+
+
+def worktree_home_lone_cd_case():
+    """Rule 0: a lone `cd` (Bash) or `Set-Location` (PowerShell) into the recorded home is allowed,
+    from a cwd outside that home, with the home written as a Windows or a POSIX path.
+
+    Without this, a stray `Set-Location` leaves the PowerShell cwd outside the home, and every later
+    call is refused, including the one that would move it back.
+    """
+    agent_id = "wthomelone1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    for shell, template in MOVE_STEPS:
+        for home in (worktree, _posix_form(worktree)):
+            _expect_call(problems, "%s into %s from outside" % (shell, home), "allow", shell,
+                         primary, agent_id, template % home)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a lone cd or Set-Location into the home is allowed in both path forms"
+
+
+def worktree_home_chained_case():
+    """Rule 0: a `cd` or `Set-Location` into the home that has another step chained after it is
+    still refused, from a cwd outside the home. The lone-step allowance must not reach a chain."""
+    agent_id = "wthomechain1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    chained = (("Bash", "cd %s; git push"), ("PowerShell", "Set-Location %s; rm x"))
+    for shell, template in chained:
+        for home in (worktree, _posix_form(worktree)):
+            _expect_call(problems, "%s chained into %s from outside" % (shell, home), "deny",
+                         shell, primary, agent_id, template % home, rule="worktree-home")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a chained step after a move into the home is refused, in both path forms"
+
+
+def worktree_home_posix_cwd_case():
+    """Rule 0: a cwd given in POSIX form, `/c/Users/...`, names the same folder as the Windows
+    home the agent recorded. Inside that home it is allowed. The same form outside it is refused,
+    so the spelling alone never decides which side a cwd is on."""
+    agent_id = "wthomeposix1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    _expect_call(problems, "POSIX cwd inside the home", "allow", "Bash", _posix_form(worktree),
+                 agent_id, "echo hi")
+    # An allow alone cannot show the cwd was READ as inside: an unreadable home also allows. An
+    # Edit to the primary checkout from that cwd is refused only once the home is known.
+    got, reason = _decide_full("Edit", _posix_form(worktree), agent_id=agent_id,
+                               file_path=os.path.join(primary, "src", "app.py"),
+                               old_string="a", new_string="b")
+    if got != "deny" or "worktree-home" not in reason:
+        problems.append("POSIX cwd inside the home, Edit outside it: expected deny worktree-home, "
+                        "got %s (%s)" % (got, reason[:120]))
+    _expect_call(problems, "POSIX cwd outside the home", "deny", "Bash", _posix_form(primary),
+                 agent_id, "echo hi", rule="worktree-home")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a /c/ cwd inside the home is allowed; the same form outside is refused"
+
+
+def worktree_home_cd_out_case():
+    """Rule 0: a `cd` or `Set-Location` from a cwd outside the home, to a path outside the home, is
+    still refused. The target is a folder in the primary checkout, or the home's own name with a
+    suffix, which shares its text but is not inside it."""
+    agent_id = "wthomeout1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    targets = (os.path.join(primary, "src"), worktree + "-sibling")
+    for shell, template in MOVE_STEPS:
+        for target in targets:
+            for form in (target, _posix_form(target)):
+                _expect_call(problems, "%s to %s from outside" % (shell, form), "deny", shell,
+                             primary, agent_id, template % form, rule="worktree-home")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a cd or Set-Location outside the home, or to its suffixed sibling, is refused"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -10102,6 +10212,14 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
+    ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
+     "it, in Windows or POSIX form", worktree_home_lone_cd_case),
+    ("worktree-home: a cd or Set-Location into the home chained with another step is still denied",
+     worktree_home_chained_case),
+    ("worktree-home: a /c/ cwd inside the home is inside, and the same form outside it is denied",
+     worktree_home_posix_cwd_case),
+    ("worktree-home: a cd or Set-Location outside the home, or to its suffixed sibling, is denied",
+     worktree_home_cd_out_case),
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -11609,8 +11727,12 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session matches two", "branch-worktree"),
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
     ("liveness: session_is_live reads an implied", "branch-worktree"),
-    ("worktree-home: orchestrator", "branch-worktree"),
-    ("worktree-home: a later path field", "branch-worktree"),
+    ("worktree-home: orchestrator", "worktree-home"),
+    ("worktree-home: a later path field", "worktree-home"),
+    ("worktree-home: a lone cd or Set-Location", "worktree-home"),
+    ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),
+    ("worktree-home: a /c/ cwd inside", "worktree-home"),
+    ("worktree-home: a cd or Set-Location outside the home", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
