@@ -51,6 +51,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       lint/test_scanner_traps.mjs) on="$on mods code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
+      # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
+      skills/plain-english-map/*.md) on="$on mods " ;;
       # Docs: nothing runs on them but the lints in `gates`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
       *) on="$on $ALL " ;;
