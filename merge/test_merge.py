@@ -3413,6 +3413,7 @@ class SliceSelector(unittest.TestCase):
         got = {f"{t.__class__.__name__}.{t._testMethodName}" for t in iter_tests(select_tests(self.all_tests(), "windows-slice"))
                if t.__class__.__name__ != "SliceSelector"}
         self.assertEqual(got, {
+            "ClaudeMdFlag.test_a_name_outside_cp1252_on_a_piped_stdout_still_flags_and_runs_every_step_after_the_merge",
             "Flow.test_afterMerge_runs_in_git_bash_not_the_wsl_stub",
             "Flow.test_full_merge_claims_pushes_merges_syncs_cleans",
             "GhHalf.test_an_empty_required_list_is_refused",
