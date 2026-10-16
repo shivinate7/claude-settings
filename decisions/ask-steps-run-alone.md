@@ -18,6 +18,11 @@ aliases `sl`, `chdir` and `Push-Location`. So does `cd -`. A segment with a redi
 substitution, a `&`, or an escaped quote (`\"`, `\'`) is a step too. A reset after `Set-Location`
 is judged in the target folder, as after `cd`.
 
+Owner ruling, 2026-10-14 22:25 CDT. An inline interpreter script (a python, node, perl or ruby
+heredoc) is one step, and it asks once. A chain around it still counts. A shell body (bash, sh, a
+heredoc piped to a shell) counts each line. A body with no closing line counts each line. A deny
+in the body still wins. Owner rule, 22:27: no safety hole that main lacks.
+
 The steps that ask today: a worktree prune, a worktree discard, a forced push, and a shell write
 to the model-cap settings. The deny names the kind of step, never the command text.
 
