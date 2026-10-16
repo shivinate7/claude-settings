@@ -71,6 +71,9 @@ one fixed order, and the first match wins.
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied, `--auto` too.
     draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
+    records-page       a `git commit` whose docs/records.md differs from HEAD's page and from the
+                       base tip's page. A merge of the base brings the base's page, so it passes.
+                       Denied. A read that fails is no hit.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -256,8 +259,8 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            DRAFT_PR_REASON, MERGE_TOOLS, gh_call_of, git_call_of, merge_call_of, merge_gate,
-            merge_gate_reason, settings_roots, undrafted_pr_create,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of, merge_call_of,
+            merge_gate, merge_gate_reason, records_page_hit, settings_roots, undrafted_pr_create,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -2051,6 +2054,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+
+    # 6c. A lane commit of the generated records page (decision records-index-at-merge).
+    matched = records_page_hit(stripped, cwd)
+    if matched:
+        refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
