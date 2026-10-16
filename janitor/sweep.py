@@ -453,29 +453,36 @@ def _is_primary_checkout(entry_path: str):
     return own == common
 
 
-AGENT_LOCK_RE = re.compile(r"^claude agent agent-\w+ \(pid (\d+) start (.+)\)$")
+AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
 def stale_agent_lock_verdict(reason: str):
-    """True when REASON is a claude agent lock (`claude agent agent-<id> (pid N start <date>)`,
-    MEASURED from the Agent tool's own lock) whose pid is dead, or alive with a different start
-    time (pid reuse). The pid is the HOST claude process, not the agent. False when it still
-    runs, or the reason is any other lock. None when the start time or the process read could
-    not tell. Only True lets a lock go."""
+    """True when REASON is a claude agent lock that may go. Two forms, MEASURED: the Agent tool's own
+    lock `claude agent agent-<id> (pid N start <date>)`, and, on this machine since 2026-10-15,
+    `claude agent agent-<id> (pid N)` with no start time. N is the HOST claude process, not the agent.
+    A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
+    reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
+    process now holds keeps its lock. False when the holder still runs, or the reason is any other
+    lock. None when the start time or the process read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
-    try:
-        # MEASURED: the lock's date is UTC (this machine's own `ps` read 5 hours earlier for
-        # the same pid), so it is read with timegm, never mktime.
-        locked_ms = calendar.timegm(time.strptime(found.group(2), "%a %b %d %H:%M:%S %Y")) * 1000
-    except Exception:
-        return None
-    actual = guard._process_start_ms(int(found.group(1)))
+    pid, start = int(found.group(1)), found.group(2)
+    locked_ms = None
+    if start is not None:
+        try:
+            # MEASURED: the lock's date is UTC (this machine's own `ps` read 5 hours earlier for
+            # the same pid), so it is read with timegm, never mktime.
+            locked_ms = calendar.timegm(time.strptime(start, "%a %b %d %H:%M:%S %Y")) * 1000
+        except Exception:
+            return None
+    actual = guard._process_start_ms(pid)
     if actual is guard.PROCESS_START_UNREADABLE:
         return None
     if actual is None:
         return True
+    if locked_ms is None:
+        return False
     return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
 
 
@@ -679,6 +686,12 @@ def _agent_rule_keep(kept: dict, idle):
     if idle < AGENT_IDLE_SECONDS:
         return {"path": path, "action": "keep",
                 "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    return _remote_tracking_keep(path)
+
+
+def _remote_tracking_keep(path: str):
+    """A keep decision unless HEAD of PATH is on a remote-tracking ref (`git branch -r --contains`),
+    else None. A failed read keeps. One home: the agent rule and the agent-end rule both ask it."""
     contains = guard._git(path, "branch", "-r", "--contains", "HEAD")
     if contains is None or contains.returncode != 0:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
@@ -774,6 +787,35 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "reap", "reason": "removable: stale agent lock",
                 "unlock": True, "lock_reason": holder}
     return {"path": path, "action": "reap", "reason": "removable"}
+
+
+# Owner ruling 2026-10-15: at agent end, ANOTHER finished agent's tree needs 30 minutes of quiet.
+# AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
+AGENT_END_IDLE_SECONDS = 30 * 60
+
+
+def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
+    """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
+    the seconds of git quiet the tree needs (None: none). Idle is read first: `git status` can
+    rewrite the index and make every tree look active. The rest is
+    `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
+    the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
+    remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
+    (`_restore_cut_short`) gets its deleted tracked files back first, when no lock, session or
+    process holds it, so it can be decided again."""
+    path = entry["path"]
+    if min_idle is not None:
+        idle = worktree_idle_seconds(path)
+        if idle is None:
+            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+        if idle < min_idle:
+            return {"path": path, "action": "keep",
+                    "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    _restore_cut_short(where, entry)
+    decision = decide_worktree(where, entry, attended=True)
+    if decision["action"] != "reap":
+        return decision
+    return _remote_tracking_keep(path) or decision
 
 
 # ------------------------------------------------------------------ orphaned TCP listeners
@@ -2212,13 +2254,57 @@ def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):
         )
 
 
+REMOVAL_MARKER = "claude-removal-started"  # in the tree's admin dir; a finished remove deletes that dir
+
+
+def _admin_dir(path: str):
+    """The absolute git admin dir of worktree PATH (`.git/worktrees/<name>`), or None. The same read
+    as `worktree_idle_seconds`, kept apart so the sweep-fast lane's edits there do not collide."""
+    answer = guard._git(path, "rev-parse", "--absolute-git-dir")
+    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+        return None
+    return answer.stdout.strip()
+
+
+def _restore_cut_short(where: str, entry: dict):
+    """Owner ruling 2026-10-15, review point 4: `guard._git` stops `git worktree remove` at 10 s, which
+    can leave a tree half deleted. `remove_worktree` writes REMOVAL_MARKER before each remove. When
+    the marker is there and every dirty line is a deleted tracked file, this writes the missing
+    files back from the index (`checkout-index` without -f never overwrites a file that exists), so
+    `decide_worktree` sees a clean tree and the next remove finishes the job. No --force anywhere.
+    LIMIT: when the cut-short remove already deleted the tree's `.git` file, git cannot read the
+    tree, so it is kept as unreadable and needs a person.
+    Review round 2: a failed remove can leave the marker on an intact tree, where a deletion may be
+    a person's own. So the write-back runs only when the lock, session and process checks that
+    `decide_worktree` runs after its clean check would pass. Any failed read writes nothing."""
+    path = entry["path"]
+    admin = _admin_dir(path)
+    if not admin or not os.path.isfile(os.path.join(admin, REMOVAL_MARKER)):
+        return
+    dirty = guard.porcelain(path)
+    if not dirty or not all(line.startswith(" D ") for line in dirty):
+        return
+    locked = guard.worktree_locked(where, path)
+    if locked is None or (locked and stale_agent_lock_verdict(entry.get("locked_reason") or "") is not True):
+        return
+    if guard.worktree_live_session(path) is not False:
+        return
+    inside, _unreadable = processes_in(path)
+    if inside != []:
+        return
+    guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
+
+
 _LOCK_UNREADABLE = object()
 
 
 def _lock_unlockable(root: str, path: str, decision: dict):
     """Re-read the lock of this one tree just before `git worktree unlock`: an agent may have
-    taken a live lock since the pass listed it. True when the lock is still stale (or gone), so
-    the removal goes ahead; otherwise False, and DECISION becomes a keep."""
+    taken a live lock since the pass listed it. True when the lock is gone, or is still the very
+    lock that was judged stale, so the removal goes ahead; otherwise False, and DECISION becomes a
+    keep. A lock that changed since the read is kept, even a stale one.
+    LIMIT: git has no compare-and-unlock, so a lock taken between this read and the unlock is still
+    cleared."""
     named = os.path.normcase(os.path.realpath(path))
     found = [e for e in parse_worktree_list(root) or []
              if os.path.normcase(os.path.realpath(e["path"])) == named]
@@ -2226,8 +2312,8 @@ def _lock_unlockable(root: str, path: str, decision: dict):
     if reason is None:
         decision.pop("unlock", None)  # nobody holds a lock now: nothing to take off
         return True
-    if reason is not _LOCK_UNREADABLE and stale_agent_lock_verdict(reason) is True:
-        decision["lock_reason"] = reason
+    if (reason is not _LOCK_UNREADABLE and reason == decision.get("lock_reason")
+            and stale_agent_lock_verdict(reason) is True):
         return True
     decision.pop("unlock", None)
     decision["action"] = "keep"
@@ -2245,10 +2331,19 @@ def remove_worktree(root: str, path: str, decision: dict):
             decision["error"] = "unlock failed: %s" % (
                 unlocked.stderr.strip() if unlocked is not None else "git gave no answer")
             return
+    admin = _admin_dir(path)
+    if admin:
+        try:
+            with open(os.path.join(admin, REMOVAL_MARKER), "w", encoding="utf-8") as handle:
+                handle.write("%d\n" % int(time.time()))
+        except OSError:
+            pass  # no marker: a cut-short remove is kept as dirty, as before
     answer = guard._git(root, "worktree", "remove", path)
     if answer is None or answer.returncode != 0:
         decision["error"] = "remove failed: %s" % (
-            answer.stderr.strip() if answer is not None else "git gave no answer"
+            answer.stderr.strip() if answer is not None else
+            "git gave no answer (cut short at its time limit, or git did not start); a later "
+            "agent end finishes a cut-short remove"
         )
         if decision.get("unlock"):
             # The lock came off for this removal only. Put it back, so the worktree is no

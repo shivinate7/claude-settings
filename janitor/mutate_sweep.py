@@ -650,6 +650,11 @@ MUTATIONS = [
      '        if cwd is None or not sweep._cwd_under_checkout(cwd, target):\n            continue',
      '        if cwd is None:\n            continue',
      "test_an_orphan_in_another_worktree_is_not_even_considered"),
+    ("agent-end reap: a finished tree idle under 30 minutes is removed",
+     "agent_end_reap",
+     'decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)',
+     'decide_agent_end_worktree(root, entry, None)',
+     "test_an_other_agent_tree_idle_31_minutes_is_removed_and_29_minutes_is_kept"),
     ("agent-end reap: an agent id is no longer checked, so a path in it escapes the worktrees",
      "agent_end_reap",
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
@@ -906,13 +911,20 @@ MUTATIONS = [
      "test_running_agent_lock_keeps"),
     ("stale lock: an unreadable lock start counts as stale",
      "sweep",
-     '    except Exception:\n'
-     '        return None\n'
-     '    actual = guard._process_start_ms(',
-     '    except Exception:\n'
-     '        return True\n'
-     '    actual = guard._process_start_ms(',
+     '        except Exception:\n'
+     '            return None\n'
+     '    actual = guard._process_start_ms(pid)',
+     '        except Exception:\n'
+     '            return True\n'
+     '    actual = guard._process_start_ms(pid)',
      "test_unreadable_lock_start_keeps"),
+    ("stale lock: a lock with no start time counts as stale, even when its host runs",
+     "sweep",
+     '    if locked_ms is None:\n'
+     '        return False\n',
+     '    if locked_ms is None:\n'
+     '        return True\n',
+     "test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
      '        unlocked = guard._git(root, "worktree", "unlock", path)',
