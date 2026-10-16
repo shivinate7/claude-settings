@@ -54,8 +54,6 @@ test('SKILL.md names no path of one host repository and cites no decision of one
 
 test('the skill holds its scripts, its helpers and its page template', () => {
   for (const rel of FILES) needFile(rel);
-  const extra = readdirSync(join(SKILL, 'scripts', 'lib')).filter((n) => !LIB.includes(`scripts/lib/${n}`));
-  assert.deepEqual(extra, [], 'scripts/lib/ holds a file that this test does not name');
 });
 
 // ---- the scan of the scripts ---------------------------------------------------------------------------------

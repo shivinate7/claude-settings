@@ -59,17 +59,25 @@ export const junction = (target) => {
   return link;
 };
 
-/** A copy of `tests/fixture/` in a fresh git repository in tmp. `git add -N` lists each file for `git ls-files` and writes no object. */
-export const scratchRepo = () => {
+/**
+ * A copy of `tests/fixture/` in a fresh git repository in tmp. `git add -N` lists each file for `git ls-files` and writes no object.
+ * With `commit`, the files are committed too, so `git rev-parse HEAD` works. A host repository that builds a page has a commit.
+ * The commit runs with an empty hooks folder, so no hook of the machine runs in the scratch repository.
+ */
+export const scratchRepo = ({ commit = false } = {}) => {
   const dir = tmpFolder('pemap-repo-');
   cpSync(FIXTURE, dir, { recursive: true });
   const git = (...a) => execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   git('init', '-q');
-  git('add', '-N', '.');
+  if (commit) {
+    git('add', '.');
+    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture');
+  } else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
   for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'docs/map/core.md', 'docs/map/traces/home.md'])
     assert.ok(tracked.includes(f), `the scratch repository does not track ${f}`);
+  if (commit) assert.match(git('rev-parse', 'HEAD').trim(), /^[0-9a-f]{40}$/, 'the scratch repository has no commit');
   return dir;
 };
 
