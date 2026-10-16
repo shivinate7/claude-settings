@@ -5240,14 +5240,22 @@ class SimulatorTierActTests(unittest.TestCase):
 #   sweep._now                  zero-argument callable, seconds. `main` reads it once when the pass
 #                               starts. The deadline is that reading plus the budget.
 #   sweep.JUDGE_BUDGET_SECONDS  the budget for the WHOLE pass: the idle sort, the judging, the
-#                               removals, the branch loop and the process reaps. Not the judging.
-# One deadline covers every phase in TIMED_PHASES. Each phase checks the clock before it starts.
-# None starts at or past the deadline. A tree the pass did not judge gets a decision in the result:
-# action "keep", reason starting "not judged". Its folder stays on disk. A stale agent lock is
-# re-read just before the tree is unlocked, so a live lock taken after the listing keeps the tree.
+#                               removals, the branch loop, the folder scans and reaps, and the
+#                               process reaps. Not the judging alone.
+# The deadline applies to the SessionEnd run only: `--confirm` with no `--attended`, the argv
+# session_end_sweep.py sends. No flag names that run, so the cases key on the argv. A person's run
+# (`--attended`, with or without `--confirm`, or a plain preview) has no deadline and judges every
+# tree and every phase, however late the clock is (owner ruling 2026-10-15 15:08 CDT).
+# In the SessionEnd run, one deadline covers every phase in TIMED_PHASES. Each phase checks the
+# clock before it starts, and none starts at or past the deadline. No git read whose `-C` folder is
+# a tree starts at or past the deadline, the per-tree primary-checkout read included. Each tree's
+# idle time is read once per pass: the oldest-first sort and the decision share that one read. A
+# tree the pass did not judge gets a decision in the result: action "keep", reason starting "not
+# judged". Its folder stays on disk. A stale agent lock is re-read just before the tree is unlocked,
+# so a live lock taken after the listing keeps the tree.
 #
 # Each case reads `self.events`: the (phase, clock) pair at every timed phase start. A violation
-# names the phase that started late.
+# names the phase that started late. `self.git_reads` holds (clock, git argv) for every git call.
 
 TREE_IDLE_HOURS = (("wt-a", 2), ("wt-b", 3), ("wt-c", 4), ("wt-d", 5), ("wt-e", 6))
 BUDGET = 15.0  # seconds: the deadline is BUDGET past the clock's reading when the pass starts
@@ -5259,6 +5267,9 @@ TIMED_PHASES = (
     ("remove_worktree", "removal", True),
     ("decide_branch", "branch decision", True),
     ("reap_branch", "branch reap", True),
+    ("find_husks", "husk scan", True),
+    ("find_trash", "trash scan", True),
+    ("reap_trash", "trash reap", True),
     ("find_swept_listeners", "listener read", True),
     ("reap_listener", "process reap", False),
     ("find_dead_rooted", "dead-rooted read", True),
@@ -5308,6 +5319,22 @@ def _timed_phases(events, clock, idle_tick):
         yield
 
 
+@contextlib.contextmanager
+def _timed_git(log, clock):
+    """Append (clock, argv) for every `git` call, the clock as it stood when the call started. It
+    wraps whatever `subprocess.run` is current, so enter it after `_watch_git`."""
+    real = subprocess.run
+    now = (lambda: clock[0]) if clock is not None else (lambda: 0.0)
+
+    def run(args, *a, **k):
+        if isinstance(args, (list, tuple)) and args and str(args[0]) == "git":
+            log.append((now(), [str(x) for x in args]))
+        return real(args, *a, **k)
+
+    with mock.patch("subprocess.run", run):
+        yield
+
+
 def _starts_at_or_after(events, phases, deadline):
     """The (phase, clock) starts in EVENTS that name one of PHASES and begin at or past DEADLINE."""
     return ["%s at %gs" % (phase, t) for phase, t in events if phase in phases and t >= deadline]
@@ -5352,6 +5379,7 @@ class SweepFinishesTests(unittest.TestCase):
         the (phase, clock) pair at each TIMED_PHASES start in this pass."""
         calls, results, judged = [], [], []
         self.events = []
+        self.git_reads = []
         real_decide = sweep.decide_worktree
 
         def judging(where, entry, *args, **kwargs):
@@ -5365,7 +5393,8 @@ class SweepFinishesTests(unittest.TestCase):
             results.extend(found)
 
         seams = _no_deadline() if clock is None else _clock_and_budget(clock, budget)
-        with _watch_git(calls), _process_table({}), _machine_quiet(), seams, \
+        with _watch_git(calls), _timed_git(self.git_reads, clock), _process_table({}), \
+                _machine_quiet(), seams, \
                 (extra or contextlib.nullcontext()), \
                 _timed_phases(self.events, clock, idle_tick), \
                 mock.patch.object(sweep, "decide_worktree", judging), \
@@ -5525,6 +5554,116 @@ class SweepFinishesTests(unittest.TestCase):
         late = _starts_at_or_after(self.events, ("removal",), BUDGET)
         self.assertEqual(late, [], "removals started at or past the %g s deadline" % BUDGET)
         self.assert_one_root(results)
+
+    def tree_reads_at_or_after(self, deadline):
+        """Each git read in the pass whose `-C` folder is one of the trees and that started at or
+        past DEADLINE, as text for a failure message."""
+        trees = {_norm_path(p) for p in self.trees.values()}
+        late = []
+        for started, argv in self.git_reads:
+            if started < deadline or "-C" not in argv:
+                continue
+            folder = argv[argv.index("-C") + 1]
+            if _norm_path(folder) in trees:
+                late.append("%s at %gs" % (" ".join(argv[argv.index("-C"):]), started))
+        return late
+
+    def counted_idle_reads(self):
+        """(counts, patch). COUNTS maps each folder to the worktree_idle_seconds calls made on it;
+        PATCH is an `extra` for run_pass that counts them. A preview reads on threads: a lock."""
+        counts, lock = {}, threading.Lock()
+        real_idle = sweep.worktree_idle_seconds
+
+        def counting(path, *args, **kwargs):
+            with lock:
+                key = _norm_path(path)
+                counts[key] = counts.get(key, 0) + 1
+            return real_idle(path, *args, **kwargs)
+
+        return counts, mock.patch.object(sweep, "worktree_idle_seconds", counting)
+
+    def assert_each_tree_idle_read_once(self, argv):
+        counts, patch = self.counted_idle_reads()
+        self.run_pass(argv, extra=patch)
+        self.assertTrue(counts, "no idle read ran, so this case proved nothing")
+        for name, path in self.trees.items():
+            n = counts.get(_norm_path(path), 0)
+            self.assertEqual(n, 1, "%s: worktree_idle_seconds ran %d times in one %r pass; want 1 "
+                                   "(the oldest-first sort and the decision share one read)"
+                             % (name, n, argv))
+
+    def test_each_tree_idle_is_read_once_in_a_confirm_pass(self):
+        self.assert_each_tree_idle_read_once(["--confirm"])
+
+    def test_each_tree_idle_is_read_once_in_a_preview_pass(self):
+        self.assert_each_tree_idle_read_once([])
+
+    def test_no_git_read_in_a_tree_folder_starts_past_the_deadline(self):
+        # Trees 3 to 5 are reached only after two judged trees tick the clock past the deadline.
+        clock = [0.0]
+        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = self.tree_reads_at_or_after(BUDGET)
+        self.assertEqual(late, [], "git reads in a tree folder started at or past the %g s "
+                                   "deadline: %r" % (BUDGET, late))
+
+    def test_no_husk_or_trash_scan_starts_past_the_deadline(self):
+        clock = [0.0]
+        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = _starts_at_or_after(self.events, ("husk scan", "trash scan"), BUDGET)
+        self.assertEqual(late, [], "folder scans started at or past the %g s deadline" % BUDGET)
+
+    def test_no_trash_reap_starts_past_the_deadline(self):
+        # A linked tree under the repository's own .claude/worktrees holds a trash folder that a
+        # reap would delete. Each idle read costs 20 s, so the clock passes the deadline inside the
+        # sort, before any folder scan starts.
+        tree = os.path.join(self.repo, ".claude", "worktrees", "agent-trash")
+        made = run_vcs(self.repo, "worktree", "add", "-q", "--detach", tree, "main")
+        require(made.returncode == 0, "worktree add %r failed: %s" % (tree, made.stderr.strip()))
+        folder = sweep.trash_name(os.path.join(tree, "build"))
+        os.makedirs(folder)
+        verdict = sweep.trash_verdict(folder)
+        require(verdict[0] is True, "the trash folder is not reapable on this machine: %r"
+                % (verdict,))
+        clock = [0.0]
+        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=0.0, idle_tick=20.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = _starts_at_or_after(self.events, ("trash reap",), BUDGET)
+        self.assertEqual(late, [], "trash reaps started at or past the %g s deadline" % BUDGET)
+        self.assertTrue(os.path.isdir(folder), "a trash folder was reaped past the deadline")
+
+    def assert_a_person_run_has_no_deadline(self, argv):
+        # One branch merged into main and checked out nowhere, so the branch loop has work to do.
+        run_vcs(self.repo, "branch", "lane-done", "main")
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(argv, clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        self.assert_one_root(results)
+        reasons = [d["reason"] for d in results[0]["worktrees"] + results[0]["branches"]]
+        late = [r for r in reasons if "deadline" in r]
+        self.assertEqual(late, [], "a %r run has no deadline, yet these decisions cite one: %r"
+                         % (argv, late))
+        self.assertIsNotNone(results[0]["listeners"],
+                             "the listener read was skipped in a %r run" % (argv,))
+        ran = {phase for phase, _t in self.events}
+        for phase in ("branch decision", "listener read", "dead-rooted read"):
+            self.assertIn(phase, ran, "%s never ran in a %r run past the deadline" % (phase, argv))
+        self.assertEqual(sorted(set(self.trees) - set(judged)), [],
+                         "trees the %r run did not judge" % (argv,))
+
+    def test_a_preview_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline([])
+
+    def test_an_attended_preview_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline(["--attended"])
+
+    def test_an_attended_confirm_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline(["--attended", "--confirm"])
 
 
 if __name__ == "__main__":
