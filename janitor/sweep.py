@@ -53,9 +53,10 @@ Usage:
     python3 janitor/sweep.py --discover DIR              # preview a sweep of DIR's own checkouts
     python3 janitor/sweep.py ROOT --confirm              # actually reap, no deadline
     python3 janitor/sweep.py ROOT --confirm --deadline-seconds N
-                                                         # the SessionEnd run: judge no tree after
-                                                         # min(12 s, N minus 7.5 s). Only this run
-                                                         # has a deadline
+                                                         # the SessionEnd run: judge no tree later
+                                                         # than min(12 s, N minus 7.5 s) from the
+                                                         # start of the pass. Only a run with this
+                                                         # flag has a budget
     python3 janitor/sweep.py --purge                     # preview which tombstones are past 90 days
     python3 janitor/sweep.py --purge --confirm           # actually drop tombstones past 90 days
 
@@ -2613,11 +2614,12 @@ def run_repo_reaper(root: str):
 
 # Only the SessionEnd run has a deadline (owner ruling 2026-10-15 15:08 CDT). session_end_sweep.py
 # kills its sweep after min(25 s, the time its hook has left) and passes that number as
-# `--deadline-seconds N`. The pass then judges trees until min(JUDGE_BUDGET_SECONDS, N minus
-# DEADLINE_TAIL_SECONDS) after it started. A tree judged at the last moment still costs about 7.5 s
-# (measured), then the branch, leftover-folder and listener work follows, so the tail is that 7.5 s.
-# A run with no flag has no deadline. A tree the pass did not reach is kept ("not judged: deadline")
-# and the next run judges it.
+# `--deadline-seconds N`. The budget counts from the start of the pass: the pass judges trees until
+# min(JUDGE_BUDGET_SECONDS, N minus DEADLINE_TAIL_SECONDS) seconds after it started. A tree judged
+# at the last moment still costs about 7.5 s (measured), then the branch, leftover-folder and
+# listener work follows, so the tail is that 7.5 s. Only a run given --deadline-seconds has a
+# budget (session_end_sweep.py passes it); the scheduled job and a person's run have none. A tree
+# the pass did not reach is kept ("not judged: deadline") and the next run judges it.
 JUDGE_BUDGET_SECONDS = 12
 DEADLINE_TAIL_SECONDS = 7.5
 _now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
@@ -3015,9 +3017,11 @@ def main(argv=None) -> int:
                               "it, --confirm removes a worktree only when it is both")
     parser.add_argument("--deadline-seconds", type=float, metavar="N",
                          help="the SessionEnd run only: N is the time left before the caller kills "
-                              "this sweep. The pass judges no tree after min(%d s, N minus %s s). "
-                              "Without it there is no deadline: the scheduled job and a person's "
-                              "run, with or without --confirm, judge every tree"
+                              "this sweep. The budget counts from the start of the pass: it "
+                              "judges no tree later than min(%d s, N minus %s s) from then. Only a "
+                              "run with this flag has a budget (session_end_sweep.py passes it). "
+                              "Without it there is none: the scheduled job and a person's run, "
+                              "with or without --confirm, judge every tree"
                               % (JUDGE_BUDGET_SECONDS, DEADLINE_TAIL_SECONDS))
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
