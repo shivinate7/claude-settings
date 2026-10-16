@@ -1,5 +1,8 @@
 # The janitor is one machine-wide sweep
 
+Kind: process
+Home: janitor/sweep.py
+
 The sweep deletes a local branch when that branch holds no unique work. It
 also removes a spent worktree. This entry
 records where it lives, and what it leaves to each repository.
@@ -57,6 +60,8 @@ only when the host pid is dead, or alive with another start time. The worktree
 must also pass every other check. Any other lock reason, and any unreadable
 fact, keeps it.
 
+The lock may also read `claude agent agent-<id> (pid N)`, with no start time. The sweep frees that form only when pid N is dead. It has no pid-reuse check, so a live process that holds a reused pid keeps the tree.
+
 Owner ruling: remove only a folder that is clean, and whose work is safe. Work
 is safe in two cases. Every commit on HEAD is on a remote branch, and a
 detached HEAD counts. Or HEAD is merged into the default branch by ancestry or
@@ -92,9 +97,8 @@ Owner rulings, 2026-10-08:
   free disk.
 - The sweep lists entries under `<root>/.claude/worktrees/` that git does not
   register, as strays. It never deletes them.
-- The rule keeps git's admin-file idle time (1 hour), not folder mtime, and it
-  never calls a repository's WorktreeRemove hook (see "The sweep never runs
-  code a repository supplies").
+- The rule keeps git's admin-file idle time (1 hour), not folder mtime. It removes
+  a worktree with git. It never calls a repository's WorktreeRemove hook.
 
 ## A branch leaves "checked out" with its worktree, in the same run
 

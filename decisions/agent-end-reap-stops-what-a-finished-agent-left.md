@@ -1,5 +1,8 @@
 # Agent-end reap stops what a finished agent left
 
+Kind: process
+Home: janitor/agent_end_reap.py
+
 This record is step 2 of the plan in `which-start-shapes-outlive-the-agent-on-windows`
 (start shapes that outlive a subagent on Windows; PR #144). That record measured the
 shapes. This record holds the fix. Governing records:
@@ -7,8 +10,8 @@ shapes. This record holds the fix. Governing records:
 `liveness-read-is-platform-specific-and-unreadable-is-not-death` (an unreadable read is
 not death).
 
-The goal: when a subagent ends, each process it left under its own worktree stops.
-Nothing else stops.
+The goal: when a subagent ends, each process it left under its own worktree stops, and
+that worktree is removed when Part 4 allows. Nothing else stops or is removed.
 
 ## Part 1. The guard refuses the three missed shapes
 
@@ -42,12 +45,11 @@ copy without the skip. janitor/mutate_sweep.py carries one mutant for it.
 
 ## Part 3. The reaper
 
-`janitor/agent_end_reap.py` is a hook. It reads one hook payload.
+`janitor/agent_end_reap.py` is a hook. It runs on SubagentStop only and reads one hook payload.
 
 - **SubagentStop** gives `agent_id`. The harness names the worktree `agent-<agent_id>`.
   The reaper looks for `<primary>/.claude/worktrees/agent-<agent_id>`. It finds the
   primary checkout from the payload `cwd` with `guard.primary_checkout`.
-- **WorktreeRemove** names no target. The reaper has no branch for it. See "Not wired" below.
 
 The target must have the shape `.claude/worktrees/<name>`. It must exist. It must not be
 a primary checkout. An agent id must match `[A-Za-z0-9_-]{1,64}`.
@@ -60,7 +62,8 @@ The reaper stops one process only when each read below answers a confirmed yes:
 3. The root of its process tree inside the target is orphaned. The reaper climbs from the
    process to each live parent whose cwd is also inside the target. Then it asks
    `sweep.is_orphan` about the last one. A live parent outside the target means keep. A
-   harness or a terminal is such a parent.
+   harness or a terminal is such a parent. Read 3 applies in the ending agent's own worktree
+   too. The remover's stop of the agent's own shells is a separate test (Part 4).
 4. The current user owns the process.
 
 An unreadable read means keep. The signal goes by pid through `sweep.send_signal`, once.
@@ -75,13 +78,103 @@ The owner's constraints hold:
 - Ownership is judged by the checkout that holds the cwd, never by a name.
 - The primary checkout is never a target.
 - A worktree that a live session uses is never touched.
-- A process that a live parent outside the worktree holds is never touched.
+- A process that a live parent outside the worktree holds is never stopped by the hook.
+  The remover stops the agent's own shells under Part 4's own test.
 
 Owner ruling 3, 2026-09-27: this scope is accepted. The reaper stops each orphaned tree
 inside an ended agent's worktree, not only listeners.
 
 The guard's ownership change (owner ruling, 2026-10-10) changes the guard's kill rule
 only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
+
+## Part 4. The worktree is removed at agent end
+
+Owner rulings, 2026-10-15: plan step 3, the 19:43 CDT rulings below, and the 23:00 CDT
+ruling "Build a delayed remover". The 23:01 CDT ruling drops own-tree removal from lane
+wt-reap for now. Status: decided, not built. Lane wt-reap builds the removal of other
+finished agents' worktrees idle 30 min or more. Lane wt-reap-delay builds the delayed
+remover for the ending agent's own tree. Until those lanes merge, the reaper stops
+processes and removes no worktree.
+
+Why. On 2026-10-15 the machine held 610 agent worktrees. The reaper stopped processes only.
+Removal fell to the session-end sweep. The sweep costs about 7.5 s per tree. Its budget is
+25 s, so it reaches about three trees a run. Debt `sweep-no-deadline-many-trees` tracks the gap.
+
+Rule. At each SubagentStop, the reaper removes two kinds of worktree:
+
+- the ending agent's own worktree, `agent-<agent_id>`;
+- each other finished agent's worktree that is idle 30 min or more.
+
+Idle is read as the sweep reads it (see "The sweep removes a finished agent worktree").
+
+**Own tree: a delayed remover.** (Owner ruling, 2026-10-15 23:00 CDT.)
+
+MEASURED 2026-10-15, Windows, lane wt-reap try 4:
+
+- The hook cannot remove its own worktree. Its own wrapper shells run with cwd inside the
+  tree. `git worktree remove` gives rc 255 after it deletes the files.
+- The host `claude.exe` has its cwd outside the tree.
+- The guard's SubagentStop check runs at the same time. Its wrapper is inside the same
+  tree, so an in-hook stop loop can signal it.
+
+Flow for the ending agent's own tree:
+
+1. The hook applies Part 3 to `agent-<agent_id>`. Then it checks the tree: clean, pushed,
+   and free of a live lock. A failed check keeps the tree. The hook exits.
+2. The hook starts a remover. The remover is detached, is not a child of the hook chain,
+   and has its cwd outside the tree. The hook then exits.
+3. The remover waits, up to a fixed limit, until every hook process inside the tree has
+   exited. It never stops a process that runs a hook.
+4. The remover stops the agent's own shells: processes inside the tree whose first parent
+   outside the tree is the host and that run no hook.
+5. The remover re-checks clean, pushed, lock and session.
+6. The remover removes the tree without `--force`.
+7. If the limit ends first, the remover keeps the tree. The next agent end or the sweep
+   removes it.
+
+The hook keeps main's Part 3 stops, read 3 in force, in the ending agent's tree. It stops an
+orphan whose parent is dead. It never stops a process with a live parent, so the guard's
+wrapper is never stopped. Read 3 keeps that wrapper, because its parent is the live host
+outside the tree. Unmeasured. Part 3 targets only the ending agent's tree, so the hook stops
+nothing in another tree, as on main.
+
+The 19:43 CDT rulings now belong to the remover. It stops the agent's own shells, then
+removes the tree, even with git-ignored files. Read 3 does not decide these stops. The
+shells' parent is the live host outside the tree, so the hook keeps them, and the remover
+stops them under step 4. Part 3 reads 1, 2 and 4 still hold for the remover's stops.
+(Owner ruling, 2026-10-15 19:43 CDT.)
+
+A clean tree has no uncommitted and no untracked file. Git-ignored files do not keep a
+tree. A clean, pushed worktree is removed even when it holds git-ignored files, such as
+build output, packages or `.env.local`. For the ending agent's own tree, the remover
+applies this. (Owner ruling, 2026-10-15 19:43 CDT.)
+
+A worktree is removed only when all of these hold:
+
+- it is clean;
+- it is pushed;
+- it is unlocked;
+- no live session uses it (the constraint in Part 3);
+- no process has a cwd inside it. In the ending agent's own worktree, the remover's stop
+  (step 4) runs first.
+
+The hook checks clean, pushed and lock (step 1). The remover re-checks clean, pushed, lock
+and session (step 5).
+
+A read that cannot tell keeps the worktree.
+
+Related, same ruling:
+
+- Session start warns when more than 50 agent worktrees exist (lane wt-reap).
+- Briefs stop leaving checkouts for the sweep. An agent leaves its worktree clean and
+  pushed, and agent end removes it. The builder and test-author agent definitions say so.
+- Sweep speed: one pass of git reads, a time limit, oldest first (lane sweep-fast).
+- Drain today's pile of 610 (plan step 5). The ruling names no method.
+
+Accepted cost: a resume of a finished agent fails once its worktree is gone. A fresh agent
+gets the old report instead. Removal also deletes the tree's git-ignored files, a copied
+`.env.local` included. The sweep's Limits note says the same. If the remover's limit ends
+first, the tree stays until the next agent end or the sweep removes it.
 
 ## Reap timeout, 2026-10-10
 
@@ -133,16 +226,7 @@ The line holds the raw payload, the target, and each decision. The hook fields t
 docs leave open get measured from this log. The file keeps the last 200 lines (the cap
 in `guard-trims-from-the-audit`). The hook always exits 0.
 
-## Not wired: WorktreeRemove
-
-The hooks reference says that WorktreeRemove "Replaces default git behavior". A hook on
-that event would stop the harness from removing agent worktrees. So settings.json wires
-only SubagentStop. Read from docs, on 2026-09-26, unmeasured.
-
 ## The sweep removes a finished agent worktree
-
-Kind: process
-Home: janitor/test_sweep.py
 
 Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`)
 removes a finished agent's worktree in every repo. It ADDS to the removals of
@@ -221,5 +305,24 @@ gives 1 of 596 cases wrong, and that case is the only one. The full harness ran 
 - A payload in the log that disagrees with the fields above.
 - A subagent worktree name that is not `agent-<agent_id>`.
 - A server that a live agent needed, stopped by this reaper or the sweep.
+- A tree that Part 4 removes with an uncommitted or untracked file, unpushed, locked, or in use.
+- A process in another tree that the reaper stops.
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A batch read, or a full run on about 1,300 pids, that takes 60 s or more.
+
+## Holes, named
+
+Lane `sweep-fast` passed review round 3 with a positive net safety value. Each open finding is a debt:
+
+- `sweep-no-deadline-many-trees`: the husk and trash scans run to their end once started. The per-root setup has no deadline check. Review round 3, item 1.
+- `sweep-no-deadline-many-trees`: idle time is read for every tree before any judgment. Old kept trees can use the budget, so younger trees go unjudged. Review round 3, item 2.
+- `sweep-skip-reads-as-clean`: a skipped scan reads as clean. The run log has no not-judged count. The summary has no trash UNKNOWN line. The listener line gives the wrong cause. The hook drops stdout. Review round 3, item 3.
+- `sweep-no-deadline-many-trees`: idle is read up to about 12-20 s before a decision, against 1-3 s on main. Dirty, unpushed, live-session and process checks still keep a tree. Review round 3, item 4.
+- `sweep-attended-idle-unused`: an attended run reads idle time it does not use. A preview may lose its thread pool. Review round 3, item 5.
+- `sweep-no-deadline-many-trees`: the deadline is a fixed 12 s for any `--confirm` without `--attended`, until lane `sweep-budget` lands.
+
+Lane `wt-reap` passed review round 3 with a positive net safety value. Each open finding is a debt:
+
+- `finished-agent-lock-holds-tree`: a finished agent's worktree can hold `claude agent agent-<id> (pid N)`, with no start time. N is the session's live claude.exe. The lock looks like a running agent's lock. So the tree stays until the host exits. MEASURED 2026-10-15 23:31: 17 of 166 agent trees, later 22, all held by one pid. A fix needs a finished-agent proof that the ruling does not give. Owner decision.
+- `marker-writeback-loses-deletion`: a failed remove leaves `claude-removal-started` on an intact tree. Later, at agent end, that tree is written back and removed. The tree must be idle 30 minutes, unlocked (or hold a stale agent lock), with no live session or process inside. It holds only unstaged deletions of tracked files. The person's uncommitted deletion is lost. Narrow: it needs a prior failed remove.
+- `no-start-lock-has-no-pid-check`: the lock form with no start time has no pid-reuse check. The sweep frees it only when pid N is dead. A live process that holds a reused pid keeps the tree. That is the safe side. The janitor decision names this form.
