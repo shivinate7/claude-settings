@@ -226,12 +226,14 @@ def undrafted_pr_create(segment: str) -> bool:
 # 2026-10-16: "Also add a guard"; incident 2026-10-16, three batches conflicted on the page)
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
-# HEAD's page AND from the base tip's page: a merge of the base into the lane brings the base's page,
-# so it passes. The base is `resolve_default_base`, read at its TIP (a stale local `main` is not it).
-# The hook runs BEFORE the shell chain, so `commit -a`, `commit <page>` and a `git add` that reaches
-# the page earlier in the same command read the working tree, and any other commit reads the index.
-# Any read that fails is no hit. Limits: a `sh -c` script is not read, and `commit -a` reads the
-# working tree even for an untracked page.
+# HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
+# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP.
+# The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
+# that reaches the page earlier in the same command read the working tree, and any other commit reads
+# the index. A commit that names paths (`--`, --only) holds only those paths. A segment that runs
+# `lint/hook_catalog.py` without `--check` rewrites the page, so a later commit that reaches the page
+# is refused with no id read. Any read that fails is no hit. Limits: a `sh -c` script is not read, and
+# `commit --include` is judged as `commit <paths>`.
 RECORDS_PAGE = "docs/records.md"
 RECORDS_PAGE_REASON = (
     "Rule (Git): this commit changes docs/records.md. The page is rebuilt only at merge, by the "
@@ -299,15 +301,28 @@ def _names_page(specs, where, top):
 
 
 def _page_ids(top, base):
-    """Return the page's blob ids at HEAD and at `base`: an id, '' for no page, None for a failed read."""
+    """Return the page's blob ids at HEAD, at `base` and at `origin/<base>`: an id, '' for no page,
+    None for a failed read."""
     out = []
-    for rev in ("HEAD", base):
+    for rev in ("HEAD", base, base if base.startswith("origin/") else "origin/" + base):
         done = _git(top, "ls-tree", rev, "--", RECORDS_PAGE)
         if done is None or done.returncode != 0:
             out.append(None)
         else:
             out.append(done.stdout.split()[2] if done.stdout.strip() else "")
     return out
+
+
+def _page_tracked(top):
+    done = _git(top, "ls-files", "--", RECORDS_PAGE)
+    return done is not None and done.returncode == 0 and bool(done.stdout.strip())
+
+
+def _runs_generator(segment):
+    """True when the segment runs lint/hook_catalog.py in any form but `--check`."""
+    tokens = segment_tokens(segment) or []
+    return (any(os.path.basename(t) == "hook_catalog.py" for t in tokens) and "--check" not in tokens
+            and tokens[0] != "echo")
 
 
 def _commit_page_id(top, working):
@@ -327,12 +342,13 @@ def _commit_page_id(top, working):
 
 
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is neither HEAD's nor the base
-    tip's, else ''. Each segment is judged from its own command word."""
-    staged = False   # an earlier `git add` in this command reaches the page
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
+    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] not in ("add", "commit"):
+            generated = generated or (bool(segment.strip()) and _runs_generator(segment))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
@@ -346,14 +362,21 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             staged = staged or whole or _names_page(specs, where, top)
             continue
         all_flag, specs = _commit_shape(call[1])
+        # The working tree's page rides in when a path names it, or (no paths) an add reached it, or
+        # `-a` meets a tracked page. A commit with paths ignores the index.
+        working = _names_page(specs, where, top) if specs else staged or (all_flag and _page_tracked(top))
+        if specs and not working:
+            continue
+        if generated and working:
+            return "git commit " + RECORDS_PAGE
         base = resolve_default_base(top)
         if base is None:
             continue
-        head_id, base_id = _page_ids(top, base)
+        head_id, base_id, origin_id = _page_ids(top, base)
         if head_id is None or not base_id:   # a failed read, or a base with no page: no hit
             continue
-        page_id = _commit_page_id(top, staged or all_flag or _names_page(specs, where, top))
-        if page_id is not None and page_id not in (head_id, base_id):
+        page_id = _commit_page_id(top, working)
+        if page_id is not None and page_id not in (head_id, base_id, origin_id):
             return "git commit " + RECORDS_PAGE
     return ""
 
