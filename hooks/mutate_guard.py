@@ -554,7 +554,7 @@ MUTATIONS = [
      '    if False:\n        return sleeps[0][0]\n', "guard",
      'waiter: an until-loop waiting on a file is refused'),
     ("waiter: a foreground watcher is let through",
-     '    return "" if background else watcher',
+     '    return run_watch or ("" if background else watcher)',
      '    return ""', "guard",
      'waiter: a foreground gh run watch is refused'),
     ("command word: a loop keyword no longer yields to the command inside it (Rule 9's own gap)",
