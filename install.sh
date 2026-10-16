@@ -169,17 +169,87 @@ common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/
 # The main working tree of the repo DIR belongs to: the first entry of the worktree list.
 clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'; }
 
+# True when the pinned checkout $1 is not detached at the clone's local main commit.
+pin_off_main() {
+  main_commit=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  git -C "$1" symbolic-ref -q HEAD >/dev/null || [ -z "$main_commit" ] \
+    || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
+}
+
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
-# worktree allowed.
+# worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
+# may be a link to such a worktree (merge/install_from_main.sh moves it), so paths compare resolved.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
   m=$(clone_of "$SRC")
-  if [ -z "$m" ] || [ "$(canon "$SRC")" != "$(canon "$(dirname "$m")")/$(basename "$m")-live" ]; then
+  if [ -z "$m" ] || [ "$(canon "$SRC")" != "$(canon "$m-live")" ]; then
     log "ERROR: $SRC is a linked git worktree; run the installer from the main clone${m:+ $m}."
     exit 1
   fi
+  if pin_off_main "$SRC"; then
+    log "ERROR: the pinned checkout $SRC is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+    exit 1
+  fi
 fi
+
+# put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
+# DEST is never absent or half-written (a gate hook reads it at any moment). In guard.py and
+# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its
+# post-merge hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other
+# line is touched. STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh
+# cannot share that code); an optional CR before the line end is kept. A failure leaves DEST as it
+# was, is printed, and makes the run exit 1; the caller must not count the file as landed.
+INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
+STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
+STAMP_CR="$(printf '\r')"
+INSTALL_FAILED=0
+put_file() {
+  t="$2.cs-new"
+  case "$1" in
+    */guard.py|*/guard_*.py)
+      sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
+    *) cp "$1" "$t" ;;
+  esac && mv -f "$t" "$2" && return 0
+  rm -f "$t"
+  log "could not replace $2; left as it was"
+  INSTALL_FAILED=1
+  return 1
+}
+
+# ---- one install at a time, one start line and one end line in the install log --------------------
+# Owner ruling 2026-10-15 (install-set). The lock is a file made with noclobber, so only one run makes
+# it. install.ps1 and its post-merge hook take the same file, so the three paths wait on each other.
+# A run waits CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with
+# nothing written. A lock file older than 10 minutes is a dead run's: it is removed.
+# ponytail: age is the only stale test, because the lock holders live in different pid spaces
+# (Windows pids and MSYS pids); an owner-alive test is the upgrade if a dead run ever needs sooner.
+# The id (INSTALL_ID_VALUE, above) is unique per run: the time plus the process id. The log line
+# names it with the pid.
+INSTALL_LOG="$CLAUDE_DIR/claude-settings-install.log"
+INSTALL_LOCK="$CLAUDE_DIR/.claude-settings-install.lock"
+install_log_line() { printf '%s install.sh: %s id=%s pid=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$INSTALL_ID_VALUE" "$$" >> "$INSTALL_LOG"; }
+finish_install() {
+  rc=$?
+  install_log_line "end exit=$rc"
+  rm -f "$INSTALL_LOCK"
+}
+take_install_lock() {
+  mkdir -p "$CLAUDE_DIR"
+  tries=$(( ${CLAUDE_SETTINGS_LOCK_WAIT:-60} * 5 ))
+  while ! ( set -C; printf '%s\n' "$$" > "$INSTALL_LOCK" ) 2>/dev/null; do
+    if [ -n "$(find "$INSTALL_LOCK" -mmin +10 2>/dev/null)" ]; then rm -f "$INSTALL_LOCK"; continue; fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+      log "ERROR: another install holds the lock $INSTALL_LOCK; nothing was changed. Run the installer again when it ends, or delete that file if no install is running."
+      exit 1
+    fi
+    sleep 0.2
+  done
+  trap finish_install EXIT
+  install_log_line start
+}
+take_install_lock
 
 # Local install from a clone that has a branch named main: the links point at the pinned
 # checkout <clone>-live, a worktree on a detached HEAD at main's commit, never at the clone,
@@ -189,8 +259,8 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
   if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
-      git -C "$SRC" worktree add -q --detach "$PIN" "$main_commit" \
-        || { log "ERROR: cannot make the pinned checkout $PIN; free that path and run the installer again."; exit 1; }
+      err=$(git -C "$SRC" worktree add -q --detach --lock --reason "claude-settings live pin" "$PIN" "$main_commit" 2>&1) \
+        || { log "ERROR: cannot make the pinned checkout $PIN: $err; fix that and run the installer again."; exit 1; }
       log "made the pinned checkout $PIN at main"
     else
       pin_common=$(canon "$(common_dir "$PIN")")
@@ -198,6 +268,12 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
         log "ERROR: $PIN is not a worktree of $SRC; move it aside and run the installer again."
         exit 1
       fi
+      if pin_off_main "$PIN"; then
+        log "ERROR: the pinned checkout $PIN is not detached at local main; run merge/install_from_main.sh from the clone $SRC to move it."
+        exit 1
+      fi
+      # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
+      git -C "$SRC" worktree lock --reason "claude-settings live pin" "$PIN" >/dev/null 2>&1
     fi
     SRC="$PIN"
   else
@@ -252,28 +328,29 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
-# DEST is never absent or half-written (a gate hook reads it at any moment). In guard.py and
-# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its
-# post-merge hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other
-# line is touched. STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh
-# cannot share that code); an optional CR before the line end is kept. A failure leaves DEST as it
-# was, is printed, and makes the run exit 1; the caller must not count the file as landed.
-INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
-STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
-STAMP_CR="$(printf '\r')"
-INSTALL_FAILED=0
-put_file() {
-  t="$2.cs-new"
-  case "$1" in
-    */guard.py|*/guard_*.py)
-      sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
-    *) cp "$1" "$t" ;;
-  esac && mv -f "$t" "$2" && return 0
-  rm -f "$t"
-  log "could not replace $2; left as it was"
-  INSTALL_FAILED=1
-  return 1
+# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files. Owner ruling 2026-10-15 (install-set):
+# a guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
+# with this run's id, into DEST_HOOKS/guard.d/<id>/, where no guard reads it yet. Step 2 replaces
+# DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
+# id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept
+# beside it for tools that read them by path. The folder of the set before this one stays until the
+# next install; older ones go. A step 1 failure removes the new folder and lands nothing: the old
+# set stays whole and the run exits 1.
+land_guard_set() {
+  gdir="$2/guard.d/$INSTALL_ID_VALUE"
+  prev_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$2/guard.py" 2>/dev/null | head -n1)
+  mkdir -p "$gdir" || { log "could not make $gdir; the guard files stay as they were"; INSTALL_FAILED=1; return 1; }
+  for gf in "$1"/guard.py "$1"/guard_*.py; do
+    [ -f "$gf" ] || continue
+    put_file "$gf" "$gdir/$(basename "$gf")" || { rm -rf "$gdir"; log "the guard files stay as they were"; return 1; }
+  done
+  [ -f "$1/guard.py" ] && { put_file "$1/guard.py" "$2/guard.py" || { rm -rf "$gdir"; return 1; }; }
+  for gf in "$1"/guard_*.py; do [ -f "$gf" ] && put_file "$gf" "$2/$(basename "$gf")"; done
+  for gd in "$2"/guard.d/*; do
+    [ -d "$gd" ] || continue
+    case "$(basename "$gd")" in "$INSTALL_ID_VALUE"|"$prev_id") ;; *) rm -rf "$gd" ;; esac
+  done
+  return 0
 }
 
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
@@ -303,8 +380,18 @@ land_dir() {
   DEST_DIR="$CLAUDE_DIR/$sub"
   mkdir -p "$DEST_DIR"
   LANDED=""
+  GUARD_SET=0; GUARD_OK=0
+  if [ "$CLOUD" = 1 ] && [ "$sub" = hooks ]; then
+    GUARD_SET=1
+    land_guard_set "$SRC/hooks" "$DEST_DIR" && GUARD_OK=1
+  fi
   for f in "$SRC/$sub"/*; do
     [ -f "$f" ] || continue
+    # The guard files landed above, as one set.
+    case "$(basename "$f")" in
+      guard.py|guard_*.py)
+        if [ "$GUARD_SET" = 1 ]; then [ "$GUARD_OK" = 1 ] && LANDED="$LANDED $(basename "$f")"; continue; fi ;;
+    esac
     DEST="$DEST_DIR/$(basename "$f")"
     if [ "$CLOUD" = 1 ]; then
       put_file "$f" "$DEST" || continue
