@@ -311,6 +311,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-indirect-forms` | The guard reads literal set forms only. | [`debts/git-env-set-indirect-forms.md`](../debts/git-env-set-indirect-forms.md) |
 | `git-env-set-untested-forms` | No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in a heredoc body. | [`debts/git-env-set-untested-forms.md`](../debts/git-env-set-untested-forms.md) |
 | `git-env-warn-session-start` | The warning runs at session start only, so damage done mid-session shows at the next start. | [`debts/git-env-warn-session-start.md`](../debts/git-env-warn-session-start.md) |
+| `gitignore-change-skips-map-skill-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`debts/gitignore-change-skips-map-skill-tests.md`](../debts/gitignore-change-skips-map-skill-tests.md) |
 | `guard-abtests-test-path` | The test-path rule reads `native/ABTests/` as a test folder, so a builder cannot edit product code there. | [`debts/guard-abtests-test-path.md`](../debts/guard-abtests-test-path.md) |
 | `guard-audit-subagent-stop-open` | On SubagentStop, a missing guard module still fails open, and one log line records it. | [`debts/guard-audit-subagent-stop-open.md`](../debts/guard-audit-subagent-stop-open.md) |
 | `guard-bash-c-silent-write` | A silent git write inside `bash -c '...'` is allowed. | [`debts/guard-bash-c-silent-write.md`](../debts/guard-bash-c-silent-write.md) |

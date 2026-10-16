@@ -25,7 +25,7 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
 
 ## Holes, named
 
-Debts: `skill-copy-outside-clone-no-typescript` (a copy of the skill outside the clone finds no `typescript`: a cloud install, or a refused symlink. An offline `npm ci` re-install also wipes `node_modules`).
+Debts: `skill-copy-outside-clone-no-typescript` (a copy of the skill outside the clone finds no `typescript`: a cloud install, or a refused symlink. An offline `npm ci` re-install also wipes `node_modules`), `gitignore-change-skips-map-skill-tests` (a change to only `.gitignore` skips the map skill tests).
 
 Kind: process
 Home: skills/plain-english-map/SKILL.md
