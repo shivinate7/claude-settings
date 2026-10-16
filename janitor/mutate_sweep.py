@@ -268,8 +268,6 @@ MUTATIONS = [
     # cannot prove this mutant.
     ("refusal: no unreadable worktree subject keeps any more (all three reads)",
      "sweep",
-     '    path = entry["path"]\n'
-     '    dirty = guard.porcelain(path)\n'
      '    if dirty is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if dirty:\n'
@@ -291,8 +289,6 @@ MUTATIONS = [
      '    pushed = fully_pushed(path)\n'
      '    if pushed is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
-     '    path = entry["path"]\n'
-     '    dirty = guard.porcelain(path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if dirty:\n'
@@ -572,7 +568,7 @@ MUTATIONS = [
      "test_too_little_budget_left_returns_none"),
 
     # 4. Command-line argv coverage (found 2026-09-22): the hook's own reap call,
-    # `[sys.executable, SWEEP_PATH, root, "--confirm"]`, is the one subprocess.run in this whole
+    # `[sys.executable, SWEEP_PATH, root, "--confirm", "--deadline-seconds", N]`, is the one subprocess.run in this whole
     # program that actually deletes a branch for real, and no mutant here ever changed its argv
     # before this one. Dropping `--confirm` turns the reap silently into a preview: sweep.py's own
     # `if confirm and decision["action"] == "reap":` (janitor/sweep.py) then never fires, so
@@ -581,13 +577,13 @@ MUTATIONS = [
     # `.bak` copy before this mutant was written.
     ("confirm: the sweep call drops --confirm, so a reap silently becomes a preview",
      "session_end_sweep",
-     '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
-     '            [sys.executable, SWEEP_PATH, root],',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm",',
+     '            [sys.executable, SWEEP_PATH, root,',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
     ("strict: the SessionEnd sweep call passes --attended",
      "session_end_sweep",
-     '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
-     '            [sys.executable, SWEEP_PATH, root, "--confirm", "--attended"],',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm",',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm", "--attended",',
      "test_the_sweep_is_not_passed_the_attended_flag"),
 
     # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
