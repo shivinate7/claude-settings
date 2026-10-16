@@ -50,9 +50,10 @@ another repo on the same account several times.
   call got "API rate limit exceeded" while core had 4,560 of 5,000 left. That watchers cause
   it is unmeasured. Debt `rate-retry-budget-short` (3 x 60 s is too short for GitHub's write
   limit).
-- `ci_wake.wait_for` lists the head's runs once. A run that starts after that list is never
-  judged, so the hook can print green while that run goes on. This gap is older than this
-  change. `bin/merge` lists the runs again on each pass. Debt `ci-wake-lists-runs-once` (a
+- `ci_wake.wait_for` lists the head's runs again, at most once per 30 s, until a run that ran
+  is judged. A skipped draft run counts as no run (lane ci-wake-draft-run, after the false
+  "CI red" on PRs 452 and 453). A real run that starts after a judged one is never judged.
+  `bin/merge` lists the runs again on each pass. Debt `ci-wake-lists-runs-once` (a
   later run is not judged).
 - A merge wait now reads the checks and runs every 30 s, not every 60 s: about 6 calls a
   minute. Unmeasured on a real run.
