@@ -90,6 +90,8 @@ def sh(args, cwd=None, input=None, env=None):
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
+RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
+RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 RATE_WAIT_CAP = 60  # seconds: a real gh call shows no Retry-After header, and a GitHub secondary limit needs about a minute; 3 retries bound the wait at 180 s
@@ -195,7 +197,12 @@ def undo_check(wt, base_ref, unknown_ok=""):
         raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
 
 def say(*lines):
-    print("\n".join(lines), flush=True)  # one line each: the preview is a list of indented lines, never one long line
+    text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:  # a piped Windows stdout is cp1252, strict: escape what it cannot hold, so no name can stop the steps after a merge. stderr already escapes
+        enc = sys.stdout.encoding or "ascii"
+        print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
 
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
@@ -1126,6 +1133,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 sha = merged
                 if prove(keep) == "healed":  # the base moved during that wait and the page conflicts again: a fourth wait would outrun the lock
                     keep(f"{base_ref} moved during the wait on the merge commit, and the records page conflicts again. Nothing was merged.")
+            try:  # the PR's own paths. --no-renames: a moved file names both paths. -z: git does not quote a non-ASCII name. Any failure of this read leaves the list unknown and never holds the merge
+                c, names = git(wt, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...{sha}")
+            except (subprocess.TimeoutExpired, OSError):
+                c, names = 1, ""
+            rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
@@ -1134,6 +1146,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         except Exception as e:
             fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
         say(f"merge: #{n} merged as {commit[:9]}.")
+        if rule_files is None:
+            say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
+        for x in rule_files or []:
+            say(f"merge: #{n} changes {x}, a rule file every session loads.")
         ok = True
         try:
             ff_main(root, base, commit)
