@@ -168,7 +168,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
