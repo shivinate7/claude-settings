@@ -59,6 +59,10 @@ export const junction = (target) => {
   return link;
 };
 
+/** Runs git in `dir` and answers its stdout. The env has no `GIT_*` key, and the line-end setting is fixed, so a machine setting never changes a status. */
+export const gitIn = (dir, ...a) =>
+  execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+
 /**
  * A copy of `tests/fixture/` in a fresh git repository in tmp. `git add -N` lists each file for `git ls-files` and writes no object.
  * With `commit`, the files are committed too, so `git rev-parse HEAD` works. A host repository that builds a page has a commit.
@@ -67,7 +71,7 @@ export const junction = (target) => {
 export const scratchRepo = ({ commit = false } = {}) => {
   const dir = tmpFolder('pemap-repo-');
   cpSync(FIXTURE, dir, { recursive: true });
-  const git = (...a) => execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const git = (...a) => gitIn(dir, ...a);
   git('init', '-q');
   if (commit) {
     git('add', '.');
