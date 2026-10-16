@@ -336,8 +336,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
-    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s); 5 min leaves room for a slow runner start.
-    timeout-minutes: 5
+    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s), before install-set.test.ps1 joined. That
+    # test took 81 s to 156 s on a dev laptop, so 10 min leaves room for a slow runner.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
