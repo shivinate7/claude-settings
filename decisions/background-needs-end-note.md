@@ -35,7 +35,7 @@ Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."
     `python -m flask run`, `python -m uvicorn`, `python -m streamlit run`.
   - The guard reads through `cmd /c`, `bash -c`, `pwsh -Command`, `&`, a subshell, `.cmd` and
     `.exe` names, and `npx pkg@version`.
-- One-off builds, test runs and `gh run watch` pass without the note.
+- One-off builds and test runs pass without the note. `gh run watch` is refused (decision ci-wait-reads-run-status, CI waits read the run status).
 - The Stop check shows each quiet job's note beside it. The agent judges whether the job should
   still run.
 
