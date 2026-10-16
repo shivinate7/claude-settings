@@ -94,6 +94,14 @@ pin_at_main() {
   git -C "$1" worktree add -q --detach "$1-live" "$(git -C "$1" rev-parse main)"
 }
 
+# pin_behind_main CLONE: a locked pinned checkout at CLONE-live, as install.sh makes it, at main's
+# commit c0; then main moves one commit on, so the pin is behind main. Sets c0.
+pin_behind_main() {
+  c0=$(git -C "$1" rev-parse main)
+  git -C "$1" worktree add -q --detach --lock --reason "claude-settings live pin" "$1-live" "$c0"
+  git -C "$1" commit -q --allow-empty -m next
+}
+
 # A uname that reports Linux, in dir $1. The helper takes its POSIX path only on Linux.
 make_shim() {
   mkdir -p "$1"
@@ -310,10 +318,18 @@ case8() {
   c1=$(git -C "$d/linked" rev-parse HEAD)
   git -C "$d/clone" branch -f main "$c1"
   git -C "$d/clone" show "$c1:settings.json" > "$work/case8.want"
+  # The real install.sh takes the install lock too. A helper that holds the lock while it runs
+  # install.sh makes install.sh wait on it and fail, so the short wait turns that into a visible red.
+  export CLAUDE_SETTINGS_LOCK_WAIT=5
   run_live "$d/linked"
+  unset CLAUDE_SETTINGS_LOCK_WAIT
   cfg="$h/.claude-cfg"
 
-  if [ "$rc" -ne 0 ]; then
+  if printf '%s' "$out" | grep -q 'holds the lock'; then
+    bad "$name" "install.sh found the install lock held: the helper holds the lock across its install.sh call, so the install waits on itself: $out"
+  elif grep -q 'exit=[1-9]' "$cfg/claude-settings-install.log" 2>/dev/null; then
+    bad "$name" "an install log end line exited non-zero: $(cat "$cfg/claude-settings-install.log")"
+  elif [ "$rc" -ne 0 ]; then
     bad "$name" "script exited $rc: $out"
   elif [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" != "$c1" ]; then
     bad "$name" "pinned checkout is not at main's commit $c1: $out"
@@ -544,7 +560,237 @@ case13() {
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13"
+# Prints the id of the first start line in the install log $1, or nothing. Each install-log line
+# holds "id=<id> pid=<pid>", as install.sh writes them.
+first_start_id() { grep -w start "$1" 2>/dev/null | sed -n 's/.* id=\([^ ]*\).*/\1/p' | head -n 1; }
+
+# ---- Case 14: no symlink rights -> the pinned checkout stays usable; the run installs or refuses ----
+# The pin is behind main. The first move renames the plain pin, then point_at needs a link. With no
+# link rights the old helper stopped there: the pin path was gone, no install ran, and the pointer
+# in CLAUDE.md dangled. Accepted: the pin moves in place and the install runs, or the run refuses
+# before it moves anything. The shim ln fails on every call, so no real link is made.
+case14() {
+  name="case14: no symlink rights: the pinned checkout stays usable, and the run either installs or refuses before any move"
+  d="$work/case14"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  printf '#!/bin/sh\nexit 1\n' > "$SHIM/ln"; chmod +x "$SHIM/ln"
+  live_clone "$d/clone" stub
+  pin_behind_main "$d/clone"
+  c1=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  short0=$(git -C "$d/clone" rev-parse --short=12 "$c0")
+  if [ "$c0" = "$c1" ] || [ -L "$d/clone-live" ] || [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then
+    bad "$name" "precondition: clone-live is not a plain worktree at the old main"; return
+  fi
+  run_live "$d/linked"
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+
+  if [ ! -e "$d/clone-live" ]; then
+    bad "$name" "clone-live is gone after the run (rc $rc), so the links and the CLAUDE.md pointer dangle: $out"
+  elif [ -e "$d/clone-live.tmp" ]; then
+    bad "$name" "clone-live.tmp was left behind"
+  elif [ "$rc" -eq 0 ]; then
+    if [ "$pin_head" != "$c1" ]; then
+      bad "$name" "exit 0, but clone-live is at [$pin_head], want main [$c1]"
+    elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+      bad "$name" "exit 0, but the install did not run from clone-live: $out"
+    elif [ "$(realpwd "$(git -C "$d/clone-live" rev-parse --path-format=absolute --git-common-dir)")" \
+         != "$(realpwd "$(git -C "$d/clone" rev-parse --path-format=absolute --git-common-dir)")" ]; then
+      bad "$name" "exit 0, but clone-live is not a worktree of the clone"
+    else
+      ok "$name"
+    fi
+  elif [ "$pin_head" != "$c0" ]; then
+    bad "$name" "the run refused (rc $rc) but already moved clone-live to [$pin_head]; a refusal must move nothing"
+  elif [ -e "$d/clone-live-$short0" ] || [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "the run refused but moved the pin aside or ran an install"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 15: another run holds the install lock -> the helper waits, refuses, moves nothing ----
+# Owner ruling 2026-10-15 (install-set): the pin move holds the lock the installers hold. A lock file
+# with a fresh mtime is a live run's, so this run waits CLAUDE_SETTINGS_LOCK_WAIT seconds, then exits
+# non-zero with nothing written. The lock is not this run's, so the run must leave it as it is.
+case15() {
+  name="case15: another run holds the install lock: the helper refuses after the wait, moves no pin, runs no install, keeps the lock"
+  d="$work/case15"; h="$d/home"; mkdir -p "$h/.claude-cfg"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_behind_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  lock="$h/.claude-cfg/.claude-settings-install.lock"
+  printf '4242\n' > "$lock"
+  export CLAUDE_SETTINGS_LOCK_WAIT=2
+  run_live "$d/linked"
+  unset CLAUDE_SETTINGS_LOCK_WAIT
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "exit 0 while another run held the install lock: $out"
+  elif [ "$pin_head" != "$c0" ]; then
+    bad "$name" "the helper moved clone-live to [$pin_head] while another run held the lock; want [$c0]"
+  elif [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ] || [ -e "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "an install ran while another run held the lock"
+  elif [ "$(cat "$lock" 2>/dev/null)" != 4242 ]; then
+    bad "$name" "the helper removed or replaced a lock it did not take"
+  else
+    case "$errs" in
+      *lock*) ok "$name" ;;
+      *) bad "$name" "the refusal does not name the lock: $errs" ;;
+    esac
+  fi
+}
+
+# ---- Case 16: each helper run logs one start line and one end line, with its id and pid -------
+# The install log is the one install.sh writes. A start line and an end line share an id= and a
+# pid=, and a second run gets a new id. The wording around them is not pinned.
+case16() {
+  name="case16: each helper run writes one start and one end line, each with its id and pid; a second run gets a new id"
+  d="$work/case16"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  log="$h/.claude-cfg/claude-settings-install.log"
+  run_live "$d/linked"; rc1=$rc; out1=$out
+  run_live "$d/linked"; rc2=$rc; out2=$out
+  if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
+    bad "$name" "a run exited non-zero ($rc1, $rc2): $out1 | $out2"; return
+  fi
+  starts=$(cat "$log" 2>/dev/null | grep -cw start)
+  ends=$(cat "$log" 2>/dev/null | grep -cw end)
+  if [ "$starts" -ne 2 ] || [ "$ends" -ne 2 ]; then
+    bad "$name" "want one start and one end per run (2 each), got starts=$starts ends=$ends in the install log"; return
+  fi
+  ids=$(sed -n 's/.* id=\([^ ]*\).*/\1/p' "$log" | sort -u)
+  if [ "$(printf '%s\n' "$ids" | grep -c .)" -ne 2 ]; then
+    bad "$name" "two runs must log two different ids, got: [$ids]"; return
+  fi
+  for id in $ids; do
+    sp=$(grep -w start "$log" | grep "id=$id " | sed -n 's/.* pid=\([^ ]*\).*/\1/p')
+    ep=$(grep -w end "$log" | grep "id=$id " | sed -n 's/.* pid=\([^ ]*\).*/\1/p')
+    case "$sp" in ''|*[!0-9]*) bad "$name" "start line for id=$id has no numeric pid: [$sp]"; return ;; esac
+    if [ "$sp" != "$ep" ]; then bad "$name" "end line for id=$id has pid [$ep], start has [$sp]"; return; fi
+  done
+  ok "$name"
+}
+
+# ---- Case 17: a move that fails -> an end line, the folder in the way kept, no lock left behind ----
+# The folder sits where the new pinned tree goes, so the move fails before it moves the pin. The
+# run must still close its log pair and must not leave the install lock behind, or every later
+# install waits out the 10-minute stale age.
+case17() {
+  name="case17: a move that fails ends with an end line, keeps the folder in the way, and leaves no lock behind"
+  d="$work/case17"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_behind_main "$d/clone"
+  short1=$(git -C "$d/clone" rev-parse --short=12 main)
+  mkdir -p "$d/clone-live-$short1"; printf 'keep\n' > "$d/clone-live-$short1/keep.txt"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+  log="$h/.claude-cfg/claude-settings-install.log"
+  lock="$h/.claude-cfg/.claude-settings-install.lock"
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+  sid=$(first_start_id "$log")
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "exit 0 with a folder in the way of the new pinned tree: $out"
+  elif [ ! -f "$d/clone-live-$short1/keep.txt" ]; then
+    bad "$name" "the folder in the way was removed"
+  elif [ "$pin_head" != "$c0" ]; then
+    bad "$name" "a failed move still moved clone-live to [$pin_head]; want [$c0]"
+  elif [ -z "$sid" ]; then
+    bad "$name" "no start line for the failed run: [$(cat "$log" 2>/dev/null)]"
+  elif ! grep -w end "$log" 2>/dev/null | grep -q "id=$sid "; then
+    bad "$name" "no end line for start id=$sid: the failed run left its log pair open"
+  elif [ -e "$lock" ]; then
+    bad "$name" "the failed run left the install lock behind; every later install waits out the 10-minute stale age"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 18: two racing runs -> run B waits for run A's lock; the install log never interleaves ----
+# Run A is held inside its move: the smudge filter pauses A's checkout of the new pinned tree for
+# PAUSE_SECS. Run B starts during that pause. Under the install lock, B waits until A ends, so A ends
+# first, and the install log reads start, end, start, end (as install.sh logs them, start after the
+# lock is held). Without the lock, B moves the pin while A holds it. Waits are fixed sleeps, not a
+# loop; a precondition fails the case when A has not reached its pause.
+case18() {
+  name="case18: two racing runs: run B waits for run A to end, the install-log pairs never interleave, the pin ends at main"
+  if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here; the race needs the links that the move makes"; return; fi
+  d="$work/case18"; h="$d/home"; cfg="$h/.claude-cfg"; mkdir -p "$cfg"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  guard_fixture "$d/clone" A
+  git -C "$d/clone" add -A
+  git -C "$d/clone" commit -q -m A
+  pin_at_main "$d/clone"
+  git -C "$d/clone" switch -q -c trunk
+  guard_fixture "$d/clone" B
+  git -C "$d/clone" add -A
+  git -C "$d/clone" commit -q -m B
+  git -C "$d/clone" branch -q -f main trunk
+  pause="$d/pause-smudge.sh"
+  cat > "$pause" <<'EOF'
+#!/bin/sh
+# Smudge filter for hooks/guard_pause.txt. While $PAUSE_FLAG exists, it logs the call and sleeps
+# $PAUSE_SECS before git writes the file. Otherwise it passes the content through.
+if [ -e "$PAUSE_FLAG" ]; then printf '%s\n' "$1" >> "$PAUSE_LOG"; sleep "$PAUSE_SECS"; fi
+cat
+EOF
+  git -C "$d/clone" config filter.pause.smudge "sh \"$pause\" %f"
+  git -C "$d/clone" config checkout.workers 1
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  PAUSE_FLAG="$d/pause.flag"; PAUSE_LOG="$d/pause.log"; ORDER="$d/order.txt"
+  : > "$PAUSE_FLAG"; : > "$PAUSE_LOG"; : > "$ORDER"
+  log="$cfg/claude-settings-install.log"
+
+  # One helper run from the linked worktree. It appends "<letter> <exit code>" to ORDER when it ends.
+  ( ( cd "$d/linked" && env HOME="$h" CLAUDE_CONFIG_DIR="$cfg" PATH="$SHIM:$PATH" \
+        PAUSE_FLAG="$PAUSE_FLAG" PAUSE_LOG="$PAUSE_LOG" PAUSE_SECS=8 CLAUDE_SETTINGS_LOCK_WAIT=30 \
+        bash "$SCRIPT" ) > "$d/A.out" 2>&1; printf 'A %s\n' "$?" >> "$ORDER" ) &
+  ap=$!
+  sleep 3
+  pre=$(cat "$PAUSE_LOG" | grep -c .)
+  if [ "$pre" -lt 1 ]; then
+    rm -f "$PAUSE_FLAG"; wait "$ap"
+    bad "$name" "precondition: run A had not reached its move within 3 s, so run B did not race it"; return
+  fi
+  ( ( cd "$d/linked" && env HOME="$h" CLAUDE_CONFIG_DIR="$cfg" PATH="$SHIM:$PATH" \
+        PAUSE_FLAG="$PAUSE_FLAG" PAUSE_LOG="$PAUSE_LOG" PAUSE_SECS=8 CLAUDE_SETTINGS_LOCK_WAIT=30 \
+        bash "$SCRIPT" ) > "$d/B.out" 2>&1; printf 'B %s\n' "$?" >> "$ORDER" ) &
+  bp=$!
+  rm -f "$PAUSE_FLAG"
+  wait "$ap" "$bp"
+
+  first=$(head -n 1 "$ORDER" | cut -c1)
+  arc=$(grep '^A ' "$ORDER" | cut -d' ' -f2)
+  brc=$(grep '^B ' "$ORDER" | cut -d' ' -f2)
+  seq=$(grep -ow -e start -e end "$log" 2>/dev/null | paste -sd' ' -)
+  ids_seq=$(sed -n 's/.* id=\([^ ]*\).*/\1/p' "$log" 2>/dev/null | paste -sd' ' -)
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+  want=$(git -C "$d/clone" rev-parse main)
+
+  if [ "$first" != A ]; then
+    bad "$name" "B ended before A: the move takes no install lock, so run B moved the pinned checkout while run A held it (order: $(paste -sd' ' "$ORDER"))"
+  elif [ "$arc" != 0 ] || [ "$brc" != 0 ]; then
+    bad "$name" "a racing run exited non-zero (A=$arc, B=$brc): $(cat "$d/A.out") | $(cat "$d/B.out")"
+  elif [ "$seq" != "start end start end" ]; then
+    bad "$name" "install-log events interleave: [$seq]"
+  else
+    set -- $ids_seq
+    if [ "$#" -ne 4 ] || [ "$1" != "$2" ] || [ "$3" != "$4" ] || [ "$1" = "$3" ]; then
+      bad "$name" "install-log start and end lines do not pair by id: [$ids_seq]"
+    elif [ "$pin_head" != "$want" ]; then
+      bad "$name" "the pinned checkout is at [$pin_head] after the race, want main [$want]"
+    elif [ -e "$d/clone-live.tmp" ]; then
+      bad "$name" "clone-live.tmp was left behind by the race"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
