@@ -197,7 +197,12 @@ def undo_check(wt, base_ref, unknown_ok=""):
         raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
 
 def say(*lines):
-    print("\n".join(lines), flush=True)  # one line each: the preview is a list of indented lines, never one long line
+    text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:  # a piped Windows stdout is cp1252, strict: escape what it cannot hold, so no name can stop the steps after a merge. stderr already escapes
+        enc = sys.stdout.encoding or "ascii"
+        print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
 
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
