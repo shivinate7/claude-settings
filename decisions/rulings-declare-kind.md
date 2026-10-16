@@ -91,8 +91,7 @@ the lint cannot tell the two apart.
 - The lint refuses a `--dir` of `..` or a leading `/`, as it refuses any unusable folder.
   `actions/ruling-kind/check.sh` refuses both in `records-dir`. No test covers `..` or a leading
   `/` in either.
-- `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/` by default, and takes
-  `--dir` for one other records folder, as this lint does. No workflow step passes `--dir` yet.
+- `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/`. It has no `--dir`.
   The guard reads the same `DIRS`, so a message that cites a `debts/` record by path is refused
   by cite-by-id (`git-cite-by-id`). That is intended.
 - `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name, and
