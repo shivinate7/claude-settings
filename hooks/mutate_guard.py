@@ -869,7 +869,10 @@ MUTATIONS = [
     #   "silent-write: the throwaway test always passes, so a real checkout is never judged"
     #     -> "silent-write real: a discarded commit in a real checkout"
     #   "silent-write: the quote walk is quote-blind, so a redirect named in a message counts"
-    #     -> "silent-write scanner: a discard named inside a message is text"
+    #     -> "silent-write scanner: a discard named before a space inside a message is text"
+    #        (SILENT_WRITE_REDIRECT needs a boundary after the null device, so the older case's
+    #        `>/dev/null"` never matched and passed on a quote-blind walk; a space after the target
+    #        makes only the quote walk keep this one an allow)
     ("silent-write: the throwaway test always passes, so a real checkout is never judged",
      'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:',
      'def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:\n    return True', "guard",
@@ -877,7 +880,7 @@ MUTATIONS = [
     ("silent-write: the quote walk is quote-blind, so a redirect named in a message counts",
      'def unquoted_at(text: str, index: int) -> bool:',
      'def unquoted_at(text: str, index: int) -> bool:\n    return True', "guard",
-     "silent-write scanner: a discard named inside a message is text"),
+     "silent-write scanner: a discard named before a space inside a message is text"),
 
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
