@@ -15,7 +15,7 @@ passes.
   the checks and runs, as it does now.
 - `hooks/ci_wake.py`, `watch_run`: no watch. It reads `gh run view <id> --json status` once
   every 30 s, and returns when the status is `completed` or the deadline passes. A failed
-  read ends the wait as unknown, as a failed watch does now.
+  read ends the wait as unknown.
 
 ## Claude's own waits
 
@@ -56,6 +56,10 @@ another repo on the same account several times.
   later run is not judged).
 - A merge wait now reads the checks and runs every 30 s, not every 60 s: about 6 calls a
   minute. Unmeasured on a real run.
+- One failed status read ends a CI-wake wait as unknown, with no retry. The session is then
+  told "unknown", never green. Debt `ci-wake-read-no-retry` (a failed read is not retried).
+- The test stub models only `in_progress`. A change that stops at a `queued` run would wake
+  early with an unknown line, and no case catches it. It cannot read green. Same debt.
 
 Kind: build
 Plan: decisions/ci-wait-reads-run-status.md#the-ruling (all)
