@@ -112,6 +112,14 @@ function Restore-Env([hashtable]$Saved) {
     foreach ($n in $Saved.Keys) { [Environment]::SetEnvironmentVariable($n, $Saved[$n]) }
 }
 
+# Appends a build line to each guard file in a clone's hooks folder, in place. Nothing is committed.
+function Add-BuildLine([string]$Dir, [string]$Build) {
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Dir 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' })) {
+        $text = [IO.File]::ReadAllText($f.FullName)
+        [IO.File]::WriteAllText($f.FullName, $text + "`n# build $Build`n", $Utf8)
+    }
+}
+
 # A clone folder: install.ps1 and install.sh, the repo's guard files each with a build line appended,
 # and a settings.json and CLAUDE.md. With -Skills N it also lands N skill folders after the hooks, so
 # an install runs long enough to overlap another. With -Git it is a git repository on main.
@@ -124,9 +132,9 @@ function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git)
     $lands = if ($Skills -gt 0) { "hooks`nskills`n" } else { "hooks`n" }
     [IO.File]::WriteAllText((Join-Path $Dir 'landed-dirs.txt'), $lands, $Utf8)
     foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' })) {
-        $text = [IO.File]::ReadAllText($f.FullName)
-        [IO.File]::WriteAllText((Join-Path $Dir ('hooks\' + $f.Name)), $text + "`n# build $Build`n", $Utf8)
+        Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Dir ('hooks\' + $f.Name))
     }
+    Add-BuildLine $Dir $Build
     for ($i = 0; $i -lt $Skills; $i++) {
         $d = Join-Path $Dir ('skills\skill-' + $i)
         New-Item -ItemType Directory -Force -Path $d | Out-Null
@@ -287,7 +295,7 @@ function Invoke-Overlap([string]$Cfg, [scriptblock]$StartA, [scriptblock]$StartB
         if (-not $released -and ($now - $tA).TotalSeconds -ge 9) { $hold.Close(); $released = $true }
         if ($pA.HasExited -and -not $aExit) { $aExit = $now }
         if (-not $bFirst) {
-            foreach ($text in (Get-GuardTexts $Cfg)) { if ($text -match '# build B') { $bFirst = $now; break } }
+            foreach ($text in (Get-GuardTexts $Cfg)) { if ($text -cmatch '(?m)^# build B\r?$') { $bFirst = $now; break } }
         }
         Start-Sleep -Milliseconds 50
     }
@@ -321,13 +329,15 @@ if ($r2.BFirst) {
 }
 
 # Pair 2: install.ps1 against the git post-merge hook (cross-path). The hook is the one install.ps1
-# wrote into the git clone, and it copies that clone's working tree, marked build B.
+# wrote into the git clone, and it copies that clone's working tree. The clone is built base3 for the
+# setup install, then its working tree is marked build B (uncommitted), so the setup install holds no B.
 $C3   = Join-Path $Root 'lock1-hook'
 $Cfg3 = Join-Path $C3 'claude'
 New-Clone (Join-Path $C3 'a') 'A' -Skills 60
-New-Clone (Join-Path $C3 'git') 'B' -Git
+New-Clone (Join-Path $C3 'git') 'base3' -Git
 $pBase3 = Start-Install (Join-Path $C3 'git') $Cfg3 (Join-Path $C3 'git-setup-run')
 Wait-Bounded $pBase3 180
+Add-BuildLine (Join-Path $C3 'git') 'B'
 $hookB = Join-Path $C3 'hook-b.sh'
 Write-ShellRun $hookB (Join-Path $C3 'git') $Cfg3 'sh .git/hooks/post-merge' 'HOOK'
 $r3 = Invoke-Overlap $Cfg3 `
