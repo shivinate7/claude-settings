@@ -13,7 +13,8 @@ ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 
 Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
 or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
-line, never 1. It reads GitHub at most once per 30 s per run, and never loops on a red run.
+line, never 1. It lists runs, and reads a run's status, at most once per 30 s each. It never
+loops on a red run.
 
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.

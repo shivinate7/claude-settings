@@ -57,6 +57,9 @@ another repo on the same account several times.
   red or green; after a real run is judged, the hook waits for no later run.
   `bin/merge` lists the runs again on each pass. Debt `ci-wake-lists-runs-once` (a
   later run is not judged).
+- A head whose only runs are skipped now wakes the session with "unknown: no run yet" at
+  the deadline, about 55 min after `gh pr ready`, not at once. The lists add about 110 calls
+  an hour for that PR. `bin/merge` judges a merge on its own. Same debt.
 - A merge wait now reads the checks and runs every 30 s, not every 60 s: about 6 calls a
   minute. Unmeasured on a real run.
 - One failed status read ends a CI-wake wait as unknown, with no retry. The session is then
