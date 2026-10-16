@@ -64,3 +64,6 @@ use Monitor for a wait. An agent that followed that text was refused. An agent t
 
 A measured count of Monitor failures in agent reports, or a `waiter` deny count that does not
 fall after this change.
+
+Kind: process
+Home: hooks/guard_stream.py
