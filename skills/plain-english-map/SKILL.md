@@ -28,7 +28,7 @@ the version it reads in `MAP_FORMAT_VERSION`, in `scripts/lib/map-config.mjs`. A
 - **Newer map.** Every command refuses, and the message says to update the skill. No command writes a downgrade.
 
 To change the map format: raise `MAP_FORMAT_VERSION`, and add one step to the list in `scripts/map-upgrade.mjs`.
-Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines carried.
+Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines carried. It strips a `:N` after a file name only when its extension is in `codeExtensions`: `example.com:3000` stays.
 
 ## Steps
 

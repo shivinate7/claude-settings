@@ -13,18 +13,22 @@ import { MAP_FORMAT_VERSION, readFormatVersion } from './lib/map-config.mjs';
  * The steps, in order. Each `run` takes one map file's text and answers it in the next version.
  * Step 1 to 2: version 1 map lines carried line references, and a line number goes stale with the next edit.
  * It removes the three forms of them. A reference that was rewritten by hand into other words is not a form it can find.
- * ponytail: a backtick token like `example.com:3000` has the same shape as `file.ts:30`. Narrow the file-name pattern if a host map holds one.
+ * `run` takes the config too: a ":N" goes only after a name whose extension is in `codeExtensions`, so `example.com:3000` stays.
  */
 export const STEPS = [
   {
     from: 1,
-    run: (text) => text
-      // A parenthesis that holds only a line reference (`:26-36` or `:492`) goes, with the space before it: "x (`:26-36`). y" becomes "x. y".
-      .replace(/ \(`:\d+(?:-\d+)?`\)/g, '')
-      // "`file.ext:N`" loses its ":N" part.
-      .replace(/`([^`\s:]+\.[A-Za-z0-9]+):\d+(?:-\d+)?`/g, '`$1`')
-      // ", `:N`" goes from inside a parenthesis that has a name: "(`notes`, `:492`)" becomes "(`notes`)".
-      .replace(/, `:\d+(?:-\d+)?`(?=\))/g, ''),
+    run: (text, cfg) => {
+      const exts = cfg.codeExtensions;
+      if (!Array.isArray(exts) || exts.some((e) => typeof e !== 'string' || !/^[a-z0-9]+$/i.test(e))) throw new Error('map.config.json "codeExtensions" must be a list of extensions, so the upgrade can tell a file name from a host name');
+      return text
+        // A parenthesis that holds only line references (`:26-36`, or `:1`, `:2`) goes, with the space before it: "x (`:26-36`). y" becomes "x. y".
+        .replace(/ \(`:\d+(?:-\d+)?`(?:, `:\d+(?:-\d+)?`)*\)/g, '')
+        // "`file.ext:N`" loses its ":N" part when "ext" is a code extension.
+        .replace(new RegExp(String.raw`\`([^\`\s:]+\.(?:${exts.join('|')})):\d+(?:-\d+)?\``, 'g'), '`$1`')
+        // ", `:N`" goes from inside a parenthesis that has a name: "(`notes`, `:492`)" becomes "(`notes`)". A run of them goes at once.
+        .replace(/(?:, `:\d+(?:-\d+)?`)+(?=\))/g, '');
+    },
   },
 ];
 
@@ -40,16 +44,20 @@ export const upgradeMap = (root) => {
   const cfgFile = path.join(root, 'map.config.json');
   const raw = readFileSync(cfgFile, 'utf8');
   const cfg = JSON.parse(raw);
+  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('map.config.json is not an object: the top level must be a JSON object');
   const version = readFormatVersion(cfg);
   if (version === MAP_FORMAT_VERSION) return [];
   const wrote = [];
   for (const f of mapFilesOf(root)) {
     const before = readFileSync(path.join(root, f), 'utf8');
-    const after = STEPS.filter((s) => s.from >= version).reduce((t, s) => s.run(t), before);
+    const after = STEPS.filter((s) => s.from >= version).reduce((t, s) => s.run(t, cfg), before);
     if (after !== before) { writeFileSync(path.join(root, f), after); wrote.push(f); }
   }
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
-  writeFileSync(cfgFile, `${JSON.stringify({ formatVersion: MAP_FORMAT_VERSION, ...cfg }, null, 2).replace(/\n/g, eol)}${eol}`);
+  // The new version wins over a "formatVersion": 1 in the file. The key keeps its place.
+  const next = { formatVersion: MAP_FORMAT_VERSION, ...cfg };
+  next.formatVersion = MAP_FORMAT_VERSION;
+  writeFileSync(cfgFile, `${JSON.stringify(next, null, 2).replace(/\n/g, eol)}${eol}`);
   return [...wrote, 'map.config.json'];
 };
 
