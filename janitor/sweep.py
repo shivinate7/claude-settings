@@ -683,16 +683,26 @@ def _agent_rule_keep(kept: dict, idle):
     return None
 
 
+def _idle_then_dirty(entry: dict, attended: bool):
+    """(idle, path, dirty) for ENTRY. Idle is read first: `git status` can rewrite the index and
+    make every tree look active."""
+    idle = worktree_idle_seconds(entry["path"]) if not attended else None
+    path = entry["path"]
+    dirty = guard.porcelain(path)
+    return idle, path, dirty
+
+
 def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
     keeps hold it. A repo's own `reap:worktrees` script turns it off."""
-    # Read first: `git status` below can rewrite the index and make every tree look active.
-    idle = worktree_idle_seconds(entry["path"]) if not attended else None
-    path = entry["path"]
-    dirty = guard.porcelain(path)
+    if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
+        idle, path = (None if attended else entry["idle"]), entry["path"]
+        dirty = guard.porcelain(path)
+    else:
+        idle, path, dirty = _idle_then_dirty(entry, attended)
     if dirty is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if dirty:
@@ -2610,14 +2620,19 @@ def _past_deadline() -> bool:
     return _DEADLINE is not None and _now() >= _DEADLINE
 
 
+def _same_folder(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
 def _oldest_idle_first(entries):
     """ENTRIES with the longest-idle tree first: the likeliest removals come before the deadline.
-    A tree whose idle time cannot be read goes last; it is kept either way."""
+    A tree whose idle time cannot be read goes last; it is kept either way. Each entry keeps its
+    read as "idle", and `decide_worktree` uses it: one idle read per tree per pass."""
     idle = {}
     for e in entries:  # a read past the deadline never starts; that tree is "not judged"
         idle[e["path"]] = (None if e.get("bare") or _past_deadline()
                            else worktree_idle_seconds(e["path"]))
-    return sorted(entries, key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
+    return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
@@ -2696,6 +2711,12 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         """The decision for one entry, or None when none is ever recorded against it."""
         if entry.get("bare"):
             return None
+        # Past the deadline no git read starts in a tree's folder, the primary-checkout read
+        # included. ROOT is the primary checkout in a SessionEnd run: it gets no decision.
+        if _past_deadline() and _same_folder(entry["path"], root):
+            return None
+        if _past_deadline():
+            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}
         is_primary = _is_primary_checkout(entry["path"])
         if is_primary is True:
             return None  # the clone's one primary checkout: no decision is ever recorded
@@ -2703,8 +2724,6 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        if _past_deadline():
-            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}
         return decide_worktree(root, entry, attended, agent_rule)
 
     judged = _oldest_idle_first(entries) if mode == "full" else []
@@ -2746,18 +2765,26 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "branches":
         return result
 
+    # Past the deadline the folder scans and their reaps wait for the next run. An unscanned
+    # folder is unknown (None), never zero.
     husk_names = optout.get("huskNames", [])
-    result["husks"] = find_husks(root, entries, husk_names)
+    result["husks"] = None if _past_deadline() else find_husks(root, entries, husk_names)
     if confirm:
         for decision in result["husks"] or []:
             if decision["action"] == "husk":
-                reap_husk(root, decision, husk_names)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_husk(root, decision, husk_names)
 
-    result["trash"] = find_trash(root, entries)
+    result["trash"] = None if _past_deadline() else find_trash(root, entries)
     if confirm:
-        for decision in result["trash"]:
+        for decision in result["trash"] or []:
             if decision["action"] == "trash":
-                reap_trash(decision)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_trash(decision)
 
     result["strays"] = find_strays(root, entries)  # after the husk reap: a deleted husk is gone
 
@@ -2822,8 +2849,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
         if result.get("husks") is None:
-            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder",
-                  file=out)
+            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder, or "
+                  "the deadline came first", file=out)
+        if result.get("trash", []) is None:
+            print("  trash     UNKNOWN -- not scanned: deadline", file=out)
         for h in result.get("husks") or []:
             husk_counts[h["action"]] += 1
             tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
@@ -2894,7 +2923,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
     if any(r.get("husks") is None and not r.get("refused") for r in results):
-        print("  leftover folders: unknown (folder unreadable)", file=out)
+        print("  leftover folders: unknown (folder unreadable, or the deadline came first)",
+              file=out)
     else:
         print("  leftover folders: %d, kept: %d"
               % (husk_counts["husk"], husk_counts["keep"]), file=out)
@@ -3040,7 +3070,9 @@ def main(argv=None) -> int:
     global _LIVE_HEADS, _DEADLINE
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
-    _DEADLINE = _now() + JUDGE_BUDGET_SECONDS
+    # Only the SessionEnd run has a deadline: `--confirm` with no `--attended`, the argv
+    # session_end_sweep.py sends. A person's run judges everything (owner ruling 2026-10-15).
+    _DEADLINE = _now() + JUDGE_BUDGET_SECONDS if args.confirm and not args.attended else None
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
