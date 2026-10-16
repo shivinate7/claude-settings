@@ -406,6 +406,91 @@ class Flow(Env):
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
+class ClaudeMdFlag(Env):
+    """Decision claude-md-change-is-flagged (a CLAUDE.md change is flagged), owner ruling 2026-10-16 03:27 CDT, "Report only".
+    After a merge, one line per changed rule file (CLAUDE.md, .claude/CLAUDE.md, each file under output-styles/). Never a hold.
+
+    The seam the builder provides: the tool reads no changed-file list today. Read the PR's own paths from git, in the merge
+    worktree and before host.merge: `git diff --name-only <base_ref>...<sha>` (three dots: the PR's changes, not the base's).
+    Not `gh pr view --json files`: FakeHost has no such read, so these cases would stay red. Not the merge commit's first
+    parent: under the rebase method it sees one commit. Fixtures are real commits on feat, so no stub is needed.
+    The cases pin the printed lines only. Paths are literal "/" strings: git prints "/" on Windows too."""
+
+    def line(self, path):
+        return f"merge: #7 changes {path}, a rule file every session loads."
+
+    def flags(self, out):
+        return [l for l in out.splitlines() if "a rule file every session loads" in l]
+
+    def on_main(self, path, text):
+        """Main gains a commit, pushed from the other clone, that the PR branch does not hold."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"main: {path}"); sh(o, "git", "push", "-q", "origin", "main")
+
+    def pr_writes(self, files, sync_main=False):
+        """The PR gains one commit that writes these paths. sync_main first merges the current origin/main into feat."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        if sync_main:
+            sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "pr: rule files"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def assert_flagged(self, rc, out, *paths):
+        """The merge landed first, so a red here means only that a flag line is wrong or missing. Then: one line per path,
+        and every flag line comes after the merged-as line."""
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertCountEqual(self.flags(out), [self.line(p) for p in paths], out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged_at), 1, out)
+        self.assertTrue(all(i > merged_at[0] for i, l in enumerate(lines) if "a rule file every session loads" in l), out)
+
+    def test_a_merged_pr_that_adds_claude_md_is_flagged_after_the_merged_as_line(self):
+        self.pr_writes({"CLAUDE.md": "new rules\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")
+
+    def test_a_merged_pr_that_edits_a_claude_md_already_on_main_is_flagged(self):
+        self.on_main("CLAUDE.md", "rules\n")  # the owner's fear: an edit to the file main already holds
+        # an added line, not a replaced one: the silent-undo scan reads a replaced line as an undo of the commit that wrote it
+        self.pr_writes({"CLAUDE.md": "rules\nand one more rule\n"}, sync_main=True)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")
+
+    def test_each_changed_rule_file_gets_its_own_line(self):
+        self.pr_writes({".claude/CLAUDE.md": "project rules\n", "output-styles/a.md": "a\n", "output-styles/sub/b.md": "b\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, ".claude/CLAUDE.md", "output-styles/a.md", "output-styles/sub/b.md")
+
+    def test_a_pr_that_changes_none_of_them_prints_no_line(self):  # guard: green on 3a2081a
+        rc, out = self.run_merge("7", "--confirm")  # the fixture PR adds docs/decisions/second.md only
+        self.assert_flagged(rc, out)
+
+    def test_a_near_miss_path_is_not_flagged(self):
+        self.pr_writes({"CLAUDE.md": "rules\n", "CLAUDE.md.bak": "x\n", "output-styles.md": "x\n", "notes/output-styles/x.md": "x\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")  # only the exact paths of the ruling
+
+    def test_a_rule_file_that_only_main_changed_is_not_flagged(self):
+        self.on_main("CLAUDE.md", "main's own change\n")  # the PR never touches it: a two-dot diff would name it
+        self.pr_writes({".claude/CLAUDE.md": "pr rules\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, ".claude/CLAUDE.md")
+
+    def test_the_flag_never_holds_the_merge(self):
+        self.pr_writes({"CLAUDE.md": "rules\n", ".claude/CLAUDE.md": "rules\n", "output-styles/a.md": "a\n"})
+        asked = unittest.mock.patch("builtins.input", side_effect=AssertionError("the merge asked for input"))
+        asked.start(); self.addCleanup(asked.stop)
+        rc, out = self.run_merge("7", "--confirm")  # no extra flag, no extra word
+        self.assertEqual(len(self.host.waits), 2, out)  # the head and the claim, as for any PR: no wait added
+        self.assertFalse(self.lock_ref(), out)
+        self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
+
 class Race(Env):
     def test_two_runs_one_lock(self):
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
