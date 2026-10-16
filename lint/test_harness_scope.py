@@ -228,5 +228,31 @@ class Scope(unittest.TestCase):
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
         self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
 
+    # Review round 3: the skill's own tests (skills/plain-english-map/tests) run as a step of the
+    # `gates` job, gated on `mods`. The `*.md) ;;` arm gave a .md path under the skill no flag, so a
+    # diff naming only SKILL.md (test 3 reads it) or a fixture .md skipped them. Any path under the
+    # skill, .md included, turns `mods` on, as a new file and as an edit.
+    MAP_SKILL = "skills/plain-english-map/"
+
+    def test_a_map_skill_md_change_turns_on_mods(self):
+        for p in (self.MAP_SKILL + "SKILL.md", self.MAP_SKILL + "tests/fixture/docs/map/core.md",
+                  self.MAP_SKILL + "tests/fixture/docs/map/traces/home.md"):
+            for existing in ((), (p,)):
+                with self.subTest(path=p, edit=bool(existing)):
+                    self.assertEqual(run([p], existing=existing).get("mods"), "true")
+
+    # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm.
+    def test_a_map_skill_script_change_still_turns_everything_on(self):
+        p = self.MAP_SKILL + "scripts/map-check.mjs"
+        for existing in ((), (p,)):
+            with self.subTest(edit=bool(existing)):
+                self.assertFlags(run([p], existing=existing), want_true=ALL)
+
+    # Control: another skill's .md keeps today's flags. The new rule must name the map skill only.
+    def test_another_skills_md_keeps_its_current_flags(self):
+        p = "skills/ci-hygiene/SKILL.md"
+        self.assertFlags(run([p], existing=[p]), want_false=ALL)
+        self.assertEqual(self.true_set(run([p])), {"gates_windows", "shell_macos", "code", "guard"})
+
 if __name__ == "__main__":
     unittest.main()
