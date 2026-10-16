@@ -790,7 +790,109 @@ EOF
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18"
+# Prints the exit codes of the end lines for id $2 in install log $1, one per line, sorted and unique.
+end_exits() { grep -w end "$1" 2>/dev/null | grep "id=$2 " | sed -n 's/.* exit=\([^ ]*\).*/\1/p' | sort -u; }
+
+# ---- Case 19: run B waits on the lock, main moves X -> Y meanwhile; B must not move the pin back to X ----
+# Owner ruling 2026-10-15 (install-set). The helper reads main's commit before it takes the lock, so
+# a run that waits on the lock can act on a commit that is no longer main when it gets the lock. The
+# lock is a fake holder (case15's pattern), which keeps the race deterministic. The case plays run A's
+# part: main moves to Y, the pin moves to Y, and the lock is let go. B is the real run, and it started
+# when main was X. The pin must end at Y, never back at X.
+case19() {
+  name="case19: a run that waited on the lock works from main's commit after the wait, so it never moves the pin back to the older commit"
+  d="$work/case19"; h="$d/home"; cfg="$h/.claude-cfg"; mkdir -p "$cfg"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  X=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  lock="$cfg/.claude-settings-install.lock"
+  printf '4242\n' > "$lock"
+  ( cd "$d/linked" && env HOME="$h" CLAUDE_CONFIG_DIR="$cfg" MSYS=winsymlinks:nativestrict \
+      PATH="$SHIM:$PATH" CLAUDE_SETTINGS_LOCK_WAIT=30 bash "$SCRIPT" ) > "$d/B.out" 2>&1 &
+  bp=$!
+  sleep 3   # fixed wait: run B reads main (X) and then blocks on the fake lock
+  if ! kill -0 "$bp" 2>/dev/null; then
+    rm -f "$lock"; wait "$bp"
+    bad "$name" "precondition: run B ended while the fake lock was held: $(cat "$d/B.out")"; return
+  fi
+  git -C "$d/clone" commit -q --allow-empty -m Y
+  Y=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone-live" switch -q --detach "$Y"   # run A's move: the pin goes to Y
+  pin_mid=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+  rm -f "$lock"                                    # run A lets go; B takes the lock
+  wait "$bp"; brc=$?
+  pin_head=$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)
+
+  if [ "$X" = "$Y" ] || [ "$pin_mid" != "$Y" ]; then
+    bad "$name" "precondition: the pin did not move to main's new commit [$Y] (pin at [$pin_mid])"
+  elif [ "$pin_head" = "$X" ]; then
+    bad "$name" "run B moved the pin back to the older commit [$X]; want main [$Y]. B read main before it waited on the lock: $(cat "$d/B.out")"
+  elif [ "$pin_head" != "$Y" ]; then
+    bad "$name" "the pin is at [$pin_head] after the lock wait, want main [$Y]: $(cat "$d/B.out")"
+  elif [ "$brc" -ne 0 ]; then
+    bad "$name" "run B exited $brc: $(cat "$d/B.out")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 20: the installer check fails (no install.sh) -> the end line carries the run's exit 1 ----
+# release_lock logs the end line before the installer check, so a run that fails at that check logs
+# exit=0 and then exits 1. The end line for the run's id must carry the real exit.
+case20() {
+  name="case20: a run that fails at the installer check logs an end line with its real non-zero exit"
+  d="$work/case20"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  git -C "$d/clone" rm -q install.sh
+  git -C "$d/clone" commit -q -m "no install.sh"
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  run_live "$d/linked"
+  log="$h/.claude-cfg/claude-settings-install.log"
+  sid=$(first_start_id "$log")
+  ends=$(end_exits "$log" "$sid")
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "exit 0 although the pinned checkout has no install.sh: $out"
+  elif [ -z "$sid" ]; then
+    bad "$name" "no start line for the run: [$(cat "$log" 2>/dev/null)]"
+  elif [ "$ends" != "$rc" ]; then
+    bad "$name" "the end line for id=$sid says exit=[$ends], the run exited $rc: $(cat "$log")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- Case 21: the installer runs and exits 7 -> the end line carries exit=7, the run's real exit ----
+case21() {
+  name="case21: an installer that exits 7 leaves an end line with exit=7, the run's real exit"
+  d="$work/case21"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  STUB_EXIT=7
+  export STUB_EXIT
+  run_live "$d/linked"
+  unset STUB_EXIT
+  log="$h/.claude-cfg/claude-settings-install.log"
+  sid=$(first_start_id "$log")
+  ends=$(end_exits "$log" "$sid")
+
+  if [ "$rc" -ne 7 ]; then
+    bad "$name" "expected exit 7, got $rc: $out"
+  elif [ ! -f "$d/clone-live/ran-sh.txt" ]; then
+    bad "$name" "install did not run from the pinned checkout, so the end line proves nothing: $out"
+  elif [ -z "$sid" ]; then
+    bad "$name" "no start line for the run: [$(cat "$log" 2>/dev/null)]"
+  elif [ "$ends" != 7 ]; then
+    bad "$name" "the end line for id=$sid says exit=[$ends], want exit=7: $(cat "$log")"
+  else
+    ok "$name"
+  fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
