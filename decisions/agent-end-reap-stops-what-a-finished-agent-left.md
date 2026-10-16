@@ -89,8 +89,8 @@ only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
 
 ## Part 4. The worktree is removed at agent end
 
-Owner rulings, 2026-10-15: plan step 3, and the 19:43 CDT rulings below. Status: decided,
-not built. Lane wt-reap builds it.
+Owner rulings, 2026-10-15: plan step 3, the 19:43 CDT rulings below, and the 23:00 CDT
+ruling "Build a delayed remover". Status: decided, not built. Lane wt-reap builds it.
 Until that lane merges, the reaper stops processes and removes no worktree.
 
 Why. On 2026-10-15 the machine held 610 agent worktrees. The reaper stopped processes only.
@@ -104,15 +104,45 @@ Rule. At each SubagentStop, the reaper removes two kinds of worktree:
 
 Idle is read as the sweep reads it (see "The sweep removes a finished agent worktree").
 
-Agent end stops the processes that the ending agent started in its own worktree. This
-includes its own shells. Then it removes that worktree. The reaper never stops a process
-whose cwd is inside another tree. In the ending agent's own worktree, Part 3 read 3 does
-not apply. The parent of its shells is a live harness outside the tree. Part 3 reads 1, 2
-and 4 still hold. (Owner ruling, 2026-10-15 19:43 CDT.)
+**Own tree: a delayed remover.** (Owner ruling, 2026-10-15 23:00 CDT.)
+
+MEASURED 2026-10-15, Windows, lane wt-reap try 4:
+
+- The hook cannot remove its own worktree. Its own wrapper shells run with cwd inside the
+  tree. `git worktree remove` gives rc 255 after it deletes the files.
+- The host `claude.exe` has its cwd outside the tree.
+- The guard's SubagentStop check runs at the same time. Its wrapper is inside the same
+  tree, so an in-hook stop loop can signal it.
+
+Flow for the ending agent's own tree:
+
+1. The hook checks `agent-<agent_id>`: clean, pushed, and free of a live lock. A failed
+   check keeps the tree. The hook exits.
+2. The hook starts a remover. The remover is detached, is not a child of the hook chain,
+   and has its cwd outside the tree. The hook then exits.
+3. The remover waits, up to a fixed limit, until every hook process inside the tree has
+   exited. It never stops a process that runs a hook.
+4. The remover stops the agent's own shells: processes inside the tree whose first parent
+   outside the tree is the host and that run no hook.
+5. The remover re-checks clean, pushed, lock and session.
+6. The remover removes the tree without `--force`.
+7. If the limit ends first, the remover keeps the tree. The next agent end or the sweep
+   removes it.
+
+The hook stops no process, in any tree.
+
+The 19:43 CDT rulings now belong to the remover. It stops the agent's own shells, then
+removes the tree, even with git-ignored files. In the ending agent's own worktree, Part 3
+read 3 does not apply. The parent of its shells is a live host outside the tree. Part 3
+reads 1, 2 and 4 still hold. (Owner ruling, 2026-10-15 19:43 CDT.)
+
+Not ruled: an orphaned process in another tree, or in a dirty tree, has no stopper. Part 3
+ruling 3 covers it. This ruling does not.
 
 A clean tree has no uncommitted and no untracked file. Git-ignored files do not keep a
 tree. A clean, pushed worktree is removed even when it holds git-ignored files, such as
-build output, packages or `.env.local`. (Owner ruling, 2026-10-15 19:43 CDT.)
+build output, packages or `.env.local`. For the ending agent's own tree, the remover
+applies this. (Owner ruling, 2026-10-15 19:43 CDT.)
 
 A worktree is removed only when all of these hold:
 
@@ -120,7 +150,11 @@ A worktree is removed only when all of these hold:
 - it is pushed;
 - it is unlocked;
 - no live session uses it (the constraint in Part 3);
-- no process has a cwd inside it. In the ending agent's own worktree, the stop above runs first.
+- no process has a cwd inside it. In the ending agent's own worktree, the remover's stop
+  (step 4) runs first.
+
+The hook checks clean, pushed and lock (step 1). The remover re-checks clean, pushed, lock
+and session (step 5).
 
 A read that cannot tell keeps the worktree.
 
@@ -134,7 +168,8 @@ Related, same ruling:
 
 Accepted cost: a resume of a finished agent fails once its worktree is gone. A fresh agent
 gets the old report instead. Removal also deletes the tree's git-ignored files, a copied
-`.env.local` included. The sweep's Limits note says the same.
+`.env.local` included. The sweep's Limits note says the same. If the remover's limit ends
+first, the tree stays until the next agent end or the sweep removes it.
 
 ## Reap timeout, 2026-10-10
 
