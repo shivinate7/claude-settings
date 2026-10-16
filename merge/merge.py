@@ -17,8 +17,11 @@ RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint",
 sys.path.insert(0, os.path.dirname(RECORDS))
 try:
     from hook_catalog import RECORDS_PAGE  # noqa: E402  the page the generator writes; one home, so a conflict on the page is told from any other
-except Exception as e:  # a missing or broken module: one line, no traceback
-    sys.exit("merge: cannot load the records generator, module hook_catalog (lint/hook_catalog.py): " + " ".join(f"{type(e).__name__}: {e}".split()))
+except Exception as e:  # a missing or broken module: one line, no traceback when run; an ImportError when imported
+    _why = "merge: cannot load the records generator, module hook_catalog (lint/hook_catalog.py): " + " ".join(f"{type(e).__name__}: {e}".split())
+    if __name__ == "__main__":
+        sys.exit(_why)
+    raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -168,7 +171,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
