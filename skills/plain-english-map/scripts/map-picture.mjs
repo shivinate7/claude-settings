@@ -2,9 +2,10 @@
 // code's own imports.
 // Use: node <skill>/scripts/map-picture.mjs [<out.html>] [--usage <file.json>] [--config <map.config.json>], run from the root
 // of a repository that has `map.config.json`. It reads that repository and writes one page. With no <out.html>, the page is
-// `map.html` in the root. An <out.html> inside the repository is refused.
+// `map.html` in a new folder under the system temp folder, and the command prints its path. An <out.html> inside the repository is refused.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripCommentsAndStrings } from './lib/source-text.mjs';
@@ -65,7 +66,7 @@ const readTrace = (key, text) => {
   return { key, name: text.split('\n').find((l) => l.startsWith('# '))?.slice(2).trim() ?? key, actions };
 };
 
-// The web side of the app (D-710, The picture's views). `web` joins each client file to the file of the route that
+// The web side of the app. `web` joins each client file to the file of the route that
 // answers its call. `page` holds the files that `index.html` loads. `server` holds the files that register a route.
 // The reader is MAP8's (`webCalls`), never a second one. Only files in the map count.
 const webOf = (sources, tracked) => {
@@ -110,7 +111,7 @@ export const pictureData = ({ mapFiles, traceFiles, sources, tracked, commit, co
   const links = nodes
     .flatMap((n) => (sources[n.p] ? importTargets(n.p, sources[n.p], tracked) : []).filter((t) => area.has(t) && t !== n.p).map((to) => ({ from: n.p, to })))
     .sort(byKey('from', 'to'));
-  // D-710, Plain English is the master copy: an area link counts imports from code files only, never from test files.
+  // An area link counts imports from code files only, never from test files.
   const isTest = new Set(nodes.filter((n) => n.k === 'test').map((n) => n.p));
   const counts = new Map();
   for (const l of links) {
@@ -119,7 +120,7 @@ export const pictureData = ({ mapFiles, traceFiles, sources, tracked, commit, co
   }
   const areaLinks = [...counts].map(([k, n]) => ({ from: k.split('\t')[0], to: k.split('\t')[1], n })).sort(byKey('from', 'to'));
   const traces = Object.keys(traceFiles).sort().map((k) => readTrace(k, traceFiles[k]));
-  // The AI calls tab (D-710, Plain English is the master copy). `aiCalls` holds one row per place that starts a model call or records
+  // The AI calls tab. `aiCalls` holds one row per place that starts a model call or records
   // a step, read from the code by the reader in `.claude/skills/plain-english-map/scripts/map-check.mjs`. `aiSteps` holds one card per spend step, because `model_calls` records the step.
   // A call path with no step goes in `aiNoStep`. No money and no rate is read or held here.
   const web = webOf(sources, tracked);
@@ -185,7 +186,7 @@ export const withUsage = (data, usage) => {
   return { ...data, usage: { commit: usage.commit, from: usage.from, to: usage.to, rows, unmatched } };
 };
 
-// The area tree (D-710, The picture's views). Only a link from a code file counts. `usedBy` holds every area
+// The area tree. Only a link from a code file counts. `usedBy` holds every area
 // that uses the file, its own area too.
 export const areaGroups = ({ nodes, links }, areaId) => {
   const kind = new Map(nodes.map((n) => [n.p, n]));
@@ -231,7 +232,7 @@ const loopRoots = (next, owner, files) => {
   return roots;
 };
 
-// The area tree (D-710, The picture's views). Roots are the area's code files that no other code file of
+// The area tree. Roots are the area's code files that no other code file of
 // the area uses. A screen's first step comes first, with the screen's name. A file opens once, at its
 // SHORTEST depth from a root (breadth-first), and every other place shows it `seen`. A loop with no
 // other user gives one root: its first file by path. Other areas fold into `other`, with a count each.
@@ -286,7 +287,7 @@ const appGraph = (data) => {
   return { area, next, build };
 };
 
-// The app tree (D-710, The picture's views): one root, three trunks. The browser trunk starts at the files that the page
+// The app tree: one root, three trunks. The browser trunk starts at the files that the page
 // loads, the server trunk at the files that register a route, and a web call joins a client file to its route's file.
 // The third trunk holds the code files that neither reaches, by area. A file opens once, at its shortest depth.
 export const appTree = (data) => {
@@ -310,7 +311,7 @@ export const appTree = (data) => {
   ] })] };
 };
 
-// The tree of one screen (D-710, The picture's views): from the first file of its trace, through imports and web calls, in every area.
+// The tree of one screen: from the first file of its trace, through imports and web calls, in every area.
 export const screenTree = (data, key) => {
   const { area, next, build } = appGraph(data);
   const first = data.traces?.find((t) => t.key === key)?.actions?.[0]?.steps?.[0]?.p;
@@ -358,7 +359,7 @@ export const branchKeys = (roots, max = 8) => {
   return out;
 };
 
-// The focus on one file (D-710, The picture's views). Only a link from a code file counts. Each side is
+// The focus on one file. Only a link from a code file counts. Each side is
 // a tree to `depth` steps (1 to 3). A file expands once, at its SHORTEST depth from the focus file,
 // found breadth-first. Every other place it appears is a `seen` leaf with no children.
 // The page runs this same source (`renderPage` injects it), so it holds no outside reference.
@@ -394,7 +395,7 @@ export const focusTree = ({ nodes, links }, path, depth) => {
   return { uses: side('from', 'to'), usedBy: side('to', 'from') };
 };
 
-// The layers (D-710, The picture's views). Only a link between two code files counts. A loop is a
+// The layers. Only a link between two code files counts. A loop is a
 // strongly connected group (iterative Tarjan, so a deep graph cannot overflow the stack). A group
 // sits 1 row above the highest group it uses, and row 0 uses no other file.
 export const layers = ({ nodes, links }) => {
@@ -441,7 +442,7 @@ export const layers = ({ nodes, links }) => {
   return { rows: rows.map((r) => r.sort()), loops: groups.filter((g) => g.length > 1).sort((a, b) => (a[0] < b[0] ? -1 : 1)) };
 };
 
-// The look-alikes (D-710, Plain English is the master copy). Two views of repeated work, read with no
+// The look-alikes. Two views of repeated work, read with no
 // model. A name is listed when two or more code files define it. A browser client in
 // `src/services/*Client.ts` shares names with the server on purpose, so a name is hidden when all its
 // files but one are such clients. A family is the files that share the last capitalised word of the base
@@ -473,7 +474,7 @@ export const lookAlikes = ({ nodes }, sources) => {
   return { names, families, hidden: [...defs].filter(([, f]) => f.length > 1).length - names.length };
 };
 
-// The rulings (D-710, Plain English is the master copy). Each decision entry, with the checks it lists
+// The rulings. Each decision entry, with the checks it lists
 // (its prose names them, or a check's call or comment block cites it), sorted, and the checks its `Held by:` line holds. A numbered entry comes first, by number. A pending entry (id `pending`) comes after, by slug.
 export const rulingProof = (index) => {
   const num = (e) => Number(String(e.id).match(/\d+/)?.[0] ?? Infinity);
@@ -632,7 +633,7 @@ const main = (root, out, usageFile, configFile) => {
   const own = { ...check, repoMapConfig: ownRepoMapConfig, validateMapConfig: ownValidateMapConfig, aiCallRows: () => [] };
   for (const k of Object.keys(own)) R[k] ??= own[k];
   const config = configFile ? loadMapConfig(configFile, root) : repoMapConfig();
-  const outPath = out ? path.resolve(out) : path.join(root, 'map.html');
+  const outPath = out ? path.resolve(out) : path.join(mkdtempSync(path.join(os.tmpdir(), 'plain-english-map-')), 'map.html');
   if (out && insideRepo(root, outPath)) throw new Error('Write the page outside the repo.');
   const all = git(root, 'ls-files').split('\n').filter(Boolean);
   const tracked = new Set(all);

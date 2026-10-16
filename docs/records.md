@@ -268,6 +268,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-read-no-retry` | One failed status read ends a CI-wake wait as unknown, with no retry. | [`debts/ci-wake-read-no-retry.md`](../debts/ci-wake-read-no-retry.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
 | `cites-lack-gloss-unchecked` | Some cites of record ids, in decisions and debts, carry no gloss. | [`debts/cites-lack-gloss-unchecked.md`](../debts/cites-lack-gloss-unchecked.md) |
+| `cloud-skill-copy-no-typescript` | A cloud install copies the skill folder outside the clone. | [`debts/cloud-skill-copy-no-typescript.md`](../debts/cloud-skill-copy-no-typescript.md) |
 | `cmd-c-quote-count-bash-reader` | cmd reads `\` as a plain character, and each `"` toggles its quote state. | [`debts/cmd-c-quote-count-bash-reader.md`](../debts/cmd-c-quote-count-bash-reader.md) |
 | `cmd-c-script-skips-kill` | `cmd /c taskkill /F /IM node.exe` is allowed. | [`debts/cmd-c-script-skips-kill.md`](../debts/cmd-c-script-skips-kill.md) |
 | `debt-decision-link-unchecked` | No check confirms that a debt's decision still names its gap. | [`debts/debt-decision-link-unchecked.md`](../debts/debt-decision-link-unchecked.md) |

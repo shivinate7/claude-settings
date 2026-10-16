@@ -24,7 +24,8 @@ The repository values live in `map.config.json` at the repository root. The keys
    step in a screen's path. Fix each line that names a file the change moved or deleted.
 3. **Review.** Run the same command until it is green. Then run
    `node ~/.claude/skills/plain-english-map/scripts/map-picture.mjs` from the repository root and read the page.
-   It writes `map.html` in the root, or the path you give it, and it refuses a path inside the repository.
+   It writes `map.html` in a new folder under the system temp folder and prints the path.
+   Give a path to write there instead. The command refuses a path inside the repository.
 
 ## Formats
 

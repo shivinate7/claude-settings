@@ -90,7 +90,7 @@ export const migrationTables = (migrationSources) => {
   return [...names].sort();
 };
 
-// Every screen key that `SCREEN_KEYS` holds in a source file, such as src/utils/screens.ts (D-710).
+// Every screen key that `SCREEN_KEYS` holds in a source file, such as src/utils/screens.ts.
 // It parses the `SCREEN_KEYS` statement and follows each spread to the array it names, through
 // `X.map((i) => i.key)` and `X.flatMap((g) => g.rows)`. A spread it cannot follow throws: never a partial list.
 export const screenKeysFromSource = (source, constName) => {
@@ -189,7 +189,7 @@ export const actionsWithoutStep = (text) => {
   return out;
 };
 
-// ---- MAP8: an earlier step of the same action must reach each step (D-710, Traces) ----
+// ---- MAP8: an earlier step of the same action must reach each step ----
 
 // One parse for each file, shared by every reader below.
 const parses = new Map();
@@ -576,7 +576,7 @@ export const scriptEntries = (scripts, tracked, routeFiles = [], re = extRe(repo
 /** Reads { traces, links, calls, routes }. Returns each step that no earlier step of its action reaches, with the step before it. */
 export const traceGaps = ({ traces, links, calls, routes, entries = [], tables = null }) => {
   // A file that registers a route imports most of the server. Its plain import links do not count: it
-  // reaches only the files that the routes called by an earlier step use (D-710, Traces).
+  // reaches only the files that the routes called by an earlier step use.
   const routeFiles = new Set(routes.map((r) => r.file));
   const next = new Map();
   for (const l of links) if (!routeFiles.has(l.from)) (next.get(l.from) ?? next.set(l.from, []).get(l.from)).push(l.to);
@@ -602,7 +602,7 @@ export const traceGaps = ({ traces, links, calls, routes, entries = [], tables =
     return chain(seeds).has(b);
   };
   // A separate process (a file no code file imports) joins an earlier step it imports when both step
-  // sentences name the same table in backticks (D-710, Traces).
+  // sentences name the same table in backticks.
   const entry = new Set(entries);
   const tablesOf = (sentence) =>
     new Set([...sentence.matchAll(/`([^`]+)`/g)].map((x) => x[1]).filter((t) => (tables ? tables.includes(t) : true)));
@@ -619,7 +619,7 @@ export const traceGaps = ({ traces, links, calls, routes, entries = [], tables =
       const step = { path: m[1], tables: tablesOf(line.slice(line.indexOf(' — ') + 3)) };
       const joined = (e) =>
         entry.has(step.path) && links.some((l) => l.from === step.path && l.to === e.path) && sharesTable(e.tables, step.tables);
-      // A step is fine when any earlier step of the same action reaches it (D-710, Traces).
+      // A step is fine when any earlier step of the same action reaches it.
       if (before.length && !before.some((e) => reaches(e.path, step.path, before.map((x) => x.path)) || joined(e)))
         gaps.push({ key, action, from: before[before.length - 1].path, to: step.path });
       before.push(step);
@@ -672,7 +672,7 @@ export const plainWordsNotes = (files) =>
       );
     });
 
-// ---- The AI calls tab reader (D-710, Plain English is the master copy). It reads the model-call sites from the generator and the worker stages. No check holds its coverage. ----
+// ---- The AI calls tab reader. It reads the model-call sites from the generator and the worker stages. No check holds its coverage. ----
 // The call sites come from `seamSites` of the generator, read with the parser, so a comment or a string makes no row. The tab adds the
 // tier and the effort that a call's own line gives as literals. The seam is the file in `modelSeam.file` of the config, and it is no
 // caller. A config with no seam has no rows.
