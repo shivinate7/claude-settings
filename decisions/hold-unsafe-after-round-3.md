@@ -1,8 +1,8 @@
-# Hold a change whose net safety value is not positive after round 3
+# Hold a guard, gate or check change whose net safety value is not positive after round 3
 
 ## The question
 
-After review round 3, does a change merge or get held? Its net safety value against main decides which.
+After review round 3, does a change merge or get held? For a change that touches a guard, gate or check, its net safety value against main decides which. Any other change merges on green.
 
 ## Ruling
 
@@ -13,9 +13,9 @@ Owner ruling, 2026-10-15 12:00 CDT. The owner's words:
 
 The rule that follows:
 
-- After round 3, the round-3 reviewer judges the change's net safety value against main: holes closed against holes opened, weighted by expected harm. The judgment is semantic.
-- Positive net value merges on green. Every open finding becomes a named limit and a debt.
-- Zero or negative net value is held. It is dropped from the batch, so the rest merges green. It is parked: it gets no fix lane and no more work until the owner decides.
+- After round 3, a change that touches a guard, gate or check gets the net-value test (owner word, 2026-10-15 22:39 CDT: "should be adjusted"). The round-3 reviewer judges its net safety value against main: holes closed against holes opened, weighted by expected harm. The judgment is semantic. A change that touches none skips the test.
+- Positive net value merges on green. Every open finding becomes a named limit and a debt, for every change.
+- A guard, gate or check change with zero or negative net value is held. It is dropped from the batch, so the rest merges green. It is parked: it gets no fix lane and no more work until the owner decides.
 - The owner's word can allow work on a held change. A merge still needs positive net value.
 - Owner ruling, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split.
 - The red-CI split in `review-cap-red-ci` (red CI is split, not a hole) still applies to changes that are not held.
@@ -24,7 +24,7 @@ The rule that follows:
 
 ## Why
 
-The owner does not want worse changes on main. He does want partial progress merged. A change that takes main from 6 safety holes to 3 merges.
+The owner does not want worse changes on main. He does want partial progress merged. A change that takes main from 6 safety holes to 3 merges. A change that touches no guard, gate or check scores zero, so the test would park it for wording nits.
 
 Holes that main already has do not count against a change. Every guard on main has known gaps. Only the holes a change opens count against it, and the holes it closes count for it.
 
