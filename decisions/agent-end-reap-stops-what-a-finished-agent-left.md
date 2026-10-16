@@ -320,3 +320,9 @@ Lane `sweep-fast` passed review round 3 with a positive net safety value. Each o
 - `sweep-no-deadline-many-trees`: idle is read up to about 12-20 s before a decision, against 1-3 s on main. Dirty, unpushed, live-session and process checks still keep a tree. Review round 3, item 4.
 - `sweep-attended-idle-unused`: an attended run reads idle time it does not use. A preview may lose its thread pool. Review round 3, item 5.
 - `sweep-no-deadline-many-trees`: the deadline is a fixed 12 s for any `--confirm` without `--attended`, until lane `sweep-budget` lands.
+
+Lane `wt-reap` passed review round 3 with a positive net safety value. Each open finding is a debt:
+
+- `finished-agent-lock-holds-tree`: a finished agent's worktree can hold `claude agent agent-<id> (pid N)`, with no start time. N is the session's live claude.exe. The lock looks like a running agent's lock. So the tree stays until the host exits. MEASURED 2026-10-15 23:31: 17 of 166 agent trees, later 22, all held by one pid. A fix needs a finished-agent proof that the ruling does not give. Owner decision.
+- `marker-writeback-loses-deletion`: a failed remove leaves `claude-removal-started` on an intact tree. Later, at agent end, that tree is written back and removed. The tree must be idle 30 minutes, unlocked (or hold a stale agent lock), with no live session or process inside. It holds only unstaged deletions of tracked files. The person's uncommitted deletion is lost. Narrow: it needs a prior failed remove.
+- `no-start-lock-has-no-pid-check`: the lock form with no start time has no pid-reuse check. The sweep frees it only when pid N is dead. A live process that holds a reused pid keeps the tree. That is the safe side. The janitor decision names this form.

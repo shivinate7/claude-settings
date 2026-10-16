@@ -60,6 +60,8 @@ only when the host pid is dead, or alive with another start time. The worktree
 must also pass every other check. Any other lock reason, and any unreadable
 fact, keeps it.
 
+The lock may also read `claude agent agent-<id> (pid N)`, with no start time. The sweep frees that form only when pid N is dead. It has no pid-reuse check, so a live process that holds a reused pid keeps the tree.
+
 Owner ruling: remove only a folder that is clean, and whose work is safe. Work
 is safe in two cases. Every commit on HEAD is on a remote branch, and a
 detached HEAD counts. Or HEAD is merged into the default branch by ancestry or
