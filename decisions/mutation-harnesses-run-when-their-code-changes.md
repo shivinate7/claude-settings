@@ -24,8 +24,7 @@ other step took under 2 min. A pull request that changed one sentence in
 - `lint/_transcript.py` is in the guard set because the ruling names it. No harness
   imports it.
 - The diff uses `--no-renames`. A move out of a trigger path then lists the old path.
-- An empty base SHA on a pull request runs every harness. So does an empty or
-  all-zeros `before` SHA on a push.
+- An empty base SHA on a pull request runs every harness. A push runs every harness.
 - A nightly `schedule:` run on main and `workflow_dispatch` run every harness. The guard harness
   runs on ubuntu only; the sweep harness runs on every OS.
 - A diff that cannot be read runs both harnesses.
@@ -38,3 +37,6 @@ other step took under 2 min. A pull request that changed one sentence in
 main has no branch protection and no required check, so a skipped step blocks nothing.
 A regression that reaches a harness only through a file outside the sets above is
 caught by the nightly run, not by the pull request.
+
+Kind: process
+Home: .github/scripts/harness-scope.sh

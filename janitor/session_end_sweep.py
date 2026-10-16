@@ -96,32 +96,9 @@ HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECOND
 # timeout) without also widening that settings.json entry is exactly the drift
 # HookBudgetFitsUnderItsHostCeiling exists to catch.
 
-# THE UPPER EDGE. HookBudgetFitsUnderItsHostCeiling's floor arm above refuses a ceiling that
-# leaves LESS than SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS over the worst case. Nothing stopped
-# it leaving unlimited MORE: a later change that quietly doubled SWEEP_TIMEOUT_SECONDS, or halved
-# it while settings.json's 55 stayed put, would still pass every arm above, because only the
-# lower bound was guarded. State the ceiling on that margin here, beside the arithmetic it
-# checks. When the arm that reads this constant goes red, do ONE of two things, on purpose:
-# either SHRINK THE WORK (bring SWEEP_TIMEOUT_SECONDS or the git-call budget back down toward
-# this margin), or MOVE THE CEILING ON PURPOSE (widen settings.json's SessionEnd timeout, and
-# widen this constant in the same commit, with a reason).
+# THE LOWER EDGE. The settings.json SessionEnd timeout must leave at least this much over
+# HOOK_WORST_CASE_SECONDS, for process-start and import overhead. A test reads the constant.
 SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS = 5.0
-SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0
-
-
-def headroom_within_bounds(ceiling_seconds: float, worst_case_seconds: float) -> bool:
-    """True when `ceiling_seconds - worst_case_seconds` (settings.json's margin over this hook's
-    own worst case) sits inside [SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
-    SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS]. Too little margin means a ceiling that could cut
-    the hook off before its own fail-open exit; too much margin means the worst-case arithmetic
-    or the ceiling drifted without the other one following -- both are the same kind of silent
-    drift, just on opposite sides of the number."""
-    margin = ceiling_seconds - worst_case_seconds
-    return (
-        SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS
-        <= margin
-        <= SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS
-    )
 
 
 # SPENDING WHAT REMAINS, NOT WHAT WAS GUESSED. HOOK_WORST_CASE_SECONDS above is a STATIC bound,

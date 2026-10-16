@@ -2,7 +2,7 @@
 """CLI tests for the scope detector (.github/scripts/harness-scope.sh).
 
 Each case builds a scratch git repo, commits a base, commits the changed paths, runs the script
-with EVENT, BASE_SHA and BEFORE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
+with EVENT and BASE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
 HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
@@ -30,7 +30,7 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", before="auto", existing=(), landed=None):
+def run(paths, event="pull_request", base="auto", existing=(), landed=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
@@ -56,7 +56,7 @@ def run(paths, event="pull_request", base="auto", before="auto", existing=(), la
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out,
-                   BASE_SHA=sha if base == "auto" else base, BEFORE_SHA=sha if before == "auto" else before)
+                   BASE_SHA=sha if base == "auto" else base)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
         lines = open(out).read().split()
@@ -110,9 +110,6 @@ class Scope(unittest.TestCase):
     def test_push_schedule_and_dispatch_run_everything_even_for_docs(self):
         for ev in ("push", "schedule", "workflow_dispatch"):
             self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
-
-    def test_push_with_an_unreadable_range_runs_everything(self):
-        self.assertFlags(run(["README.md"], event="push", before="e" * 40), want_true=ALL)
 
     # Map gaps found in review: each path is read by a suite in another job.
     def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
@@ -224,6 +221,12 @@ class Scope(unittest.TestCase):
 
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
+
+    # Review round 1: mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
+    # and the Mod tests run that test. The lint/* rule sets `code` only, so a diff naming only the lint
+    # file would skip its test.
+    def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
+        self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
 
 if __name__ == "__main__":
     unittest.main()

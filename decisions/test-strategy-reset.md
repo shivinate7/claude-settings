@@ -31,3 +31,7 @@ Home: .github/workflows/gates.yml
 The first audit counted about 2300 guard cases that each start a Python process, and about 81 cases that cannot fail. It counted about 195 s of fixed sleeps, and found that macOS uses most CI minutes on suites that do not touch the OS. The value review judged 1805 units: 73% keep, 18% merge, 4.5% cut, 4.3% rewrite. On 2026-10-14, slow Windows runners failed PR 432 twice, on two tests that its change did not touch.
 
 Reports: `wt/test-audit-report/00-holistic.md` and `wt/test-value-report/00-holistic.md` on the owner's machine. They are working notes, not records.
+
+## Holes, named
+
+- Lane merge-guard-b merged with three rows gone that each alone pinned a guard part. Owner, 2026-10-15 17:31 CDT. Debts: `split-paren-pkill-unpinned`, `split-quoted-hash-unpinned`, `reload-missing-file-unpinned`.

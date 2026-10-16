@@ -8,7 +8,7 @@ import os
 import re
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
     inline_script, resolve_command, segment_tokens, split_segments,
 )
 
@@ -316,7 +316,7 @@ def _inner_scripts(tokens, at: int):
     if word in PLAYWRIGHT_PS_SHELLS:
         return _pwsh_script(tokens)
     if word in ("cmd", "cmd.exe") and at + 1 < len(tokens) and tokens[at + 1].lower() in ("/c", "/k"):
-        return " ".join(tokens[at + 2:])
+        return PowerShellScript(" ".join(tokens[at + 2:]))
     return ""
 
 

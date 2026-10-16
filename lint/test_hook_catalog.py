@@ -53,6 +53,73 @@ Unit cases U1-U4 pin the table and sentence helpers used here.
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
 are hand scanners; they get the comment-opener, lone-quote and multi-line-string cases (F2-F6,
 F11-F16). JavaScript is not scanned, so the multi-line template-literal case does not apply.
+
+Records page, lane records-index, round 1. Owner ruling 2026-10-14 10:59 CDT: "live updating index
+for this and all repos, and it needs to delete old/stale rulings and rewrite in place, never store
+a history that's overruled". Cases A, B, C, D and R10-R13 pin it; U5-U7 pin the readers they use.
+Interface the generator must meet. The builder builds to this. One home: the same generator, no
+second script.
+- No argument writes every page it owns: docs/catalog.md and docs/records.md. `--check` checks both:
+  a missing or stale page, or a problem, is exit 1 and names the page or the offender. `--print`
+  stays the catalog page only (R7). F18, F19, F26 and F27 now publish with a no-argument run, so
+  they stay green on 1ac9851 and on the build.
+- Merge-time rebuild, owner ruling 2026-10-14 13:18 CDT. The shared merge tool (merge/merge.py,
+  cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
+  head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
+  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
+  run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) a stale or missing docs/records.md is no
+  failure and prints nothing. On any other run (a push to the default branch, a laptop) it fails and
+  names the page. A problem (a history marker, an empty record, an unreadable file) and the catalog
+  page stay red everywhere. Why keep the check: after a merge made without the tool, or a failed
+  rebuild, main would hold a stale index and no signal. The push check on main is that signal, and the
+  next merge heals it. Why lenient on a pull request: each pull request that touches a record would
+  have to carry a regenerated page, and two of them conflict on it. R10-R13 read the committed page, so
+  they are skipped on a pull request run. The fixture cases drop the runner's variables (B6-B10 set them).
+- A root with no records at all (no record folder, no rule marker) writes no page: exit 0, nothing
+  written, `--check` silent. The merge tool runs the generator on every repo it merges (D5).
+- `--root DIR` is the repo root, the same as the environment variable HOOK_CATALOG_ROOT (both work).
+  It never comes from the working folder.
+- Catalog parts: a hooks/, skills/ or mods/ folder. A root with none writes and checks only
+  docs/records.md and never reads settings.json or the model table. A root with a part and no
+  settings.json is still exit 2 (F20).
+- Records, read from the root: the `<!-- rule:<id> -->` markers in CLAUDE.md, and the .md files in
+  decisions/, debts/, deferred/ and plans/. A README.md in a folder is no record. Other files and a
+  missing folder are ignored. A file the generator cannot read is exit 2 naming it. An empty record,
+  or a debt with no What, is a problem: exit 1 naming the file.
+- Page: one `## ` section per kind, in this order, only when it has a row: Mandates, Rulings, Build
+  designs, Unsorted decisions, Debts, Deferred, Plans. Each holds a table headed Slug | Gist | Link.
+  Slug: the rule id, or the file name without .md. Link: `../CLAUDE.md` or `../<folder>/<slug>.md`.
+  Rows: Mandates in CLAUDE.md order, every other kind sorted by slug. A pipe in a gist is written \\|.
+- Rulings: Kind: process. Build designs: Kind: build. Unsorted decisions: no Kind line, or a Kind
+  the generator does not know (that may instead be a problem naming the file). A Kind line counts
+  outside fenced text only: decisions/rulings-declare-kind.md holds a fenced example of both.
+- Gist, one sentence, text flattened first (lines wrap). A sentence ends at ". ", "? " or "! ", or at
+  the end of its block. Mandate: the first sentence of the rule's text, which runs from the paragraph
+  start (a bold lead label dropped) or the marker before it, to its marker. Decision: the first block
+  under the first `## Ruling` or `## The ruling`, else under `## The question`, else the first
+  paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
+  text stays as written, so a decision whose paragraph opens with bold text (the real
+  one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
+  leading # dropped.
+- No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
+  or "Old ruling", in any case. The other five fail only where they open a block: the text of a
+  heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
+  marker itself. "was:" fails where it opens a block, or where the word "old" comes earlier in the
+  same block ("the old wording was: ..."). A bare "no longer" is no marker. The failure is one line per
+  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
+  plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
+  comments are not special: their lines are read as prose, so history hidden in a comment fails when
+  it opens a block. A continuation line of a wrapped paragraph does not open a block.
+  What I chose, and why. Measured on 1ac9851 over those files: this rule fires on 0 lines, and "was:"
+  has 0 hits in all of them. The plain rule "the marker appears anywhere in the prose" fires on 30
+  lines in 21 files, almost all of them behaviour prose ("the guard no longer crashes"), CI runs
+  ("cancels superseded runs"), or a rule quoted by name. That would cry wolf on day one. The cost:
+  kept history that says "(superseded by the floor, kept as evidence)" mid-sentence is not caught. A
+  debt's What describing a gap may say "no longer", and it opens with its "**What.**" label.
+- Scanner cases (rule building-scanner-respects-strings), the markdown form. A comment opener, a
+  quote or a backtick inside code or a fence must not hide, or invent, a marker, a heading, a Kind
+  line or a rule marker. A multi-line fenced block is the multi-line-template-literal case. A lone
+  quote or backtick in text must not open a string.
 """
 import ast
 import collections
@@ -185,15 +252,35 @@ def model_matches(cell, want):
     return cell == want or re.match(re.escape(want) + r"[ ,(]", cell) is not None
 
 
-def generator(root, *args):
-    """Run lint/hook_catalog.py on root (None: the real repo). Returns (code, stdout, stderr)."""
+PR_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request run
+
+
+def pull_request_run():
+    """True when this test run is itself a pull request run in Actions (the stamp engine's test: onDefaultBranch)."""
+    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+
+
+def generator(root, *args, cwd=None, flag_root=False, env=None):
+    """Run lint/hook_catalog.py on root (None: the real repo). Returns (code, stdout, stderr).
+    The root goes in the environment variable, or as --root DIR with flag_root. cwd: the working folder, root by default.
+    env: variables to add. A fixture run (root given) drops the runner's pull request variables first, so a fixture
+    behaves the same on a laptop and in a pull request run; the real repo (root None) keeps them."""
     if not os.path.exists(GEN):
         raise AssertionError("lint/hook_catalog.py does not exist yet: the builder writes it")
-    env = dict(os.environ)
-    env.pop("HOOK_CATALOG_ROOT", None)
+    child = dict(os.environ)
+    child.pop("HOOK_CATALOG_ROOT", None)
     if root is not None:
-        env["HOOK_CATALOG_ROOT"] = root
-    proc = subprocess.run([sys.executable, GEN, *args], cwd=root or ROOT, env=env,
+        for name in PR_ENV:
+            child.pop(name, None)
+    child.update(env or {})
+    env = child
+    argv = [sys.executable, GEN, *args]
+    if root is not None:
+        if flag_root:
+            argv += ["--root", root]
+        else:
+            env["HOOK_CATALOG_ROOT"] = root
+    proc = subprocess.run(argv, cwd=cwd or root or ROOT, env=env,
                           capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=120)
     return proc.returncode, proc.stdout, proc.stderr
@@ -420,7 +507,119 @@ def row_for(rows, key):
     raise AssertionError("no row keyed %s in the page" % key)
 
 
-class Fixtures(unittest.TestCase):
+# ---- the records page: readers and fixture texts ------------------------------------------------
+
+RECORDS_COLUMNS = ["Slug", "Gist", "Link"]
+SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans"]
+RECORDS_PAGE = os.path.join(ROOT, "docs", "records.md")
+LINK_TARGET = re.compile(r"\]\(([^)]*)\)")
+RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
+KIND_LINE = re.compile(r"^Kind:\s*(process|build)\s*$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def unfenced_lines(text):
+    """Lines outside fenced blocks. A fence closes on the same character, at least as long, with no text after it.
+    Written here from CommonMark, not imported from the generator."""
+    fence = None
+    for line in text.replace("\r\n", "\n").split("\n"):
+        found = FENCE.match(line)
+        if fence:
+            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) and not found.group(2).strip():
+                fence = None
+            continue
+        if found and not (found.group(1)[0] == "`" and "`" in found.group(2)):
+            fence = found.group(1)
+            continue
+        yield line
+
+
+def records_rows(text):
+    """Rows of every table headed Slug | Gist | Link, each a dict: section (the last '## ' heading above the
+    table), slug (backticks off), gist (an escaped pipe unescaped) and link (the target of the first
+    markdown link in the Link cell, or "")."""
+    rows, section, state = [], "", None
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("## "):
+            section, state = line[3:].strip(), None
+            continue
+        if not line.lstrip().startswith("|"):
+            state = None
+            continue
+        cells = split_cells(line)
+        if state is None:
+            if cells == RECORDS_COLUMNS:
+                state = "separator"
+            continue
+        if state == "separator":
+            state = "body"
+            continue
+        cells += [""] * len(RECORDS_COLUMNS)
+        found = LINK_TARGET.search(cells[2])
+        rows.append({"section": section, "slug": cells[0].strip("`"), "gist": cells[1],
+                     "link": found.group(1) if found else ""})
+    return rows
+
+
+def listed(rows):
+    """{section: [slug, ...]} in page order."""
+    out = {}
+    for r in rows:
+        out.setdefault(r["section"], []).append(r["slug"])
+    return out
+
+
+def line_of(text, line):
+    """The 1-based number of the first line of text that equals line."""
+    return text.split("\n").index(line) + 1
+
+
+RULED = ("# Ruled thing\n\n## The question\n\nWhat is ruled?\n\n## The ruling\n\n"
+         "The thing is ruled. More text follows.\n\nKind: process\n")
+BUILT = ("# Built thing\n\n## The question\n\nHow is the thing built? Plainly.\n\n"
+         "Kind: build\nPlan: plans/plan-a.md#plan-a (linux)\n")
+LOOSE = ("# Loose note\n\nThis note has no kind and no\nruling heading. It wraps across lines.\n\n"
+         "## Why\n\nBecause.\n")
+TITLED = "# Just a title\n\n## Why\n\nBecause.\n"
+DEBT = ("# Gap one\n\n- **What.** The check misses one case. It also misses a second.\n"
+        "- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover both.\n")
+WAITING = "# Waiting for a thing\n\n**What waits.** The thing.\n"
+PLAN = "# Plan: do a thing\n\nOne command does it.\n"
+RULES = ("# How I work\n\n**Building.** Never guess an answer the code should give you.<!-- rule:b-one --> "
+         "Surface ambiguity instead\nof resolving it silently. Say why.<!-- rule:b-two -->\n\n"
+         "Never drop an item without saying so.<!-- rule:b-three -->\n")
+
+
+def with_records(extra=None):
+    """clean() (a catalog that passes) plus one record of each kind. extra: {path: text}; a None drops the path."""
+    spec = clean()
+    spec.update({"CLAUDE.md": RULES, "decisions/ruled.md": RULED, "decisions/built.md": BUILT,
+                 "decisions/loose.md": LOOSE, "decisions/titled.md": TITLED, "debts/gap-one.md": DEBT,
+                 "deferred/waiting.md": WAITING, "plans/plan-a.md": PLAN})
+    for rel, text in (extra or {}).items():
+        if text is None:
+            spec.pop(rel, None)
+        else:
+            spec[rel] = text
+    return spec
+
+
+def lean(extra=None):
+    """A repo with no catalog part: decisions/ and debts/ only."""
+    spec = {"decisions/ruled.md": RULED, "decisions/built.md": BUILT, "decisions/loose.md": LOOSE,
+            "debts/gap-one.md": DEBT, "debts/README.md": "# Debts\n\nOne file per debt.\n"}
+    spec.update(extra or {})
+    return spec
+
+
+def old_decision(body, title="# Old thing"):
+    """A decision whose body sits on line 7, after a blank line."""
+    return "%s\n\n## The question\n\nWhat is it?\n\n%s\n" % (title, body)
+
+
+class Tree(unittest.TestCase):
+    """Cases that build a temp tree and run the generator on it. Holds no test of its own."""
+
     def tree(self, tree_files):
         root = tempfile.mkdtemp(prefix="hook_catalog_")
         self.addCleanup(shutil.rmtree, root, True)
@@ -428,6 +627,20 @@ class Fixtures(unittest.TestCase):
             put(root, rel, text)
         return root
 
+    def publish(self, root):
+        """Write every page the generator owns, as a committed repo would hold them: a no-argument run."""
+        code, out, err = generator(root)
+        self.assertEqual(code, 0, out + err)
+
+    def records_text(self, root):
+        """docs/records.md under root. A failure, not an error, while the generator has not written it."""
+        path = os.path.join(root, "docs", "records.md")
+        if not os.path.exists(path):
+            self.fail("docs/records.md was not written")
+        return read(path)
+
+
+class Fixtures(Tree):
     def assert_problem(self, tree_files, *names):
         code, out, err = generator(self.tree(tree_files), "--check")
         self.assertEqual(code, 1, out + err)
@@ -530,12 +743,6 @@ class Fixtures(unittest.TestCase):
                                   extra={"hooks/judge.py": '"""Judge."""\nfrom decision_watch import invoke_model\ninvoke_model("x")\n'}),
                             "hooks/judge.py")
 
-    def publish(self, root):
-        """Write the generator's own render to docs/catalog.md, as a committed page would be."""
-        code, out, err = generator(root, "--print")
-        self.assertEqual(code, 0, out + err)
-        put(root, "docs/catalog.md", out)
-
     def test_f18_stale_page_fails(self):
         root = self.tree(clean())
         self.publish(root)
@@ -617,18 +824,14 @@ class Fixtures(unittest.TestCase):
         spec["settings.json"] = settings("echo one")
         spec["lint/hook_catalog_inline.json"] = json.dumps({sidecar_key("Notification", "echo one"): "Says one plain thing."})
         root = self.tree(spec)
-        code, out, err = generator(root, "--print")
-        self.assertEqual(code, 0, out + err)
-        put(root, "docs/catalog.md", out)
+        self.publish(root)
         put(root, "settings.json", settings("echo two-changed"))
         new_key = sidecar_key("Notification", "echo two-changed")
         code, out, err = generator(root, "--check")
         self.assertEqual(code, 1, out + err)
         self.assertIn(new_key, out + err)
         put(root, "lint/hook_catalog_inline.json", json.dumps({new_key: "Says one plain thing."}))
-        code, out, err = generator(root, "--print")
-        self.assertEqual(code, 0, out + err)
-        put(root, "docs/catalog.md", out)
+        self.publish(root)
         self.assertEqual(generator(root, "--check"), (0, "", ""))
 
     def test_f27_two_inline_commands_under_one_label_both_carry_summaries(self):
@@ -646,7 +849,7 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         got = sorted(r["What it does"] for r in page_rows(out) if r["Kind"] == "hook" and r["Event"] == "Notification")
         self.assertEqual(got, ["First summary.", "Second summary."], out + err)
-        put(root, "docs/catalog.md", out)
+        self.publish(root)
         self.assertEqual(generator(root, "--check"), (0, "", ""))
 
     def test_f28_duplicate_sidecar_key_fails_check(self):
@@ -675,9 +878,591 @@ class Fixtures(unittest.TestCase):
         self.assert_problem(spec, "PreToolUse matcher=Gone")
 
 
+# ---- the records page: the generator on temp trees ---------------------------------------------
+
+GIST_CASES = [
+    ("ruling beats question", "# T\n\n## The question\n\nWhat?\n\n## The ruling\n\nIt is so. Yes.\n\nKind: process\n",
+     "It is so."),
+    ("plain Ruling heading", "# T\n\n## Ruling\n\nIt is so. Yes.\n\nKind: process\n", "It is so."),
+    ("question only", "# T\n\n## The question\n\nHow does it work? It does.\n\nKind: process\n", "How does it work?"),
+    ("a sentence that wraps", "# T\n\n## The ruling\n\nThe ruling wraps\nacross two lines. Then it ends.\n\nKind: process\n",
+     "The ruling wraps across two lines."),
+    ("list item first", "# T\n\n## The ruling\n\n- The installer writes each file first. Then it renames.\n- Second item.\n\nKind: process\n",
+     "The installer writes each file first."),
+    ("lone quote", "# T\n\n## The ruling\n\nDon't block the session. Ever.\n\nKind: process\n", "Don't block the session."),
+    ("quoted ruling that ends its block", '# T\n\n## The ruling\n\nOwner ruling, 2026-10-13 23:41 CDT: "End condition at start."\n\n- A call needs a note.\n\nKind: process\n',
+     'Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."'),
+    ("a heading inside a fence is no heading", "# T\n\n```\n## The ruling\n\nFake ruling. No.\n```\n\n## The question\n\nReal question?\n\nKind: process\n",
+     "Real question?"),
+    ("a first paragraph that opens with bold text keeps it", "# T\n\n**Changed in part on 2026-09-28** by `other-rule`, the rule stays. Second.\n\nKind: process\n",
+     "**Changed in part on 2026-09-28** by `other-rule`, the rule stays."),
+]
+
+# The real shape of decisions/rulings-declare-kind.md: a fenced example of both kinds, then one real line.
+FENCED_KINDS = ("# T\n\n## The ruling\n\nIt is so.\n\n```\nKind: build\nPlan: <path>#<slug> (<platform>)\n\n"
+                "Kind: process\nHome: rule:<id>\n```\n\nKind: process\nHome: lint/x.py\n")
+
+
+class RecordsPage(Tree):
+    def rows(self, extra=None):
+        root = self.tree(with_records(extra))
+        self.publish(root)
+        return records_rows(self.records_text(root))
+
+    def test_a1_each_record_is_listed_once_under_its_kind(self):
+        # The model table (decisions/subagent-model-cap.md in the fixture) has no Kind line, so it is unsorted.
+        self.assertEqual(listed(self.rows()), {
+            "Mandates": ["b-one", "b-two", "b-three"],
+            "Rulings": ["ruled"],
+            "Build designs": ["built"],
+            "Unsorted decisions": ["loose", "subagent-model-cap", "titled"],
+            "Debts": ["gap-one"],
+            "Deferred": ["waiting"],
+            "Plans": ["plan-a"],
+        })
+
+    def test_a2_each_row_holds_a_one_sentence_gist(self):
+        want = {
+            ("Rulings", "ruled"): "The thing is ruled.",
+            ("Build designs", "built"): "How is the thing built?",
+            ("Unsorted decisions", "loose"): "This note has no kind and no ruling heading.",
+            ("Unsorted decisions", "titled"): "Just a title",
+            ("Debts", "gap-one"): "The check misses one case.",
+            ("Deferred", "waiting"): "Waiting for a thing",
+            ("Plans", "plan-a"): "Plan: do a thing",
+            ("Mandates", "b-one"): "Never guess an answer the code should give you.",
+            ("Mandates", "b-two"): "Surface ambiguity instead of resolving it silently.",
+            ("Mandates", "b-three"): "Never drop an item without saying so.",
+        }
+        got = {(r["section"], r["slug"]): r["gist"] for r in self.rows()}
+        for key, gist in want.items():
+            self.assertEqual(got.get(key), gist, key)
+
+    def test_a3_each_row_links_to_its_file(self):
+        folder = {"Rulings": "decisions", "Build designs": "decisions", "Unsorted decisions": "decisions",
+                  "Debts": "debts", "Deferred": "deferred", "Plans": "plans"}
+        rows = self.rows()
+        self.assertTrue(rows)
+        for r in rows:
+            want = "../CLAUDE.md" if r["section"] == "Mandates" else "../%s/%s.md" % (folder[r["section"]], r["slug"])
+            self.assertEqual(r["link"], want, (r["section"], r["slug"]))
+
+    def test_a4_rows_come_in_a_fixed_order(self):
+        # Mandates in CLAUDE.md order, so a topic stays together. Every other kind sorted by slug, so a
+        # Windows write and a Linux check agree whatever order the folder lists.
+        got = listed(self.rows({
+            "decisions/zeta.md": LOOSE, "decisions/alpha.md": LOOSE, "decisions/mid.md": LOOSE,
+            "debts/z-gap.md": DEBT, "debts/a-gap.md": DEBT,
+            "CLAUDE.md": "# R\n\nZ rule.<!-- rule:z-last -->\n\nA rule.<!-- rule:a-first -->\n"}))
+        self.assertEqual(got["Mandates"], ["z-last", "a-first"])
+        self.assertEqual(got["Unsorted decisions"], ["alpha", "loose", "mid", "subagent-model-cap", "titled", "zeta"])
+        self.assertEqual(got["Debts"], ["a-gap", "gap-one", "z-gap"])
+
+    def test_a5_a_readme_and_a_non_markdown_file_are_no_records(self):
+        got = listed(self.rows({"debts/README.md": "# Debts\n\nNo longer a store.\n\nSuperseded by nothing.\n",
+                                "debts/notes.txt": "A note.\n", "decisions/.gitkeep": ""}))
+        self.assertEqual(got["Debts"], ["gap-one"])
+        self.assertNotIn("README", got["Debts"])
+
+    def test_a6_one_slug_in_two_kinds_gets_two_rows(self):
+        got = listed(self.rows({"decisions/shared.md": RULED, "deferred/shared.md": WAITING}))
+        self.assertIn("shared", got["Rulings"])
+        self.assertIn("shared", got["Deferred"])
+
+    def test_a7_a_decision_gist_comes_from_its_ruling_else_its_question(self):
+        extra = {"decisions/g%d.md" % i: text for i, (_name, text, _gist) in enumerate(GIST_CASES)}
+        got = {r["slug"]: r["gist"] for r in self.rows(extra) if r["section"] == "Rulings"}
+        for i, (name, _text, gist) in enumerate(GIST_CASES):
+            with self.subTest(name):
+                self.assertEqual(got.get("g%d" % i), gist)
+
+    def test_a8_a_kind_line_counts_outside_fences_only(self):
+        got = listed(self.rows({"decisions/fenced.md": FENCED_KINDS,
+                                "decisions/only-fenced.md": "# T\n\nBody sentence.\n\n```\nKind: process\n```\n"}))
+        self.assertIn("fenced", got["Rulings"])
+        self.assertNotIn("fenced", got["Build designs"])
+        self.assertIn("only-fenced", got["Unsorted decisions"])
+        self.assertNotIn("only-fenced", got["Rulings"])
+
+    def test_a9_a_kind_the_generator_does_not_know_is_unsorted_or_a_named_problem(self):
+        root = self.tree(with_records({"decisions/odd.md": "# T\n\nBody sentence.\n\nKind: other\n"}))
+        code, out, err = generator(root)
+        if code != 0:
+            self.assertEqual(code, 1, out + err)
+            self.assertIn("decisions/odd.md", out + err)
+            return
+        self.assertIn("odd", listed(records_rows(self.records_text(root))).get("Unsorted decisions", []))
+
+    def test_a10_a_rule_marker_in_code_or_a_fence_is_no_mandate(self):
+        claude = ("# Rules\n\n**Scan.** Write `<!-- rule:fake-code -->` after each rule.<!-- rule:real-one -->\n\n"
+                  "```text\n<!-- rule:fake-fence -->\n```\n\nDon't use a ` here.<!-- rule:after-tick -->\n")
+        rows = [r for r in self.rows({"CLAUDE.md": claude}) if r["section"] == "Mandates"]
+        self.assertEqual([r["slug"] for r in rows], ["real-one", "after-tick"])
+        self.assertEqual(rows[0]["gist"], "Write `<!-- rule:fake-code -->` after each rule.")
+        self.assertEqual(rows[1]["gist"], "Don't use a ` here.")
+
+    def test_a11_a_gist_with_a_pipe_a_quote_and_comment_openers_stays_one_cell(self):
+        what = "A pipe a|b and `c|d` stay, Don't break, // and # too, `<!-- x -->` as well."
+        debt = DEBT.replace("The check misses one case. It also misses a second.", what)
+        got = {(r["section"], r["slug"]): r["gist"] for r in self.rows({"debts/gap-one.md": debt})}
+        self.assertEqual(got[("Debts", "gap-one")], what)
+
+    def test_a12_crlf_and_a_bom_leave_no_mark_in_a_gist(self):
+        debt = "﻿" + DEBT.replace("\n", "\r\n")
+        got = {(r["section"], r["slug"]): r["gist"] for r in self.rows({"debts/gap-one.md": debt})}
+        self.assertEqual(got[("Debts", "gap-one")], "The check misses one case.")
+
+    def test_a13_a_record_with_no_text_is_a_problem_that_names_it(self):
+        no_what = "# Gap\n\n- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover it.\n"
+        for rel, text in (("debts/no-what.md", no_what), ("decisions/empty.md", "\n")):
+            with self.subTest(rel):
+                code, out, err = generator(self.tree(with_records({rel: text})))
+                self.assertEqual(code, 1, out + err)
+                self.assertIn(rel, out + err)
+                self.assertNotIn("Traceback", out + err)
+
+    def test_a14_a_record_that_cannot_be_read_is_exit_2_and_named(self):
+        root = self.tree(with_records())
+        with open(os.path.join(root, "decisions", "bad.md"), "wb") as handle:
+            handle.write(b"# Bad\n\n\xff\xfe\x00 not utf-8\n")
+        code, out, err = generator(root)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("decisions/bad.md", out + err)
+
+    def test_a15_a_short_first_ruling_block_gives_the_question_sentence(self):
+        # Red on 6fb3ac0 for the three short-block rows. Kind: process throughout. A ruling's first block of under 4 words
+        # ("Yes.", "Owner, 2026-10-11:") gives the first sentence of "## The question". A 4-word block stays (green pin).
+        cases = [
+            ("a bare yes", "Does the gate run first? It does.", "Yes.", "Does the gate run first?"),
+            ("a 3-word block", "Is the page rebuilt at merge? Yes.", "Yes, it is.", "Is the page rebuilt at merge?"),
+            ("a dated owner line, then a short block", "Is the page rebuilt at merge? Yes.",
+             "Owner, 2026-10-11:\n\nYes.\n\nThe page is rebuilt at merge.", "Is the page rebuilt at merge?"),
+            ("a 4-word block stays", "What runs first? The gate.", "The gate runs first.", "The gate runs first."),
+        ]
+        extra = {"decisions/r%d.md" % i: "# T\n\n## The question\n\n%s\n\n## The ruling\n\n%s\n\nKind: process\n" % (q, r)
+                 for i, (_name, q, r, _gist) in enumerate(cases)}
+        got = {r["slug"]: r["gist"] for r in self.rows(extra) if r["section"] == "Rulings"}
+        for i, (name, _q, _r, gist) in enumerate(cases):
+            with self.subTest(name):
+                self.assertEqual(got.get("r%d" % i), gist)
+
+
+class RecordsStale(Tree):
+    def published(self, extra=None):
+        root = self.tree(with_records(extra))
+        self.publish(root)
+        self.assertEqual(generator(root, "--check"), (0, "", ""))
+        return root
+
+    def test_b1_a_new_debt_fails_the_check_until_the_page_is_written_again(self):
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        code, out, err = generator(root, "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+        self.assertIn("stale", (out + err).lower())
+        self.publish(root)
+        self.assertEqual(generator(root, "--check"), (0, "", ""))
+        self.assertIn("new-gap", listed(records_rows(self.records_text(root)))["Debts"])
+
+    def test_b2_every_kind_of_change_makes_the_page_stale(self):
+        changes = {
+            "a debt is added": lambda root: put(root, "debts/new-gap.md", DEBT),
+            "a debt is deleted": lambda root: os.remove(os.path.join(root, "debts", "gap-one.md")),
+            "a debt's What changes": lambda root: put(
+                root, "debts/gap-one.md", DEBT.replace("The check misses one case.", "The check misses two cases.")),
+            "a decision is added": lambda root: put(root, "decisions/new.md", LOOSE),
+            "a decision gains a Kind line": lambda root: put(root, "decisions/loose.md", LOOSE + "\nKind: process\n"),
+            "a deferred file is added": lambda root: put(root, "deferred/new.md", WAITING),
+            "a plan is added": lambda root: put(root, "plans/new.md", PLAN),
+            "a rule marker is added": lambda root: put(root, "CLAUDE.md", RULES + "\nShip it.<!-- rule:b-four -->\n"),
+            "a rule marker is deleted": lambda root: put(root, "CLAUDE.md", RULES.replace("<!-- rule:b-three -->", "")),
+        }
+        for name, change in changes.items():
+            with self.subTest(name):
+                root = self.published()
+                change(root)
+                code, out, err = generator(root, "--check")
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("docs/records.md", out + err)
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+
+    def test_b3_a_hand_edit_of_the_page_is_stale(self):
+        root = self.published()
+        put(root, "docs/records.md", self.records_text(root) + "\nA hand-written line.\n")
+        code, out, err = generator(root, "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_b4_the_check_reads_both_pages(self):
+        for rel in ("docs/catalog.md", "docs/records.md"):
+            with self.subTest(rel):
+                root = self.published()
+                self.assertTrue(os.path.exists(os.path.join(root, *rel.split("/"))), "%s was not written" % rel)
+                os.remove(os.path.join(root, *rel.split("/")))
+                code, out, err = generator(root, "--check")
+                self.assertEqual(code, 1, out + err)
+                self.assertIn(rel, out + err)
+
+    def test_b5_a_write_on_a_current_page_changes_nothing(self):
+        root = self.published()
+        before = self.records_text(root)
+        self.publish(root)
+        self.assertEqual(self.records_text(root), before)
+
+    # Merge-time rebuild (owner ruling 2026-10-14 13:18 CDT): the merge rewrites the page, so a pull request
+    # run does not fail on a stale one. The stamp engine reads a pull request run from GITHUB_BASE_REF or a
+    # GITHUB_REF under refs/pull/, and each alone counts.
+    PULL_REQUEST_RUNS = ({"GITHUB_BASE_REF": "main"}, {"GITHUB_REF": "refs/pull/12/merge"},
+                         {"GITHUB_BASE_REF": "main", "GITHUB_REF": "refs/pull/12/merge"})
+
+    def test_b6_on_a_pull_request_a_stale_page_is_not_red(self):
+        for pr_env in self.PULL_REQUEST_RUNS:
+            with self.subTest(pr_env):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                self.assertEqual(generator(root, "--check", env=pr_env), (0, "", ""))
+
+    def test_b7_on_a_pull_request_a_missing_records_page_is_not_red(self):
+        for pr_env in self.PULL_REQUEST_RUNS:
+            with self.subTest(pr_env):
+                root = self.published()
+                self.records_text(root)  # a failure, not an error, while the page is not written
+                os.remove(os.path.join(root, "docs", "records.md"))
+                self.assertEqual(generator(root, "--check", env=pr_env), (0, "", ""))
+
+    def test_b8_on_a_push_to_the_default_branch_a_stale_page_is_red(self):
+        # The signal that a merge made without the tool, or a failed rebuild, left main with a stale index.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        for push_env in ({"GITHUB_REF": "refs/heads/main"}, {"GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "push"}):
+            with self.subTest(push_env):
+                code, out, err = generator(root, "--check", env=push_env)
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("docs/records.md", out + err)
+        self.records_text(root)
+        os.remove(os.path.join(root, "docs", "records.md"))
+        code, out, err = generator(root, "--check", env={"GITHUB_REF": "refs/heads/main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_b9_a_problem_is_red_on_a_pull_request_too(self):
+        # Only a stale page is waived. A history marker, an empty record or an unreadable file fails everywhere:
+        # the merge refuses to write over a problem, so waiting for it would stop the merge late.
+        root = self.published()
+        put(root, "decisions/old.md", old_decision("Superseded: x."))
+        put(root, "debts/empty.md", "\n")
+        code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/old.md:7", out + err)
+        self.assertIn("debts/empty.md", out + err)
+
+    def test_b10_the_catalog_page_stays_strict_on_a_pull_request(self):
+        # Regression pin, green on 1ac9851: the ruling covers the records page only.
+        root = self.published()
+        put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
+        code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/catalog.md", out + err)
+        self.assertNotIn("docs/records.md", out + err)
+
+
+NOT_HISTORY = [
+    ("mid-sentence no longer", "# Old thing", "The guard no longer crashes when the key is missing."),
+    ("superseded runs of a CI job", "# Old thing", "`concurrency` cancels superseded runs on pull requests only."),
+    ("a PR closes as superseded", "# Old thing", "The old PR closes as superseded."),
+    ("a heading that holds the phrase", "# Repeal: prose above the report no longer needs a question", "The repeal is plain."),
+    ("a rule id in a comment", "# Old thing", "<!-- rule:speak-rewrite-superseded-in-place -->"),
+    ("inline code opens the line", "# Old thing", "`Superseded` is a label this check refuses."),
+    ("a wrapped continuation line", "# Old thing", "The guard stops the run when the\nno longer needed flag is set."),
+    ("the rule's own words on a wrapped line", "# Old thing", "Rewrite\nsuperseded text in place. Keep only what is true now."),
+    ("a fence", "# Old thing", "```\nSuperseded: x\nno longer\nOld ruling: y\n```"),
+    ("a tilde fence", "# Old thing", "~~~\nPreviously: x\n~~~"),
+    ("a fence of three inside a fence of four", "# Old thing", "````\n```\nPreviously: still inside the outer fence\n```\n````"),
+    ("was: in inline code", "# Old thing", "The marker `was:` opens old text."),
+    ("was: in a fence", "# Old thing", "```\nThe old wording was: x\n```"),
+]
+
+# Each body ends in a line that must fail, whatever text comes before it.
+AFTER_TRAPS = [
+    ("a fence with a comment opener and quotes", "```\n<!-- not closed\nit's \"quoted\n```\n\nSuperseded: caught after the fence."),
+    ("a comment opener in inline code", "Write `<!--` to open a comment.\n\nPreviously: caught after the code span."),
+    ("lone quotes in text", "The word \"ruling is open and it's not closed.\n\nOverruled: caught after the quotes."),
+    ("a fence of four around a fence of three", "````\n```\ninner\n```\n````\n\nOld ruling: caught after the outer fence."),
+    ("a tilde fence", "~~~\nx\n~~~\n\nSuperseded: caught after the tilde fence."),
+]
+
+HISTORY_LINES = [
+    "## Superseded", "## Old ruling", "### Previously, the guard allowed it", "## Overruled on 2026-10-01",
+    "## Was: allow it", "## No longer in force",
+    "Superseded by the floor rule.", "Overruled on 2026-10-01 by the owner.", "Previously the guard allowed it.",
+    "Old ruling: allow it.", "was: allow it.", "No longer in force: allow it.", "superseded by the floor rule.",
+    "OLD RULING: allow it.",
+    "- Superseded: allow it.", "* Overruled by the floor.", "1. Previously allowed.", "  - was: allow it.",
+    "**Old ruling:** allow it.", "_Previously_ the guard allowed it.", "- **Superseded.** Allow it.",
+    "The old wording was: allow it.", "Some text; the old rule was: allow it.",
+]
+
+
+class RecordsHistory(Tree):
+    def assert_history(self, spec, where):
+        code, out, err = generator(self.tree(spec), "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertNotIn("Traceback", out + err)
+        self.assertRegex(out + err, re.escape(where) + r"(?!\d)")
+
+    def test_c1_a_marker_that_opens_a_heading_or_a_block_fails_with_file_and_line(self):
+        for line in HISTORY_LINES:
+            with self.subTest(line):
+                self.assert_history(with_records({"decisions/old.md": old_decision(line)}), "decisions/old.md:7")
+
+    def test_c2_every_record_folder_and_claude_md_is_read(self):
+        cases = [
+            ("deferred/old.md", "# Old\n\nSuperseded: by the new plan.\n", "Superseded: by the new plan."),
+            ("plans/old.md", "# Plan\n\n## Old ruling\n\nText.\n", "## Old ruling"),
+            ("debts/old.md", DEBT + "\nPreviously: the check ran.\n", "Previously: the check ran."),
+            ("CLAUDE.md", RULES + "\nOverruled: the old rule text.\n", "Overruled: the old rule text."),
+        ]
+        for rel, text, line in cases:
+            with self.subTest(rel):
+                self.assert_history(with_records({rel: text}), "%s:%d" % (rel, line_of(text, line)))
+
+    def test_c3_the_failure_names_every_offender(self):
+        spec = with_records({"decisions/a.md": old_decision("Superseded: a."), "decisions/b.md": old_decision("Overruled: b.")})
+        code, out, err = generator(self.tree(spec), "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/a.md:7", out + err)
+        self.assertIn("decisions/b.md:7", out + err)
+        self.assertGreaterEqual(len([ln for ln in (out + err).splitlines() if ".md:" in ln]), 2, out + err)
+
+    def test_c4_the_page_is_not_written_while_a_problem_stands(self):
+        root = self.tree(with_records({"decisions/old.md": old_decision("Superseded: x.")}))
+        code, out, err = generator(root)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/old.md:7", out + err)
+        self.assertFalse(os.path.exists(os.path.join(root, "docs", "records.md")), "a page was written over a problem")
+
+    def test_c5_prose_and_code_that_only_use_the_words_do_not_fail(self):
+        # Each case also needs its record on the page, so a generator that is silent for all input fails here.
+        for name, title, body in NOT_HISTORY:
+            with self.subTest(name):
+                root = self.tree(with_records({"decisions/old.md": old_decision(body, title)}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
+
+    def test_c6_a_trap_before_the_marker_does_not_hide_it_or_its_line_number(self):
+        for name, body in AFTER_TRAPS:
+            with self.subTest(name):
+                text = old_decision(body)
+                last = body.split("\n")[-1]
+                self.assert_history(with_records({"decisions/old.md": text}), "decisions/old.md:%d" % line_of(text, last))
+
+    def test_c7_crlf_and_a_bom_do_not_move_the_line_number(self):
+        text = "﻿" + old_decision("Previously: the guard allowed it.").replace("\n", "\r\n")
+        self.assert_history(with_records({"decisions/old.md": text}), "decisions/old.md:7")
+
+    def test_c10_was_colon_fails_on_a_wrapped_line_too(self):
+        text = old_decision("The old rule text goes\nhere, and was: allow it.\nThen more.")
+        self.assert_history(with_records({"decisions/old.md": text}),
+                            "decisions/old.md:%d" % line_of(text, "here, and was: allow it."))
+
+    def test_c11_history_hidden_in_a_comment_fails_when_it_opens_a_block(self):
+        text = old_decision("<!--\n\nSuperseded: hidden old text.\n\n-->")
+        self.assert_history(with_records({"decisions/old.md": text}),
+                            "decisions/old.md:%d" % line_of(text, "Superseded: hidden old text."))
+
+    def test_c8_a_debt_what_may_say_no_longer(self):
+        cases = [
+            ("opens its text", "- **What.** No longer checks X. The gap is real.\n", "No longer checks X."),
+            ("wraps", "- **What.** The check is wrong when the file\n  no longer exists. A second sentence.\n",
+             "The check is wrong when the file no longer exists."),
+        ]
+        for name, what, gist in cases:
+            with self.subTest(name):
+                debt = "# Gap\n\n%s- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover it.\n" % what
+                root = self.tree(with_records({"debts/gap-one.md": debt}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                rows = records_rows(self.records_text(root))
+                self.assertEqual({r["slug"]: r["gist"] for r in rows if r["section"] == "Debts"}["gap-one"], gist)
+
+    def test_c9_the_wording_of_a_real_rule_passes_in_claude_md(self):
+        claude = RULES + ("\n**Speak plainly.** Rewrite\nsuperseded text in place. Keep only what is true now."
+                          "<!-- rule:speak-rewrite-superseded-in-place -->\n"
+                          "Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file -->\n")
+        root = self.tree(with_records({"CLAUDE.md": claude}))
+        self.publish(root)
+        self.assertEqual(generator(root, "--check"), (0, "", ""))
+        gists = {r["slug"]: r["gist"] for r in records_rows(self.records_text(root)) if r["section"] == "Mandates"}
+        self.assertEqual(gists["speak-rewrite-superseded-in-place"], "Rewrite superseded text in place.")
+        self.assertEqual(gists["roles-remove-override-file"], "Remove the file when the raise is no longer needed.")
+
+    def test_c12_words_that_only_look_like_a_marker_do_not_fail(self):
+        # Red on 6fb3ac0 for each prose line below: none is overruled text. The control line must still fail the check,
+        # so a detector gone silent cannot pass this case.
+        for line in ["The flag was: on.", "No longer used: the old flag.", "Previously-run tests stay green."]:
+            with self.subTest(line):
+                root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
+        self.assert_history(with_records({"decisions/old.md": old_decision("Old ruling: allow it.")}), "decisions/old.md:7")
+
+    def test_c13_only_in_force_opens_a_no_longer_marker(self):
+        # Review round 2, records-index. "No longer" marks overruled text only as "No longer in force". The first three
+        # lines were markers until the orchestrator dropped them (red on d027e3d). The fourth is a bare "No longer".
+        for line in ["No longer holds: the rule.", "No longer applies: the flag.", "No longer valid: the flag.", "No longer checks the flag."]:
+            with self.subTest(line):
+                root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
+        self.assert_history(with_records({"decisions/old.md": old_decision("No longer in force: the flag.")}), "decisions/old.md:7")
+
+    def test_c14_limit_old_before_was_colon_flags_as_pinned(self):
+        # NAMED LIMIT, pinned as the current behaviour. The "old" rule flags "was:" when "old" comes earlier in the same
+        # block, so it cannot tell a description from overruled text. Contrast c12: "The flag was: on." has no "old" and
+        # passes. Debt: an entry in the debt store is still owed (debts/ is not a test path). A change here is a rule change.
+        self.assert_history(with_records({"decisions/old.md": old_decision("The old flag was: on.")}), "decisions/old.md:7")
+
+
+class OtherRepos(Tree):
+    """A repo that is not this one: no hooks, mods or skills, so no catalog. It runs the same generator."""
+
+    def write(self, root, elsewhere, *args):
+        return generator(root, *args, cwd=elsewhere, flag_root=True)
+
+    def test_d1_a_repo_with_only_decisions_and_debts_gets_only_its_records_page(self):
+        root, elsewhere = self.tree(lean()), self.tree({})
+        code, out, err = self.write(root, elsewhere)
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("settings.json", out + err)
+        self.assertNotIn("cannot read", out + err)
+        path = os.path.join(root, "docs", "records.md")
+        self.assertTrue(os.path.exists(path), "docs/records.md was not written")
+        self.assertFalse(os.path.exists(os.path.join(root, "docs", "catalog.md")), "a catalog was written for a repo with no catalog part")
+        self.assertEqual(os.listdir(elsewhere), [], "the root came from the working folder, not from --root")
+        page = read(path)
+        self.assertEqual([h for h in re.findall(r"^## (.+?)\s*$", page, re.M) if h in SECTIONS],
+                         ["Rulings", "Build designs", "Unsorted decisions", "Debts"])
+        self.assertEqual(listed(records_rows(page)), {
+            "Rulings": ["ruled"], "Build designs": ["built"], "Unsorted decisions": ["loose"], "Debts": ["gap-one"]})
+
+    def test_d2_the_check_needs_no_catalog_and_goes_red_on_a_stale_page(self):
+        root, elsewhere = self.tree(lean()), self.tree({})
+        code, out, err = self.write(root, elsewhere)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.write(root, elsewhere, "--check"), (0, "", ""))
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        code, out, err = self.write(root, elsewhere, "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_d3_the_environment_variable_and_the_flag_write_the_same_page(self):
+        by_env, by_flag, elsewhere = self.tree(lean()), self.tree(lean()), self.tree({})
+        self.publish(by_env)
+        code, out, err = self.write(by_flag, elsewhere)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.records_text(by_env), self.records_text(by_flag))
+
+    def test_d4_a_repo_with_a_catalog_part_and_no_settings_json_is_still_exit_2(self):
+        spec = lean({"hooks/ok.py": '"""Does one thing."""\n'})
+        code, out, err = generator(self.tree(spec))
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("settings.json", out + err)
+
+
+    def test_d5_a_repo_with_no_records_gets_no_page(self):
+        # The merge tool runs the generator on every repo it merges, so a repo with no records must stay as it is.
+        for name, spec in (("nothing", {"README.md": "# A repo\n"}), ("only a folder readme", {"debts/README.md": "# Debts\n"})):
+            with self.subTest(name):
+                root, elsewhere = self.tree(spec), self.tree({})
+                before = sorted(os.listdir(root))
+                code, out, err = self.write(root, elsewhere)
+                self.assertEqual(code, 0, out + err)
+                self.assertEqual(sorted(os.listdir(root)), before, "a page was written for a repo with no records")
+                self.assertEqual(self.write(root, elsewhere, "--check"), (0, "", ""))
+
+
+@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
+class RealRecords(unittest.TestCase):
+    """The committed page against the real records. Red until the builder writes docs/records.md. Skipped on a pull
+    request run (owner ruling 2026-10-14 13:18 CDT: the merge rebuilds the page); run on a laptop and on a push to main."""
+
+    def rows(self):
+        if not os.path.exists(RECORDS_PAGE):
+            self.fail("docs/records.md does not exist yet: the generator writes it")
+        return records_rows(read(RECORDS_PAGE))
+
+    def test_r10_every_record_file_has_one_row_and_a_link_that_resolves(self):
+        rows = self.rows()
+        folders = (("decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("debts", ("Debts",)),
+                   ("deferred", ("Deferred",)), ("plans", ("Plans",)))
+        problems = []
+        for folder, sections in folders:
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder)) if f.endswith(".md") and f != "README.md")
+            self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
+            got = sorted(r["slug"] for r in rows if r["section"] in sections)
+            if got != names:
+                problems.append("%s: missing %s, extra or twice %s" % (
+                    folder, sorted(set(names) - set(got)), sorted(s for s in set(got) if got.count(s) > 1 or s not in names)))
+        for r in rows:
+            target = os.path.normpath(os.path.join(ROOT, "docs", *r["link"].split("/"))) if r["link"] else ""
+            if not target or not os.path.isfile(target):
+                problems.append("%s %s: link %r does not resolve" % (r["section"], r["slug"], r["link"]))
+        self.assertFalse(problems, "\n".join(problems))
+
+    def test_r11_every_rule_marker_in_claude_md_has_one_mandate_row_in_order(self):
+        ids = []
+        for line in unfenced_lines(read(os.path.join(ROOT, "CLAUDE.md"))):
+            ids += [i for i in RULE_MARK.findall(line) if i not in ids]
+        self.assertTrue(ids, "no rule marker in CLAUDE.md, so the scan proves nothing")
+        self.assertEqual([r["slug"] for r in self.rows() if r["section"] == "Mandates"], ids)
+
+    def test_r12_every_gist_is_filled_in(self):
+        problems = []
+        for r in self.rows():
+            # Markdown noise: a heading, table or quote mark, a list marker, or (a mandate) its bold lead label.
+            noise = re.match(r"(#|\||>|[-*+]\s)", r["gist"]) or (r["section"] == "Mandates" and r["gist"].startswith("**"))
+            if not r["gist"].strip() or noise:
+                problems.append("%s %s: gist %r" % (r["section"], r["slug"], r["gist"]))
+        self.assertFalse(problems, "\n".join(problems))
+
+    def test_r13_the_real_kind_lines_decide_the_group(self):
+        # decisions/rulings-declare-kind.md holds a fenced example of both kinds and one real process line.
+        got = {r["slug"]: r["section"] for r in self.rows() if r["section"] in ("Rulings", "Build designs", "Unsorted decisions")}
+        problems = []
+        for name in sorted(os.listdir(os.path.join(ROOT, "decisions"))):
+            if not name.endswith(".md"):
+                continue
+            kinds = {m.group(1) for m in map(KIND_LINE.match, unfenced_lines(read(os.path.join(ROOT, "decisions", name)))) if m}
+            want = {frozenset(["process"]): "Rulings", frozenset(["build"]): "Build designs", frozenset(): "Unsorted decisions"}.get(frozenset(kinds))
+            if want and got.get(name[:-3]) != want:
+                problems.append("%s: listed under %r, want %r" % (name, got.get(name[:-3]), want))
+        self.assertIn("rulings-declare-kind", got, "rulings-declare-kind is not listed")
+        self.assertFalse(problems, "\n".join(problems))
+
+
 class Helpers(unittest.TestCase):
     def test_u1_escaped_pipe_in_a_code_span_stays_in_its_cell(self):
         self.assertEqual(split_cells("| `Bash\\|PowerShell` | x |"), ["`Bash|PowerShell`", "x"])
+
+    def test_u5_records_rows_reads_each_section_and_unescapes_a_pipe(self):
+        text = ("# Records\n\n## Debts\n\n| Slug | Gist | Link |\n|---|---|---|\n"
+                "| `a-b` | One \\| two. | [a-b](../debts/a-b.md) |\n\n"
+                "## Plans\n\n| Slug | Gist | Link |\n|---|---|---|\n| `p` | Plan. | [p](../plans/p.md) |\n")
+        self.assertEqual(records_rows(text), [
+            {"section": "Debts", "slug": "a-b", "gist": "One | two.", "link": "../debts/a-b.md"},
+            {"section": "Plans", "slug": "p", "gist": "Plan.", "link": "../plans/p.md"}])
+
+    def test_u6_unfenced_lines_closes_a_fence_only_on_its_own_kind(self):
+        text = "a\n````\n```\nb\n```\n````\nc\n~~~\nd\n~~~\ne\n```text\nf\n```\n"
+        self.assertEqual(list(unfenced_lines(text)), ["a", "c", "e", ""])
+
+    def test_u7_line_of_counts_from_one(self):
+        self.assertEqual(line_of("a\n\nb\nb\n", "b"), 3)
 
 
 if __name__ == "__main__":
