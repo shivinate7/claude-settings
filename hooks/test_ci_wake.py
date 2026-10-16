@@ -45,6 +45,9 @@ Seams under test (the builder must read these names):
 - `watch_run(run_id, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). It
   reads through the module's `gh()`, reads the clock with the module's `time.monotonic`, pauses
   with the module's `time.sleep`, and makes no direct `subprocess` call.
+- `wait_for(sha, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). Its gh reads
+  go through the module's `gh()`, it reads the clock with the module's `time.monotonic`, and it pauses
+  with the module's `time.sleep`. The pace and deadline cases run it in process on a fake clock.
 - `time.sleep` in the hook process: a case run through FAST_SLEEP_LAUNCHER caps it at 0.05 s, so the
   30 s status pause costs 0.05 s there. Every pause of the hook must go through `time.sleep`.
 
@@ -60,8 +63,23 @@ A run marked in_progress_at_list reads in progress at `run list` and as its fixt
 connects to the localhost port in GH_STUB_READY_PORT, so a case can wait for that read with one
 accept() and no polling. A run with fail_status_read: that read exits 1. A run with in_progress_reads N: its first N
 `run view <id>` reads (any --json fields, counted from the call log) show it in progress with no
-conclusion, and later reads show the fixture: a run that ends only after N reads. Fixture mode "error"
+conclusion, and later reads show the fixture: a run that ends only after N reads. A run with
+appears_at_list N: `run list` leaves it out until the Nth `run list` call of the case (counted from the call
+log, all PRs together). A run with unfinished_to_list N: `run list` shows it in progress, with no
+conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
+
+Draft run, then the real run (incident 2026-10-16, PR 452 head 5cee0ee; debt ci-wake-lists-runs-once):
+`gh pr create --draft` made a run whose jobs all skipped. `gh pr ready` made the real run 6 s later.
+The hook listed the head once. The draft run had no conclusion at that list, so it was waited on and
+then read as skipped. The real run was not listed yet. The hook then printed "CI red ...: workflow
+gates", from judge_runs' "skipped, no job ran". The cases below use these rules:
+- A run that ends skipped is no run, whether the list showed it skipped or in progress.
+- While no run that ran has been judged, the hook lists the head again, at most once per 30 s
+  (STATUS_PAUSE). It keeps listing until its deadline: the last pause ends at the deadline.
+  No list comes after the deadline. A list made at the deadline after that pause is allowed.
+- A head with no real run at the deadline wakes with `CI unknown`, never red or green.
+- A real run that failed still reads red, with its own failing job names.
 
 Scratch files live in one temp directory, removed at exit.
 """
@@ -144,10 +162,11 @@ def read_log(base):
             out.append(json.loads(f.read()))
     return out
 
-def view(r, listed):
-    """One run as `gh --json` prints it. listed: the `run list` form, which has no jobs. A run
-    marked in_progress_at_list reads in progress there, and as its fixture says at `run view`."""
-    hidden = bool(r.get("in_progress_at_list")) and listed
+def view(r, listed, n=1):
+    """One run as `gh --json` prints it. listed: the `run list` form, which has no jobs; n: the
+    number of that `run list` call. A run marked in_progress_at_list reads in progress there, and as
+    its fixture says at `run view`. So does a run with unfinished_to_list >= n."""
+    hidden = listed and (bool(r.get("in_progress_at_list")) or n <= r.get("unfinished_to_list", 0))
     out = {"databaseId": r["databaseId"], "name": r["name"], "workflowName": r["workflowName"],
            "headSha": r["headSha"], "event": r["event"],
            "status": "in_progress" if hidden else r["status"],
@@ -160,6 +179,10 @@ def views_of(key):
     """How many `run view <key>` calls the log holds, this one too (log_call ran first). Each gh
     call is a new process, so the log is the only count that outlives one."""
     return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:3] == ["run", "view", key])
+
+def lists_of():
+    """How many `run list` calls the log holds, this one too, as views_of counts."""
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:2] == ["run", "list"])
 
 def ready_ping():
     port = os.environ.get("GH_STUB_READY_PORT")
@@ -193,8 +216,10 @@ def main(args):
         return 0
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
-        hits = [r for r in fx["runs"] if commit is None or r["headSha"].startswith(commit)]
-        sys.stdout.write(json.dumps([view(r, True) for r in hits]) + "\n")
+        n = lists_of()
+        hits = [r for r in fx["runs"] if (commit is None or r["headSha"].startswith(commit))
+                and r.get("appears_at_list", 1) <= n]
+        sys.stdout.write(json.dumps([view(r, True, n) for r in hits]) + "\n")
         return 0
     if obj == "run" and verb == "watch":
         sys.stderr.write("stub gh: the hook must not run `gh run watch`\n")
@@ -290,10 +315,15 @@ def job(name, conclusion):
 
 
 def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
-        status="completed", ping=False, fail_status=False, in_progress_reads=0):
+        status="completed", ping=False, fail_status=False, in_progress_reads=0,
+        appears_at_list=1, unfinished_to_list=0):
     out = {"databaseId": run_id, "name": name, "workflowName": name, "headSha": sha,
            "event": "pull_request", "status": status, "conclusion": conclusion,
            "jobs": jobs, "in_progress_at_list": in_progress_at_list}
+    if appears_at_list > 1:
+        out["appears_at_list"] = appears_at_list
+    if unfinished_to_list:
+        out["unfinished_to_list"] = unfinished_to_list
     if ping:
         out["ping_on_status_read"] = True
     if fail_status:
@@ -332,6 +362,19 @@ LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_a
 PENDING = run(908, "gates", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
 HOLD = run(909, "gates", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
 BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
+# The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
+# skipped (the form that read red on main). DRAFT_DONE lists skipped (the form main already drops).
+DRAFT_LIVE = run(920, "gates", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
+DRAFT_DONE = run(921, "gates", "skipped", [job("unit", "skipped")])
+
+
+def late(run_id, appears, conclusion="success", jobs=None):
+    """The real run of `gh pr ready`, which the lists before list number `appears` do not show. It
+    lists in progress when it first shows, and its first status read is in progress too."""
+    jobs = jobs or [job("lint", "success"), job("unit", "success")]
+    return run(run_id, "gates", conclusion, jobs, appears_at_list=appears, unfinished_to_list=appears,
+               in_progress_reads=1)
+
 
 PUSH_FORMS = [
     "git push",
@@ -637,6 +680,59 @@ def case_lock_folder_unusable_wakes_unknown():
     expect_no_watch("lock folder is a file", res)
 
 
+def case_draft_run_then_real_run():
+    """Incident 2026-10-16, PR 452. The draft run skips, and the real run comes after it. The hook
+    never reads red for the skipped run: it waits on the real run and reports that run's result.
+    Rows marked (control) pass on main. FAST_SLEEP_LAUNCHER: the pauses between lists cost 0.05 s."""
+    fast = dict(launcher=FAST_SLEEP_LAUNCHER)
+    ready = bash("gh pr ready 12")
+    res = run_hook(ready, fixture(READY, [DRAFT_DONE, GREEN]))
+    expect_verdict("draft run listed skipped beside a real run (control)", res, "green")
+    expect_watch("draft run listed skipped beside a real run (control)", res, ["901"])
+    res = run_hook(ready, fixture(READY, [DRAFT_LIVE, INPROG_906]), **fast)
+    expect_verdict("draft run running at the list, real run listed with it (control)", res, "green")
+    # The incident: the first list shows only the draft run, still running. The real run lists second.
+    label = "draft run running at the first list, real run listed second"
+    res = run_hook(ready, fixture(READY, [DRAFT_LIVE, late(922, 2)]), **fast)
+    expect_verdict(label, res, "green")
+    check("%s: waited on the real run (922) and listed again" % label,
+          "922" in watched(res) and count(res, "run", "list") >= 2, why(res))
+    res = run_hook(ready, fixture(READY, [DRAFT_LIVE, late(922, 2, "failure", RED["jobs"])]), **fast)
+    expect_verdict("draft run running at the first list, real run listed second and failed", res, "red",
+                   names_in=["unit", "e2e"], names_out=["lint", "workflow"])
+
+
+def case_real_run_listed_late():
+    """The real run is not in the first lists. It shows at list 3, so a hook that lists twice and
+    gives up ends in `CI unknown ... no run yet`. It lists again and judges the run it finds."""
+    for label, runs in (("no run at the first two lists, the real run at the third", [late(923, 3)]),
+                        ("draft run listed skipped, the real run at the third list",
+                         [DRAFT_DONE, late(923, 3)])):
+        res = run_hook(bash("gh pr ready 12"), fixture(READY, runs), launcher=FAST_SLEEP_LAUNCHER)
+        expect_verdict(label, res, "green")
+        check("%s: waited on the real run (923) after 3 lists" % label,
+              "923" in watched(res) and count(res, "run", "list") >= 3, why(res))
+
+
+def case_real_failed_run_beside_a_draft_run_is_red():
+    """Control: a skipped draft run does not hide a real failure. Passes on main."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_DONE, RED]))
+    expect_verdict("draft run listed skipped beside a failed real run (control)", res, "red",
+                   names_in=["unit", "e2e"], names_out=["lint", "workflow"])
+    expect_watch("draft run listed skipped beside a failed real run (control)", res, ["902"])
+
+
+def case_draft_run_ending_skipped_is_no_run_yet():
+    """The draft run is still running at the first list and ends skipped, and no real run comes. A
+    real clock and a 4 s deadline: it ends in `CI unknown`, near the deadline. Never red (main read
+    "CI red ...: workflow gates"), never green. At most one list at the start and one at the deadline."""
+    label = "head whose draft run ends skipped, no real run by the deadline"
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_LIVE]), extra={"CI_WAKE_DEADLINE": "4"})
+    expect_verdict(label, res, "unknown")
+    check("%s: wakes near its deadline (3.5 s to 15 s)" % label, 3.5 <= res.elapsed < 15, why(res))
+    check("%s: run list read at most twice" % label, count(res, "run", "list") <= 2, why(res))
+
+
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
 STATUS_READ = ["run", "view", "7", "--json", "status"]
 T0 = 1000.0   # where the fake clock starts
@@ -805,6 +901,91 @@ def case_watch_run_failed_read_is_unknown():
         check("watch_run, %s: raises Unknown" % label, isinstance(raised, mod.Unknown), detail)
         check("watch_run, %s: %d read(s) and no retry, no `gh run watch`" % (label, reads),
               len(calls) == reads and direct == [], detail)
+
+
+# wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
+# `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
+def wait_for_on_fakes(runs, budget):
+    """Run wait_for(SHA, cwd, deadline) in process. budget: seconds from the clock's start to the
+    deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
+    no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh."""
+    spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    clock, calls = FakeTime(), []
+
+    def fake_gh(args, cwd, timeout=None):
+        calls.append((clock.now, list(args)))
+        if len(calls) > 400:
+            raise AssertionError("runaway reads: 400 gh calls")
+        if args[:2] == ["run", "list"]:
+            n = sum(1 for _, a in calls if a[:2] == ["run", "list"])
+            shown = [GH.view(r, True, n) for r in runs if r.get("appears_at_list", 1) <= n]
+            return 0, json.dumps(shown) + "\n", ""
+        if args[:2] == ["run", "view"]:
+            hits = [r for r in runs if str(r["databaseId"]) == args[2]]
+            if hits:
+                out = GH.view(hits[0], False)
+                fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
+                return 0, json.dumps({k: v for k, v in out.items() if not fields or k in fields}) + "\n", ""
+        return 1, "", "stub gh: unsupported: %s" % " ".join(args)
+
+    fake_shutil = types.SimpleNamespace(which=lambda name, *a, **kw: None)
+    deadline = clock.now + budget
+    with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
+            mock.patch.object(mod, "shutil", fake_shutil):
+        try:
+            mod.wait_for(SHA, os.getcwd(), deadline)
+            raised = None
+        except Exception as e:
+            raised = e
+    return raised, clock, calls, deadline
+
+
+def list_times(calls):
+    return [t for t, a in calls if a[:2] == ["run", "list"]]
+
+
+def lists_paced(times, deadline, gap=30):
+    """Each list is `gap` s or more after the one before it. The one list made at the deadline,
+    after the last pause was cut short, is the only exception."""
+    return all(b - a >= gap or abs(b - deadline) < 1e-6 for a, b in zip(times, times[1:]))
+
+
+def wait_detail(raised, clock, calls, deadline):
+    return "raised=%r lists_at=%r end=%.1f deadline=%.1f gh=%r" % (
+        raised, [round(t - T0, 1) for t in list_times(calls)], clock.now - T0, deadline - T0,
+        [" ".join(a[:3]) for _, a in calls])
+
+
+def case_wait_for_lists_again_until_a_real_run_shows():
+    """wait_for: the real run (922) shows at list 3, after a draft run listed skipped. wait_for lists
+    again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
+    label = "wait_for, draft run skipped, real run at the third list"
+    raised, clock, calls, deadline = wait_for_on_fakes(
+        [DRAFT_DONE, run(922, "gates", "success", [job("unit", "success")], appears_at_list=3)], 3600)
+    times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: lists 3 times or more, the first at once" % label, len(times) >= 3 and times[0] == T0, detail)
+    check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+    check("%s: reads the real run (922)" % label,
+          any(a[:3] == ["run", "view", "922"] for _, a in calls), detail)
+
+
+def case_wait_for_lists_until_the_deadline_and_no_further():
+    """wait_for: only a skipped draft run, so no real run, ever. It keeps listing, 30 s or more apart,
+    and its last pause ends at the deadline: no list after the deadline, no pause past it. A deadline
+    10 s away (budget 10): the one pause is cut to 10 s, and this row passes on main."""
+    for budget in (100, 10):
+        label = "wait_for, only a skipped draft run, deadline in %d s" % budget
+        raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_DONE], budget)
+        times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
+        check("%s: ends at the deadline, not before it and not past it" % label,
+              abs(clock.now - deadline) < 1e-6, detail)
+        check("%s: no list after the deadline" % label, all(t <= deadline + 1e-6 for t in times), detail)
+        check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+        if budget == 100:
+            check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
 
 def main():
@@ -976,6 +1157,14 @@ def main():
     case_watch_run_returns_at_the_deadline()
     case_watch_run_at_or_past_the_deadline_reads_nothing()
     case_watch_run_failed_read_is_unknown()
+
+    # Incident 2026-10-16 (PR 452): a draft run that skips, then the real run. Debt ci-wake-lists-runs-once.
+    case_draft_run_then_real_run()
+    case_real_run_listed_late()
+    case_real_failed_run_beside_a_draft_run_is_red()
+    case_draft_run_ending_skipped_is_no_run_yet()
+    case_wait_for_lists_again_until_a_real_run_shows()
+    case_wait_for_lists_until_the_deadline_and_no_further()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
