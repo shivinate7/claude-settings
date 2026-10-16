@@ -8,7 +8,7 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, norm, split_segments,
+    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, is_powershell, norm, split_segments,
 )
 
 
@@ -349,7 +349,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
-    texts, too_deep = _substitutions(cmd, heredoc=heredoc)
+    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:

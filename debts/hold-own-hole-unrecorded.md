@@ -1,6 +1,6 @@
-# The hold rule does not say where a held change records its own hole
+# A held change's own hole has no shown record
 
-- **What.** The rule turns each open finding after round 3 into a debt. A held change has a finding that is the reason it is held. The rule does not say whether that hole is a debt too, or only a line in the change's decision.
-- **Where.** Rule `roles-review-cap-three` in `CLAUDE.md`; decision `hold-unsafe-after-round-3`.
-- **Decision.** `hold-unsafe-after-round-3` (after round 3, a change with zero or negative net safety value is held).
-- **Retire.** The rule says where a held change records its own hole, and one held change shows it.
+- **What.** The rule says where a held change records its hole: a limit under "Holes, named" in its decision, and a debt. No held change has shown that record yet.
+- **Where.** Rule `roles-review-cap-three` (review round cap) in `CLAUDE.md`; decision `hold-unsafe-after-round-3` (net-value hold after round 3).
+- **Decision.** `hold-unsafe-after-round-3` (net-value hold after round 3).
+- **Retire.** One held change's decision and debt both name its hole.
