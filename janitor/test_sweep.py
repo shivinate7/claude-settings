@@ -3623,7 +3623,10 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assertKept(sibling)
             self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
 
-    def test_a_process_inside_keeps_the_own_worktree(self):
+    def test_a_host_started_process_inside_the_own_worktree_is_stopped_then_the_tree_removed(self):
+        # Owner ruling 2026-10-15 19:43 CDT, point 1. Re-points the old keep-a-process case, which
+        # asserted the opposite. Red on abf5f8e: the host is a live parent outside the tree, so
+        # tree_root_orphaned keeps the process ("not-orphaned").
         twin, subject = self.add("proctwin"), self.add("proc")
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=subject,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -3631,13 +3634,16 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.addCleanup(self.stop, proc)
         inside, _unreadable = sweep.processes_in(subject)
         self.assertIn(proc.pid, inside or [], "the fixture process is not inside the worktree")
-        self.fire("proctwin", twin)
+        self.fire_under_host("proctwin", twin)
         with self.subTest(control="clean pushed twin is removed"):
             self.assertRemoved(twin)
-        self.fire("proc", subject)
-        with self.subTest(arm="process inside"):
-            self.assertKept(subject)
-            self.assertIsNone(proc.poll(), "the process inside the own worktree was stopped")
+        self.fire_under_host("proc", subject)
+        with self.subTest(arm="host-started process inside the own tree"):
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.fail("the host-started process inside the own worktree was not stopped")
+            self.assert_own_reaped(subject)
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
@@ -3672,6 +3678,214 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
             self.assertKept(locked)
         with self.subTest(case="outside agent-*, idle 31 min"):
             self.assertKept(lane)
+
+
+class AgentEndRulingTests(_AgentEndFixture):
+    """Owner rulings 2026-10-15 19:43 CDT, from review round 1 of the agent-end stage. Each case names
+    its review point. Most cases run the hook in a subprocess (`fire`, `fire_under_host`). A fault that
+    must land inside the stage (a faked cwd read, a lock taken mid-stage, a killed git call) runs
+    `handle()` in this process instead: the same entry the hook's main calls. Real git and real
+    processes everywhere else. Review point 5 (ruling point 2) is a pin: green on abf5f8e, must stay green."""
+
+    def run_in_process(self, agent, path):
+        """`handle()` on a SubagentStop payload for AGENT, in this process. CLAUDE_PID names this test
+        process, so its children are host-started, as fire_under_host sets them."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent, "cwd": path,
+                              "session_id": "agent-end-wt-cases"})
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg, "CLAUDE_PID": str(os.getpid())}):
+            return self.reap.handle(payload)
+
+    def row_for(self, record, path):
+        for row in record.get("worktrees") or []:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(path):
+                return row
+        return None
+
+    def lock_reason(self, path):
+        """The text after `locked` for PATH in `git worktree list --porcelain`, or None when unlocked."""
+        out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
+        for block in out.split("\n\n"):
+            lines = block.splitlines()
+            if not lines or not lines[0].startswith("worktree "):
+                continue
+            if _norm_path(lines[0][len("worktree "):]) != _norm_path(path):
+                continue
+            for line in lines[1:]:
+                if line == "locked" or line.startswith("locked "):
+                    return line[len("locked"):].strip()
+        return None
+
+    @staticmethod
+    def dead_pid():
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        pid = gone.pid
+        del gone  # Windows reads an exited pid as live while this process still holds its handle
+        gc.collect()
+        return pid
+
+    def sleeper(self, cwd):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        return proc
+
+    def test_a_process_inside_a_sibling_tree_is_never_stopped(self):
+        """Review point 1, guard: green on abf5f8e. The stop covers the ending agent's own tree only. The
+        sibling is aged 31 minutes, so only the process inside it can keep it."""
+        own, sibling = self.add("sibown"), self.add("sibproc")
+        proc = self.sleeper(sibling)
+        inside, _unreadable = sweep.processes_in(sibling)
+        self.assertIn(proc.pid, inside or [], "the fixture process is not inside the sibling")
+        _age_admin_files(sibling, 31 * 60)
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
+                                "the sibling is not 31 min idle")
+        self.fire_under_host("sibown", own)
+        with self.subTest(control="own tree with no process inside is removed"):
+            self.assert_own_reaped(own)
+        with self.subTest(arm="process inside a sibling tree"):
+            self.assertIsNone(proc.poll(), "a process inside a sibling tree was stopped")
+            self.assertKept(sibling)
+
+    def test_a_process_the_host_did_not_start_is_not_stopped_inside_the_own_tree(self):
+        """Review point 1, guard: green on abf5f8e. This reads ruling point 1 as "the host's processes
+        only". A grandchild of a live sponsor outside the host chain keeps the tree and runs on. To
+        confirm with the owner."""
+        own = self.add("spon")
+        pidfile = os.path.join(self.root, "grand.pid")
+        sponsor_code = ("import subprocess, sys, time\n"
+                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
+                        " cwd=sys.argv[1])\n"
+                        "with open(sys.argv[2], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n"
+                        "time.sleep(120)\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, own, pidfile], cwd=self.root,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, sponsor)
+        grand = int(_read_when_ready(pidfile))
+        self.addCleanup(sweep.send_signal, grand)  # the fixture's own grandchild outlives its sponsor
+        inside, _unreadable = sweep.processes_in(own)
+        self.assertIn(grand, inside or [], "the fixture grandchild is not inside the own worktree")
+        self.fire_under_host("spon", own)
+        with self.subTest(arm="grandchild of a sponsor the host did not start"):
+            self.assertTrue(sweep.pid_alive(grand), "a process the host did not start was stopped")
+            self.assertKept(own)
+
+    def test_an_unreadable_pid_cwd_keeps_the_own_worktree_at_agent_end(self):
+        """Review point 2. A pid whose cwd cannot be read may sit inside the tree, so at agent
+        end it keeps the tree. Red on abf5f8e: processes_in lists the pid as unreadable and
+        decide_worktree drops it (sweep.py ~2040, ~714). Driven through handle(), because the fault is
+        a faked cwd read. The control twin runs on the real reads, which hold unreadable pids of their
+        own (measured 2026-10-15: 252 of 612 live pids), so a literal rule keeps the twin too."""
+        if sys.platform == "darwin":
+            self.skipTest("macOS reads every cwd in one lsof call; process_cwd is not on that path")
+        twin, subject = self.add("unrtwin"), self.add("unr")
+        proc = self.sleeper(self.root)
+        real = sweep.process_cwd
+
+        def hidden(pid):
+            return None if pid == proc.pid else real(pid)
+
+        self.run_in_process("unrtwin", twin)
+        with self.subTest(control="clean pushed twin is removed on the real reads"):
+            self.assertRemoved(twin)
+        with mock.patch.object(sweep, "process_cwd", new=hidden):
+            record = self.run_in_process("unr", subject)
+        with self.subTest(arm="one pid's cwd is unreadable"):
+            row = self.row_for(record, subject)
+            self.assertIsNotNone(row, "the stage wrote no row for the own tree")
+            self.assertEqual(row.get("action"), "keep",
+                             "the own tree was reaped past an unreadable pid: %s" % row.get("reason"))
+            self.assertKept(subject)
+
+    def test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock(self):
+        """Review point 3. decide_worktree reads a stale lock early (sweep.py ~666), and
+        remove_worktree unlocks by name later (~2189). A live lock taken in between must keep the tree
+        and survive. The injection runs inside processes_in: after the lock read, before the unlock.
+        The lock names a separate child, never a host pid, so _OWN_AGENT cannot lift it. Red on
+        abf5f8e: the unlock clears the live lock by name. The control twin has the same dead-pid lock
+        with no injection, and must be removed, so the case reaches the unlock path."""
+        twin, subject = self.add("reltwin"), self.add("relock")
+        dead = self.dead_pid()
+        self.lock(twin, "claude agent agent-reltwin (pid %d)" % dead)
+        self.lock(subject, "claude agent agent-relock (pid %d)" % dead)
+        holder = self.sleeper(self.root)
+        live = "claude agent agent-relock (pid %d)" % holder.pid
+        real_processes_in = sweep.processes_in
+
+        def take_live_lock(path):
+            found = real_processes_in(path)
+            if _norm_path(path) == _norm_path(subject):
+                # The other session's act, between the lock read and the unlock.
+                require(run_vcs(self.primary, "worktree", "unlock", subject).returncode == 0,
+                        "unlock in the window failed")
+                self.lock(subject, live)
+            return found
+
+        self.run_in_process("reltwin", twin)
+        with self.subTest(control="dead-pid lock, no injection, is removed"):
+            self.assertRemoved(twin)
+        with mock.patch.object(sweep, "processes_in", new=take_live_lock):
+            self.run_in_process("relock", subject)
+        with self.subTest(arm="live lock taken between the lock read and the unlock"):
+            self.assertKept(subject)
+            self.assertEqual(self.lock_reason(subject), live, "the live lock was cleared or replaced")
+
+    def test_a_worktree_remove_cut_short_by_its_timeout_is_not_left_half_removed(self):
+        """Review point 4. guard._git kills `git worktree remove` at 10 s (hooks/guard_core.py
+        ~800) and returns None, so a removal cut short can leave a half-removed tree. Red on abf5f8e:
+        the row says "remove failed" and the tree stays, with nothing that says it was cut short.
+        The fault is SIMULATED, not measured: the first worktree remove with a finite timeout deletes
+        one tracked file and raises TimeoutExpired. Git calls without a timeout run for real, so a
+        builder who drops the timeout, or moves the removal into a detached child, is not faulted."""
+        subject = self.add("cutshort")
+        real_run = subprocess.run
+        injected = []
+
+        def cut_short(argv, *args, **kwargs):
+            timeout = kwargs.get("timeout")
+            if (not injected and isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
+                    and timeout is not None):
+                injected.append(argv)
+                os.remove(os.path.join(subject, "f.txt"))
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return real_run(argv, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "run", new=cut_short):
+            first = self.run_in_process("cutshort", subject)
+        self.assertTrue(injected, "the fault never landed: no finite-timeout worktree remove ran")
+        if os.path.exists(subject):
+            with self.subTest(arm="tree left behind by the cut-short remove"):
+                row = self.row_for(first, subject) or {}
+                self.assertRegex(json.dumps(row), r"cut[- ]short",
+                                 "a cut-short removal left the tree and did not say so")
+            with self.subTest(arm="the next run finishes the removal"):
+                self.run_in_process("cutshort", subject)
+                self.assertRemoved(subject)
+        else:
+            self.assertRemoved(subject)
+
+    def test_a_clean_pushed_tree_holding_git_ignored_files_is_removed(self):
+        """Review point 5 (ruling point 2), a pin: green on abf5f8e, must stay green. A clean, pushed
+        tree goes even when it holds git-ignored files (build output, .env.local). The proof reads show
+        the files are ignored and not untracked, so the case tests the ruling and not a fixture that
+        never took."""
+        with open(os.path.join(self.primary, ".git", "info", "exclude"), "a", encoding="utf-8") as handle:
+            handle.write(".env.local\nbuild/\n")
+        twin, subject = self.add("igntwin"), self.add("ign")
+        write(os.path.join(subject, ".env.local"), "API_TOKEN=test-only\n")
+        write(os.path.join(subject, "build", "out.bin"), "built\n")
+        self.assertEqual(guard.porcelain(subject), [], "the fixture tree is not clean")
+        self.assertTrue(any(line.startswith("!! ") for line in guard.porcelain(subject, ignored=True)),
+                        "the fixture files are not git-ignored")
+        self.fire("igntwin", twin)
+        with self.subTest(control="clean pushed twin is removed"):
+            self.assertRemoved(twin)
+        self.fire("ign", subject)
+        with self.subTest(arm="clean, pushed, holding ignored files"):
+            self.assertRemoved(subject)
 
 
 BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
