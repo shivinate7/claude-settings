@@ -51,7 +51,11 @@ still sits inside is what keeps that partial state from ever happening.
 Usage:
     python3 janitor/sweep.py [ROOT ...]                 # preview a sweep of the named roots
     python3 janitor/sweep.py --discover DIR              # preview a sweep of DIR's own checkouts
-    python3 janitor/sweep.py ROOT --confirm              # actually reap
+    python3 janitor/sweep.py ROOT --confirm              # actually reap, no deadline
+    python3 janitor/sweep.py ROOT --confirm --deadline-seconds N
+                                                         # the SessionEnd run: judge no tree after
+                                                         # min(12 s, N minus 7.5 s). Only this run
+                                                         # has a deadline
     python3 janitor/sweep.py --purge                     # preview which tombstones are past 90 days
     python3 janitor/sweep.py --purge --confirm           # actually drop tombstones past 90 days
 
@@ -2607,11 +2611,15 @@ def run_repo_reaper(root: str):
     return None
 
 
-# A pass judges trees until this many seconds after it started (owner ruling 2026-10-15: the sweep
-# must finish). session_end_sweep.py kills the sweep at 25 s, and a tree judged at the last moment
-# still costs about 7.5 s (measured), then the branch, leftover-folder and listener work follows.
-# A tree the pass did not reach is kept ("not judged: deadline") and the next run judges it.
+# Only the SessionEnd run has a deadline (owner ruling 2026-10-15 15:08 CDT). session_end_sweep.py
+# kills its sweep after min(25 s, the time its hook has left) and passes that number as
+# `--deadline-seconds N`. The pass then judges trees until min(JUDGE_BUDGET_SECONDS, N minus
+# DEADLINE_TAIL_SECONDS) after it started. A tree judged at the last moment still costs about 7.5 s
+# (measured), then the branch, leftover-folder and listener work follows, so the tail is that 7.5 s.
+# A run with no flag has no deadline. A tree the pass did not reach is kept ("not judged: deadline")
+# and the next run judges it.
 JUDGE_BUDGET_SECONDS = 12
+DEADLINE_TAIL_SECONDS = 7.5
 _now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
 _DEADLINE = None  # a `_now()` time while `main` runs; None means no deadline
 
@@ -3005,6 +3013,12 @@ def main(argv=None) -> int:
     parser.add_argument("--attended", action="store_true",
                          help="a person's run: skip the merged and idle-1-hour keeps. Without "
                               "it, --confirm removes a worktree only when it is both")
+    parser.add_argument("--deadline-seconds", type=float, metavar="N",
+                         help="the SessionEnd run only: N is the time left before the caller kills "
+                              "this sweep. The pass judges no tree after min(%d s, N minus %s s). "
+                              "Without it there is no deadline: the scheduled job and a person's "
+                              "run, with or without --confirm, judge every tree"
+                              % (JUDGE_BUDGET_SECONDS, DEADLINE_TAIL_SECONDS))
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
@@ -3070,9 +3084,12 @@ def main(argv=None) -> int:
     global _LIVE_HEADS, _DEADLINE
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
-    # Only the SessionEnd run has a deadline: `--confirm` with no `--attended`, the argv
-    # session_end_sweep.py sends. A person's run judges everything (owner ruling 2026-10-15).
-    _DEADLINE = _now() + JUDGE_BUDGET_SECONDS if args.confirm and not args.attended else None
+    # Only a run given `--deadline-seconds N` has a deadline: the SessionEnd run. The scheduled
+    # job and a person's run judge everything (owner ruling 2026-10-15 15:08 CDT). A NaN is no
+    # time left, never no deadline: it compares false against every clock reading.
+    n = args.deadline_seconds
+    _DEADLINE = None if n is None else _now() + (
+        0 if n != n else min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
