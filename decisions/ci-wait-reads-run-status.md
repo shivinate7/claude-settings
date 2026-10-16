@@ -53,6 +53,8 @@ another repo on the same account several times.
 - `ci_wake.wait_for` lists the head's runs again, at most once per 30 s, until a run that ran
   is judged. A skipped draft run counts as no run (lane ci-wake-draft-run, after the false
   "CI red" on PRs 452 and 453). A real run that starts after a judged one is never judged.
+  The lane's three calls, by the orchestrator: lists are 30 s apart; a skipped run is never
+  red or green; after a real run is judged, the hook waits for no later run.
   `bin/merge` lists the runs again on each pass. Debt `ci-wake-lists-runs-once` (a
   later run is not judged).
 - A merge wait now reads the checks and runs every 30 s, not every 60 s: about 6 calls a

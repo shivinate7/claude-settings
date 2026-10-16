@@ -5,14 +5,15 @@ decisions/handoff-hooks-wave-2.md, part 3.
 
 PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
 `gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
-A push starts none. Per PR it reads the head once, waits on every run of that head, and prints one line:
+A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
+ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
 Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
 or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
-line, never 1. It never polls and never loops on a red run.
+line, never 1. It reads GitHub at most once per 30 s per run, and never loops on a red run.
 
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
