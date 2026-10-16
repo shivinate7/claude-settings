@@ -141,7 +141,7 @@ def merge_module():
             module.SH_TIMEOUT = MERGE_READ_TIMEOUT
             _MERGE_MODULE.append(module)
             return module
-        except Exception:
+        except (Exception, SystemExit):  # a tool that exits at import is unloadable too, never a pass
             continue
     return None
 

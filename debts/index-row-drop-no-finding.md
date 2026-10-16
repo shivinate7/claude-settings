@@ -1,0 +1,6 @@
+# A records page row can drop with no finding
+
+- **What.** The records page can lose a row with no finding in two cases. A record renamed to a non-`.md` file is skipped by the generator. The check then excuses the page, because it matches the generator's output. A `Drops-lines` trailer for the page, on any commit in the window, excuses every page line the window drops. So a row for a record untouched in the window can drop with no finding.
+- **Where.** `lint/hook_catalog.py`, `collect_records` (lines 670-705; the `.md` filter is at line 690). `lint/check_silent_undo.py`, `allowed` (lines 83-92) and `judge` (line 110), which excuse by path across the whole range.
+- **Decision.** `records-index-at-merge` (one records index page, rebuilt at merge time). Its "Holes, named" section names this gap.
+- **Retire.** The generator reports a record it cannot list, instead of skipping it. The check reads a page row drop as a finding unless its record is gone too. Tests in `lint/test_hook_catalog.py` cover the rename to `.txt`. Tests in `lint/test_check_silent_undo.py` cover a trailer in the window with an untouched record's row dropped. Each shows red on the current code and green after the fix. No test covers either case today.
