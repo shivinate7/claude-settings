@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Decides which gates jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows
-#   per suite: code (any non-docs file changed), mods (a path under mods/: the mod tests, a step of
-#   the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
+#   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
+#   map skill tests, steps of the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA. decisions/docs-only-prs-skip-code-suites.md.
@@ -51,6 +51,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       lint/test_scanner_traps.mjs) on="$on mods code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
+      # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
+      skills/plain-english-map/*.md) on="$on mods " ;;
       # Docs: nothing runs on them but the lints in `gates`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
       *) on="$on $ALL " ;;

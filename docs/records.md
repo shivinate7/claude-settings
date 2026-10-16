@@ -126,6 +126,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
 | `local-time-central` | Owner, 2026-10-12: US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
+| `map-skill-lives-here` | Owner, 2026-10-16: `skills/plain-english-map/` in claude-settings is the one home of the skill. | [`decisions/map-skill-lives-here.md`](../decisions/map-skill-lives-here.md) |
 | `merge-needs-a-proven-head` | Owner, 2026-10-12: "Fix both now, one lane." | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
 | `mods-deferred-table` | Owner word, 2026-10-13 21:00 CDT: leave these as deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
@@ -310,6 +311,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-indirect-forms` | The guard reads literal set forms only. | [`debts/git-env-set-indirect-forms.md`](../debts/git-env-set-indirect-forms.md) |
 | `git-env-set-untested-forms` | No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in a heredoc body. | [`debts/git-env-set-untested-forms.md`](../debts/git-env-set-untested-forms.md) |
 | `git-env-warn-session-start` | The warning runs at session start only, so damage done mid-session shows at the next start. | [`debts/git-env-warn-session-start.md`](../debts/git-env-warn-session-start.md) |
+| `gitignore-skips-map-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`debts/gitignore-skips-map-tests.md`](../debts/gitignore-skips-map-tests.md) |
 | `guard-abtests-test-path` | The test-path rule reads `native/ABTests/` as a test folder, so a builder cannot edit product code there. | [`debts/guard-abtests-test-path.md`](../debts/guard-abtests-test-path.md) |
 | `guard-audit-subagent-stop-open` | On SubagentStop, a missing guard module still fails open, and one log line records it. | [`debts/guard-audit-subagent-stop-open.md`](../debts/guard-audit-subagent-stop-open.md) |
 | `guard-bash-c-silent-write` | A silent git write inside `bash -c '...'` is allowed. | [`debts/guard-bash-c-silent-write.md`](../debts/guard-bash-c-silent-write.md) |
@@ -516,6 +518,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-write-miss-subshell` | A write inside a subshell, `( ... > P)`, is not seen: the closing parenthesis stays glued to the path word, so the path never matches. | [`debts/shell-write-miss-subshell.md`](../debts/shell-write-miss-subshell.md) |
 | `silent-undo-oracle-hides-cause` | When the records page generator fails, is missing, or reports a problem, the silent-undo check reports only "hunk reversed" for `docs/records.md` and discards the generator's stderr. | [`debts/silent-undo-oracle-hides-cause.md`](../debts/silent-undo-oracle-hides-cause.md) |
 | `sim-boot-check-xcodebuild` | The ruling 5 boot check runs only after `simctl boot` and MCP `launch`. | [`debts/sim-boot-check-xcodebuild.md`](../debts/sim-boot-check-xcodebuild.md) |
+| `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`debts/skill-copy-no-typescript.md`](../debts/skill-copy-no-typescript.md) |
 | `skill-rows-dir-named-skill-md` | A directory named `SKILL.md` counts as a skill. | [`debts/skill-rows-dir-named-skill-md.md`](../debts/skill-rows-dir-named-skill-md.md) |
 | `skill-rows-fence-indent` | In the check, a line of 4 spaces, then a fence mark, inside a fence closes it. | [`debts/skill-rows-fence-indent.md`](../debts/skill-rows-fence-indent.md) |
 | `skill-rows-phrase-any-cell` | The check matches the two phrases anywhere on the row line. | [`debts/skill-rows-phrase-any-cell.md`](../debts/skill-rows-phrase-any-cell.md) |
@@ -581,6 +584,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `unknown-reads-nonbool-skips` | The check prints PASS for True, FAIL for False, and SKIP for any other answer. | [`debts/unknown-reads-nonbool-skips.md`](../debts/unknown-reads-nonbool-skips.md) |
 | `unknown-stash-word-tree-only` | An unknown stash word is read as a push, so the guard judges it on the working tree only. | [`debts/unknown-stash-word-tree-only.md`](../debts/unknown-stash-word-tree-only.md) |
 | `until-note-unjudged` | The `background-end` rule accepts any non-empty `until:` text, such as `until: n/a`. | [`debts/until-note-unjudged.md`](../debts/until-note-unjudged.md) |
+| `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`debts/upgrade-strips-name-port.md`](../debts/upgrade-strips-name-port.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
 | `walk-curly-quotes-plain` | PowerShell can take the curly quotes U+2018 to U+201E as quote marks. | [`debts/walk-curly-quotes-plain.md`](../debts/walk-curly-quotes-plain.md) |
 | `win-slice-hides-skip-rows` | Nine guard cases skip on Windows: 2 subject, 6 kill and 1 simulator. | [`debts/win-slice-hides-skip-rows.md`](../debts/win-slice-hides-skip-rows.md) |
