@@ -96,6 +96,12 @@ if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
 FAMILY = "misc"  # set at each section header below
+# TEMP_DIR is the temp folder the guard reads for the cases added while it is set, or None for the
+# system temp. add() records it, and decide() puts it in TMPDIR, TEMP and TMP for that guard run.
+# The silent-write section sets it to ROOT/tmp, so its throwaway cases sit under it while every
+# other fixture (ROOT/nogit, ROOT/repo) stays outside it. Left None, a case keeps the system temp,
+# which holds ROOT, so a case that sets nothing is judged as it always was.
+TEMP_DIR = None
 
 
 def _family(name):
@@ -246,6 +252,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "max_seconds": max_seconds,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
+        # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
+        "temp": TEMP_DIR,
         "tool_input": tool_input,
         # Tagged for GUARD_TESTS=windows-slice. A session case reads a live process's start time,
         # which on Windows is the ctypes arm of _process_start_ms (guard.py L1837-1905).
@@ -868,7 +876,8 @@ def build_fixtures():
     """The EAGER fixtures: config folders, fake gh files, message files and the link probe. Each git
     repo is a builder below, and it is built on first use."""
     global LINKS_MADE, SYMWT_MADE
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git")):
+    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
+                   os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -3620,6 +3629,23 @@ sh("detached: a quoted mention of the shape prints text and starts nothing",
 sh("detached: a grep for Start-Job is not a call to it",
    'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
 
+# ---- a backslash before `&&`, the kill family (lane swn-pwsh-escape). In bash `\&` is a literal
+# `&`, and the second `&` starts a background job, so bash runs the taskkill after it. Round 2 made
+# `\&` text, and the split then never ends a segment at that lone `&`, so the kill is judged inside
+# one segment and allowed. The deny cases are RED on ce4ac8c and deny on a92d509, where the old split
+# cut at `&&`. The PowerShell case is a PIN: PowerShell has no such escape, so it denies on both.
+# The `\;` case is a CONTROL: bash reads `\;` as text, so taskkill is an argument of cd and runs
+# nothing. It allows on ce4ac8c and denies on a92d509, where the old split cut at the `;`.
+sh("kill: a bash cd with a backslash before && hides taskkill /IM, denies",
+   r"cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill", cwd=NOGIT)
+sh("kill: a bash cmd /c with a backslash before && hides taskkill /IM, denies",
+   r"cmd /c cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill", cwd=NOGIT)
+sh("kill: a PowerShell cmd /c with a backslash before && still denies taskkill /IM",
+   r"cmd /c cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill",
+   tool="PowerShell", cwd=NOGIT)
+sh("kill: a bash backslash before ; makes taskkill an argument of cd, allowed",
+   r"cd C:\x\; taskkill /F /IM node.exe", "allow", cwd=NOGIT)
+
 
 # A MACHINE-WIDE KILL IN A ONE-COMMAND PYTHON BODY STILL DENIES (owner ruling 2026-10-14 22:25): the
 # body is one step, and the kill is a deny, which wins over any ask step in the same command.
@@ -4050,6 +4076,11 @@ add("background-end: py -3 -m http.server under run_in_background with no note i
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
+# Lane swn-pwsh-escape, review round 2, item 3: a backslash before ; hides the server in a cmd /c
+# script. RED when guard_stream's cmd /c tail (guard_stream:319) is read as bash text.
+add("background-end: a cmd /c with a backslash before ; hides npm run dev under run_in_background, denies",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command=r'cmd /c "echo C:\x\; npm run dev"', run_in_background=True)
 add("background-end: bash -c around npm run dev under run_in_background is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command='bash -c "npm run dev"', run_in_background=True)
@@ -4139,6 +4170,22 @@ add("background-end: npm test -- --watch=false under run_in_background needs no 
     "allow", cwd=NOGIT, command="npm test -- --watch=false", run_in_background=True)
 add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build-docs", run_in_background=True)
+
+# ---- a backslash before `&&` or `;`, the stream family (lane swn-pwsh-escape). The same cause as
+# the kill block: bash reads `\&` and `\;` as text, so the server after them is one segment and the
+# background-end check misses it. The bash `cd ... && npm run dev` and the bash `pwsh -c` forms are
+# RED on ce4ac8c and deny on a92d509. The PowerShell form is a PIN: it denies on both heads, so the
+# brief's PowerShell shape never reproduced. The live-stream rule reads a whole segment, so it is
+# not moved by the split; that is why the PowerShell `tail -f` cases stay green as well.
+add("background-end: a bash cd with a backslash before && hides npm run dev, denies",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command=r"cd C:\x\&& npm run dev", run_in_background=True)
+add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev, denies",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command=r'pwsh -c "cd C:\x\; npm run dev"', run_in_background=True)
+add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
+    command=r'cd "C:\x\"; npm run dev', run_in_background=True)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
@@ -4480,9 +4527,113 @@ sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
 sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
    "(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
 
+# ---- a backslash before `;` or `&&`, the wsl family (lane swn-pwsh-escape). Round 2 made a bash
+# `\` escape the next character, so `\;` and `\&` are text to bash. A nested PowerShell or cmd
+# script is still read by Windows, where `\` is a path separator, so the command after `\;` or
+# `\&&` runs. The four deny cases are RED on ce4ac8c (allowed) and deny on a92d509. The PowerShell
+# form and the scanner cases are PINS that deny on both heads. The echo case is a CONTROL: bash
+# reads `echo a\; wsl` as one echo, so it allows on ce4ac8c and denies on a92d509.
+sh("wsl: a bash pwsh -c with a backslash path before ; hides wsl --shutdown, denies",
+   r'pwsh -c "cd C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash cd with a backslash before && hides wsl --shutdown, denies",
+   r"cd C:\x\&& wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash cmd /c in double quotes, a backslash before && hides wsl --shutdown, denies",
+   r'cmd /c "cd C:\x\&& wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener in an echo string does not hide wsl after a backslash before &&",
+   r'echo "# x"; cd C:\x\&& wsl --shutdown', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a PowerShell cd with a quoted backslash path before ; still denies wsl --shutdown",
+   r'cd "C:\x\"; wsl --shutdown', "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a lone apostrophe, then a backslash path before ; still denies wsl --shutdown",
+   r"echo don't; cd C:\x\; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener inside a single-quoted pwsh -c string still denies wsl --shutdown",
+   'pwsh -c "cd C:\\x\\; echo \'# x\'; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a multi-line pwsh -c string with a backslash before its newline denies wsl --shutdown",
+   "pwsh -c \"cd C:\\x\\\n; wsl --shutdown\"", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash backslash before ; is text, so echo a\\; wsl --shutdown is one echo, allowed",
+   r"echo a\; wsl --shutdown", "allow", cwd=NOGIT)
+
+# ---- a nested PowerShell script, the wsl family (lane swn-pwsh-escape, review round 1). The iex and
+# Invoke-Expression arms of nested_script return PowerShell text, but split_segments clears
+# POWERSHELL_CALL before its caller reads the segments. segment_tokens then reads that text with bash
+# rules: the `\;` is text, so wsl --shutdown after it is an argument of echo. RED on 15bd278, deny on
+# 9d7533c. The kill and stream forms of these shapes allow on 9d7533c too, so they are not here.
+# The comment-opener shape below is RED on 15bd278. The lone-apostrophe and line-break shapes are PINS:
+# they deny on both heads, and a fix must keep them so.
+PWSH_IEX_SHAPES = (
+    ("iex with escaped double quotes", r'iex \"echo C:\x\; %s\"'),
+    ("iex with single quotes", r"iex 'echo C:\x\; %s'"),
+    ("Invoke-Expression with single quotes", r"Invoke-Expression 'echo C:\x\; %s'"),
+    ("iex with the path in single quotes", r"iex 'C:\x\; %s'"),
+)
+for _name, _inner in PWSH_IEX_SHAPES:
+    sh("wsl: a bash pwsh -c with %s hides wsl --shutdown after a backslash path, denies" % _name,
+       'pwsh -c "%s"' % (_inner % "wsl --shutdown"), "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener in quotes in a nested iex, then a backslash path, denies wsl --shutdown",
+   r'''pwsh -c "iex \"echo '# x' C:\x\; wsl --shutdown\""''', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a lone apostrophe in a nested iex, then a backslash path, denies wsl --shutdown",
+   r'''pwsh -c "iex \"echo don't C:\x\; wsl --shutdown\""''', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a line break in a nested iex, after a backslash path, denies wsl --shutdown",
+   r'pwsh -c "iex \"echo C:\x' + "\\" + "\n" + r'; wsl --shutdown\""', "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+# KEEP GREEN. Bash reads each escaped `\;` or `\&` as text, so these allow, and a fix must keep them so.
+sh("wsl: a bash -c with a backslash before ; keeps echo one command, allowed",
+   r"bash -c 'echo C:\x\; wsl --shutdown'", "allow", cwd=NOGIT)
+sh("wsl: a sed script with a backslash before & is text, allowed",
+   r"sed 's/a/\&/g'", "allow", cwd=NOGIT)
+sh("wsl: a sed script with a backslash before & and a trigger word after it, allowed",
+   r"sed 's/a/\& wsl --shutdown/g' notes.txt", "allow", cwd=NOGIT)
+sh("wsl: a find -exec with a backslash before ; is text, allowed",
+   r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
+
+# ---- lane swn-pwsh-escape, review round 2, item 3. Each case is RED when the read it names is
+# dropped (the scratch mutants, see the proof): quote_advance:118 for the escaped quote, _split_
+# reading:196 for the backslash-newline, nested_script's cmd /c tail (guard_core:1900). Each DENIES
+# on 2055fd8, so each is green there.
+sh("wsl: a pwsh -c with an escaped quote before ; hides wsl --shutdown, denies",
+   r"""pwsh -c 'echo "a\"; wsl --shutdown'""", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a pwsh -c with a backslash before a line break hides wsl --shutdown, denies",
+   'pwsh -c "cd C:\\x\\' + "\n" + 'wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell script, denies",
+   r'cmd /c "echo C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+# The PowerShell tool's own text: a doubled quote in a single-quoted pwsh -c string ends the quote
+# early under the walk, so the `;` reads as quoted. RED on 2055fd8, deny on origin/main.
+sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
+   "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+
+# ---- lane pwsh-quote-fix, review round 3, holes F1 to F3 (red until the builder fixes them).
+# F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
+# PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
+# a backtick that the outer string already consumed. Each DENIES on origin/main.
+sh("wsl: a PowerShell comment opener mid-word, then wsl --shutdown, denies",
+   "echo a<# ; wsl --shutdown #>", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a comment opener mid-word, then wsl --shutdown, denies",
+   "pwsh -c 'echo a<# ; wsl --shutdown #>'", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a sh -c script in a PowerShell call, a backtick pair then wsl --shutdown, denies",
+   "sh -c 'echo `x`; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a PowerShell iex with a double-quoted backtick pair then wsl --shutdown, denies",
+   'iex "echo `x`; wsl --shutdown"', "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a double-quoted backtick pair then wsl --shutdown, denies",
+   'pwsh -c "echo `x`; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
+# KEEP ALLOWED. A closed comment at a token start hides its text. An unclosed one runs to the end.
+sh("wsl: a PowerShell closed comment at a token start hides wsl --shutdown, allowed",
+   "echo ok <# wsl --shutdown #>", "allow", tool="PowerShell", cwd=NOGIT)
+sh("wsl: a PowerShell unclosed comment at a token start with no call after it, allowed",
+   "echo hi <# note", "allow", tool="PowerShell", cwd=NOGIT)
+sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
+   "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
+
+# ---- lane pwsh-quote-fix, review round 3, hole F4: a backtick hides the next `;` before an env read.
+# It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
+FAMILY = "env"
+sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
+   "echo a``; cat " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
+# The throwaway cases below read ROOT/tmp as the system temp. Every other write case keeps its
+# NOGIT, GITMAIN or PROJ cwd outside it, so each stays a real checkout whatever the system temp is.
+TEMP_DIR = os.path.join(ROOT, "tmp")
 #
 # Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." A discarding
 # redirect denies on any of the six subcommands, whatever git itself would have printed. git's
@@ -4506,6 +4657,11 @@ sh("silent-write: a discarded proof of landing, stdout alone",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
    VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+# The backslash-semicolon control (lane swn-pwsh-escape). Round 2 reads `\;` as text, so this is one
+# commit with a silenced redirect. It is denied on ce4ac8c. On a92d509 it was ALLOWED, because the old
+# split cut `foo\` and the unparsable piece failed open. A repo cwd is needed, so this uses the default.
+sh("silent-write: a backslash before ; then a silenced commit redirect denies, default cwd",
+   VCS + " commit -m foo\\; >/dev/null", "deny", "silent-write")
 sh("silent-write: a tag silenced by a discarded stream, its own flag does not exist",
    VCS + " tag -a v1 -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write: a cherry-pick silenced by a discarded stream",
@@ -4601,6 +4757,377 @@ sh("silent-write pipe, allow: a read piped to a discard",
    VCS + " log | cat >/dev/null", "allow", cwd=NOGIT)
 sh("silent-write pipe, allow: tee prints",
    VCS + " commit -m x | tee /tmp/l", "allow", cwd=NOGIT)
+
+# Narrowed 2026-10-14 (lane silent-write-narrow). Four changes, each pinned below. (1) A read under a
+# write verb stays allowed when silenced: `--help`, `-h`, `tag -l`, `-ln1`, `--list`, `merge-base`,
+# and `--dry-run` (`push -n` too). A flag inside a quoted value is a value, never a flag. (2) A
+# silenced write whose cwd, `-C` target or `cd` target sits under the temp folder is allowed. A real
+# checkout outside it stays denied, and a quiet flag stays denied in both. (3) `fetch -q src:dst` is
+# a write only when dst is under refs/heads/ or refs/remotes/; a short dst resolves to refs/heads.
+# (4) The refusal names its step by kind and position, the flag it hit, and one loud form to run.
+
+
+def _build_throwaway():
+    """A real repository under the silent-write temp folder, made the way `git init` makes one."""
+    make_repo(THROWAWAY, {"base.txt": "base\n"})
+
+
+THROWAWAY = os.path.join(ROOT, "tmp", "throwaway")   # built on first use, under TEMP_DIR
+TSLASH = slash(THROWAWAY)                            # the same path as a shell command names it
+lazy_fixture([THROWAWAY], _build_throwaway)
+
+# (1) Reads under a write verb. Silenced, each one still moves nothing.
+sh("silent-write read: tag -ln1 silenced lists tags",
+   VCS + " tag -ln1 >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: tag -l silenced lists tags",
+   VCS + " tag -l >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: tag --list silenced lists tags",
+   VCS + " tag --list >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: cherry-pick --help silenced prints usage",
+   VCS + " cherry-pick --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: merge --help silenced prints usage",
+   VCS + " merge --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: rebase --help silenced prints usage",
+   VCS + " rebase --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: commit -h silenced prints usage",
+   VCS + " commit -h >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: merge-base silenced reads a base",
+   VCS + " merge-base HEAD HEAD >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: push --dry-run silenced moves nothing",
+   VCS + " push --dry-run >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: push -n, the dry-run short form, silenced moves nothing",
+   VCS + " push -n >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: the remedy's own loud form is allowed",
+   VCS + " push origin zz9 2>&1 | tail -1", "allow", cwd=GITMAIN)
+
+# (1, bypasses) A flag-shaped token that is a value, or a flag that is not the read, stays denied.
+sh("silent-write read bypass: --dry-run as a message value is a real commit",
+   VCS + ' commit -m "--dry-run" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: -h as a message value is a real commit",
+   VCS + " commit -m -h >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: --help inside a message is a real commit",
+   VCS + ' commit -m "fix --help" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: commit -n is no-verify, not a dry run",
+   VCS + " commit -n -m x >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: tag -d deletes a tag, it does not list",
+   VCS + " tag -d v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: a silenced tag create is a write",
+   VCS + " tag v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+
+# (2) A silenced write whose folder is a throwaway under the temp folder is allowed.
+sh("silent-write throwaway: a discarded commit in a throwaway repo",
+   VCS + " commit -m x >/dev/null", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: -C names the throwaway repo, and it is judged there",
+   VCS + " -C " + TSLASH + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: cd into the throwaway repo, and it is judged there",
+   "cd " + TSLASH + " && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
+   VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
+   VCS + " commit -m x 2>&1 | cat >/dev/null", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: a quiet push in a throwaway repo is still a write, a push is never a throwaway",
+   VCS + " push -q", "deny", "silent-write", carries="moved nothing", cwd=THROWAWAY)
+sh("silent-write throwaway: a quiet merge in a throwaway repo",
+   VCS + " merge -q feature/x", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: this session's own scratchpad",
+   VCS + " commit -m x >/dev/null", "allow",
+   cwd=os.path.join(ROOT, "tmp", FAKE_SESSION, "scratchpad", "notes"), session=FAKE_SESSION)
+TEMP_DIR = None   # the system temp itself, for this one case
+sh("silent-write throwaway: a folder under the system temp dir counts as a throwaway",
+   VCS + " commit -m x >/dev/null", "allow", cwd=NOGIT)
+TEMP_DIR = os.path.join(ROOT, "tmp")
+
+# (2, kept) A real checkout outside the throwaway folder is still judged, quiet flags too.
+sh("silent-write real: a discarded commit in a real checkout",
+   VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a quiet push in a real checkout",
+   VCS + " push -q", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a quiet merge in a real checkout",
+   VCS + " merge -q feature/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a silenced tag create in a real checkout",
+   VCS + " tag v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a throwaway -C, then a quiet push in the real cwd",
+   VCS + " -C " + TSLASH + " commit -m x >/dev/null && " + VCS + " push -q",
+   "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a real --git-dir is judged where it points, not the throwaway cwd",
+   VCS + " --git-dir=" + slash(GITMAIN) + "/.git commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: a real -C target is judged where it runs, not the throwaway cwd",
+   VCS + " -C " + slash(GITMAIN) + " commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: an if-test of a silenced merge stays denied (unmeasured; keep)",
+   "if " + VCS + " merge feature/x >/dev/null 2>&1; then echo y; fi", "deny", "silent-write",
+   cwd=GITMAIN)
+
+# (3) `fetch -q src:dst` is a write only when dst is under refs/heads/ or refs/remotes/.
+sh("silent-write fetch: a quiet fetch into refs/tmp moves no branch",
+   VCS + " fetch -q origin main:refs/tmp/x", "allow", cwd=GITMAIN)
+sh("silent-write fetch: a forced quiet fetch into refs/tmp moves no branch",
+   VCS + " fetch -q origin +main:refs/tmp/x", "allow", cwd=GITMAIN)
+sh("silent-write fetch: a quiet fetch into refs/heads is a write",
+   VCS + " fetch -q origin main:refs/heads/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a quiet fetch into refs/remotes is a write",
+   VCS + " fetch -q origin main:refs/remotes/origin/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a short dst resolves to refs/heads, so it is a write",
+   VCS + " fetch -q origin main:main", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: one dst under refs/heads makes the whole fetch a write",
+   VCS + " fetch -q origin a:refs/tmp/a b:main", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a bare quiet fetch is a read",
+   VCS + " fetch -q origin main", "allow", cwd=GITMAIN)
+
+# (4) The refusal names its step by kind and position, the flag it hit, and one loud form.
+sh("silent-write reason: a quiet push names step 3 of 4, the push, the flag, and the loud form",
+   "echo a && " + VCS + " status && " + VCS + " push -q origin zz9 && echo done",
+   "deny", "silent-write",
+   carries=("step 3 of 4", "the push", "-q", "2>&1 | tail -1"),
+   lacks=("zz9", VCS + " push -q", "echo done"), cwd=GITMAIN)
+sh("silent-write reason: a discarded commit names step 2 of 2, the commit, the redirect, "
+   "and the loud form",
+   VCS + " add zz9 && " + VCS + " commit -m qq7 2>/dev/null", "deny", "silent-write",
+   carries=("step 2 of 2", "the commit", ">/dev/null", "2>&1 | tail -1"),
+   lacks=("qq7", "zz9", VCS + " commit -m"), cwd=GITMAIN)
+sh("silent-write reason: a piped discard counts the pipe's stages as steps",
+   VCS + " commit -m qq7 2>&1 | cat >/dev/null", "deny", "silent-write",
+   carries=("step 1 of 2", "the commit"), lacks=("qq7", "cat >/dev/null"), cwd=GITMAIN)
+
+# Scanner (building-scanner-respects-strings): a quote or a comment opener changes nothing outside
+# its own quotes, and a comment hides nothing from a real write before it.
+sh("silent-write scanner: a comment opener inside a message does not hide a discard",
+   VCS + ' commit -m "x # y" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: block and line openers inside a message do not hide a discard",
+   VCS + ' commit -m "see // and /* here" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a real comment after a discard is still a discard",
+   VCS + " commit -m x >/dev/null # the note", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a flag named in a comment after a discard is still a discard",
+   VCS + " commit -m x >/dev/null # --dry-run", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a discard named only in a comment is not a discard",
+   VCS + " commit -m x # 2>/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write scanner: a lone quote after a discard does not hide it",
+   VCS + " commit -m x 2>/dev/null; echo don't", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a lone quote in a throwaway message",
+   VCS + ' commit -m "it\'s" >/dev/null', "allow", cwd=THROWAWAY)
+sh("silent-write scanner: a multi-line message in a throwaway",
+   VCS + ' commit -m "line one\nline two" >/dev/null', "allow", cwd=THROWAWAY)
+sh("silent-write scanner: a multi-line message, then a real discard",
+   VCS + ' commit -m "line one\nline two" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a quoted git -C in a message does not move the judgement",
+   VCS + ' commit -m "git -C ' + TSLASH + ' x" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a discard quoted in echo is text",
+   'echo "' + VCS + ' commit -m x >/dev/null"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named inside a message is text",
+   VCS + ' commit -m "log >/dev/null"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named before a space inside a message is text, with a lone quote "
+   "and a comment opener in the same string",
+   VCS + ' commit -m "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named before a space inside an echo string is text, with a lone "
+   "quote and a comment opener in the same string",
+   'echo "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
+
+# Review round 1 (lane silent-write-narrow). Each DENY below is a bypass the narrowed rule lets
+# through on 87d039b, and each ALLOW is a false alarm it raises. Each one is red until the builder
+# closes it. Cases that already pass on 87d039b are marked "hold" and pin behaviour that must stay.
+
+# (a) The quote walk, `unquoted_at`. A `\"` inside double quotes, a `$'...'` string, and a
+# PowerShell backtick escape each end a quote early or late, so a real redirect reads as text.
+sh("silent-write quote walk: an escaped quote inside a message does not close it, so the redirect after it is real",
+   VCS + r' commit -m "a \" b" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a $'...' string with an escaped quote closes before the redirect",
+   VCS + r" commit -m $'a\'b' >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a PowerShell backtick escape closes nothing, so the redirect after it is real",
+   VCS + r' commit -m "x`"" >$null', "deny", "silent-write", tool="PowerShell",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (b) The throwaway cwd. Each shell below ends in a real checkout, while the guard reads a temp
+# folder that the shell has already left. The walker does not parse the move: pushd, Set-Location,
+# a bare cd, cd -, a subshell cd. Or a `-C` that a `--git-dir` overrides, or an env var that the
+# hook expands but the shell reassigns first.
+sh("silent-write throwaway bypass: pushd moves the shell out of the temp folder into a real checkout",
+   "pushd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=THROWAWAY)
+sh("silent-write throwaway bypass: Set-Location moves a PowerShell shell out of the temp folder",
+   "Set-Location " + slash(GITMAIN) + "; " + VCS + " commit -m x >$null",
+   "deny", "silent-write", tool="PowerShell", carries="a redirect silences", cwd=THROWAWAY)
+sh("silent-write throwaway bypass: a bare cd leaves the temp folder for the home folder",
+   "cd " + TSLASH + " && cd && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: cd - returns the shell to a real checkout",
+   "cd " + TSLASH + " && cd - && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: a cd inside a subshell does not carry out of it",
+   "(cd " + TSLASH + " && true); " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: a --git-dir after -C names the real repository",
+   VCS + " -C " + TSLASH + " --git-dir=" + slash(GITMAIN) + "/.git commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: an env var reassigned to . names the real cwd, not the temp folder",
+   "TEMP=. && " + VCS + ' -C "$TEMP" commit -m x >/dev/null',
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway hold: an env var that expands into the temp folder, then .. out of it, "
+   "is judged where it lands",
+   VCS + ' -C "$TEMP/../' + os.path.basename(GITMAIN) + '" commit -m x >/dev/null',
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway push: a discarded push from a temp clone to a real remote is a write",
+   VCS + " push " + slash(GITMAIN) + " feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=THROWAWAY)
+
+# (c) VALUE_FLAGS gaps. A value flag takes the next token as its value, so a dry-run word there is
+# text, and the write is real.
+sh("silent-write read bypass: push -o takes -n as its push option value, so the push is real",
+   VCS + " push -o -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: push --push-option takes -n as its value, so the push is real",
+   VCS + " push --push-option -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: commit --trailer takes -h as its value, so the commit is real",
+   VCS + " commit --trailer -h -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (d) A Git Bash /tmp path names the temp folder, so a silenced write there is a throwaway. Windows
+# only: on POSIX, /tmp is a real folder, and the fixture temp folder is not /tmp.
+if os.name == "nt":
+    sh("silent-write false alarm: git -C /tmp under the Windows temp folder is a throwaway",
+       VCS + " -C /tmp/throwaway commit -m x >/dev/null", "allow", cwd=GITMAIN)
+
+# (e) The remedy names the program that refused and the loud form. It never reduces to the bare verb,
+# which a re-run would turn into a different write, and it never names the forbidden target.
+sh("silent-write remedy: a silenced push to main gives the loud form, not the bare verb, nor the target",
+   VCS + " push origin main:main >/dev/null", "deny", "silent-write",
+   carries="2>&1 | tail -1", lacks=(VCS + " push 2>&1", "main:main"), cwd=GITMAIN)
+sh("silent-write remedy: a silenced make merge names make merge, not the git merge it rewrites to",
+   "make merge PR=5 2>/dev/null", "deny", "silent-write", carries="make merge",
+   lacks=VCS + " merge 2>&1", cwd=NOGIT)
+sh("silent-write remedy: a silenced gh pr merge names gh pr merge, not the git merge it rewrites to",
+   "gh pr merge 5 --merge >/dev/null", "deny", "silent-write", carries="gh pr merge",
+   lacks=VCS + " merge 2>&1", cwd=NOGIT)
+
+# (f) Hold: a single command is step 1 of 1. Green on 87d039b, pinned so the step count cannot drift.
+sh("silent-write step: a single silenced commit says step 1 of 1",
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="step 1 of 1",
+   lacks="step 1 of 2", cwd=GITMAIN)
+
+# (g) Scanner cases for the quote walk: a multi-line message that names a discard as text, then a
+# backtick inside a quoted message.
+sh("silent-write scanner: a multi-line message that names a discard as text, then a real discard after it",
+   VCS + ' commit -m "line one\n>/dev/null here" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a backtick inside a message does not hide a real discard after it",
+   VCS + ' commit -m "`x`" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+
+# Review round 2 (lane silent-write-narrow). Each DENY below is a bypass 3a953bc lets through, and
+# each ALLOW is a false alarm it raises. Each one is red until the builder closes it. The LIMIT cases
+# at the end pin what the guard does not see today, labelled as limits, so the gap stays on record.
+
+# (a) The quote walk, a doubled backslash outside quotes. Two backslashes are one escaped backslash,
+# and the quote after them opens. The walk must not read the pair as an escaped quote.
+sh("silent-write quote walk: a doubled backslash before a single quote is one escape, so the quote opens and the redirect after it is real",
+   VCS + r" commit -m \\'a b' >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a doubled backslash before a double quote is one escape, so the quote opens and the redirect after it is real",
+   VCS + r' commit -m \\"a b" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+# Scanner cases for the same walk (building-scanner-respects-strings): a comment opener inside the
+# quote, a message that spans lines, and a lone quote in text after the discard.
+sh("silent-write scanner: a comment opener inside a doubled-backslash message does not hide the redirect",
+   VCS + r' commit -m \\"x # y" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write scanner: a doubled backslash before a quote in a multi-line message, then a real discard",
+   VCS + " commit -m \\\\'line one\nline two' >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+# HOLD: green on 3a953bc, pinned so the walk keeps a lone quote in text from hiding a discard.
+sh("silent-write scanner: a lone quote after a doubled backslash does not hide a discard",
+   VCS + r" commit -m \\x >/dev/null; echo don't", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (b) The throwaway cwd, for the orchestrator's own writes. Only a local git write can be a throwaway.
+# A pull request merge and a make target are never throwaway, however silent and however temp the cwd.
+sh("silent-write throwaway bypass: gh pr merge silenced from a temp cwd is still a merge",
+   "gh pr merge 5 -R o/r >/dev/null", "deny", "silent-write", carries="gh pr merge",
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG, cwd=THROWAWAY)
+sh("silent-write throwaway bypass: gh pr merge silenced after a cd into the temp folder is still a merge",
+   "cd " + TSLASH + " && gh pr merge 5 -R o/r >/dev/null", "deny", "silent-write",
+   carries="gh pr merge", env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG, cwd=GITMAIN)
+sh("silent-write throwaway bypass: make merge silenced from a temp cwd is still a merge",
+   "make merge >/dev/null", "deny", "silent-write", carries="make merge", cwd=THROWAWAY)
+
+# (c) A cd on the left of a pipe runs in a subshell. The shell that runs the commit never left
+# the real checkout, so the real checkout judges it.
+sh("silent-write throwaway bypass: a cd on the left of a pipe runs in a subshell, so the real cwd takes the commit",
+   "cd " + TSLASH + " | cat; " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+
+# (d) VALUE_FLAGS, round 2. A value flag takes the next token whatever it is, so -h or -n in that
+# slot is a value, never help or dry-run. The write is real, so the discard denies.
+sh("silent-write read bypass: commit -- ends the options, so -h after it is a pathspec, not help",
+   VCS + " commit -s -- -h >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write read bypass: rebase --exec takes -h as its command, so the rebase is real",
+   VCS + " rebase --exec -h >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write read bypass: commit --pathspec-from-file takes -h as its file, so the commit is real",
+   VCS + " commit --pathspec-from-file -h >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: push --receive-pack takes -n as its program, so the push is real",
+   VCS + " push --receive-pack -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (e) False alarms. A flag that takes no value, or a value glued to its flag, leaves the next token
+# a flag. The dry run is then a dry run, and the silenced command moves nothing.
+sh("silent-write false alarm: push -u takes no value, so --dry-run after it is a dry run",
+   VCS + " push -u --dry-run origin main >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write false alarm: commit -s takes no value, so --dry-run after it is a dry run",
+   VCS + " commit -s --dry-run >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write false alarm: commit -mfoo glues its value, so --dry-run after it is a dry run",
+   VCS + " commit -mfoo --dry-run >/dev/null", "allow", cwd=GITMAIN)
+
+# The five cases below are PowerShell escapes and openers in the silent write. They sit in the ROOT/tmp
+# section, so their NOGIT cwd (under ROOT, outside ROOT/tmp) is not a throwaway. Under the system temp,
+# the throwaway allow decides them, so the case would not test the quote walk.
+# ---- lane swn-pwsh-escape, review round 2, item 2. A PowerShell escape or opener that quote_advance
+# does not read (a backtick outside quotes, a `<# #>` comment, a here-string) flips the quote state, so
+# the silenced commit after it reads as quoted text. MEASURED: on fae948c (the parent of 64a5b09) the
+# backtick, block comment and here-string cases allow. The comment opener in a string and the pin deny.
+# On origin/main 9d7533c all five deny, so those cases do not separate main from the fix. The lone
+# apostrophe is a PIN: it denies on both heads, and a fix must keep it so.
+sh("silent-write: a backtick-escaped quote in PowerShell, then a silenced commit, denies",
+   "echo `\"; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell block comment with a quote, then a silenced commit, denies",
+   '<# " #>; ' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell comment opener inside a string, then a silenced commit, denies",
+   'echo "<#"; ' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a PowerShell here-string with an odd quote, then a silenced commit, denies",
+   '@"\nsay "hi\n"@\n' + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, still denies",
+   "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+
+# (f) round 3 hole F5. Owner ruling 2026-10-15: these two were pinned allowed as limits, and are now
+# denies. A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
+# discarded commit or merge in a real checkout.
+sh("silent-write: a quote inside $( ) in a message does not hide a discarded commit, denies",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write: the PowerShell tool, a quote inside $( ) in a message does not hide a discarded commit, denies",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=GITMAIN)
+# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the case needs it.
+if os.name == "nt":
+    sh("silent-write: a --git-dir under the temp folder does not hide a discarded merge in a real checkout, denies",
+       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "deny", "silent-write",
+       carries="a redirect silences", cwd=GITMAIN)
+
+# ---- lane pwsh-quote-fix, review round 3, hole F1 for a silent write. A here-string opener mid-word
+# is text to the lane, so the discarded commit after it is allowed. It is real, so it denies.
+sh("silent-write: a PowerShell here-string opener mid-word, then a silenced commit, denies",
+   "echo foo@'\nx'; " + VCS + " commit -m x >/dev/null\n'@'", "deny", "silent-write",
+   carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
+
+TEMP_DIR = None   # back to the system temp for the sections below
 
 
 # =========================================================================== 3. push and delete
@@ -8747,6 +9274,9 @@ def decide(case):
             body["agent_type"] = case["agent_type"]
         payload = json.dumps(body)
     env = dict(os.environ)
+    if case.get("temp"):   # the temp folder this case reads as its own (see TEMP_DIR)
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            env[name] = case["temp"]
     # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
     # needs, so a key added here must not turn into a KeyError in a checker that never asked for
     # it. MEASURED on CI run 35473213091: indexing this key crashed `stack_reason_hygiene_case`,
@@ -9437,6 +9967,43 @@ def powershell_backslash_case():
     if sh_tokens != ["cd", "C:repo;", "git", "commit", "-F", "C:tmpmsg.txt"]:
         return False, "Bash tokens changed: %r" % (sh_tokens,)
     return True, "PowerShell keeps backslashes, Bash eats them as an escape"
+
+
+def wsl_script_tag_keeps_backslash_case():
+    """segment_tokens reads a PowerShellScript's own tag, not only POWERSHELL_CALL, so a pwsh -c
+    script keeps its backslashes with no PowerShell tool in play. Dropping that arm (guard_core
+    318) makes shlex eat `C:\\tmp` to `C:tmp`. Lane swn-pwsh-escape, review round 2, item 3."""
+    guard = _load_guard_module()
+    script_type = getattr(sys.modules["guard_core"], "PowerShellScript", None)
+    if script_type is None:   # a tree with no script tag fails this check, and does not crash the run
+        return False, "guard_core has no PowerShellScript tag"
+    guard.POWERSHELL_CALL[0] = False
+    try:
+        tokens = guard.segment_tokens(script_type(r"cd C:\repo; git commit -F C:\tmp\msg.txt"))
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if tokens != ["cd", "C:\\repo;", "git", "commit", "-F", "C:\\tmp\\msg.txt"]:
+        return False, "a PowerShell script tag lost a backslash: %r" % (tokens,)
+    return True, "a PowerShell script tag keeps its backslashes with no PowerShell tool"
+
+
+def wsl_split_tag_keeps_backslash_case():
+    """split_segments wraps each segment of a PowerShell script in the script's tag (guard_core
+    180). Without that wrap the first segment reads with Bash rules: `C:\\x` loses its backslash.
+    Lane swn-pwsh-escape, review round 2, item 3."""
+    guard = _load_guard_module()
+    script_type = getattr(sys.modules["guard_core"], "PowerShellScript", None)
+    if script_type is None:   # a tree with no script tag fails this check, and does not crash the run
+        return False, "guard_core has no PowerShellScript tag"
+    guard.POWERSHELL_CALL[0] = False
+    try:
+        segments = guard.split_segments(script_type(r"cd C:\x; echo y"))
+        tokens = guard.segment_tokens(segments[0]) if segments else None
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if tokens != ["cd", "C:\\x"]:
+        return False, "a split segment lost its PowerShell tag: %r" % (tokens,)
+    return True, "a split segment keeps the PowerShell tag its script had"
 
 
 def merge_tool_missing_case():
@@ -10159,6 +10726,8 @@ LOG_CHECKS = (
     ("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
+    ("wsl: a PowerShell script tag keeps its backslashes in segment_tokens", wsl_script_tag_keeps_backslash_case),
+    ("wsl: a split segment keeps the PowerShell tag its script had", wsl_split_tag_keeps_backslash_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
      agent_worktree_reset_noted_case),
@@ -11292,6 +11861,8 @@ LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 # L1837-1905, the ctypes arm on Windows) or a PowerShell tokenizing rule (L307-320).
 WINDOWS_CHECKERS = {
     powershell_backslash_case,
+    wsl_script_tag_keeps_backslash_case,
+    wsl_split_tag_keeps_backslash_case,
     process_start_ms_case,
     process_start_ms_windows_case,
     session_is_live_case,
@@ -11683,6 +12254,8 @@ LOG_RULE_FAMILY = (
     ("merge-checks: a merge tool that cannot load", "merge"),
     ("merge-checks: a gh that never answers", "merge"),
     ("powershell: a backslash path survives", "paths"),
+    ("wsl: a PowerShell script tag keeps its backslashes", "wsl"),
+    ("wsl: a split segment keeps the PowerShell tag", "wsl"),
     ("log: an unreadable subject", "shared-tree"),
     ("log: a hard reset in an agent-owned", "shared-tree"),
     ("log: checkout -- in an agent-owned", "shared-tree"),

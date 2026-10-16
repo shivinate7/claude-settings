@@ -151,6 +151,12 @@ subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/d
 abort lands nothing, so it has no landing to prove. No environment hatch. The permission
 prompt is the grant here, the same as everywhere else in this file.
 
+Narrowed 2026-10-14 after a study of 399 denies (most right, the rest false alarms): a read
+named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a value
+of `-m` or `-F` is never a flag; a write whose `-C`, `--git-dir`, `cd` or cwd sits under the
+temp folder is a throwaway and passes; `fetch` writes only a `src:dst` whose dst is a branch;
+a redirect named inside quotes is text; the refusal names its step ("step N of M, the push").
+
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
 target reads as permission to run it (CLAUDE.md, Git paragraph). The matched
@@ -214,9 +220,10 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, nested_script, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_powershell, is_worktree, log_path_and_text, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
+            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -419,9 +426,34 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase", "pull", "fetch")
 
 
+def unquoted_at(text: str, index: int) -> bool:
+    """True when `index` in `text` sits outside every quote, read off guard_core's quote walk (the
+    one `split_segments` cuts with: an escaped quote, a `$'...'` string and a PowerShell backtick
+    included). An unterminated quote runs to the end."""
+    for at, _, quote in walk_quotes(text):
+        if at >= index:
+            return not quote
+    return True
+
+
 def discards_output(segment: str) -> bool:
-    """True when the segment redirects stdout or stderr, on any descriptor, to a null device."""
-    return bool(SILENT_WRITE_REDIRECT.search(segment))
+    """True when the segment redirects stdout or stderr, on any descriptor, to a null device. A
+    redirect named inside a quoted string (a commit message, an echo) is text, never a redirect.
+
+    The walk reads a quote inside `$( )` or backticks as the outer string's own, so
+    `-m "$(printf '"')" >/dev/null` hides the redirect. Each substitution is cut out first
+    (`_substitutions`, the env layer's cut) and the text around it is read again. Too deep to cut
+    is a redirect: this fails closed. ponytail: a bandaid; the cause, the quote walk's reading of
+    a quote inside `$( )`, stays."""
+    if any(unquoted_at(segment, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(segment)):
+        return True
+    if "$(" not in segment and "`" not in segment or not SILENT_WRITE_REDIRECT.search(segment):
+        return False
+    texts, too_deep = _substitutions(segment, powershell=is_powershell(segment))
+    if too_deep:
+        return True
+    outer = type(segment)(texts[-1][0])
+    return any(unquoted_at(outer, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(outer))
 
 
 # PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
@@ -445,35 +477,102 @@ def quiet_write(args) -> bool:
     return "-q" in args or "--quiet" in args
 
 
+# A flag that takes the NEXT token as its value. Such a value is text, never a flag: `commit -m -h`
+# and `commit -m "--dry-run"` are real commits. A miss here only keeps a deny, never lifts one.
+VALUE_FLAGS = {"-m", "--message", "-F", "--file", "-c", "-C", "--reuse-message", "--reedit-message",
+               "--author", "--date", "--fixup", "--squash", "-t", "--template", "--cleanup",
+               "--trailer", "-o", "--push-option", "-X", "--onto", "--repo", "--strategy",
+               "--strategy-option", "--exec", "--pathspec-from-file", "--receive-pack"}
+# A letter whose value depends on the subcommand: `-s` is a merge's strategy but a commit's
+# sign-off, `-x` a rebase's command but a cherry-pick's note, `-u` a tag's key but a push's upstream.
+SUBCOMMAND_VALUE_FLAGS = {"merge": {"-s"}, "pull": {"-s"}, "rebase": {"-s", "-x"}, "tag": {"-u"}}
+
+
+def takes_next(subcommand: str, token: str) -> bool:
+    """True when `token` takes the next token as its value. In a short cluster the first value
+    letter takes the rest of the cluster (`-mfoo`), or the next token when it is last (`-am`)."""
+    flags = VALUE_FLAGS | SUBCOMMAND_VALUE_FLAGS.get(subcommand, set())
+    if token in flags:
+        return True
+    if token[:1] != "-" or token[1:2] in ("-", ""):
+        return False
+    letters = {flag[1] for flag in flags if len(flag) == 2}
+    for at, letter in enumerate(token[1:], 1):
+        if letter in letters:
+            return at == len(token) - 1
+    return False
+LISTING = re.compile(r"-[ln]+\d*")   # `tag -l`, `-n5`, `-ln1`
+FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o", "--server-option",
+                     "--deepen", "--shallow-since", "--shallow-exclude"}
+
+
+def read_verb(subcommand: str, args) -> bool:
+    """True when the call's own argv names a read: help, a dry run, a tag listing, a dry-run
+    push. Argv tokens only, never the value of `-m` or `-F`, and nothing after `--`."""
+    skip = False
+    for token in args:
+        if skip:
+            skip = False
+        elif token == "--":
+            return False
+        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and token == "-n") or (
+                subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
+            return True
+        elif takes_next(subcommand, token):
+            skip = True
+    return False
+
+
+def fetch_moves_branch(args) -> bool:
+    """True when a fetch's refspec writes a local branch: a `src:dst` whose dst is under
+    refs/heads/ or refs/remotes/, or a short name (git resolves that to a branch). The first
+    plain word is the repository, never a refspec."""
+    plain, skip = [], False
+    for token in args:
+        if skip:
+            skip = False
+        elif token in FETCH_VALUE_FLAGS:
+            skip = True
+        elif not token.startswith("-"):
+            plain.append(token)
+    for spec in plain[1:]:
+        dst = spec.lstrip("+").partition(":")[2]
+        if dst and (not dst.startswith("refs/") or dst.startswith(("refs/heads/", "refs/remotes/"))):
+            return True
+    return False
+
+
 def silent_write_hit(segment: str, tail: str = ""):
-    """Return (matched text, mechanism) for a write whose own trace is silenced, else ("", "").
+    """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
+    ("", "", "").
 
     `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
-    what actually fired: a redirect can hide a refusal AND a proof of landing on any of the six
-    subcommands, while the quiet flag is judged per subcommand against `QUIET_FLAG_SUBCOMMANDS`,
-    the measured set. Only `SILENT_WRITE_SUBCOMMANDS` are judged at all. `fetch`, `rev-parse`, and
-    every other read subcommand fall outside it, which is what keeps `git fetch -q` and the
-    test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge
-    --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
+    what actually fired; `kind` is the act's name (`push`, `commit`, `merge`). A redirect can hide
+    a refusal AND a proof of landing on any of the subcommands, while the quiet flag is judged per
+    subcommand against `QUIET_FLAG_SUBCOMMANDS`, the measured set. Only `SILENT_WRITE_SUBCOMMANDS`
+    are judged at all. `fetch`, `rev-parse`, and every other read subcommand fall outside it,
+    which is what keeps the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
+    2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
+    landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
     `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
     """
     silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
-            # Only a fetch that moves a local ref (`src:dst`) is a write; a bare one is a read.
-            if not any(":" in a and not a.startswith("-") for a in args):
+            # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
+            if not fetch_moves_branch(args):
                 continue
         elif subcommand not in SILENT_WRITE_SUBCOMMANDS:
             continue
         if subcommand == "merge" and "--abort" in args:
             continue
-        if subcommand in ("fetch", "pull") and "--dry-run" in args:
+        if read_verb(subcommand, args):
             continue
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if silenced:
-            return matched, "redirect"
+            return matched, "redirect", subcommand
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
-            return matched, "quiet"
+            return matched, "quiet", subcommand
     if silenced:
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
@@ -481,21 +580,85 @@ def silent_write_hit(segment: str, tail: str = ""):
             word, rest = basename(tokens[index]), tokens[index + 1:]
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
-                return word + " " + " ".join(rest), "redirect"
-    return "", ""
+                return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
+    return "", "", ""
+
+
+def _git_option_tokens(tokens):
+    """The words of a segment's git call that sit before its subcommand: git's own options."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return []
+    return tokens[index + 1:_git_subcommand_index(tokens, index)]
+
+
+def _git_dir_target(tokens):
+    """The `--git-dir` the git call names before its subcommand, either spelling, or None."""
+    options = _git_option_tokens(tokens)
+    for at, token in enumerate(options):
+        if token.startswith("--git-dir="):
+            return token[len("--git-dir="):]
+        if token == "--git-dir":
+            return options[at + 1] if at + 1 < len(options) else None
+    return None
+
+
+def _unexpanded(path) -> bool:
+    """True when a path holds a variable or a substitution: the shell's value is not this hook's."""
+    return any(mark in path for mark in "$%`")
+
+
+# The writes that change the work tree as well as the repository. `commit`, `tag` and a `fetch`
+# write only the repository.
+WORK_TREE_WRITES = ("merge", "rebase", "cherry-pick", "pull")
+
+
+def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
+    """True when the write in `segments[number]` runs under the temp folder, where a lost trace
+    costs nothing real. Only a local git write counts: a `push`, `gh pr merge` or `make merge`
+    reaches past the folder, wherever it runs. The folder is read the way
+    the shell reads it (`dir_before_segment`: cd, pushd, Set-Location, cd -, a subshell's cd),
+    then its own `-C`, then its own `--git-dir`, which names the repository and outranks `-C`.
+    A `--git-dir` leaves the work tree in the folder, so a write that changes the work tree
+    (WORK_TREE_WRITES) needs that folder under the temp folder too. A
+    path that holds a variable, an unknown cwd, a `GIT_DIR` or `--work-tree` all read as not
+    throwaway: this fails closed."""
+    if any(subcommand == "push" for subcommand, _ in git_calls(segments[number])):
+        return False
+    tokens = segment_tokens(segments[number])
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return False
+    where = dir_before_segment(segments, number, cwd, ends)
+    options = _git_option_tokens(tokens)
+    if any(t.startswith(("GIT_DIR=", "GIT_WORK_TREE=")) for t in tokens[:index]) or any(
+            t.startswith("--work-tree") for t in options):
+        return False
+    judged = []
+    for named in (_segment_git_c_target(tokens), _git_dir_target(tokens)):
+        if named is not None:
+            where = None if _unexpanded(named) else shell_abs(named, where)
+        judged.append(where)
+    # judged[0] is the work tree, judged[1] the repository
+    if not any(subcommand in WORK_TREE_WRITES for subcommand, _ in git_calls(segments[number])):
+        judged = judged[1:]
+    import tempfile   # lazy: only a silenced write reaches here
+    return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
 
 
 SILENT_WRITE_REDIRECT_REASON = (
-    "Rule (Git): a redirect silences this write's own output, so neither a refusal nor "
-    "the line that proves it landed would reach the session. "
-    "Remedy: run the same write without silencing either stream, and read what it "
-    "prints before you say it landed."
+    "Rule (Git): step {step} of {total}, the {kind}: a redirect silences this write's own "
+    "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
+    "the session. "
+    "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
 )
 SILENT_WRITE_QUIET_REASON = (
-    "Rule (Git): this write's own quiet flag drops the one line that told a real update "
-    "apart from one that moved nothing, so the session cannot read which one just ran. "
-    "Remedy: run the same write without the quiet flag, and read what it prints before "
-    "you say it landed."
+    "Rule (Git): step {step} of {total}, the {kind}: its quiet flag (-q) drops the one line "
+    "that told a real update apart from one that moved nothing, so the session cannot read "
+    "which one just ran. "
+    "Remedy: run {program} again without the quiet flag, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
 )
 
 
@@ -1723,17 +1886,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # defect before anything else judges the same segment.
     ends = []
     segments = split_segments(stripped, ends)
+    live = [number for number, segment in enumerate(segments) if segment.strip()]
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         last = number
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
-        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")
-        if matched:
+        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
+        if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
-            refuse(tool, "deny", "silent-write", reason, matched)
+            refuse(tool, "deny", "silent-write",
+                   reason.format(step=live.index(number) + 1, total=len(live), kind=kind,
+                                 program=kind if " " in kind else "git " + kind), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)

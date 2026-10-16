@@ -82,10 +82,112 @@ def basename(token: str) -> str:
     return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
 
-@functools.lru_cache(maxsize=8)
+class PowerShellScript(str):
+    """Text that pwsh or `cmd /c` reads, not bash. Every reader of the text takes PowerShell's rules,
+    where a backslash is a path character, so a path that ends in one hides no `;` or `&&`: the
+    quote walk, `split_segments` and `segment_tokens`, all through `is_powershell`.
+    `split_segments` hands back each segment of such a text with the same type, so the reading
+    follows the text to the rule that judges it. Every producer of such text (`_pwsh_script`, a
+    `cmd /c` tail, the iex arm of `nested_script`) returns this type."""
+
+
+class PosixScript(str):
+    """Text that `sh -c` or `bash -c` runs (`inline_script`): read with bash's rules, even in a
+    PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
+
+
+def is_powershell(text) -> bool:
+    """True when `text` is read with PowerShell's rules: the tool is PowerShell, or the text is a
+    script that pwsh or `cmd /c` runs. A PosixScript never is."""
+    return not isinstance(text, PosixScript) and (
+        POWERSHELL_CALL[0] or isinstance(text, PowerShellScript))
+
+
+@functools.lru_cache(maxsize=8, typed=True)   # typed: a PosixScript is not its plain twin
 def _split_segments_cached(cmd: str, powershell: bool):
-    # powershell is part of the key: split_segments reads POWERSHELL_CALL[0] too
+    # powershell is part of the key: split_segments reads POWERSHELL_CALL[0] and the text's type
     return tuple(split_segments(cmd, []))
+
+
+# ------------------------------------------------------------------ the quote walk
+#
+# ONE QUOTE WALK. `_split_reading` cuts segments with it and `walk_quotes` hands the same steps to
+# a rule that must know whether a character sits inside quotes. `quote` is "", `'`, `"`, or `$'` (a
+# bash ANSI-C string). A backslash escapes the next character outside quotes and inside `"..."` or
+# `$'...'`, a backslash too, so `\"` neither opens nor closes a quote and `\\'` opens one; inside
+# `'...'` it escapes nothing. PowerShell text takes PowerShell's rules: a backslash is a path
+# character; a backtick escapes the next character outside quotes and inside `"..."`; `''` inside
+# `'...'` and `""` inside `"..."` are one literal quote; `<# ... #>` is a comment (state `<#`) and
+# `@"` or `@'` at a line's end opens a here-string that ends at `"@` or `'@` on a line's start
+# (state `@"` or `@'`). Each opens only at a token start (`token_start`); mid-word it is text.
+# Quotes inside either span open nothing. An opener with no closer is a parse PowerShell cannot
+# finish, and the walk cannot tell where it ends: the rest reads BLIND, with no quote, escape or
+# comment, so every redirect and `;` after it stays visible. A `sh -c` script is bash text in any
+# call (PosixScript).
+BLIND = "?"
+HERE_OPEN = re.compile(r"@(['\"])[ \t]*\r?\n")
+# PowerShell opens `<#` or `@'` only at a token's start: mid-word (`a<#`, `foo@'`) each is text.
+# The characters after which a token starts, read off PowerShell's own parser (2026-10-15). `=`,
+# `)`, `}` and `&` are left out: an opener after one reads as text, which shows more, never less.
+TOKEN_BOUNDARY = " \t\r\n;|,({"
+
+
+def token_start(text: str, index: int) -> bool:
+    """True when a PowerShell token starts at `index`: the text's start, or after an unescaped
+    TOKEN_BOUNDARY character (`` `; `` is text, so no token starts after it)."""
+    return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
+
+
+def quote_advance(text: str, index: int, quote: str):
+    """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    char = text[index]
+    powershell = is_powershell(text)
+    if quote == BLIND:
+        return 1, BLIND
+    if quote and powershell:
+        if quote == "<#":
+            return (2, "") if text.startswith("#>", index) else (1, quote)
+        if quote[0] == "@":
+            closer = "\n" + quote[1] + "@"
+            return (len(closer), "") if text.startswith(closer, index) else (1, quote)
+        if (char == "`" and quote == '"') or (char == quote and text[index + 1:index + 2] == quote):
+            return 2, quote
+        return 1, ("" if char == quote else quote)
+    if quote:
+        if char == "\\" and quote != "'":
+            return 2, quote
+        return 1, ("" if char == quote[-1] else quote)
+    if powershell:
+        if char == "`":
+            return 2, ""
+        opener = token_start(text, index) and HERE_OPEN.match(text, index)
+        if token_start(text, index) and text.startswith("<#", index):
+            return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
+        if opener:
+            closer = "\n" + opener.group(1) + "@"
+            return 2, ("@" + opener.group(1) if text.find(closer, index + 2) >= 0 else BLIND)
+    if char == "\\" and not powershell:
+        return 2, ""   # `\\` is one escaped backslash, so a quote after the pair opens
+    if char == "$" and not powershell and text[index + 1:index + 2] == "'":
+        return 2, "$'"   # read at the `$`, so an escaped `\$'` opens a plain quote
+    if char in ("'", '"'):
+        return 1, char
+    return 1, ""
+
+
+def walk_quotes(text: str):
+    """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
+    that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
+    unquoted."""
+    quote, index = "", 0
+    while index < len(text):
+        if not quote and text[index] == "'" and is_contraction(text, index):
+            width, after = 1, ""
+        else:
+            width, after = quote_advance(text, index, quote)
+        yield index, text[index], ("" if quote == BLIND else quote)
+        quote, index = after, index + width
 
 
 # ------------------------------------------------------------------ shell segments and command words
@@ -118,10 +220,14 @@ def split_segments(cmd: str, ends=None):
     the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
     if ends is None:   # the same command is split by many rules: split it once
-        return list(_split_segments_cached(cmd, POWERSHELL_CALL[0]))
+        return list(_split_segments_cached(cmd, is_powershell(cmd)))
     segments, open_quote, shaped = _split_reading(cmd, ends, False)
     if open_quote and shaped:   # bash leaves a quote open: read each contraction as text too
         segments += _split_reading(cmd, ends, True)[0]
+    if isinstance(cmd, PosixScript):   # each segment keeps the reading of the text it was cut from
+        segments = [PosixScript(segment) for segment in segments]
+    elif is_powershell(cmd):
+        segments = [PowerShellScript(segment) for segment in segments]
     return segments
 
 
@@ -136,25 +242,30 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     current = []
     quote = ""
     shaped = False
+    powershell = is_powershell(cmd)
     index = 0
     length = len(cmd)
     while index < length:
         char = cmd[index]
-        if quote:
-            current.append(char)
-            if char == quote:
-                quote = ""
-            index += 1
+        if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
+            if char in ("'", '"', "`", "#", "<", "@"):
+                current.append(char)
+                index += 1
+                continue
+        elif quote:
+            width, after = quote_advance(cmd, index, quote)
+            if quote != "<#":
+                current.append(cmd[index:index + width])
+            elif not after:
+                current.append(" ")   # a block comment is dropped, and it ends a word
+            quote = after
+            index += width
             continue
         if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
             while index < length and cmd[index] != "\n":
                 index += 1
             continue
-        if char == "\\" and cmd[index + 1:index + 2] == "\\":
-            current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
-            index += 2
-            continue
-        if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
+        if char == "\\" and cmd[index + 1:index + 2] == "\n" and not powershell:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
         if char == "'" and CONTRACTION.match(cmd, index):
@@ -163,10 +274,24 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(char)   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
-        if char in ("'", '"'):
-            quote = char
-            current.append(char)
-            index += 1
+        # The quote walk owns every escape, `$'`, and each PowerShell span, so `\;` and `` `; `` are
+        # text and cut no segment.
+        if char in ("'", '"') or (not powershell and (
+                char == "\\" or cmd[index:index + 2] == "$'")) or (
+                powershell and (char == "`" or token_start(cmd, index) and (
+                    cmd.startswith("<#", index) or HERE_OPEN.match(cmd, index)))):
+            width, quote = quote_advance(cmd, index, "")
+            if quote != "<#":
+                current.append(cmd[index:index + width])
+            index += width
+            # Escaped ampersand, then `&`: the pair is a literal `&`, and the second `&` is bash's
+            # own background operator, which ends the command. `&&` and `&>` are read as they stand.
+            if (cmd[index - 2:index] == "\\&" and cmd[index:index + 1] == "&"
+                    and cmd[index + 1:index + 2] not in ("&", ">")):
+                segments.append("".join(current))
+                ends is None or ends.append("&")
+                current = []
+                index += 1
             continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
@@ -195,7 +320,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
-    return segments, quote, shaped
+    return segments, ("" if quote == BLIND else quote), shaped
 
 
 # A leading `VAR=value` assignment, which is not a segment's command. Shared with the
@@ -244,6 +369,44 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
 
 
+# What a PowerShell backtick escape stands for, outside quotes and inside `"..."` (parser, 2026-10-15).
+BACKTICK_CHARS = {"n": "\n", "r": "\r", "t": "\t", "0": "\0", "a": "\a", "b": "\b", "e": "\x1b",
+                  "f": "\f", "v": "\v"}
+BACKTICK_UNICODE = re.compile(r"\{([0-9A-Fa-f]{1,6})\}")   # pwsh 6+: `u{3b} is `;`
+
+
+def _powershell_values(segment: str) -> str:
+    """PowerShell text spelled for posix shlex, so each token is the value PowerShell hands on. A
+    backtick escape outside quotes or inside `"..."` is the character it stands for; `''` inside
+    `'...'` and `""` inside `"..."` are one literal quote. Read as it stands, shlex keeps the
+    backticks and drops the pairs, so the script a `pwsh -c` or `iex` hands on is read with escapes
+    the outer string has already spent. The quote walk finds each pair (a width-2 step)."""
+    segment = PowerShellScript(segment)
+    out, quote, index = [], "", 0
+    while index < len(segment):
+        width, after = quote_advance(segment, index, quote)
+        step = segment[index:index + width]
+        if width == 2 and quote == "'":
+            step = "'\\''"
+        elif width == 2 and quote == '"' and step == '""':
+            step = '\\"'
+        elif len(step) == 2 and quote in ("", '"') and step[0] == "`":   # a last lone `` ` `` stays
+            char = BACKTICK_CHARS.get(step[1], step[1])
+            unicode = step[1] == "u" and BACKTICK_UNICODE.match(segment, index + 2)
+            if unicode and int(unicode.group(1), 16) <= 0x10FFFF:
+                char = chr(int(unicode.group(1), 16))
+                width += len(unicode.group(0))
+            if step[1] == "\\":
+                step = "\\"   # the first half of a doubled backslash: the second half follows
+            elif not quote:
+                step = " " if step[1] in "\r\n" else "\\" + char   # `` `<newline> `` continues the line
+            else:
+                step = "\\" + char if char in '"\\' else char
+        out.append(step)
+        quote, index = after, index + width
+    return "".join(out)
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 
@@ -252,17 +415,39 @@ def segment_tokens(segment: str):
     """
     # PowerShell's escape is the backtick, so a backslash there is a path separator. Doubling it
     # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
-    if POWERSHELL_CALL[0]:
+    source = ""
+    if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
+        if "''" in segment or '""' in segment or "`" in segment:
+            segment = _powershell_values(segment)
+    elif "`" in segment:
+        source = segment   # bash text: shlex keeps its backtick substitutions as they stand
     found = _segment_tokens(segment)
     if found is None:
         return None
     tokens, quoted = found
-    if not quoted:
+    if not quoted and not source:
         return list(tokens)   # no quoted opener to mark: a plain list, built once per call
     tokens = _Tokens(tokens)
     tokens.quoted = quoted
+    tokens.bash_source = source
     return tokens
+
+
+def _spent_by_bash(tokens):
+    """`tokens` read again from their bash text with each backtick substitution outside single
+    quotes cut to `x`: bash spends those backticks before pwsh or iex reads the script, so a
+    `` `; `` there is no PowerShell escape. A backtick in single quotes reaches the script. Else
+    `tokens` as they are."""
+    source = getattr(tokens, "bash_source", "")
+    if not source:
+        return tokens
+    marks = [index for index, char, quote in walk_quotes(source) if char == "`" and quote not in ("'", "$'")]
+    out, last = [], 0
+    for start, end in zip(marks[::2], marks[1::2]):
+        out += [source[last:start], "x"]
+        last = end + 1
+    return segment_tokens(type(source)("".join(out) + source[last:])) or tokens
 
 
 # A token that opens a subshell, a substitution, or a PowerShell block or group.
@@ -272,8 +457,10 @@ _GROUP_OPEN = re.compile(r"[&.$@]?[({]")
 class _Tokens(list):
     """A segment's tokens, plus `quoted`: the indexes of tokens whose opening `(`, `$(` or `{` sat
     inside quotes, which makes it text, never a subshell or a script block. `command_indexes` and
-    the git-env PowerShell reader read it."""
+    the git-env PowerShell reader read it. `bash_source` is the bash text, when it holds a
+    backtick (`_spent_by_bash`)."""
     quoted = frozenset()
+    bash_source = ""
 
 
 def _quoted_opens(segment: str, count: int):
@@ -742,18 +929,100 @@ def pathspec_from_file_flag(arg: str) -> bool:
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
 
 
+CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
+POP_WORDS = ("popd", "pop-location")
+CD_UNKNOWN = object()   # a move whose destination is not tracked (popd)
+
+
+def _segment_cd_move(tokens):
+    """None when the segment moves no directory. Else where it goes: a path, "-" (the directory
+    before the last move), "" (a bare cd: home), or CD_UNKNOWN. `cd`, `chdir`, `pushd` and
+    PowerShell's `Set-Location`, `Push-Location` and `sl` all move; `popd` goes somewhere not
+    tracked."""
+    index = resolve_command(tokens)
+    if index is None:
+        return None
+    word = basename(tokens[index])
+    if word in POP_WORDS:
+        return CD_UNKNOWN
+    if not (word in CD_WORDS or (word == "sl" and POWERSHELL_CALL[0])):
+        return None
+    for token in tokens[index + 1:]:
+        if token == "-":
+            return "-"
+        if token.startswith("-") or token[:1] in "<>" or REDIRECTION.match(token):
+            continue
+        return token
+    return ""
+
+
 def _segment_cd_target(tokens):
     """Return the path a tokenized segment's `cd` or PowerShell `Set-Location` would take, or None
     when it names none, or when the segment's command word is neither. The aliases `sl`, `chdir`
-    and `Push-Location` are not read (owner ruling 2026-10-15 names only `Set-Location`)."""
+    and `Push-Location` are not read (owner ruling 2026-10-15 names only `Set-Location`). The push
+    and delete rules and `_run_dir` read this; `_segment_cd_move` (the silent-write rule) reads the
+    rest."""
+    move = _segment_cd_move(tokens)
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("cd", "set-location"):
         return None
-    for token in tokens[index + 1:]:
-        if token.startswith("-"):
-            continue
-        return token
-    return None
+    return move if isinstance(move, str) and move not in ("", "-") else None
+
+
+def shell_abs(path: str, base):
+    """A path a command names, made absolute against `base` (the directory the shell is in, or
+    None when that is not known). Git Bash's `/tmp` is the Windows temp folder. No variable is
+    expanded: the shell's variables are not this hook's. None when it cannot be made absolute."""
+    if os.name == "nt" and (path == "/tmp" or path.startswith("/tmp/")):
+        import tempfile   # lazy: only a path under /tmp needs it
+        path = tempfile.gettempdir() + path[4:]
+    path = os.path.expanduser(path)
+    if re.match(r"^/[a-zA-Z]/", path):
+        path = path[1].upper() + ":" + path[2:]
+    if not os.path.isabs(path):
+        return os.path.join(base, path) if base else None
+    return path
+
+
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+
+    Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
+    real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
+    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
+    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
+    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
+    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    prev, stack = None, []
+    for at, segment in enumerate(segments[:number + 1]):
+        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        stack.extend([(where, prev)] * marks.count("("))
+        if at == number:
+            return where
+        tokens = segment_tokens(segment)
+        move = _segment_cd_move(tokens) if tokens else None
+        if move is not None and not is_powershell(segment) and "|" in (
+                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if tokens is None:
+            where = None
+        elif move is not None:
+            old = where
+            if move is CD_UNKNOWN:
+                where = None
+            elif move == "-":
+                where = prev
+            elif any(mark in move for mark in "$%`"):
+                where = None
+            else:
+                where = shell_abs(move or "~", where)
+                where = where if where and os.path.isdir(where) else None
+            prev = old
+        for _ in range(marks.count(")")):
+            if stack:
+                where, prev = stack.pop()
+    return where
 
 
 def _segment_git_c_target(tokens):
@@ -1788,7 +2057,7 @@ def inline_script(tokens) -> str:
         if tok.startswith("-"):
             has_c = has_c or bool(_C_FLAG.match(tok))
             continue
-        return tok if has_c else ""
+        return PosixScript(tok) if has_c else ""
     return ""
 
 
@@ -1805,10 +2074,12 @@ PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
 
 
 def _pwsh_script(tokens) -> str:
-    """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
+    """The script text after `-c` or `-Command` of a pwsh launch, else ''. Read after the outer
+    shell's escapes: `segment_tokens` spends PowerShell's, `_spent_by_bash` bash's backticks."""
+    tokens = _spent_by_bash(tokens)
     for at, tok in enumerate(tokens[:-1]):
         if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
-            return " ".join(tokens[at + 1:])
+            return PowerShellScript(" ".join(tokens[at + 1:]))
     return ""
 
 
@@ -1837,8 +2108,11 @@ def nested_script(tokens) -> str:
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word in CMD_EXE_NAMES:
         flag = next((i for i, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
-        return "" if flag is None else " ".join(rest[flag + 1:])
-    if word in ("iex", "invoke-expression", "eval"):
+        return "" if flag is None else PowerShellScript(" ".join(rest[flag + 1:]))
+    if word in ("iex", "invoke-expression"):   # PowerShell text, whatever shell holds the call
+        spent = _spent_by_bash(tokens)
+        return PowerShellScript(" ".join(spent[(resolve_command(spent) or at) + 1:]))
+    if word == "eval":
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
 
