@@ -37,7 +37,6 @@ if HERE not in sys.path:
 
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
 STATUS_PAUSE = 30         # seconds between two status reads of one run
-NO_RUN_PAUSE = 20         # seconds; the one pause when the head has no run yet
 READ_TIMEOUT = 60         # seconds for each gh read
 PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
@@ -168,23 +167,28 @@ def lock_pr(pr, lock_dir):
 
 
 def wait_for(sha, cwd, deadline):
-    """One run list (two when the head has no run yet, after one pause), one blocking watch per
-    run (not a cancelled twin), then one read of each run with its jobs. A skipped run is no run:
-    the runs of a draft head skip, and the run of the ready PR comes after them."""
+    """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
+    A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
+    comes after it. While no run that ran is judged, list again, STATUS_PAUSE apart; the last
+    pause ends at the deadline, with one list there. Once a run that ran is judged, return it:
+    later runs are not waited on (debt ci-wake-lists-runs-once)."""
     list_args = ["run", "list", "--commit", sha, "--limit", "100", "--json", RUN_FIELDS]
-    runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
-    if not runs:
-        time.sleep(max(0, min(NO_RUN_PAUSE, deadline - time.monotonic())))
+    while True:
         runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
-    if not runs:
-        raise Unknown("no run yet")
-    live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
-    for r in runs:
-        if r["conclusion"] == "cancelled" and r["name"] in live:
-            continue   # a cancelled twin: judge_runs reads the run that ran
-        watch_run(r["databaseId"], cwd, deadline)
-    return [gh_json(["run", "view", str(r["databaseId"]), "--json", "databaseId,name,status,conclusion,jobs"], cwd)
-            for r in runs]
+        live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
+        for r in runs:
+            if r["conclusion"] == "cancelled" and r["name"] in live:
+                continue   # a cancelled twin: judge_runs reads the run that ran
+            watch_run(r["databaseId"], cwd, deadline)
+        viewed = [gh_json(["run", "view", str(r["databaseId"]), "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+                  for r in runs]
+        viewed = [r for r in viewed if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        if viewed:
+            return viewed
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise Unknown("no run yet")
+        time.sleep(min(STATUS_PAUSE, left))
 
 
 def verdict(sha, runs):
