@@ -668,8 +668,12 @@ if (Test-Path (Join-Path $RepoDir 'package-lock.json')) {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         Push-Location $RepoDir
         # cmd /c keeps npm's stderr out of PowerShell, where it would raise a NativeCommandError.
-        try { & cmd /c 'npm ci --ignore-scripts --no-audit --no-fund >nul 2>&1'; $npmOk = ($LASTEXITCODE -eq 0) } catch { $npmOk = $false } finally { Pop-Location }
-        if ($npmOk) { Log "npm ci ran in $RepoDir" } else { Log "WARNING: npm ci failed in $RepoDir; the plain-english-map skill cannot load typescript until it passes" }
+        $npmOut = @()
+        try { $npmOut = @(& cmd /c 'npm ci --ignore-scripts --no-audit --no-fund 2>&1'); $npmOk = ($LASTEXITCODE -eq 0) } catch { $npmOk = $false } finally { Pop-Location }
+        if ($npmOk) { Log "npm ci ran in $RepoDir" } else {
+            Log "WARNING: npm ci failed in $RepoDir; the plain-english-map skill cannot load typescript until it passes. Last lines of its output:"
+            $npmOut | Select-Object -Last 5 | ForEach-Object { Log "  $_" }
+        }
     } else {
         Log "WARNING: npm not found; run npm ci in $RepoDir so the plain-english-map skill can load typescript"
     }

@@ -520,9 +520,12 @@ done < "$SRC/landed-dirs.txt"
 # is logged and never fails the install. A cloud copy of a skill sits outside the clone, so cloud skips this.
 if [ "$CLOUD" != 1 ] && [ -f "$SRC/package-lock.json" ]; then
   if command -v npm >/dev/null 2>&1; then
-    (cd "$SRC" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1) \
-      && log "npm ci ran in $SRC" \
-      || log "WARNING: npm ci failed in $SRC; the plain-english-map skill cannot load typescript until it passes"
+    if npm_out=$(cd "$SRC" && npm ci --ignore-scripts --no-audit --no-fund 2>&1); then
+      log "npm ci ran in $SRC"
+    else
+      log "WARNING: npm ci failed in $SRC; the plain-english-map skill cannot load typescript until it passes. Last lines of its output:"
+      printf '%s\n' "$npm_out" | tail -n 5 | while IFS= read -r l; do log "  $l"; done
+    fi
   else
     log "WARNING: npm not found; run npm ci in $SRC so the plain-english-map skill can load typescript"
   fi

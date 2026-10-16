@@ -337,7 +337,7 @@ jobs:
 
       # The plain-english-map skill: its tests load typescript from this checkout's node_modules, as an
       # install does. They run from the skill's own tests/ folder, with no q_max path. Same `mods` flag
-      # as the step above, because harness-scope.sh turns it on for a change under skills/plain-english-map/.
+      # as the step above. A change under skills/plain-english-map/ or to package*.json turns it on, because harness-scope.sh runs every job for a path it does not name.
       - name: Plain-english-map skill tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash

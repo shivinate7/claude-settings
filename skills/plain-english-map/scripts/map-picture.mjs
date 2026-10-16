@@ -2,7 +2,7 @@
 // code's own imports.
 // Use: node <skill>/scripts/map-picture.mjs [<out.html>] [--usage <file.json>] [--config <map.config.json>], run from the root
 // of a repository that has `map.config.json`. It reads that repository and writes one page. With no <out.html>, the page is
-// `map.html` in a new folder under the system temp folder, and the command prints its path. An <out.html> inside the repository is refused.
+// `map.html` in a new folder under the system temp folder, and the command prints its path. The command refuses a page whose folder is inside the repository, by real path: a junction, a symlink, or a temp folder inside the repository.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -633,8 +633,10 @@ const main = (root, out, usageFile, configFile) => {
   const own = { ...check, repoMapConfig: ownRepoMapConfig, validateMapConfig: ownValidateMapConfig, aiCallRows: () => [] };
   for (const k of Object.keys(own)) R[k] ??= own[k];
   const config = configFile ? loadMapConfig(configFile, root) : repoMapConfig();
-  const outPath = out ? path.resolve(out) : path.join(mkdtempSync(path.join(os.tmpdir(), 'plain-english-map-')), 'map.html');
-  if (out && insideRepo(root, outPath)) throw new Error('Write the page outside the repo.');
+  // Compare real paths, so a junction or symlink into the repo, or a temp folder inside the repo, is refused. This runs before any folder is made.
+  const outDir = out ? path.dirname(path.resolve(out)) : os.tmpdir();
+  if (insideRepo(realpathSync.native(root), realpathSync.native(outDir))) throw new Error('Write the page outside the repo.');
+  const outPath = out ? path.resolve(out) : path.join(mkdtempSync(path.join(outDir, 'plain-english-map-')), 'map.html');
   const all = git(root, 'ls-files').split('\n').filter(Boolean);
   const tracked = new Set(all);
   const read = (f) => readFileSync(path.join(root, f), 'utf8');

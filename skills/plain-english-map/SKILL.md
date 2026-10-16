@@ -43,7 +43,7 @@ The repository values live in `map.config.json` at the repository root. The keys
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
 - `scripts/lib/` also holds `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
-- `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. The host installs nothing.
+- `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. Through the install link, the host installs nothing. A copy of the skill outside the clone finds no `typescript`: the error says to run the skill from its install link, or to install `typescript` in the host.
 - `assets/page.html` is the page template.
 - `tests/` holds the skill's tests and a small fixture repository. Run `node --test` in that folder.
 
