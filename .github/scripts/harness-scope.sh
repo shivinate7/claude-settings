@@ -47,6 +47,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Mod tests: no other CI job reads mods/.
       mods/*) on="$on mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
+      # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.
+      lint/test_scanner_traps.mjs) on="$on mods code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
       # Docs: nothing runs on them but the lints in `gates`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
