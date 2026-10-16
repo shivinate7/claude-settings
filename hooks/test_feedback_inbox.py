@@ -11,11 +11,6 @@ on stdin as UTF-8 bytes. PYTHONUTF8 and PYTHONIOENCODING are unset in the child.
 HOME and USERPROFILE all point into a scratch folder, so no case touches the owner's ~/.claude.
 Each case reads back the exit code, stdout, stderr and the files written.
 
-Stub runs: FEEDBACK_INBOX_STUB=always-pass-gate runs the cases against a gate that always passes.
-The block cases must then go red. FEEDBACK_INBOX_STUB=always-capture-hook runs them against a hook
-that captures every prompt. The closed-state cases must then go red. Each stub is written into this
-run's scratch folder, never into the repo.
-
 Seams the builder codes against.
 
 Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A UserPromptSubmit
@@ -122,9 +117,6 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
   - both, items first. Neither: the message is unchanged. An unreadable inbox gives no note, one
     stderr line, and the message still prints.
   - A malformed item line is never listed as an id. The other ids and the capture line still print.
-  Stub kinds for the reorient cases: FEEDBACK_INBOX_STUB=empty-inbox-note (inbox_note returns
-  "") and always-capture-line (inbox_note always returns the capture line). Each is a copy of the
-  real file with that one body swapped, written into this run's scratch folder, never the repo.
 
 Readings taken here, where the record says "every owner message between the two":
   the opening prompt is captured; `x fb` and `fbi ...` are captured while open; the gate's jotting
@@ -187,66 +179,6 @@ JOTTED_ITEMS = (
 )
 JOTTED_HANDOFF = ("# Handoff\n- fb-0958-1 ruling, NO HOME YET\n- fb-0958-2 task\n"
                   "- fb-0958-5 standing\n")
-
-
-STUB_SOURCES = {
-    "always-pass-gate": "import sys\nsys.exit(0)\n",
-    "always-capture-hook": '''import json, os, sys
-try:
-    d = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    p = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "handoffs", d["session_id"] + ".inbox.md")
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "a", encoding="utf-8") as f:
-        f.write("### stub\\n" + d["prompt"] + "\\n")
-except Exception:
-    pass
-print("Local time: 2026-10-13 10:04 CDT (UTC-05:00)")
-''',
-}
-
-
-# Each replaces the body of inbox_note in a copy of precompact_handoff.py. The real file is read
-# only. A mutant must go red on the reorient cases it names, or the case is not guarding anything.
-PRECOMPACT_MUTANTS = {
-    "empty-inbox-note": '    return ""',
-    "always-capture-line":
-        '    return " Feedback capture is still open: the owner has not sent `fb done`."',
-}
-
-
-def write_precompact_mutant(kind):
-    """Writes the mutant copy into this run's scratch folder and returns its path. HERE goes on
-    sys.path first, so the copy still imports the real local_time and feedback_gate."""
-    with open(os.path.join(HERE, "precompact_handoff.py"), encoding="utf-8") as f:
-        src = f.read()
-    head = "def inbox_note(session_id):\n"
-    if src.count(head) != 1:
-        raise SystemExit("cannot mutate inbox_note: its def line appears %d times"
-                         % src.count(head))
-    path = os.path.join(ROOT, kind, "precompact_handoff.py")
-    write_file(path, "import sys\nsys.path.insert(0, %r)\n" % HERE
-               + src.replace(head, head + PRECOMPACT_MUTANTS[kind] + "\n", 1))
-    return path
-
-
-def install_stub():
-    """Points one module at a stub written into this run's scratch folder. No env var: real paths."""
-    global LT_PATH, GATE_PATH, PRECOMPACT_PATH
-    kind = os.environ.get("FEEDBACK_INBOX_STUB", "")
-    if not kind:
-        return
-    if kind in PRECOMPACT_MUTANTS:
-        PRECOMPACT_PATH = write_precompact_mutant(kind)
-        return
-    if kind not in STUB_SOURCES:
-        raise SystemExit("FEEDBACK_INBOX_STUB must be one of: %s"
-                         % ", ".join(list(STUB_SOURCES) + list(PRECOMPACT_MUTANTS)))
-    path = os.path.join(ROOT, kind + ".py")
-    write_file(path, STUB_SOURCES[kind])
-    if kind == "always-pass-gate":
-        GATE_PATH = path
-    else:
-        LT_PATH = path
 
 
 # Judge seam. Every run of local_time.py and of feedback_judge.py loads this sitecustomize first
@@ -1563,7 +1495,6 @@ def run_case(case):
 
 def main():
     try:
-        install_stub()
         install_judge_stub()
         for case in CASES:
             run_case(case)

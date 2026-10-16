@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
 # Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -171,6 +171,25 @@ if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
     printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
       "$toplevel" "$default_branch"
   fi
+fi
+
+# More than AGENT_WORKTREE_LIMIT `.claude/worktrees/agent-*` worktrees: one notice with the count
+# (owner ruling 2026-10-15). Agent end and the janitor remove finished ones; this says when they
+# pile up anyway. One bounded worktree listing, counted with grep. A failed read is reported as
+# unknown, never as a count of zero.
+AGENT_WORKTREE_LIMIT=50
+aw_out=$(mktemp 2>/dev/null)
+if [ -n "$aw_out" ]; then
+  if bounded_git "$toplevel" "$aw_out" worktree list --porcelain; then
+    aw_count=$(grep -c '^worktree .*/\.claude/worktrees/agent-[^/]*$' "$aw_out" 2>/dev/null)
+    if [ -n "$aw_count" ] && [ "$aw_count" -gt "$AGENT_WORKTREE_LIMIT" ] 2>/dev/null; then
+      printf 'checkout %s: %s agent worktrees exist, more than %s; remove the finished ones\n' \
+        "$toplevel" "$aw_count" "$AGENT_WORKTREE_LIMIT"
+    fi
+  else
+    printf 'checkout %s: cannot list the worktrees; the agent worktree count is unknown\n' "$toplevel"
+  fi
+  rm -f "$aw_out" 2>/dev/null
 fi
 
 # The SessionEnd sweep is armed. The record is
