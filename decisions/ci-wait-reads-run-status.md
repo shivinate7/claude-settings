@@ -37,8 +37,10 @@ another repo on the same account several times.
 
 ## Holes, named
 
-- The secondary write limit on the lock commit is a separate limit. Its cause on this account
-  is unmeasured. Debt `rate-retry-budget-short` (3 x 60 s is too short for GitHub's write
+- The secondary limit is a separate limit. GitHub's docs give it a per-minute cap on REST
+  calls, which watchers from several sessions can pass together. On 2026-10-16 06:51 UTC a
+  call got "API rate limit exceeded" while core had 4,560 of 5,000 left. That watchers cause
+  it is unmeasured. Debt `rate-retry-budget-short` (3 x 60 s is too short for GitHub's write
   limit).
 
 Kind: build
