@@ -59,6 +59,8 @@ still exits 1 the day a future edit reopens this gap.
 
 Run:
     python3 janitor/mutate_sweep.py
+Only some mutants (label fragments, comma-separated; every anchor is still checked):
+    MUTATE_ONLY="deadline,oldest first" python3 janitor/mutate_sweep.py
 """
 import os
 import shutil
@@ -182,8 +184,8 @@ MUTATIONS = [
      "test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else"),
     ("modes: --branches removes worktrees",
      "sweep",
-     '    judged = entries if mode == "full" else []\n',
-     '    judged = entries\n',
+     '    judged = _oldest_idle_first(entries) if mode == "full" else []\n',
+     '    judged = _oldest_idle_first(entries)\n',
      "test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs"),
     ("modes: --branches prunes registrations",
      "sweep",
@@ -228,7 +230,7 @@ MUTATIONS = [
      "test_refusal_live_session_worktree"),
     ("refusal: a locked worktree no longer keeps",
      "sweep",
-     '    if locked:\n'
+     '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"',
      '    if False:\n'
      '        holder = entry.get("locked_reason") or "locked"',
@@ -255,31 +257,26 @@ MUTATIONS = [
      '        return {"name": branch, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_is_kept",
      "posix"),
-    # decide_worktree reads "unreadable" three times over (dirty, locked, live), each one its
-    # own `is None` guard: hooks/test_guard.py's own blind-git fixture makes EVERY git call fail
-    # at once, so knocking out only the FIRST guard is masked by the second (still None, for the
-    # same blind reason) -- MEASURED, not assumed: an earlier version of this mutant that dropped
-    # only the `dirty is None` guard survived with 0 red lines, because `worktree_locked` read
-    # against the same blind git also came back None and returned "unreadable-subject" anyway.
-    # This mutant instead drops all three guards at once, the only way to make this protection
-    # (an unreadable subject KEEPS, never reaps) actually absent under that fixture.
-    # only_on="posix": same measured platform fact as the branch mutant above --
-    # test_refusal_unreadable_subject_worktree's blind-git PATH stand-in is never reached by a
-    # list-form subprocess call on Windows, so this suite's case is skipped there and cannot
-    # prove this mutant.
+    # decide_worktree reads "unreadable" three times over (dirty, live, pushed), each one its own
+    # `is None` guard. hooks/test_guard.py's blind-git fixture makes EVERY git read None at once,
+    # so dropping one guard alone is masked by the next. This mutant drops all three together, the
+    # only way to make this protection (an unreadable subject KEEPS, never reaps) absent under that
+    # fixture. The lock is not a git read any more (parse_worktree_list reads it once per pass), so
+    # it is not one of the three.
+    # only_on="posix": test_refusal_unreadable_subject_worktree's blind-git PATH stand-in is never
+    # reached by a list-form subprocess call on Windows, so this suite's case is skipped there and
+    # cannot prove this mutant.
     ("refusal: no unreadable worktree subject keeps any more (all three reads)",
      "sweep",
-     '    path = entry["path"]\n'
-     '    dirty = guard.porcelain(path)\n'
      '    if dirty is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if dirty:\n'
      '        return {"path": path, "action": "keep", "reason": "dirty"}\n'
-     '    locked = guard.worktree_locked(where, path)\n'
-     '    if locked is None:\n'
-     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
+     '    # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh\n'
+     '    # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).\n'
+     '    # `remove_worktree` still has git refuse a locked tree.\n'
      '    stale_agent_lock = False\n'
-     '    if locked:\n'
+     '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
      '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
      '        if stale_agent_lock is not True:\n'
@@ -292,17 +289,15 @@ MUTATIONS = [
      '    pushed = fully_pushed(path)\n'
      '    if pushed is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
-     '    path = entry["path"]\n'
-     '    dirty = guard.porcelain(path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if dirty:\n'
      '        return {"path": path, "action": "keep", "reason": "dirty"}\n'
-     '    locked = guard.worktree_locked(where, path)\n'
-     '    if False:\n'
-     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
+     '    # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh\n'
+     '    # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).\n'
+     '    # `remove_worktree` still has git refuse a locked tree.\n'
      '    stale_agent_lock = False\n'
-     '    if locked:\n'
+     '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
      '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
      '        if stale_agent_lock is not True:\n'
@@ -573,7 +568,7 @@ MUTATIONS = [
      "test_too_little_budget_left_returns_none"),
 
     # 4. Command-line argv coverage (found 2026-09-22): the hook's own reap call,
-    # `[sys.executable, SWEEP_PATH, root, "--confirm"]`, is the one subprocess.run in this whole
+    # `[sys.executable, SWEEP_PATH, root, "--confirm", "--deadline-seconds", N]`, is the one subprocess.run in this whole
     # program that actually deletes a branch for real, and no mutant here ever changed its argv
     # before this one. Dropping `--confirm` turns the reap silently into a preview: sweep.py's own
     # `if confirm and decision["action"] == "reap":` (janitor/sweep.py) then never fires, so
@@ -582,14 +577,24 @@ MUTATIONS = [
     # `.bak` copy before this mutant was written.
     ("confirm: the sweep call drops --confirm, so a reap silently becomes a preview",
      "session_end_sweep",
-     '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
-     '            [sys.executable, SWEEP_PATH, root],',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm",',
+     '            [sys.executable, SWEEP_PATH, root,',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
     ("strict: the SessionEnd sweep call passes --attended",
      "session_end_sweep",
-     '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
-     '            [sys.executable, SWEEP_PATH, root, "--confirm", "--attended"],',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm",',
+     '            [sys.executable, SWEEP_PATH, root, "--confirm", "--attended",',
      "test_the_sweep_is_not_passed_the_attended_flag"),
+    ("session-end argv: the deadline flag is dropped, so the sweep runs with no deadline",
+     "session_end_sweep",
+     '             "--deadline-seconds", str(sweep_timeout)],',
+     '             ],',
+     "test_the_sweep_is_passed_the_time_left_as_a_deadline_flag"),
+    ("session-end argv: the time left is replaced by the constant 25",
+     "session_end_sweep",
+     '             "--deadline-seconds", str(sweep_timeout)],',
+     '             "--deadline-seconds", "25"],',
+     "test_the_sweep_is_passed_the_time_left_as_a_deadline_flag"),
 
     # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
     ("loose processes: an unreadable owner is left out instead of listed",
@@ -1344,6 +1349,40 @@ MUTATIONS = [
      '        return None',
      "test_an_unreadable_start_time_keeps_that_device",
      "posix"),
+
+    # ---- the sweep finishes (owner ruling 2026-10-15 15:08 CDT): the judge deadline, oldest first ----
+    ("deadline: a pass past its budget still judges every tree",
+     "sweep",
+     '        if _past_deadline():\n'
+     '            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}\n',
+     '        if False:\n'
+     '            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}\n',
+     "test_a_pass_past_its_deadline_stops_judging_and_reports_the_rest_not_judged"),
+    ("oldest first: the sweep judges the youngest idle tree first",
+     "sweep",
+     '-(idle[e["path"]] or 0)',
+     '(idle[e["path"]] or 0)',
+     "test_the_oldest_idle_tree_is_judged_first"),
+    ("deadline budget: NaN is no deadline, so every tree is judged",
+     "sweep",
+     '    _DEADLINE = None if n is None else _now() + (\n',
+     '    _DEADLINE = None if n is None or n != n else _now() + (\n',
+     "test_a_nan_deadline_has_no_time_left_and_judges_no_tree"),
+    ("deadline budget: N <= 0 is no deadline, so every tree is judged",
+     "sweep",
+     '    _DEADLINE = None if n is None else _now() + (\n',
+     '    _DEADLINE = None if n is None or n <= 0 else _now() + (\n',
+     "test_a_negative_deadline_has_no_time_left_and_judges_no_tree"),
+    ("deadline budget: the 7.5 s tail is ignored, so 7.5 s gets a 7.5 s budget",
+     "sweep",
+     'min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))',
+     'min(JUDGE_BUDGET_SECONDS, n))',
+     "test_a_7_5_second_deadline_is_all_tail_so_its_budget_is_zero"),
+    ("deadline budget: no 12 s cap, so 25 s gets a 17.5 s budget",
+     "sweep",
+     'min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))',
+     'n - DEADLINE_TAIL_SECONDS)',
+     "test_a_25_second_deadline_gives_a_12_second_budget"),
 ]
 
 
@@ -1479,10 +1518,19 @@ def main() -> int:
             print("ERROR mutation carries no required case name: %s" % label)
             return 1
 
+    # MUTATE_ONLY=<fragment>[,<fragment>...] runs only the mutants whose label holds a fragment.
+    # Every anchor is still checked above. Unset, every mutant runs.
+    wanted = [f for f in os.environ.get("MUTATE_ONLY", "").split(",") if f]
+    chosen = [(i, entry) for i, entry in enumerate(MUTATIONS)
+              if not wanted or any(f in entry[0] for f in wanted)]
+    if not chosen:
+        print("ERROR MUTATE_ONLY matches no mutation: %s" % ",".join(wanted))
+        return 1
+
     work = tempfile.mkdtemp(prefix="mutate_sweep_")
     try:
         return mutate_shared.run_mutants(
-            list(enumerate(MUTATIONS)),
+            chosen,
             lambda item: run_mutant(sources, work, item[0], item[1]))
     finally:
         shutil.rmtree(work, ignore_errors=True)
