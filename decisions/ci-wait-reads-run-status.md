@@ -63,9 +63,9 @@ another repo on the same account several times.
 - A background `gh pr checks --watch` is still allowed, because the ruling names only
   `gh run watch`. Its API cost is unmeasured. Debt `pr-checks-watch-unmeasured` (the
   background checks watch is unmeasured).
-- The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`, a
-  captured one such as `x=$(gh run watch 7)`, or PowerShell `& { gh run watch 7 }`, as main
-  did not. Guards
+- The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`. It also
+  does not read a captured one such as `x=$(gh run watch 7)`, or PowerShell
+  `& { gh run watch 7 }`. Main did not read them either. Guards
   stop Claude's mistakes, not an attacker (decision guard-guards-mistakes-only). Same debt.
 
 Kind: build
