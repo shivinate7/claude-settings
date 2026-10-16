@@ -710,12 +710,16 @@ def _idle_then_dirty(entry: dict, attended: bool):
     return idle, path, dirty
 
 
-def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):
+def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,
+                    check_processes: bool = True):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
-    keeps hold it. A repo's own `reap:worktrees` script turns it off."""
+    keeps hold it. A repo's own `reap:worktrees` script turns it off. CHECK_PROCESSES False skips the
+    pre-removal process check. Only the agent-end hook's first check of the ending agent's own tree
+    uses it, because the agent's own shells sit there; the delayed remover stops them, then checks
+    again with the process check on."""
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
         idle, path = (None if attended else entry["idle"]), entry["path"]
         dirty = guard.porcelain(path)
@@ -777,7 +781,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     # at all). Only the WHOLE enumeration failing (`processes_in` returning `(None, None)`)
     # still means keep-everything: that is a different failure, the brief's own words, "if the
     # whole listing ... or the pre-check enumeration fails."
-    inside, _unreadable = processes_in(path)
+    inside, _unreadable = processes_in(path) if check_processes else ([], [])
     if inside is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if inside:
@@ -794,7 +798,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
 AGENT_END_IDLE_SECONDS = 30 * 60
 
 
-def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
+def decide_agent_end_worktree(where: str, entry: dict, min_idle=None, check_processes: bool = True):
     """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
     the seconds of git quiet the tree needs (None: none). Idle is read first: `git status` can
     rewrite the index and make every tree look active. The rest is
@@ -802,7 +806,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
     (`_restore_cut_short`) gets its deleted tracked files back first, when no lock, session or
-    process holds it, so it can be decided again."""
+    process holds it, so it can be decided again. CHECK_PROCESSES goes to `decide_worktree`."""
     path = entry["path"]
     if min_idle is not None:
         idle = worktree_idle_seconds(path)
@@ -812,7 +816,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
     _restore_cut_short(where, entry)
-    decision = decide_worktree(where, entry, attended=True)
+    decision = decide_worktree(where, entry, attended=True, check_processes=check_processes)
     if decision["action"] != "reap":
         return decision
     return _remote_tracking_keep(path) or decision
@@ -1037,7 +1041,7 @@ def _process_cwd_linux(pid: int):
     return raw or None
 
 
-def _process_cwd_windows(pid: int):
+def _process_cwd_windows(pid: int, field_offset: int = 0x38):
     """ponytail: the PEB offsets below are UNDOCUMENTED and 64-bit-process-only (per this
     build's own brief: github.com/giampaolo/psutil/issues/51,
     github.com/raskrebs/sonar/pull/57). Any failure at any step answers `None`, never a guess.
@@ -1048,7 +1052,8 @@ def _process_cwd_windows(pid: int):
     `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` -> `NtQueryInformationProcess`
     for the PEB address -> `ReadProcessMemory` of `PEB.ProcessParameters` (offset 0x20 on
     64-bit) -> `ReadProcessMemory` of that struct's `CurrentDirectory.DosPath`, a
-    `UNICODE_STRING` (offset 0x38), whose `Buffer` is read once more for the actual text."""
+    `UNICODE_STRING` (offset FIELD_OFFSET, 0x38 for the cwd; 0x70 is `CommandLine`, read by
+    `process_cmdline`), whose `Buffer` is read once more for the actual text."""
     import ctypes
 
     PROCESS_QUERY_INFORMATION = 0x0400
@@ -1105,7 +1110,7 @@ def _process_cwd_windows(pid: int):
 
         current_directory = UnicodeString()
         ok = kernel32.ReadProcessMemory(
-            handle, ctypes.c_void_p(params_addr.value + 0x38), ctypes.byref(current_directory),
+            handle, ctypes.c_void_p(params_addr.value + field_offset), ctypes.byref(current_directory),
             ctypes.sizeof(current_directory), None,
         )
         if not ok or not current_directory.Buffer or current_directory.Length <= 0:
@@ -1136,6 +1141,16 @@ def process_command(pid: int):
     if sys.platform.startswith("win"):
         return _process_command_windows(pid)
     return None
+
+
+def process_cmdline(pid: int):
+    """The full command line of PID, or None when the read could not tell. `process_command` shows
+    only the program on Windows; this one reads `CommandLine` from the PEB there (the same undocumented
+    read as the cwd, so it fails the same way, to None). Used to tell a hook process from other
+    processes, so a None must keep."""
+    if sys.platform.startswith("win"):
+        return _process_cwd_windows(pid, 0x70)
+    return process_command(pid)
 
 
 def _process_command_posix(pid: int):

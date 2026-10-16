@@ -30,8 +30,12 @@ the child. A folder with a process cwd inside, a link, or any unreadable read st
 deletes trash names a child left.
 
 Worktrees (owner rulings 2026-10-15, 23:01 CDT): when the gates above hold for the whole worktree,
-the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a delayed
-remover (lane wt-reap-delay) removes it later. It removes every other `.claude/worktrees/agent-*`
+the hook removes no own tree inline. Its row keeps the reason OWN_TREE_REASON. When the own tree is
+clean, pushed and free of a live lock, the hook starts a detached remover (`start_remover`) and returns.
+The remover (`remove_own_tree`) waits, up to a fixed limit, until no hook process is inside, stops the
+agent's own shells (first parent outside the tree is the host, no hook), re-checks, and removes the tree
+without --force. A limit that ends first keeps the tree. The hook stops no process with a live parent.
+The hook removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
 prove keeps. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
@@ -47,6 +51,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,7 +93,7 @@ def _log_lock(path: str):
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def log(record: dict, replace_run=None):
+def log(record: dict, replace_run=None, path=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
     it grew to thousands of raw payloads nobody reads. Parallel runs take turns on a lock file,
@@ -98,7 +103,7 @@ def log(record: dict, replace_run=None):
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
     A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
-    path = log_path()
+    path = path or log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -297,22 +302,156 @@ HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook s
 
 OWN_TREE_REASON = "own tree: left for the delayed remover"  # owner ruling 2026-10-15 23:01 CDT
 
+# The delayed remover (owner ruling 2026-10-15 23:00 CDT; decision Part 4, "Own tree: a delayed remover").
+REMOVER_SETTLE_SECONDS = 10  # first wait: a sibling hook of this SubagentStop may not have started yet
+REMOVER_LIMIT_SECONDS = 120  # then the wait for hook processes, and for the stopped shells, ends here
+REMOVER_POLL_SECONDS = 2
+REMOVE_FLAG = "--remove-own-tree"  # `agent_end_reap.py --remove-own-tree TARGET HOST`: the remover's entry
+HOOK_SCRIPT = re.compile(r"agent_end_reap\.py|[\\/]hooks[\\/][^\s\"']*\.py")
+_DETACHED = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+
+
+def _host_pid():
+    """The host claude pid the harness sets as CLAUDE_PID, or None. Whether a SubagentStop hook gets
+    CLAUDE_PID is unmeasured: with no host the remover stops no shell, so a tree with a shell inside
+    is kept."""
+    try:
+        pid = int(os.environ.get("CLAUDE_PID", ""))
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def start_remover(target: str, host):
+    """Start the delayed remover for TARGET and return at once. One `Popen`: detached from the hook
+    chain, cwd outside TARGET (the temp dir), stdio on DEVNULL. HOST is the claude pid or None."""
+    kwargs = {"creationflags": _DETACHED} if sys.platform.startswith("win") else {"start_new_session": True}
+    return subprocess.Popen([sys.executable, os.path.abspath(__file__), REMOVE_FLAG, target, str(host or 0)],
+                            cwd=tempfile.gettempdir(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, **kwargs)
+
+
+def _runs_hook(pid: int):
+    command = sweep.process_cmdline(pid)
+    return None if command is None else bool(HOOK_SCRIPT.search(command))
+
+
+def _hooks_inside(target: str):
+    """The pids inside TARGET that run a hook script, or None when a read could not tell."""
+    inside, _unreadable = sweep.processes_in(target)
+    if inside is None:
+        return None
+    found = []
+    for pid in inside:
+        if pid == os.getpid():
+            continue
+        runs = _runs_hook(pid)
+        if runs is None:
+            return None
+        if runs:
+            found.append(pid)
+    return found
+
+
+def _own_shell(pid: int, target: str, host: int):
+    """True when PID is one of the agent's own shells: its first parent with a cwd outside TARGET is
+    HOST, and neither it nor a parent in TARGET runs a hook. False or None keeps it."""
+    current = pid
+    for _ in range(MAX_CLIMB):
+        if _runs_hook(current) is not False:
+            return False
+        parent = parent_pid(current)
+        cwd = sweep.process_cwd(parent) if parent else None
+        if cwd is None:
+            return None
+        if not sweep._cwd_under_checkout(cwd, target):
+            return parent == host
+        current = parent
+    return None
+
+
+def remove_own_tree(target: str, host, clock=time.monotonic, sleep=time.sleep):
+    """The delayed remover's body. Waits SETTLE, then until no hook process is inside TARGET (up to
+    LIMIT; it never stops a hook process), stops the agent's own shells, re-checks clean, pushed, lock
+    and session, and removes the tree without --force. Returns the decision row. Every wait reads CLOCK
+    and calls SLEEP. A read that cannot tell, or a limit that ends first, keeps the tree."""
+    def keep(reason):
+        return {"path": target, "action": "keep", "reason": reason}
+
+    root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
+    if not is_agent_worktree_shape(target) or sweep._is_primary_checkout(target) is not False:
+        return keep("not an agent worktree, or unreadable-subject")
+    sleep(REMOVER_SETTLE_SECONDS)
+    deadline = clock() + REMOVER_LIMIT_SECONDS
+    while True:
+        hooks = _hooks_inside(target)
+        if hooks is None:
+            return keep("unreadable-subject: the processes inside")
+        if not hooks:
+            break
+        if clock() >= deadline:
+            return keep("a hook process is still inside after %d s: pid %s"
+                        % (REMOVER_LIMIT_SECONDS, ", ".join(map(str, hooks))))
+        sleep(REMOVER_POLL_SECONDS)
+    stopped = []
+    if host:
+        inside, _unreadable = sweep.processes_in(target)
+        for pid in inside or []:
+            if (pid != os.getpid() and pid != host and sweep.is_current_user_process(pid) is True
+                    and _own_shell(pid, target, host) is True and sweep.send_signal(pid)):
+                stopped.append(pid)
+    while True:
+        entries = sweep.parse_worktree_list(root)
+        own = os.path.normcase(os.path.realpath(target))
+        found = [e for e in entries or [] if os.path.normcase(os.path.realpath(e["path"])) == own]
+        if not found:
+            return keep("unreadable-subject: the worktree list" if entries is None else "gone")
+        decision = sweep.decide_agent_end_worktree(root, found[0])
+        if decision["action"] == "reap":
+            sweep.remove_worktree(root, target, decision)
+            if decision.get("error"):
+                decision = dict(decision, action="keep", reason=decision["error"])
+            return dict(decision, stoppedShells=stopped)
+        if not decision["reason"].startswith("process-inside") or clock() >= deadline:
+            return dict(decision, stoppedShells=stopped)
+        sleep(REMOVER_POLL_SECONDS)  # a stopped shell may need a moment to release its cwd
+
+
+def _own_tree_row(target: str, root: str):
+    """The row for the ending agent's own tree. The hook only starts the remover, and only when the
+    tree is clean, pushed and free of a live lock; the remover checks again. The row's action is
+    keep, as the hook removes nothing here."""
+    row = {"path": target, "action": "keep", "reason": OWN_TREE_REASON}
+    entries = sweep.parse_worktree_list(root)
+    own = os.path.normcase(os.path.realpath(target))
+    found = [e for e in entries or [] if os.path.normcase(os.path.realpath(e["path"])) == own]
+    if not found:
+        return dict(row, remover="not started: unreadable-subject")
+    decision = sweep.decide_agent_end_worktree(root, found[0], check_processes=False)  # own shells are inside
+    if decision["action"] != "reap":
+        return dict(row, remover="not started: %s" % decision["reason"])
+    try:
+        start_remover(target, _host_pid())
+    except OSError as exc:
+        return dict(row, remover="not started: %r" % exc)
+    return dict(row, remover="started")
+
 
 def reap_worktrees(target: str, deadline: float):
-    """Keep TARGET (the ending agent's own worktree; lane wt-reap-delay removes it later) and remove
-    every other finished `.claude/worktrees/agent-*` worktree of its repository, idle 30 minutes or
-    more, that `sweep.decide_agent_end_worktree` clears. Returns one row for TARGET, one per other
-    tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
-    rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON}]
+    """Remove every other finished `.claude/worktrees/agent-*` worktree of TARGET's repository, idle
+    30 minutes or more, that `sweep.decide_agent_end_worktree` clears, and start the delayed remover
+    for TARGET itself (`_own_tree_row`). Returns one row for TARGET, one per other tree decided,
+    plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
-    entries = sweep.parse_worktree_list(root)
-    if entries is None:
-        return rows + [{"action": "keep", "reason": "unreadable-subject: the worktree list"}]
-    own = os.path.normcase(os.path.realpath(target))
-    queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
-             and sweep._is_agent_worktree(root, e["path"])]
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
     try:
+        rows = [_own_tree_row(target, root)]
+        entries = sweep.parse_worktree_list(root)
+        if entries is None:
+            return rows + [{"action": "keep", "reason": "unreadable-subject: the worktree list"}]
+        own = os.path.normcase(os.path.realpath(target))
+        queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
+                 and sweep._is_agent_worktree(root, e["path"])]
         for done, entry in enumerate(queue):
             if time.monotonic() > deadline:
                 rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
@@ -351,7 +490,19 @@ def handle(raw: str, started=None):
     return record
 
 
+def remover_main(target: str, host: str) -> int:
+    """The detached remover's entry. Writes its decision row to the payload log. Exits 0."""
+    try:
+        row = remove_own_tree(target, int(host) or None)
+    except Exception as exc:
+        row = {"path": target, "action": "keep", "reason": "error: %r" % exc}
+    log({"remover": row, "target": target}, path=os.path.join(os.path.dirname(log_path()), "agent-end-remover.jsonl"))
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == REMOVE_FLAG:
+        return remover_main(sys.argv[2], sys.argv[3])
     try:
         raw = sys.stdin.read()
     except Exception:
