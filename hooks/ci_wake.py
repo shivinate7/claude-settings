@@ -102,7 +102,7 @@ def watch_run(run_id, cwd, deadline):
     passes. Reads are at least STATUS_PAUSE seconds apart, and the last pause ends at the
     deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
     raises Unknown."""
-    while True:
+    while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
         if gh_json(["run", "view", str(run_id), "--json", "status"], cwd).get("status") == "completed":
             return
         left = deadline - time.monotonic()
