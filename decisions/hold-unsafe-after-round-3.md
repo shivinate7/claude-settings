@@ -6,14 +6,12 @@ After review round 3, does a change merge or get held?
 
 ## Trigger
 
-The net-value test covers any change that can let through what main stops. A change changes a guard, gate or check when it edits one of these:
+A change changes a guard, gate or check when it edits one of these:
 
-- A guard: any hook that can refuse or ask, with its wiring and prompt-type gates in `settings.json`. Examples: `hooks/guard*.py`, `hooks/rm_prompt_answer.py`.
-- A gate or check: any check that can fail CI or the merge. Examples: `.github/workflows/`, `actions/*`, `lint/` checks, `merge/` checks.
+- A guard: any hook that can refuse or ask, with its wiring and prompt-type gates in `settings.json`. Also any `allow`, `deny` or `ask` entry under `permissions` in `settings.json`, and any `tools` or `disallowedTools` line in `agents/*.md` frontmatter. Examples: `hooks/guard*.py`, `hooks/rm_prompt_answer.py`, `githooks/`.
+- A gate or check: any check that can fail CI or the merge. Examples: `.github/workflows/`, `actions/*`, `lint/` checks, `merge/` checks, `hooks/mutate_*.py`.
 
-Test files alone never count. The owner words of 2026-10-15 22:39 CDT ("should be adjusted") and 22:55 CDT ("No test change counts") set the scope. The definition above is the orchestrator's brief, not an owner word.
-
-Lane cap-three-scope changes process text only, not a guard, gate or check, so it skips the net-value test.
+Test files alone never count. The owner words of 2026-10-15 22:39 CDT ("should be adjusted") and 2026-10-15 22:55 CDT (option "No test change counts") set the scope. The definition above is the orchestrator's brief, not an owner word.
 
 ## Ruling
 
