@@ -51,7 +51,12 @@ still sits inside is what keeps that partial state from ever happening.
 Usage:
     python3 janitor/sweep.py [ROOT ...]                 # preview a sweep of the named roots
     python3 janitor/sweep.py --discover DIR              # preview a sweep of DIR's own checkouts
-    python3 janitor/sweep.py ROOT --confirm              # actually reap
+    python3 janitor/sweep.py ROOT --confirm              # actually reap, no deadline
+    python3 janitor/sweep.py ROOT --confirm --deadline-seconds N
+                                                         # the SessionEnd run: judge no tree later
+                                                         # than min(12 s, N minus 7.5 s) from the
+                                                         # start of the pass. Only a run with this
+                                                         # flag has a budget
     python3 janitor/sweep.py --purge                     # preview which tombstones are past 90 days
     python3 janitor/sweep.py --purge --confirm           # actually drop tombstones past 90 days
 
@@ -339,10 +344,13 @@ def parse_worktree_list(where: str):
             "detached": False,
             "locked_reason": None,
             "prunable": False,
+            "head": None,
         }
         for line in lines[1:]:
             if line.startswith("branch "):
                 entry["branch"] = _short_branch_ref(line[len("branch "):].strip())
+            elif line.startswith("HEAD "):
+                entry["head"] = line[len("HEAD "):].strip()
             elif line == "bare":
                 entry["bare"] = True
             elif line == "detached":
@@ -445,10 +453,7 @@ def _is_primary_checkout(entry_path: str):
     return own == common
 
 
-AGENT_LOCK_RE = re.compile(r"^claude agent agent-([\w-]+) \(pid (\d+)(?: start (.+))?\)$")
-# Set by the agent-end hook for one stage, like _LIVE_HEADS: {"id": the ending agent's id, "hosts":
-# the pids of the host claude process running the hook}. A lock naming that id and a host pid goes.
-_OWN_AGENT = None
+AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
 def stale_agent_lock_verdict(reason: str):
@@ -457,16 +462,12 @@ def stale_agent_lock_verdict(reason: str):
     `claude agent agent-<id> (pid N)` with no start time. N is the HOST claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
     reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
-    process now holds keeps its lock. The ending agent's own tree (`_OWN_AGENT`) also goes when N is
-    the hook's host: the host is alive at SubagentStop, so no other rule could lift it. False when
-    the holder still runs, or the reason is any other lock. None when the start time or the process
-    read could not tell. Only True lets a lock go."""
+    process now holds keeps its lock. False when the holder still runs, or the reason is any other
+    lock. None when the start time or the process read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
-    agent, pid, start = found.group(1), int(found.group(2)), found.group(3)
-    if _OWN_AGENT and agent == _OWN_AGENT["id"] and pid in _OWN_AGENT["hosts"]:
-        return True
+    pid, start = int(found.group(1)), found.group(2)
     locked_ms = None
     if start is not None:
         try:
@@ -488,14 +489,20 @@ def stale_agent_lock_verdict(reason: str):
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
 
+def _common_dir_key(path: str):
+    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common is None or common.returncode != 0 or not common.stdout.strip():
+        return None
+    return os.path.normcase(common.stdout.strip())
+
+
 def _live_remote_heads(path: str):
     """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`,
     read-only: never a fetch, never a prune), or None when any read failed. Local
     refs/remotes/* are not used: a branch deleted on the remote leaves its tracking ref behind."""
-    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if common is None or common.returncode != 0 or not common.stdout.strip():
+    key = _common_dir_key(path)
+    if key is None:
         return None
-    key = os.path.normcase(common.stdout.strip())
     if _LIVE_HEADS is not None and key in _LIVE_HEADS:
         return _LIVE_HEADS[key]
     shas = set()
@@ -520,24 +527,74 @@ def _live_remote_heads(path: str):
     return shas
 
 
-def fully_pushed(path: str):
-    """True when every commit on HEAD is reachable from a head the remote lists now (a detached
-    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
-    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
-    stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone."""
-    live = _live_remote_heads(path)
-    if live is None:
-        return None
+def _unpushed_among(path: str, heads, live):
+    """The subset of HEADS (commit SHAs) with a commit no head in LIVE reaches, or None when git
+    could not tell: ONE `rev-list --stdin` for all of HEADS. rev-list names every commit
+    reachable from HEADS and not from LIVE; a head is pushed exactly when it is not named."""
+    heads = sorted(set(heads))
+    if not heads:
+        return set()
+    if not live:  # no remote head at all: nothing is pushed, and no walk is needed to say so
+        return set(heads)
     try:
         answer = subprocess.run(
-            ["git", "-C", path, "rev-list", "-n", "1", "--stdin"],
-            input="HEAD\n--not\n" + "".join(sha + "\n" for sha in sorted(live)),
-            capture_output=True, text=True, timeout=10)
+            ["git", "-C", path, "rev-list", "--stdin"],
+            input="".join(h + "\n" for h in heads) + "--not\n" + "".join(
+                sha + "\n" for sha in sorted(live)),
+            capture_output=True, text=True, timeout=30)
     except Exception:
         return None
     if answer.returncode != 0:
         return None
-    return not answer.stdout.strip()
+    named = set(answer.stdout.split())
+    return {h for h in heads if h in named}
+
+
+def _pushed_cache(path: str):
+    """This run's {commit SHA: pushed?} for the repository PATH is in, or None with no run."""
+    if _LIVE_HEADS is None:
+        return None
+    key = _common_dir_key(path)
+    return None if key is None else _LIVE_HEADS.setdefault((key, "pushed"), {})
+
+
+def prime_pushed(root: str, entries):
+    """Settle every worktree HEAD of ROOT's repository in one rev-list, so `fully_pushed` does
+    not run one per tree (measured: the per-tree reads are why a sweep outran its 25 s). Only
+    inside a `main` run. A failed read caches nothing: each tree then asks for itself."""
+    cache = _pushed_cache(root)
+    live = _live_remote_heads(root) if cache is not None else None
+    if live is None:
+        return
+    heads = {e["head"] for e in entries
+             if not e.get("bare") and e.get("head") and set(e["head"]) != {"0"}}
+    unpushed = _unpushed_among(root, heads - set(cache), live)
+    if unpushed is not None:
+        cache.update({h: h not in unpushed for h in heads if h not in cache})
+
+
+def fully_pushed(path: str):
+    """True when every commit on HEAD is reachable from a head the remote lists now (a detached
+    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
+    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
+    stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
+    HEAD is read now; `prime_pushed` may already have settled that commit this run."""
+    live = _live_remote_heads(path)
+    if live is None:
+        return None
+    head = guard._git(path, "rev-parse", "HEAD")
+    if head is None or head.returncode != 0 or not head.stdout.strip():
+        return None
+    head = head.stdout.strip()
+    cache = _pushed_cache(path)
+    if cache is not None and head in cache:
+        return cache[head]
+    unpushed = _unpushed_among(path, [head], live)
+    if unpushed is None:
+        return None
+    if cache is not None:
+        cache[head] = head not in unpushed
+    return head not in unpushed
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
@@ -644,25 +701,35 @@ def _remote_tracking_keep(path: str):
     return None
 
 
+def _idle_then_dirty(entry: dict, attended: bool):
+    """(idle, path, dirty) for ENTRY. Idle is read first: `git status` can rewrite the index and
+    make every tree look active."""
+    idle = worktree_idle_seconds(entry["path"]) if not attended else None
+    path = entry["path"]
+    dirty = guard.porcelain(path)
+    return idle, path, dirty
+
+
 def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
     keeps hold it. A repo's own `reap:worktrees` script turns it off."""
-    # Read first: `git status` below can rewrite the index and make every tree look active.
-    idle = worktree_idle_seconds(entry["path"]) if not attended else None
-    path = entry["path"]
-    dirty = guard.porcelain(path)
+    if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
+        idle, path = (None if attended else entry["idle"]), entry["path"]
+        dirty = guard.porcelain(path)
+    else:
+        idle, path, dirty = _idle_then_dirty(entry, attended)
     if dirty is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if dirty:
         return {"path": path, "action": "keep", "reason": "dirty"}
-    locked = guard.worktree_locked(where, path)
-    if locked is None:
-        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh
+    # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).
+    # `remove_worktree` still has git refuse a locked tree.
     stale_agent_lock = False
-    if locked:
+    if entry.get("locked_reason") is not None:
         holder = entry.get("locked_reason") or "locked"
         stale_agent_lock = stale_agent_lock_verdict(holder)
         if stale_agent_lock is not True:
@@ -723,14 +790,14 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
 
 
 # Owner ruling 2026-10-15: at agent end, ANOTHER finished agent's tree needs 30 minutes of quiet.
-# The ending agent's own tree needs none. AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
+# AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
 AGENT_END_IDLE_SECONDS = 30 * 60
 
 
 def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
-    the seconds of git quiet the tree needs (None: none, the ending agent's own tree). Idle is read
-    first: `git status` can rewrite the index and make every tree look active. The rest is
+    the seconds of git quiet the tree needs (None: none). Idle is read first: `git status` can
+    rewrite the index and make every tree look active. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
@@ -2228,25 +2295,37 @@ def _restore_cut_short(where: str, entry: dict):
     guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
 
 
-def _lock_reason_now(root: str, path: str):
-    """PATH's lock reason as `parse_worktree_list` reads it right now; None when unlocked or unread."""
-    own = os.path.normcase(os.path.realpath(path))
-    for entry in parse_worktree_list(root) or []:
-        if os.path.normcase(os.path.realpath(entry["path"])) == own:
-            return entry["locked_reason"]
-    return None
+_LOCK_UNREADABLE = object()
+
+
+def _lock_unlockable(root: str, path: str, decision: dict):
+    """Re-read the lock of this one tree just before `git worktree unlock`: an agent may have
+    taken a live lock since the pass listed it. True when the lock is gone, or is still the very
+    lock that was judged stale, so the removal goes ahead; otherwise False, and DECISION becomes a
+    keep. A lock that changed since the read is kept, even a stale one.
+    LIMIT: git has no compare-and-unlock, so a lock taken between this read and the unlock is still
+    cleared."""
+    named = os.path.normcase(os.path.realpath(path))
+    found = [e for e in parse_worktree_list(root) or []
+             if os.path.normcase(os.path.realpath(e["path"])) == named]
+    reason = found[0]["locked_reason"] if found else _LOCK_UNREADABLE
+    if reason is None:
+        decision.pop("unlock", None)  # nobody holds a lock now: nothing to take off
+        return True
+    if (reason is not _LOCK_UNREADABLE and reason == decision.get("lock_reason")
+            and stale_agent_lock_verdict(reason) is True):
+        return True
+    decision.pop("unlock", None)
+    decision["action"] = "keep"
+    decision["reason"] = ("unreadable-subject" if reason is _LOCK_UNREADABLE
+                          else "locked: %s" % reason)
+    return False
 
 
 def remove_worktree(root: str, path: str, decision: dict):
+    if decision.get("unlock") and not _lock_unlockable(root, path, decision):
+        return
     if decision.get("unlock"):  # a stale agent lock; never --force
-        # Review point 3: the lock was read earlier, in decide_worktree. Another session may have
-        # taken a live lock since. Read it again and unlock only the lock that was judged stale.
-        # LIMIT: git has no compare-and-unlock, so a lock taken between this read and the unlock
-        # below is still cleared.
-        now = _lock_reason_now(root, path)
-        if now != decision.get("lock_reason"):
-            decision.update(action="keep", reason="locked: lock changed since the read: %s" % now)
-            return
         unlocked = guard._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
             decision["error"] = "unlock failed: %s" % (
@@ -2628,6 +2707,39 @@ def run_repo_reaper(root: str):
     return None
 
 
+# Only the SessionEnd run has a deadline (owner ruling 2026-10-15 15:08 CDT). session_end_sweep.py
+# kills its sweep after min(25 s, the time its hook has left) and passes that number as
+# `--deadline-seconds N`. The budget counts from the start of the pass: the pass judges trees until
+# min(JUDGE_BUDGET_SECONDS, N minus DEADLINE_TAIL_SECONDS) seconds after it started. A tree judged
+# at the last moment still costs about 7.5 s (measured), then the branch, leftover-folder and
+# listener work follows, so the tail is that 7.5 s. Only a run given --deadline-seconds has a
+# budget (session_end_sweep.py passes it); the scheduled job and a person's run have none. A tree
+# the pass did not reach is kept ("not judged: deadline") and the next run judges it.
+JUDGE_BUDGET_SECONDS = 12
+DEADLINE_TAIL_SECONDS = 7.5
+_now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
+_DEADLINE = None  # a `_now()` time while `main` runs; None means no deadline
+
+
+def _past_deadline() -> bool:
+    return _DEADLINE is not None and _now() >= _DEADLINE
+
+
+def _same_folder(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def _oldest_idle_first(entries):
+    """ENTRIES with the longest-idle tree first: the likeliest removals come before the deadline.
+    A tree whose idle time cannot be read goes last; it is kept either way. Each entry keeps its
+    read as "idle", and `decide_worktree` uses it: one idle read per tree per pass."""
+    idle = {}
+    for e in entries:  # a read past the deadline never starts; that tree is "not judged"
+        idle[e["path"]] = (None if e.get("bare") or _past_deadline()
+                           else worktree_idle_seconds(e["path"]))
+    return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
@@ -2668,6 +2780,8 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             agent_rule = False
             if reaper == "unreadable":
                 result["reaper"] = why
+            elif confirm and _past_deadline():
+                result["reaper"] = "not run: deadline"
             elif confirm:
                 result["reaper"] = run_repo_reaper(root) or "ran"
             else:
@@ -2702,6 +2816,12 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         """The decision for one entry, or None when none is ever recorded against it."""
         if entry.get("bare"):
             return None
+        # Past the deadline no git read starts in a tree's folder, the primary-checkout read
+        # included. ROOT is the primary checkout in a SessionEnd run: it gets no decision.
+        if _past_deadline() and _same_folder(entry["path"], root):
+            return None
+        if _past_deadline():
+            return {"path": entry["path"], "action": "keep", "reason": "not judged: deadline"}
         is_primary = _is_primary_checkout(entry["path"])
         if is_primary is True:
             return None  # the clone's one primary checkout: no decision is ever recorded
@@ -2711,13 +2831,18 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
         return decide_worktree(root, entry, attended, agent_rule)
 
-    judged = entries if mode == "full" else []
+    judged = _oldest_idle_first(entries) if mode == "full" else []
+    if judged and not _past_deadline():
+        prime_pushed(root, judged)
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
-            remove_worktree(root, entry["path"], decision)
+            if _past_deadline():
+                decision.update(action="keep", reason="not removed: deadline")
+            else:
+                remove_worktree(root, entry["path"], decision)
         gone = decision["action"] == "reap"
         gone = gone and not decision.get("error")
         if gone:
@@ -2726,8 +2851,17 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     checked_out_branches = {e["branch"] for e in entries
                             if e.get("branch") and e["path"] not in removed}
 
+    def judge_branch(b):
+        # The clock is read before the decision starts and again after it: a reap follows at
+        # once, so a decision that ended past the deadline is not reaped.
+        late = {"name": b, "action": "keep", "reason": "not judged: deadline"}
+        if _past_deadline():
+            return late
+        decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches)
+        return late if decision["action"] == "reap" and _past_deadline() else decision
+
     for branch, decision in zip(branches, _pmap(
-            lambda b: decide_branch(root, base, b, protected_prefixes, checked_out_branches),
+            judge_branch,
             branches, confirm)):
         result["branches"].append(decision)
         if confirm and decision["action"] == "reap":
@@ -2736,18 +2870,26 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "branches":
         return result
 
+    # Past the deadline the folder scans and their reaps wait for the next run. An unscanned
+    # folder is unknown (None), never zero.
     husk_names = optout.get("huskNames", [])
-    result["husks"] = find_husks(root, entries, husk_names)
+    result["husks"] = None if _past_deadline() else find_husks(root, entries, husk_names)
     if confirm:
         for decision in result["husks"] or []:
             if decision["action"] == "husk":
-                reap_husk(root, decision, husk_names)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_husk(root, decision, husk_names)
 
-    result["trash"] = find_trash(root, entries)
+    result["trash"] = None if _past_deadline() else find_trash(root, entries)
     if confirm:
-        for decision in result["trash"]:
+        for decision in result["trash"] or []:
             if decision["action"] == "trash":
-                reap_trash(decision)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_trash(decision)
 
     result["strays"] = find_strays(root, entries)  # after the husk reap: a deleted husk is gone
 
@@ -2755,6 +2897,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         return result
 
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
+    if _past_deadline():
+        result["listeners"] = None  # not read; the report says UNREADABLE, the next run reads
+        return result
     listener_entries = find_swept_listeners(checkout_paths)
     if listener_entries is None:
         result["listeners"] = None  # the machine-wide listener enumeration itself failed
@@ -2763,7 +2908,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             decision = decide_listener(entry)
             result["listeners"].append(decision)
             if confirm and decision["action"] == "reap":
-                reap_listener(decision)
+                if _past_deadline():
+                    decision.update(action="keep", reason="not reaped: deadline")
+                else:
+                    reap_listener(decision)
 
     return result
 
@@ -2806,8 +2954,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
         if result.get("husks") is None:
-            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder",
-                  file=out)
+            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder, or "
+                  "the deadline came first", file=out)
+        if result.get("trash", []) is None:
+            print("  trash     UNKNOWN -- not scanned: deadline", file=out)
         for h in result.get("husks") or []:
             husk_counts[h["action"]] += 1
             tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
@@ -2878,7 +3028,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
     if any(r.get("husks") is None and not r.get("refused") for r in results):
-        print("  leftover folders: unknown (folder unreadable)", file=out)
+        print("  leftover folders: unknown (folder unreadable, or the deadline came first)",
+              file=out)
     else:
         print("  leftover folders: %d, kept: %d"
               % (husk_counts["husk"], husk_counts["keep"]), file=out)
@@ -2959,6 +3110,14 @@ def main(argv=None) -> int:
     parser.add_argument("--attended", action="store_true",
                          help="a person's run: skip the merged and idle-1-hour keeps. Without "
                               "it, --confirm removes a worktree only when it is both")
+    parser.add_argument("--deadline-seconds", type=float, metavar="N",
+                         help="the SessionEnd run only: N is the time left before the caller kills "
+                              "this sweep. The budget counts from the start of the pass: it "
+                              "judges no tree later than min(%d s, N minus %s s) from then. Only a "
+                              "run with this flag has a budget (session_end_sweep.py passes it). "
+                              "Without it there is none: the scheduled job and a person's run, "
+                              "with or without --confirm, judge every tree"
+                              % (JUDGE_BUDGET_SECONDS, DEADLINE_TAIL_SECONDS))
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
@@ -3021,13 +3180,19 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
-    global _LIVE_HEADS
+    global _LIVE_HEADS, _DEADLINE
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
+    # Only a run given `--deadline-seconds N` has a deadline: the SessionEnd run. The scheduled
+    # job and a person's run judge everything (owner ruling 2026-10-15 15:08 CDT). A NaN is no
+    # time left, never no deadline: it compares false against every clock reading.
+    n = args.deadline_seconds
+    _DEADLINE = None if n is None else _now() + (
+        0 if n != n else min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
-        _LIVE_HEADS = None
+        _LIVE_HEADS = _DEADLINE = None
         undo()
 
 
@@ -3051,17 +3216,25 @@ def _sweep_roots(args, roots, restore_log_path, mode):
                 print("  free disk: unknown")
     if mode != "full":
         return 0
+    if _past_deadline():
+        print("\njanitor: past the time budget; dead-rooted, loose-process and simulator "
+              "reads not run (the next run does them)")
+        return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    print_loose_processes_report(find_loose_processes())
+    if not _past_deadline():
+        print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:
             if d["action"] == "reap" and d["pid"] not in {r["pid"] for r in reaped}:
+                if _past_deadline():
+                    break  # the next run reaps it
                 reap_listener(d)
                 reaped.append(d)
         print_grace_period_report(reaped)
-    print_sim_report(sim_tier(args.confirm), args.confirm)
+    if not _past_deadline():
+        print_sim_report(sim_tier(args.confirm), args.confirm)
     return 0
 
 
