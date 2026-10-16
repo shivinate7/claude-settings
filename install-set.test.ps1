@@ -13,10 +13,14 @@
 #           over it is refused, as a reader holding it would refuse it. A second install then stalls
 #           mid-swap. No guard run made while that install is alive may be a guard-crash deny. After
 #           the install, the guard loads the second install's id.
-#   lock1   The second install starts 300 ms after the first, with the same hold, so the first is
-#           still alive. The second's guard files must not land while the first is still running.
-#           The second must wait, or exit with one clear line about the lock. Two pairs:
-#           install.ps1 against install.ps1, and install.ps1 against the git post-merge hook.
+#   lock1   The second install starts only after the first has logged its start line, which it does
+#           once it holds the lock, so the first is still alive when the second starts. The second's
+#           start line must come after the first's end line: the second waits, or it exits with one
+#           clear line about the lock. Two pairs: install.ps1 against install.ps1, and install.ps1
+#           against the git post-merge hook.
+#   lock2   install.ps1 given CLAUDE_SETTINGS_LOCK_TOKEN equal to line 1 of the lock file runs without
+#           waiting, logs its own start and end, and leaves the lock. Any other token waits, then exits
+#           1 with one lock line and writes nothing.
 #   log3    install.ps1, the post-merge hook and install.sh each log one start line and one end
 #           line, naming the install id and the process id.
 #
@@ -69,15 +73,6 @@ function Read-Shared([string]$Path) {
 # Holds a file open for read with no delete sharing. A rename over the file is refused while it is held.
 function Hold-File([string]$Path) {
     return [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-}
-
-# The text of every guard*.py under a config dir, wherever the installer put it. Unreadable files are skipped.
-function Get-GuardTexts([string]$Cfg) {
-    $out = @()
-    foreach ($f in @(Get-ChildItem -LiteralPath $Cfg -Recurse -File -Filter 'guard*.py' -ErrorAction SilentlyContinue)) {
-        try { $out += Read-Shared $f.FullName } catch { }
-    }
-    return $out
 }
 
 # The one INSTALL_ID the guard loads from a config dir, or '' when none, or the loaded modules disagree,
@@ -148,10 +143,15 @@ function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git)
 }
 
 # Starts install.ps1 from a clone, copy mode, into $Cfg. Stdout and stderr go to $Out.out.txt and $Out.err.txt.
-function Start-Install([string]$Clone, [string]$Cfg, [string]$Out) {
-    $saved = Set-Env @{
+# $Extra sets more environment for this run only. The lock token and wait are cleared first, so no case
+# inherits them from the shell that runs the test.
+function Start-Install([string]$Clone, [string]$Cfg, [string]$Out, [hashtable]$Extra = @{}) {
+    $vals = @{
         CLAUDE_CONFIG_DIR = $Cfg; CLAUDE_SETTINGS_FORCE_COPY = '1'
-        CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$EnvSub"; USERPROFILE = $NoGit }
+        CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$EnvSub"; USERPROFILE = $NoGit
+        CLAUDE_SETTINGS_LOCK_TOKEN = $null; CLAUDE_SETTINGS_LOCK_WAIT = $null }
+    foreach ($k in $Extra.Keys) { $vals[$k] = $Extra[$k] }
+    $saved = Set-Env $vals
     try {
         $proc = Start-Process -FilePath $PsHost -PassThru -NoNewWindow -WorkingDirectory $NoGit `
             -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $Clone 'install.ps1') + '"')) `
@@ -211,6 +211,24 @@ function Get-Decision([string]$Text) {
 function Find-LogLines([string[]]$Lines, [string]$Word, [string]$Id, [int]$ProcId) {
     if (-not $Id) { return @() }
     return @($Lines | Where-Object { $_ -match "(?i)\b$Word\b" -and $_.Contains($Id) -and $_ -match "(?<!\d)$ProcId(?!\d)" })
+}
+
+# Log lines that carry the word and "pid=<n>" for one process, found without an id. Every installer path
+# writes pid=<n>, and the match needs the "pid=" prefix, so a date's digits never stand in for a pid.
+function Find-PidLines([string[]]$Lines, [string]$Word, [int]$ProcId) {
+    return @($Lines | Where-Object { $_ -match "(?i)\b$Word\b" -and $_ -match "\bpid=$ProcId(?!\d)" })
+}
+# Index of the first such line at or after $From, or -1.
+function Find-PidLine([string[]]$Lines, [string]$Word, [int]$ProcId, [int]$From = 0) {
+    for ($i = $From; $i -lt $Lines.Count; $i++) {
+        if ($Lines[$i] -match "(?i)\b$Word\b" -and $Lines[$i] -match "\bpid=$ProcId(?!\d)") { return $i }
+    }
+    return -1
+}
+
+# Line 1 of a lock file, trimmed. A missing or unreadable file gives ''.
+function Get-LockLine([string]$Path) {
+    try { return ((Read-Shared $Path) -split '\r?\n')[0].Trim() } catch { return '' }
 }
 
 # The install log in a config dir, as lines. Missing means no lines.
@@ -279,32 +297,53 @@ Check 'swap1: no guard run during install 2 was any other deny' ($others1.Count 
 Check 'swap1: after install 2 the guard loads install 2 id, one whole set' ($id2 -ne '' -and $id2 -ne $id1) "loaded id after install 2: '$id2' (after install 1: '$id1')"
 
 # ---- lock1: a second install waits for the first, or refuses with one clear line ----------------
-# Overlap is forced: the first install holds the sibling file, and it runs a skills tree after the
-# hooks. The sampler records when the second install's guard text first lands, and when the first exits.
+# Overlap is forced: the first install holds a sibling file, and it runs a skills tree after the hooks.
+# The second starts only once the first's start line names the first's pid. The first writes that line
+# after it takes the lock, so from there the second meets the lock, not a race for it. The result is the
+# log line index of each run's start and end lines; the checks read the order from those.
 function Invoke-Overlap([string]$Cfg, [scriptblock]$StartA, [scriptblock]$StartB, [string]$OutB) {
     $hold = Hold-File (Join-Path $Cfg 'hooks\guard_core.py')
     $tA = Get-Date
     $pA = & $StartA
-    Start-Sleep -Milliseconds 300
+    $deadlineA = (Get-Date).AddSeconds(60)
+    while (-not $pA.HasExited -and (Get-Date) -lt $deadlineA -and
+           (Find-PidLine @(Get-InstallLog $Cfg) 'start' $pA.Id) -lt 0) { Start-Sleep -Milliseconds 50 }
+    $aStartedAtB = (Find-PidLine @(Get-InstallLog $Cfg) 'start' $pA.Id) -ge 0
     $aAliveAtB = -not $pA.HasExited
     $pB = & $StartB
-    $bFirst = $null; $aExit = $null; $released = $false
+    $released = $false
     $deadline = (Get-Date).AddSeconds(150)
     while ((-not $pA.HasExited -or -not $pB.HasExited) -and (Get-Date) -lt $deadline) {
-        $now = Get-Date
-        if (-not $released -and ($now - $tA).TotalSeconds -ge 9) { $hold.Close(); $released = $true }
-        if ($pA.HasExited -and -not $aExit) { $aExit = $now }
-        if (-not $bFirst) {
-            foreach ($text in (Get-GuardTexts $Cfg)) { if ($text -cmatch '(?m)^# build B\r?$') { $bFirst = $now; break } }
-        }
+        if (-not $released -and ((Get-Date) - $tA).TotalSeconds -ge 9) { $hold.Close(); $released = $true }
         Start-Sleep -Milliseconds 50
     }
     if (-not $released) { $hold.Close() }
     Wait-Bounded $pA 60
     Wait-Bounded $pB 60
-    if (-not $aExit) { $aExit = Get-Date }
-    $bLines = @((Get-RunText $OutB) -split '\r?\n' | Where-Object { $_ -match '(?i)lock|another install|already running|waiting' })
-    return @{ AAlive = $aAliveAtB; BFirst = $bFirst; AExit = $aExit; BLockLines = $bLines.Count; BExit = $pB.ExitCode }
+    # A shell run (the hook) prints its own pid as HOOKPID; a process run's pid is $pB.Id.
+    $bPid = $pB.Id
+    $hp = [regex]::Match((Get-RunText $OutB), 'HOOKPID=(\d+)')
+    if ($hp.Success) { $bPid = [int]$hp.Groups[1].Value }
+    $lines = @(Get-InstallLog $Cfg)
+    $aStart = Find-PidLine $lines 'start' $pA.Id
+    $aEnd = if ($aStart -ge 0) { Find-PidLine $lines 'end' $pA.Id ($aStart + 1) } else { -1 }
+    $bStart = Find-PidLine $lines 'start' $bPid
+    $bLockLines = @((Get-RunText $OutB) -split '\r?\n' | Where-Object { $_ -match '(?i)lock|another install|already running|waiting' })
+    return @{ AStartedAtB = $aStartedAtB; AAlive = $aAliveAtB; AEnd = $aEnd; BStart = $bStart; BLockLines = $bLockLines.Count }
+}
+
+# The lock1 checks for one pair. When B ran, its start line must come after A's end line. When B did not
+# run, it must have printed one clear lock line.
+function Test-LockOrder([string]$Pair, $R) {
+    Check "lock1: install A logged its start and end lines, and was alive when install B started ($Pair)" `
+        ($R.AStartedAtB -and $R.AAlive -and $R.AEnd -ge 0) "A's start seen before B: $($R.AStartedAtB); A alive: $($R.AAlive); A's end line: $($R.AEnd)"
+    if ($R.BStart -ge 0) {
+        Check "lock1: install B's start line came after install A's end line ($Pair)" `
+            ($R.BStart -gt $R.AEnd) "B's start is at log line $($R.BStart), A's end at line $($R.AEnd): B started while A held the lock"
+    } else {
+        Check "lock1: install B never started and printed one clear lock line ($Pair)" `
+            ($R.BLockLines -eq 1) "B wrote no start line and printed $($R.BLockLines) lock line(s)"
+    }
 }
 
 $C2   = Join-Path $Root 'lock1'
@@ -320,13 +359,7 @@ $r2 = Invoke-Overlap $Cfg2 `
     { Start-Install (Join-Path $C2 'a') $Cfg2 (Join-Path $C2 'a-run') } `
     { Start-Install (Join-Path $C2 'b') $Cfg2 (Join-Path $C2 'b-run') } `
     (Join-Path $C2 'b-run')
-Check 'lock1: precondition, install A was still alive when install B started (install.ps1 pair)' $r2.AAlive 'install A had already exited; the case proves nothing'
-if ($r2.BFirst) {
-    $lead2 = ($r2.AExit - $r2.BFirst).TotalSeconds
-    Check 'lock1: install B guard files did not land while install A ran (install.ps1 pair)' ($lead2 -lt 1.0) ("install B's guard files landed {0:N1} s before install A exited" -f $lead2)
-} else {
-    Check 'lock1: install B waited or exited with one clear lock line (install.ps1 pair)' ($r2.BLockLines -eq 1) "install B wrote no guard file and printed $($r2.BLockLines) lock line(s)"
-}
+Test-LockOrder 'install.ps1 pair' $r2
 
 # Pair 2: install.ps1 against the git post-merge hook (cross-path). The hook is the one install.ps1
 # wrote into the git clone, and it copies that clone's working tree. The clone is built base3 for the
@@ -344,13 +377,37 @@ $r3 = Invoke-Overlap $Cfg3 `
     { Start-Install (Join-Path $C3 'a') $Cfg3 (Join-Path $C3 'a-run') } `
     { Start-Shell $hookB (Join-Path $C3 'hook-b-run') } `
     (Join-Path $C3 'hook-b-run')
-Check 'lock1: precondition, install A was still alive when the hook started (cross-path pair)' $r3.AAlive 'install A had already exited; the case proves nothing'
-if ($r3.BFirst) {
-    $lead3 = ($r3.AExit - $r3.BFirst).TotalSeconds
-    Check 'lock1: the hook guard files did not land while install A ran (cross-path pair)' ($lead3 -lt 1.0) ("the hook's guard files landed {0:N1} s before install A exited" -f $lead3)
-} else {
-    Check 'lock1: the hook waited or exited with one clear lock line (cross-path pair)' ($r3.BLockLines -eq 1) "the hook wrote no guard file and printed $($r3.BLockLines) lock line(s)"
-}
+Test-LockOrder 'cross-path pair' $r3
+
+# ---- lock2: a run given the parent's lock token works under that lock; any other token waits -----------
+# merge/install_from_main.sh holds the lock and passes its id as CLAUDE_SETTINGS_LOCK_TOKEN. A token equal
+# to line 1 of the lock file lets install.ps1 run at once and leave the lock for its parent. Any other token
+# waits like a run with no token, then gives up with one line.
+$C5    = Join-Path $Root 'lock2'
+$Cfg5  = Join-Path $C5 'claude'
+$Lock5 = Join-Path $Cfg5 '.claude-settings-install.lock'
+$Tok5  = 'parent-' + [guid]::NewGuid().ToString('N')
+New-Clone (Join-Path $C5 'src') 'held'
+New-Item -ItemType Directory -Force -Path $Cfg5 | Out-Null
+[IO.File]::WriteAllText($Lock5, "$Tok5`n", $Utf8)
+
+$pT = Start-Install (Join-Path $C5 'src') $Cfg5 (Join-Path $C5 'token-run') @{ CLAUDE_SETTINGS_LOCK_TOKEN = $Tok5; CLAUDE_SETTINGS_LOCK_WAIT = '3' }
+Wait-Bounded $pT 180
+$logT = Get-InstallLog $Cfg5
+Check 'lock2: a run with the parent token exits 0' ($pT.ExitCode -eq 0) "exit code '$($pT.ExitCode)'; it did not run under the parent's lock"
+Check 'lock2: a run with the parent token writes one start line and one end line' `
+    ((Find-PidLines $logT 'start' $pT.Id).Count -eq 1 -and (Find-PidLines $logT 'end' $pT.Id).Count -eq 1) `
+    "start lines naming pid $($pT.Id): $((Find-PidLines $logT 'start' $pT.Id).Count); end lines: $((Find-PidLines $logT 'end' $pT.Id).Count)"
+Check 'lock2: a run with the parent token leaves the parent lock as it was' ((Get-LockLine $Lock5) -eq $Tok5) "lock line 1 is now '$(Get-LockLine $Lock5)'"
+
+$pW = Start-Install (Join-Path $C5 'src') $Cfg5 (Join-Path $C5 'wrong-run') @{ CLAUDE_SETTINGS_LOCK_TOKEN = "not-$Tok5"; CLAUDE_SETTINGS_LOCK_WAIT = '3' }
+Wait-Bounded $pW 180
+$logW = Get-InstallLog $Cfg5
+$wLockLines = @((Get-RunText (Join-Path $C5 'wrong-run')) -split '\r?\n' | Where-Object { $_ -match 'holds the lock' })
+Check 'lock2: a run with a token that does not match exits 1' ($pW.ExitCode -eq 1) "exit code '$($pW.ExitCode)'"
+Check 'lock2: a run with a token that does not match prints one lock line' ($wLockLines.Count -eq 1) "lock lines printed: $($wLockLines.Count)"
+Check 'lock2: a run with a token that does not match writes no start line' ((Find-PidLines $logW 'start' $pW.Id).Count -eq 0) "start lines naming pid $($pW.Id): $((Find-PidLines $logW 'start' $pW.Id).Count)"
+Check 'lock2: a run with a token that does not match leaves the parent lock as it was' ((Get-LockLine $Lock5) -eq $Tok5) "lock line 1 is now '$(Get-LockLine $Lock5)'"
 
 # ---- log3: each installer path logs one start line and one end line, with id and pid ----------
 $C4   = Join-Path $Root 'log3'
