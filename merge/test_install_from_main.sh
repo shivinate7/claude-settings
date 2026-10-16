@@ -506,7 +506,45 @@ EOF
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12"
+# ---- Case 13: <clone>-live deleted but still registered -> the line carries git's message --
+# The folder is gone, but git still lists the worktree, so `worktree add` refuses the path. Freeing
+# the path is the wrong remedy: the stale registration must be pruned. The helper must not discard
+# git's stderr, so the line carries git's own message or names the stale registration. The line may
+# be more than one stderr line, because git's message comes first.
+case13() {
+  name="case13: <clone>-live deleted but still registered: the stderr line carries git's message or names the stale registration"
+  d="$work/case13"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  pin_at_main "$d/clone"
+  git -C "$d/clone" worktree add -q -b caller "$d/linked"
+  rm -rf "$d/clone-live"
+  if ! git -C "$d/clone" worktree list --porcelain | grep -q 'clone-live$'; then
+    bad "$name" "fixture: git no longer lists the stale pinned checkout"; return
+  fi
+  run_live "$d/linked"
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
+  elif [ -n "$outs" ]; then
+    bad "$name" "text went to stdout, expected stderr only: $outs"
+  else
+    case "$errs" in
+      *"not run"*"clone-live"*) ;;
+      *) bad "$name" "stderr line does not say the install did not run and name the pinned path: $errs"; return ;;
+    esac
+    case "$errs" in
+      *registered*|*prune*) ;;
+      *) bad "$name" "stderr carries neither git's message nor the stale registration: $errs"; return ;;
+    esac
+    if [ -e "$d/clone/ran-sh.txt" ] || [ -e "$d/linked/ran-sh.txt" ]; then
+      bad "$name" "an install ran although the pinned checkout could not be made"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
