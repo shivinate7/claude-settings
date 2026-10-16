@@ -16,7 +16,8 @@ refuses only real waste:
 - a loop that pauses, in bash or PowerShell;
 - two or more pauses in one command, the sleep-then-poll form;
 - one pause of 25 s or more;
-- a CI watcher (`gh pr checks --watch`, `gh run watch`) in the foreground;
+- `gh pr checks --watch` in the foreground;
+- `gh run watch` in the foreground or the background (decision ci-wait-reads-run-status, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
 
 It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a watcher run

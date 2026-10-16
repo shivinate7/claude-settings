@@ -153,8 +153,8 @@ passes its arguments through and adds nothing.
    A head that still reads as the pre-claim SHA is GitHub lagging the push. The wait goes
    on for it until the deadline. Any other head, DIRTY or CONFLICTING ends the wait. Any failed or
    cancelled check ends the wait, required or not. Every entry of a duplicate check name is
-   kept. All must pass, and one red entry ends the wait. A pending check blocks in
-   `gh run watch` for at most a minute, then the loop reads again.
+   kept. All must pass, and one red entry ends the wait. A pending check with a run
+   link pauses 30 s, then the loop reads again (decision ci-wait-reads-run-status, CI waits read the run status).
 7. Fetch `<base>` again. Run the silent-undo check and `stamp.mjs --check` against its tip.
    Each claimed number must still be free there.
 8. Run `gh pr merge <pr> --<method> --match-head-commit <sha>`. Never `--admin`.
