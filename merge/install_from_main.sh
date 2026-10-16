@@ -13,12 +13,16 @@
 # install.sh makes it) renames that directory to <clone>-live-<its commit> first; between the two
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
-# writes the files one at a time; a debt names it. The run tests for link rights before it moves
-# anything, so a host without them never loses the pin path.
-# The pin move takes the install lock the installers take (owner ruling 2026-10-15, install-set):
-# one install at a time. The run logs a start line once it holds the lock and an end line when it
-# lets go, each with a unique id and its pid, in the install log install.sh writes. It lets go
-# before it runs the installer, which takes the lock again for its own run.
+# writes the files one at a time (debt pin-switch-in-place-mix, a live reader can see a mix there).
+# The run tests for link rights before it moves anything, so a host without them never loses the
+# pin path.
+# The run takes the install lock the installers take (owner ruling 2026-10-15, install-set): one
+# install at a time. It reads main's commit only once it holds the lock, so a run that waited never
+# moves the pin back to an older main. It holds the lock through the installer, and hands the
+# installer its id as CLAUDE_SETTINGS_LOCK_TOKEN; the lock file holds that id, so the installer
+# runs under this lock and does not wait on it. The run logs a start line once it holds the lock
+# and an end line with its real exit code when it ends, each with a unique id and its pid, in the
+# install log install.sh writes. The installer logs its own pair inside this one.
 # ponytail: this lock code copies install.sh's, because install.sh runs on load and cannot be
 # sourced; one shared lock file is the one home. A shared lock script is the upgrade.
 # Every pinned worktree is locked, so the janitor sweep never removes it.
@@ -27,8 +31,8 @@ fail() { echo "install not run: $1" >&2; exit 1; }
 clone=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 [ -n "$clone" ] || fail "no git clone found here; run merge/install_from_main.sh from inside the clone"
 pin="$clone-live"
-commit=$(git rev-parse --verify -q refs/heads/main) \
-  || fail "no branch named main, so $pin cannot move; create it with git branch main origin/main, then run merge/install_from_main.sh"
+no_main="no branch named main, so $pin cannot move; create it with git branch main origin/main, then run merge/install_from_main.sh"
+git rev-parse --verify -q refs/heads/main >/dev/null || fail "$no_main"   # fail fast, before any lock wait
 REASON="claude-settings live pin"
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -36,16 +40,17 @@ INSTALL_LOG="$CLAUDE_DIR/claude-settings-install.log"
 INSTALL_LOCK="$CLAUDE_DIR/.claude-settings-install.lock"
 INSTALL_ID="$(date +%Y%m%d%H%M%S)$$"
 log_line() { printf '%s install_from_main.sh: %s id=%s pid=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$INSTALL_ID" "$$" >> "$INSTALL_LOG"; }
-release_lock() {   # end line, then the lock; the EXIT trap runs it for a failed run too
+release_lock() {   # the EXIT trap: the end line with the run's real exit, then the lock if it is still this run's
   rc=$?
   trap - EXIT
-  log_line "end exit=${1:-$rc}"
-  rm -f "$INSTALL_LOCK"
+  log_line "end exit=$rc"
+  [ "$(head -n 1 "$INSTALL_LOCK" 2>/dev/null)" = "$INSTALL_ID" ] && rm -f "$INSTALL_LOCK"
+  return "$rc"
 }
 take_lock() {
   mkdir -p "$CLAUDE_DIR"
   tries=$(( ${CLAUDE_SETTINGS_LOCK_WAIT:-60} * 5 ))
-  while ! ( set -C; printf '%s\n' "$$" > "$INSTALL_LOCK" ) 2>/dev/null; do
+  while ! ( set -C; printf '%s\n' "$INSTALL_ID" > "$INSTALL_LOCK" ) 2>/dev/null; do
     if [ -n "$(find "$INSTALL_LOCK" -mmin +10 2>/dev/null)" ]; then rm -f "$INSTALL_LOCK"; continue; fi
     tries=$((tries - 1))
     [ "$tries" -gt 0 ] || fail "another install holds the lock $INSTALL_LOCK; nothing was moved. Run merge/install_from_main.sh again when it ends, or delete that file if no install is running."
@@ -143,6 +148,7 @@ move_pin() {
 }
 
 take_lock
+commit=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"   # read under the lock
 if [ -L "$pin" ] && [ ! -e "$pin" ]; then rm -f "$pin"; fi   # a link whose tree is gone
 if [ ! -e "$pin" ]; then
   err=$(git worktree add -q --detach --lock --reason "$REASON" "$pin" "$commit" 2>&1) \
@@ -155,14 +161,14 @@ else
   git worktree lock --reason "$REASON" "$pin" >/dev/null 2>&1   # lock an unlocked pin; fails harmlessly when locked
 fi
 
-release_lock 0   # the installer takes the lock for its own run
+# The installer runs under this run's lock; the EXIT trap logs the end line with its exit code.
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)
     [ -f "$pin/install.ps1" ] || fail "$pin has no install.ps1"
     echo "Installing from $pin"
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$pin/install.ps1")" ;;
+    CLAUDE_SETTINGS_LOCK_TOKEN="$INSTALL_ID" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$pin/install.ps1")" ;;
   *)
     [ -f "$pin/install.sh" ] || fail "$pin has no install.sh"
     echo "Installing from $pin"
-    bash "$pin/install.sh" ;;
+    CLAUDE_SETTINGS_LOCK_TOKEN="$INSTALL_ID" bash "$pin/install.sh" ;;
 esac

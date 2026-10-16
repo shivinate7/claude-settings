@@ -226,16 +226,26 @@ put_file() {
 # (Windows pids and MSYS pids); an owner-alive test is the upgrade if a dead run ever needs sooner.
 # The id (INSTALL_ID_VALUE, above) is unique per run: the time plus the process id. The log line
 # names it with the pid.
+# merge/install_from_main.sh holds the lock through its install.sh call. It writes its id into the
+# lock file and passes that id as CLAUDE_SETTINGS_LOCK_TOKEN; when the two match, this run works
+# under that lock: it does not wait, and it leaves the lock for its parent to remove.
 INSTALL_LOG="$CLAUDE_DIR/claude-settings-install.log"
 INSTALL_LOCK="$CLAUDE_DIR/.claude-settings-install.lock"
+OWN_INSTALL_LOCK=1
 install_log_line() { printf '%s install.sh: %s id=%s pid=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$INSTALL_ID_VALUE" "$$" >> "$INSTALL_LOG"; }
 finish_install() {
   rc=$?
   install_log_line "end exit=$rc"
-  rm -f "$INSTALL_LOCK"
+  if [ "$OWN_INSTALL_LOCK" = 1 ]; then rm -f "$INSTALL_LOCK"; fi
 }
 take_install_lock() {
   mkdir -p "$CLAUDE_DIR"
+  if [ -n "${CLAUDE_SETTINGS_LOCK_TOKEN:-}" ] && [ "$(head -n 1 "$INSTALL_LOCK" 2>/dev/null)" = "$CLAUDE_SETTINGS_LOCK_TOKEN" ]; then
+    OWN_INSTALL_LOCK=0
+    trap finish_install EXIT
+    install_log_line start
+    return
+  fi
   tries=$(( ${CLAUDE_SETTINGS_LOCK_WAIT:-60} * 5 ))
   while ! ( set -C; printf '%s\n' "$$" > "$INSTALL_LOCK" ) 2>/dev/null; do
     if [ -n "$(find "$INSTALL_LOCK" -mmin +10 2>/dev/null)" ]; then rm -f "$INSTALL_LOCK"; continue; fi

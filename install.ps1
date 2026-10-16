@@ -79,7 +79,15 @@ function Exit-Install([int]$Code) { $script:ExitCode = $Code; exit $Code }
 $LockPath = Join-Path $ClaudeDir '.claude-settings-install.lock'
 $LockDeadline = (Get-Date).AddSeconds($(if ($env:CLAUDE_SETTINGS_LOCK_WAIT) { [int]$env:CLAUDE_SETTINGS_LOCK_WAIT } else { 60 }))
 $LockStream = $null
-while (-not $LockStream) {
+# merge/install_from_main.sh holds the lock through its install.ps1 call. It writes its id into the
+# lock file and passes that id as CLAUDE_SETTINGS_LOCK_TOKEN; when the two match, this run works under
+# that lock: it does not wait, and it leaves the lock for its parent to remove.
+$HeldByParent = $false
+if ($env:CLAUDE_SETTINGS_LOCK_TOKEN) {
+    $held = Get-Content -LiteralPath $LockPath -TotalCount 1 -ErrorAction SilentlyContinue
+    $HeldByParent = ([string]$held).Trim() -eq $env:CLAUDE_SETTINGS_LOCK_TOKEN
+}
+while (-not $LockStream -and -not $HeldByParent) {
     try { $LockStream = New-Object IO.FileStream($LockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose) }
     catch {
         $held = Get-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
@@ -764,5 +772,5 @@ if ($StillFailed.Count -gt 0) { Exit-Install 1 }
 $script:ExitCode = 0
 } finally {
     Add-InstallLogLine "$(Get-Date -Format s) install.ps1: end id=$InstallId pid=$PID exit=$($script:ExitCode)"
-    $LockStream.Dispose()
+    if ($LockStream) { $LockStream.Dispose() }
 }
