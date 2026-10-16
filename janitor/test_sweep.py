@@ -3411,14 +3411,15 @@ class _AgentEndFixture(unittest.TestCase):
                 "worktree add %s failed" % name)
         return path
 
-    def fire(self, agent, path):
-        """Run the SubagentStop hook for AGENT with payload cwd PATH. The hook must exit 0."""
+    def fire(self, agent, path, cwd=None):
+        """Run the SubagentStop hook for AGENT with payload cwd PATH, from working directory CWD (default:
+        the test root). The hook must exit 0."""
         payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
                               "cwd": path, "session_id": "agent-end-wt-cases"})
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
         answer = subprocess.run([sys.executable, os.path.join(HERE, "agent_end_reap.py")],
                                 input=payload, capture_output=True, text=True, env=env,
-                                cwd=self.root, timeout=120)
+                                cwd=cwd or self.root, timeout=120)
         self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
 
     def listed(self):
@@ -3445,10 +3446,12 @@ class _AgentEndFixture(unittest.TestCase):
         test process, the host that fire_under_host names."""
         return "claude agent agent-%s (pid %d)" % (name, os.getpid())
 
-    def fire_under_host(self, agent, path):
+    def fire_under_host(self, agent, path, cwd=None, check=True):
         """Run the SubagentStop hook one process below an intermediate python, itself run by this test
         process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
-        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell)."""
+        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell).
+        CWD (default: the test root) is the working directory of the relay, and so of the hook. CHECK
+        False returns the answer without asserting its exit code."""
         payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
                               "cwd": path, "session_id": "agent-end-wt-cases"})
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
@@ -3456,13 +3459,19 @@ class _AgentEndFixture(unittest.TestCase):
                  "input=sys.stdin.read(), text=True).returncode)")
         answer = subprocess.run([sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
                                 input=payload, capture_output=True, text=True, env=env,
-                                cwd=self.root, timeout=120)
-        self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+                                cwd=cwd or self.root, timeout=120)
+        if check:
+            self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+        return answer
+
+    def last_row(self):
+        """The last row of the payload log: the decision record of the last hook run."""
+        with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
+            return json.loads(handle.readlines()[-1])
 
     def own_row(self, path):
         """The decision row the last hook run wrote for PATH, or None."""
-        with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
-            last = json.loads(handle.readlines()[-1])
+        last = self.last_row()
         for row in last.get("worktrees") or []:
             if _norm_path(str(row.get("path", ""))) == _norm_path(path):
                 return row
@@ -3644,6 +3653,54 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             except subprocess.TimeoutExpired:
                 self.fail("the host-started process inside the own worktree was not stopped")
             self.assert_own_reaped(subject)
+
+    def test_hook_run_from_inside_its_own_tree_removes_it(self):
+        # Red on 149921d: the hook's own pid is in processes_in, so the own tree reads process-inside
+        # and the row's reason names the hook's pid. The hook runs with its cwd inside the tree, as
+        # the harness runs it. Its removal needs the hook to leave that cwd first: a live process
+        # cwd inside a tree blocks git's delete on Windows (measured on a scratch repo: rc 255,
+        # Permission denied; the same remove after a chdir out: rc 0).
+        own = self.add("inside")
+        self.fire("inside", own, cwd=own)
+        self.assert_own_reaped(own)
+
+    def test_hook_never_signals_its_own_wrapper_chain(self):
+        # Red on 149921d: the wrapper has its cwd inside the own tree and its parent is CLAUDE_PID,
+        # the host. tree_root_orphaned reads that parent as a host start, so the wrapper is reaped
+        # and signalled while the hook is still its child. No removal is asserted here: a wrapper
+        # with its cwd inside the tree blocks the delete on Windows, and the hook cannot move it.
+        own = self.add("wrapper")
+        answer = self.fire_under_host("wrapper", own, cwd=own, check=False)
+        reaped = [d for d in (self.last_row().get("decisions") or []) if d.get("action") == "reap"]
+        with self.subTest(arm="the wrapper exits 0"):
+            self.assertEqual(answer.returncode, 0,
+                             "the wrapper exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+        with self.subTest(arm="no decision reaps the wrapper chain"):
+            self.assertEqual(reaped, [], "the hook reaped its own wrapper chain: %r" % reaped)
+
+    def test_stale_removal_marker_on_an_intact_tree_does_not_restore_an_unstaged_deletion(self):
+        # Review finding 2, red on 149921d: _restore_cut_short writes a deleted tracked file back from
+        # the index before the lock, session and process checks. Here the lock keeps the tree, so the
+        # user's unstaged deletion is undone on a tree that is kept. The marker is stale: a failed
+        # earlier remove left it on a tree that is otherwise intact.
+        subject = os.path.join(self.primary, ".claude", "worktrees", "agent-staledel")
+
+        def damage(path):
+            admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+            write(os.path.join(admin, sweep.REMOVAL_MARKER), "1\n")
+            os.remove(os.path.join(path, "f.txt"))
+            self.lock(path, "held by a test")
+
+        def proof(path):
+            lines = guard.porcelain(path) or []
+            require(lines and all(line.startswith(" D ") for line in lines),
+                    "not only an unstaged deletion: %r" % lines)
+            require(guard.worktree_locked(self.primary, path), "the lock did not take")
+
+        self.keep_case("staledel", damage, proof)
+        with self.subTest(arm="the unstaged deletion is still there"):
+            self.assertFalse(os.path.exists(os.path.join(subject, "f.txt")),
+                             "the unstaged deletion was written back into a kept tree")
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
