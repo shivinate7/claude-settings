@@ -34,16 +34,24 @@
 //       command each refuse, say to update the skill, exit non-zero, and write nothing.
 //   4a, 4b. An older version (a missing key, and 1): the check command fails, names the upgrade command, and writes nothing.
 //   5.  A `formatVersion` that is no whole number is an error that says so.
+//   Review round 1 (step 3b):
+//   6.  A config with an explicit `"formatVersion": 1` is upgraded to 2: the new version wins, and the check then passes.
+//   7a. A version 1 map line holds seven colon tokens that are no line reference (`example.com:3000`, `127.0.0.1:3000`,
+//       `db.internal:5432`, `1.5:1`, `config.port:3000`, `/api/runs.json:1`, `node.js:18`). The upgrade keeps each one,
+//       and it strips `x.mjs:12-30` on the same line, because `mjs` is in `codeExtensions`.
+//   7b. The list in the config decides: with `codeExtensions` of `["ts"]`, `x.mjs:12-30` stays and `y.ts:5` goes.
+//   8a, 8b. `(`:1`, `:2`)` and `(`rows`, `:1`, `:2`)`: one run reaches the end state, and a second run changes no file.
+//   9.  A config that is no JSON object (`[]`, `null`, a number, a string): the upgrade exits non-zero, says so, and writes nothing.
 //
 // A run writes nothing when every file in the repository has the same size, the same mtime and the same bytes after it, and no
 // file was added or removed. `.git` is left out: git itself may refresh its index.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURE, HERE, SKILL, expected, junction, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
+import { FIXTURE, HERE, SKILL, expected, gitIn, junction, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
 const PICTURE = join(SKILL, 'scripts', 'map-picture.mjs');
@@ -253,3 +261,110 @@ test('5. a formatVersion that is no whole number is an error that says so, and n
     assert.ok(same(before, snapshot(dir)), `the check must write nothing (${JSON.stringify(bad)})`);
   }
 });
+
+// ---- Review round 1 (step 3b) ----
+
+/** `text` with one map line added at its end. */
+const appendLine = (text, line) => `${text.replace(/\n*$/, '\n')}${line}\n`;
+
+/** Adds `line` to the end of `docs/map/core.md` of `dir`. */
+const addMapLine = (dir, line) => {
+  const p = join(dir, 'docs/map/core.md');
+  writeFileSync(p, appendLine(readFileSync(p, 'utf8'), line));
+};
+
+/** Adds the extensions of `exts` to `codeExtensions` in the config of `dir`, and a tracked file for each, so the config stays valid. */
+const withExtensions = (dir, exts) => {
+  const p = join(dir, 'map.config.json');
+  const cfg = JSON.parse(readFileSync(p, 'utf8'));
+  writeFileSync(p, `${JSON.stringify({ ...cfg, codeExtensions: [...cfg.codeExtensions, ...exts] }, null, 2)}\n`);
+  mkdirSync(join(dir, 'tools'), { recursive: true });
+  for (const e of exts) {
+    writeFileSync(join(dir, 'tools', `build.${e}`), '// a tracked file\n');
+    gitIn(dir, 'add', '-N', `tools/build.${e}`);
+  }
+  return dir;
+};
+
+const coreOf = (dir) => readLf(join(dir, 'docs/map/core.md'));
+/** The one line of the core page that the case added: it names `src/extra.ts`. */
+const extraLine = (dir) => coreOf(dir).split('\n').find((l) => l.includes('`src/extra.ts`'));
+
+test('6. a config with an explicit "formatVersion": 1 is upgraded to 2, and the check then passes', () => {
+  needFile('scripts/map-upgrade.mjs');
+  const dir = withVersion(v1Repo(), 1);
+  const versionOf = () => JSON.parse(readFileSync(join(dir, 'map.config.json'), 'utf8')).formatVersion;
+  // The scope first: the config holds the key, or the case proves nothing about a key that is present.
+  assert.equal(versionOf(), 1, 'the config must say "formatVersion": 1');
+  const r = run([UPGRADE], dir);
+  assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
+  assert.equal(versionOf(), 2, `the new version must win over the old "formatVersion": 1\n${out1500(r)}`);
+  assertVersion2Files(dir, '\n');
+  const c = run([CHECK], dir);
+  assert.equal(verdicts(c.out), expected(), `the check must print one PASS line for each of MAP1 to MAP8\n${out1500(c)}`);
+  assert.equal(c.status, 0, `the check must exit 0 on the upgraded map\n${out1500(c)}`);
+});
+
+// Colon tokens in backticks that are no line reference. A host map holds them, and an upgrade keeps every sentence.
+const NOT_LINE_REFS = ['`example.com:3000`', '`127.0.0.1:3000`', '`db.internal:5432`', '`1.5:1`', '`config.port:3000`', '`/api/runs.json:1`', '`node.js:18`'];
+
+test('7a. an upgrade keeps seven colon tokens that are no line reference, and strips x.mjs:12-30 on the same line, when mjs is a code extension', () => {
+  needFile('scripts/map-upgrade.mjs');
+  const dir = withExtensions(v1Repo(), ['mjs']);
+  // The line holds a lone quote (`page's`), as a real map line may.
+  const text = (last) => `- \`src/extra.ts\` — Lists the page's links ${NOT_LINE_REFS.join(', ')} and ${last}.`;
+  addMapLine(dir, text('`x.mjs:12-30`'));
+  // The scope first: the line holds all seven tokens before the run, or "kept" says nothing.
+  assert.deepEqual(NOT_LINE_REFS.filter((f) => !extraLine(dir)?.includes(f)), [], 'the version 1 map must hold all seven tokens');
+  const r = run([UPGRADE], dir);
+  assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
+  const line = extraLine(dir);
+  assert.ok(line, 'the added line must survive the upgrade');
+  assert.deepEqual(NOT_LINE_REFS.filter((f) => !line.includes(f)), [], `the upgrade changed these tokens, and it must keep them\n${line}`);
+  assert.equal(line, text('`x.mjs`'), 'the line must lose only the line reference of x.mjs');
+  assert.equal(coreOf(dir), lf(appendLine(readFileSync(join(FIXTURE, 'docs/map/core.md'), 'utf8'), text('`x.mjs`'))), 'the rest of the page must equal the version 2 page');
+});
+
+test('7b. the code extensions of the config decide: with ["ts"], x.mjs:12-30 stays and y.ts:5 goes', () => {
+  needFile('scripts/map-upgrade.mjs');
+  const dir = v1Repo();
+  addMapLine(dir, '- `src/extra.ts` — Reads `x.mjs:12-30` and `y.ts:5`.');
+  const r = run([UPGRADE], dir);
+  assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
+  assert.equal(extraLine(dir), '- `src/extra.ts` — Reads `x.mjs:12-30` and `y.ts`.', 'mjs is no code extension in this config, so x.mjs:12-30 must stay');
+});
+
+// One run reaches the end state, and a second run changes no file.
+for (const [id, from, to] of [
+  ['8a', '- `src/extra.ts` — Reads it (`:1`, `:2`). The next sentence stays.', '- `src/extra.ts` — Reads it. The next sentence stays.'],
+  ['8b', '- `src/extra.ts` — Holds the rows (`rows`, `:1`, `:2`). The next sentence stays.', '- `src/extra.ts` — Holds the rows (`rows`). The next sentence stays.'],
+]) {
+  test(`${id}. a parenthesis of two line references (${id === '8a' ? 'only' : 'after a name'}): one run reaches the end state, and a second run changes no file`, () => {
+    needFile('scripts/map-upgrade.mjs');
+    const dir = v1Repo();
+    addMapLine(dir, from);
+    const first = run([UPGRADE], dir);
+    assert.equal(first.status, 0, `the first run must exit 0\n${out1500(first)}`);
+    assert.equal(extraLine(dir), to, 'one run must reach the end state');
+    const once = snapshot(dir);
+    const second = run([UPGRADE], dir);
+    assert.equal(second.status, 0, `the second run must exit 0\n${out1500(second)}`);
+    assert.ok(same(once, snapshot(dir)), 'the second run must write no file, add none and remove none');
+  });
+}
+
+// A config that is no JSON object is refused before any write.
+for (const [what, text] of [['[]', '[]'], ['null', 'null'], ['a number', '3'], ['a string', '"x"']]) {
+  test(`9. a config of ${what} is refused: the upgrade exits non-zero, says so, and writes nothing`, () => {
+    needFile('scripts/map-upgrade.mjs');
+    const dir = v1Repo();
+    writeFileSync(join(dir, 'map.config.json'), `${text}\n`);
+    const before = snapshot(dir);
+    const r = run([UPGRADE], dir);
+    assert.equal(r.signal, null, `the command died with a signal: ${r.signal}`);
+    assert.notEqual(r.status, 0, `the upgrade must exit non-zero on a config of ${what}\n${out1500(r)}`);
+    assert.match(r.out, /map\.config\.json/, `the message must name map.config.json\n${out1500(r)}`);
+    assert.match(r.out, /object/i, `the message must say that the config is a JSON object\n${out1500(r)}`);
+    assert.ok(same(before, snapshot(dir)), 'a refusal must write nothing, neither a map file nor the config');
+  });
+}
