@@ -413,8 +413,14 @@ class ClaudeMdFlag(Env):
     The seam the builder provides: the tool reads no changed-file list today. Read the PR's own paths from git, in the merge
     worktree and before host.merge: `git diff --name-only <base_ref>...<sha>` (three dots: the PR's changes, not the base's).
     Not `gh pr view --json files`: FakeHost has no such read, so these cases would stay red. Not the merge commit's first
-    parent: under the rebase method it sees one commit. Fixtures are real commits on feat, so no stub is needed.
-    The cases pin the printed lines only. Paths are literal "/" strings: git prints "/" on Windows too."""
+    parent: under the rebase method it sees one commit. Fixtures are real commits on feat, so most cases need no stub.
+    The cases pin the printed lines only. Paths are literal "/" strings: git prints "/" on Windows too.
+
+    Review round 1 (F1 rename, F2 timeout, F3 could-not-run, quoted non-ASCII path, case):
+    - A rename is a change to both paths: the old path is flagged too, and git's default rename detection hides it.
+    - The timeout seam: `merge.sh` is patched for the one `git diff` call whose args hold a `...` range (the PR-paths
+      read). Any other call goes to the real `sh`. A case that never reaches that call fails, so a changed read cannot pass blind.
+    - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it."""
 
     def line(self, path):
         return f"merge: #7 changes {path}, a rule file every session loads."
@@ -490,6 +496,86 @@ class ClaudeMdFlag(Env):
         self.assertEqual(len(self.host.waits), 2, out)  # the head and the claim, as for any PR: no wait added
         self.assertFalse(self.lock_ref(), out)
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
+
+    def pr_renames(self, moves):
+        """Main holds each old path first. The PR merges main, then renames each (old, new). Same text, so git sees a rename."""
+        for old, _ in moves:
+            self.on_main(old, "".join(f"rule line {i}\n" for i in range(8)))
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
+        for old, new in moves:
+            sh(o, "git", "mv", old, new)
+        sh(o, "git", "commit", "-qm", "pr: move"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_rename_out_of_output_styles_flags_the_old_path(self):  # F1: --name-only names the new path only
+        self.pr_renames([("output-styles/x.md", "docs/x.md")])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "output-styles/x.md")  # docs/x.md is no rule file
+
+    def test_a_rename_into_claude_md_flags_the_new_path(self):  # guard: green on c2c6b82
+        self.pr_renames([("docs/y.md", "CLAUDE.md")])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")  # docs/y.md is no rule file
+
+    def test_a_rename_away_from_claude_md_flags_the_old_path(self):  # F1: a moved CLAUDE.md
+        self.pr_renames([("CLAUDE.md", "docs/c.md")])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")
+
+    def unreadable(self, fail):
+        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
+        real_sh, seen = merge.sh, []
+        def stub(args, cwd=None, input=None, env=None):
+            if "diff" in args and any("..." in a for a in args):
+                seen.append(args)
+                return fail(args)
+            return real_sh(args, cwd=cwd, input=input, env=env)
+        patch = unittest.mock.patch.object(merge, "sh", stub)
+        patch.start(); self.addCleanup(patch.stop)
+        return seen
+
+    def assert_check_could_not_run(self, rc, out, seen):
+        """The merge landed (rc 0, merged, lock free) and one line after the merged-as line says the check could not run."""
+        self.assertTrue(seen, "the PR-paths read never ran, so the stub did nothing")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertFalse(self.lock_ref(), out)
+        self.assertEqual(self.flags(out), [], out)  # an unread diff names no file
+        lines = out.splitlines()
+        said = [i for i, l in enumerate(lines) if l.startswith("merge: #7 ") and "the rule-file check could not run" in l]
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertEqual((len(said), len(merged_at)), (1, 1), out)
+        self.assertGreater(said[0], merged_at[0], out)
+
+    def test_a_timeout_on_the_changed_paths_read_still_merges_and_says_the_check_could_not_run(self):  # F2
+        self.pr_writes({"CLAUDE.md": "rules\n"})
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.unreadable(slow)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_check_could_not_run(rc, out, seen)
+
+    def test_a_failed_changed_paths_read_still_merges_and_says_the_check_could_not_run(self):  # F3; guard: green on c2c6b82
+        self.pr_writes({"CLAUDE.md": "rules\n"})
+        seen = self.unreadable(lambda args: (128, "fatal: bad revision"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_check_could_not_run(rc, out, seen)
+
+    def test_a_non_ascii_name_under_output_styles_is_flagged_with_its_real_name(self):  # git quotes it: "output-styles/caf\303\251.md"
+        self.pr_writes({"output-styles/café.md": "a\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "output-styles/café.md")
+
+    def test_a_lower_case_root_claude_md_is_flagged(self):  # Windows loads claude.md as CLAUDE.md
+        self.pr_writes({"claude.md": "rules\n", "docs/claude.md": "x\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "claude.md")  # docs/claude.md is no rule file
+
+    def test_the_other_rule_file_paths_match_without_case_too(self):
+        self.pr_writes({".Claude/claude.md": "rules\n", "Output-Styles/A.md": "a\n", "notes/Output-Styles/b.md": "b\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
 
 class Race(Env):
     def test_two_runs_one_lock(self):
