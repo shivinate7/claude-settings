@@ -159,10 +159,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
-| `install-hooks-whole` | The installer writes each file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
+| `install-hooks-whole` | The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
 | `liveness-read-is-platform-specific-and-unreadable-is-not-death` | `hooks/guard.py`'s liveness oracle (`_process_start_ms`, `session_is_live`, `worktree_live_session`) folded two different facts into one answer. | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
 | `merge-net-retry` | Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times." | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
 | `merge-notice-checks-the-report` | CLAUDE.md: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." And: trust a guard only once it goes red on the defect it guards. | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
+| `merge-reinstalls-from-main` | Owner, 2026-10-11, owner, 2026-10-15 (the pinned checkout), and owner, 2026-10-15 17:40 CDT (the install switch): | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `owner-feedback-inbox` | Owner ruling, 2026-10-13, from an interview in the claude-settings audit session. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
 | `plain-diff-mod-limits` | The mod sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `prune-cases-skip-without-symlink-privilege` | Prune cases skip when this account cannot make a real symlink | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
@@ -207,7 +208,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
-| `merge-reinstalls-from-main` | `install.sh` links the shipped skills, hooks and tools into `~/.claude`. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
 | `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `playwright-browsers-path` | No. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
@@ -325,6 +325,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-log-tool-field-tab` | The reader reads `session` as field 6, and `matched` as field 5 plus the later fields. | [`debts/guard-log-tool-field-tab.md`](../debts/guard-log-tool-field-tab.md) |
 | `guard-lone-quote-overdeny` | Commit-message rules read heredoc bodies by both readings. | [`debts/guard-lone-quote-overdeny.md`](../debts/guard-lone-quote-overdeny.md) |
 | `guard-msg-blank-segment-split` | The guard blanks the message value of a commit or a pull request, so prose that names a shell reads as text. | [`debts/guard-msg-blank-segment-split.md`](../debts/guard-msg-blank-segment-split.md) |
+| `guard-old-install-mixes-once` | An install made before the switch rule copies guard files one at a time into `~/.claude/hooks`. | [`debts/guard-old-install-mixes-once.md`](../debts/guard-old-install-mixes-once.md) |
+| `guard-realpath-after-flip` | In link mode, `hooks/guard.py` sets `_HERE` from `realpath(__file__)`. | [`debts/guard-realpath-after-flip.md`](../debts/guard-realpath-after-flip.md) |
 | `guard-redirect-paren-heredoc` | These hide a refused command, and main allows them too: a leading redirect before the command word (`2>/dev/null pkill foo`), and `)#` that opens no comment. | [`debts/guard-redirect-paren-heredoc.md`](../debts/guard-redirect-paren-heredoc.md) |
 | `guard-shell-wrap-discard-unread` | A discard inside `sh -c`, `eval`, or a `$(…)` substitution is not read. | [`debts/guard-shell-wrap-discard-unread.md`](../debts/guard-shell-wrap-discard-unread.md) |
 | `guard-split-heredocs-here-string` | `guard_core._split_heredocs` reads a quoted or commented `<<X`, or a here-string `<<<word`, as a real heredoc. | [`debts/guard-split-heredocs-here-string.md`](../debts/guard-split-heredocs-here-string.md) |
@@ -362,14 +364,16 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-unreadable-drops-ids` | An unreadable inbox drops the open ids from the post-compaction note. | [`debts/inbox-unreadable-drops-ids.md`](../debts/inbox-unreadable-drops-ids.md) |
 | `index-row-drop-no-finding` | The records page can lose a row with no finding in two cases. | [`debts/index-row-drop-no-finding.md`](../debts/index-row-drop-no-finding.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
+| `install-early-exit-unlogged` | Refusals and lock timeouts exit before the start line. | [`debts/install-early-exit-unlogged.md`](../debts/install-early-exit-unlogged.md) |
 | `install-family-list-by-hand` | The guard's module list `_FAMILY_MODULES` is kept by hand. | [`debts/install-family-list-by-hand.md`](../debts/install-family-list-by-hand.md) |
 | `install-hook-path-from-checkout` | The post-merge git hook runs the installer from the checkout that ran the pull. | [`debts/install-hook-path-from-checkout.md`](../debts/install-hook-path-from-checkout.md) |
+| `install-lock-stale-by-age` | The install lock is a file made with noclobber. | [`debts/install-lock-stale-by-age.md`](../debts/install-lock-stale-by-age.md) |
+| `install-lock-trap-no-id` | The install lock file holds its holder's id. | [`debts/install-lock-trap-no-id.md`](../debts/install-lock-trap-no-id.md) |
 | `install-ps1-counts-store-alias` | A machine whose only python is the Store python gets the no-python remedy on every gated call. | [`debts/install-ps1-counts-store-alias.md`](../debts/install-ps1-counts-store-alias.md) |
 | `install-reader-can-die-silent` | `HookReader` counts each read fault, but two lines sit outside its try: the file-name read and the body index. | [`debts/install-reader-can-die-silent.md`](../debts/install-reader-can-die-silent.md) |
 | `install-sh-no-python-warning` | A Mac without `python3` gets no warning from `install.sh`. | [`debts/install-sh-no-python-warning.md`](../debts/install-sh-no-python-warning.md) |
 | `install-skill-fail-exits-0` | If `Install-Dir` cannot replace a skill folder, the run does not retry it and exits 0. | [`debts/install-skill-fail-exits-0.md`](../debts/install-skill-fail-exits-0.md) |
 | `install-stamp-line-unpinned` | Tests pin each stamper only to fixture copies. | [`debts/install-stamp-line-unpinned.md`](../debts/install-stamp-line-unpinned.md) |
-| `install-window-guard-refusals` | An install replaces the hook files one by one. | [`debts/install-window-guard-refusals.md`](../debts/install-window-guard-refusals.md) |
 | `install-worktree-check-gaps` | Four gaps, found in review: | [`debts/install-worktree-check-gaps.md`](../debts/install-worktree-check-gaps.md) |
 | `install-writes-in-place` | The `CLAUDE.md` pointer, `settings.json` in `install.sh`, the skills folder, the install log and the marker are written in place. | [`debts/install-writes-in-place.md`](../debts/install-writes-in-place.md) |
 | `interp-keep-body-unpinned` | The guard keeps the heredoc body under inspection for `ts-node -`, `babel-node -`, `git-bash.exe -c` and `node.cmd -`. | [`debts/interp-keep-body-unpinned.md`](../debts/interp-keep-body-unpinned.md) |
@@ -390,6 +394,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-slug-piped-body-unread` | A piped body, such as `echo ... \| gh pr create -F -`, is not read. | [`debts/lane-slug-piped-body-unread.md`](../debts/lane-slug-piped-body-unread.md) |
 | `lane-slug-tag-messages-unchecked` | Tag messages are out of scope. | [`debts/lane-slug-tag-messages-unchecked.md`](../debts/lane-slug-tag-messages-unchecked.md) |
 | `lane-slug-tilde-fence-refused` | A tilde fence (`~~~`) is not blanked. | [`debts/lane-slug-tilde-fence-refused.md`](../debts/lane-slug-tilde-fence-refused.md) |
+| `live-pin-first-move-gap` | The first move from a plain `<clone>-live` directory renames that directory to `<clone>-live-<commit>`. | [`debts/live-pin-first-move-gap.md`](../debts/live-pin-first-move-gap.md) |
 | `liveness-windows-arm-unproven` | The repository has no Windows machine to run the Windows arm on. | [`debts/liveness-windows-arm-unproven.md`](../debts/liveness-windows-arm-unproven.md) |
 | `local-time-hard-coded-dst` | The rule is the US rule in force since 2007, and it is coded in `hooks/local_time.py`. | [`debts/local-time-hard-coded-dst.md`](../debts/local-time-hard-coded-dst.md) |
 | `local-time-line-cost-unmeasured` | The token cost of one line per prompt is unmeasured. | [`debts/local-time-line-cost-unmeasured.md`](../debts/local-time-line-cost-unmeasured.md) |
@@ -433,6 +438,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
 | `own-tree-reason-names-remover` | The hook's row for the ending agent's own tree says "left for the delayed remover", and comments name lane wt-reap-delay. | [`debts/own-tree-reason-names-remover.md`](../debts/own-tree-reason-names-remover.md) |
 | `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, a standalone run of the check has no generator, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
+| `pin-switch-in-place-mix` | A host can have no symlink rights. | [`debts/pin-switch-in-place-mix.md`](../debts/pin-switch-in-place-mix.md) |
 | `plain-diff-4mib-unconfirmed` | Output over the host's limit is cut, and the header says "Diff truncated". | [`debts/plain-diff-4mib-unconfirmed.md`](../debts/plain-diff-4mib-unconfirmed.md) |
 | `plain-diff-desktop-untested` | The pane draw, and the turn-text match against a real `$.session.messages()`, are untested in the desktop app. | [`debts/plain-diff-desktop-untested.md`](../debts/plain-diff-desktop-untested.md) |
 | `plain-diff-env-innocent-name` | A `.env` body under an innocent name, such as `notes.txt`, passes the path test. | [`debts/plain-diff-env-innocent-name.md`](../debts/plain-diff-env-innocent-name.md) |
