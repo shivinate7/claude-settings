@@ -294,7 +294,7 @@ function New-WtFixture([string]$Root) {
     $sk = Join-Path $main 'skills\sample-skill'
     New-Item -ItemType Directory -Force -Path $sk | Out-Null
     Set-Content -Path (Join-Path $sk 'SKILL.md') -Value 'v1' -Encoding utf8
-    git -C $main init -q | Out-Null
+    git -C $main init -q -b main | Out-Null
     git -C $main add -A | Out-Null
     git -C $main -c user.email=t@example.com -c user.name=t commit -q -m init | Out-Null
     git -C $main worktree add -q --detach $wt | Out-Null
@@ -370,14 +370,298 @@ try {
     } else {
         $kwRes  = Invoke-InstallProc (Join-Path $kwFix.Main 'install.ps1') $KwCfg $KwHome $KwLogs
         $kwPtr  = Join-Path $KwCfg 'CLAUDE.md'
-        $kwWant = '@' + ($kwFix.Main -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+        $kwWant = '@' + (($kwFix.Main + '-live') -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
         $kwGot  = if (Test-Path -LiteralPath $kwPtr) { [IO.File]::ReadAllText($kwPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
         Check "keepwt1: main clone of a repo with a linked worktree exits 0" ($kwRes.Exit -eq 0)
-        Check "keepwt1: that run points the config CLAUDE.md at the main clone" ($kwGot -eq $kwWant)
+        Check "keepwt1: that run points the config CLAUDE.md at the pinned checkout <clone>-live" ($kwGot -eq $kwWant)
         if ($kwRes.Exit -ne 0) { Write-Host "  keepwt1 output: $($kwRes.Text)" }
     }
 } finally {
     Remove-Item -Recurse -Force $KwRoot -ErrorAction SilentlyContinue
+}
+# ---- pinnedps1 / pinnedwt1: the pinned checkout at <clone>-live --------------------------------
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the links in ~\.claude point at one pinned
+# checkout, a worktree of the clone on a detached HEAD at main's commit, at the sibling path
+# <clone>-live. pinnedps1: with none present, install.ps1 run from the clone makes it at main's
+# commit, and the config CLAUDE.md pointer names it. pinnedwt1: the linked-worktree guard lets
+# install.ps1 run from that path, and from no other linked worktree (refusewt1 keeps that side).
+# Red now: the installer makes no pinned checkout, points the pointer at the clone, and refuses
+# every linked worktree. Each run is a child host with a fake USERPROFILE, a fake CLAUDE_CONFIG_DIR
+# and the throwaway PATH key, as envkey1 does.
+
+# New-PinFixture ROOT: a git clone at ROOT\clone on branch main, with one commit that holds
+# install.ps1, CLAUDE.md, settings.json, landed-dirs.txt and one skill. Returns the clone path.
+function New-PinFixture([string]$Root) {
+    $main = Join-Path $Root 'clone'
+    New-Item -ItemType Directory -Force -Path $main | Out-Null
+    Set-Content -Path (Join-Path $main 'CLAUDE.md') -Value '# pinned fixture content' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'landed-dirs.txt') -Value 'skills' -Encoding utf8
+    $sk = Join-Path $main 'skills\sample-skill'
+    New-Item -ItemType Directory -Force -Path $sk | Out-Null
+    Set-Content -Path (Join-Path $sk 'SKILL.md') -Value 'v1' -Encoding utf8
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $main 'install.ps1')
+    git -C $main init -q -b main | Out-Null
+    git -C $main add -A | Out-Null
+    git -C $main -c user.email=t@example.com -c user.name=t commit -q -m init | Out-Null
+    return $main
+}
+
+$PnRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinnedps1-" + [guid]::NewGuid().ToString('N'))
+$PnHome = Join-Path $PnRoot 'home'
+$PnCfg  = Join-Path $PnRoot 'claude'
+$PnLogs = Join-Path $PnRoot 'logs'
+New-Item -ItemType Directory -Force -Path $PnHome, $PnLogs | Out-Null
+try {
+    $pnMain = New-PinFixture $PnRoot
+    $pnPin  = $pnMain + '-live'
+    $pnHead = (& git -C $pnMain rev-parse HEAD).Trim()
+    $pnRes  = Invoke-InstallProc (Join-Path $pnMain 'install.ps1') $PnCfg $PnHome $PnLogs
+    $pnWant = '@' + ($pnPin -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+    $pnPtr  = Join-Path $PnCfg 'CLAUDE.md'
+    $pnGot  = if (Test-Path -LiteralPath $pnPtr) { [IO.File]::ReadAllText($pnPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
+    $pnHere = Test-Path -LiteralPath $pnPin
+    $pnAt   = if ($pnHere) { (& git -C $pnPin rev-parse HEAD).Trim() } else { '' }
+    $pnRef  = if ($pnHere) { (& git -C $pnPin rev-parse --symbolic-full-name HEAD).Trim() } else { '' }
+    Check "pinnedps1: install.ps1 run from the clone exits 0" ($pnRes.Exit -eq 0)
+    Check "pinnedps1: it makes a pinned checkout at <clone>-live" $pnHere
+    Check "pinnedps1: the pinned checkout is at main's commit" ($pnAt -eq $pnHead)
+    Check "pinnedps1: the pinned checkout is on a detached HEAD" ($pnRef -eq 'HEAD')
+    Check "pinnedps1: the config CLAUDE.md pointer names the pinned checkout" ($pnGot -eq $pnWant)
+    if ($pnRes.Exit -ne 0) { Write-Host "  pinnedps1 output: $($pnRes.Text)" }
+} finally {
+    Remove-Item -Recurse -Force $PnRoot -ErrorAction SilentlyContinue
+}
+
+$PwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinnedwt-" + [guid]::NewGuid().ToString('N'))
+$PwHome = Join-Path $PwRoot 'home'
+$PwCfg  = Join-Path $PwRoot 'claude'
+$PwLogs = Join-Path $PwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $PwHome, $PwLogs | Out-Null
+try {
+    $pwMain = New-PinFixture $PwRoot
+    $pwPin  = $pwMain + '-live'
+    git -C $pwMain worktree add -q --detach $pwPin | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAIL: pinnedwt1 fixture: git worktree add failed"; $Failed++
+    } else {
+        $pwRes  = Invoke-InstallProc (Join-Path $pwPin 'install.ps1') $PwCfg $PwHome $PwLogs
+        $pwWant = '@' + ($pwPin -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+        $pwPtr  = Join-Path $PwCfg 'CLAUDE.md'
+        $pwGot  = if (Test-Path -LiteralPath $pwPtr) { [IO.File]::ReadAllText($pwPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
+        Check "pinnedwt1: install.ps1 run from <clone>-live is not refused and exits 0" ($pwRes.Exit -eq 0)
+        Check "pinnedwt1: that run points the config CLAUDE.md at the pinned checkout" ($pwGot -eq $pwWant)
+        if ($pwRes.Exit -ne 0) { Write-Host "  pinnedwt1 output: $($pwRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $PwRoot -ErrorAction SilentlyContinue
+}
+
+# ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main). install.ps1 allows a linked worktree only at
+# <clone>-live AND detached at the clone's local main commit. pinlivewt1: a -live worktree on a lane
+# branch is refused. pinlivewt2: a -live worktree detached at a commit that is not main is refused.
+# pinlivehook1: run from the pin, the post-merge hook still lands in the clone's .git\hooks. Only copy
+# mode calls Install-PostMergeHook, so the case forces it and checks the settings.json copy first.
+# pinlivestale1: a -live folder deleted but still registered; the failure line carries git's own
+# message or names the stale registration. pinnedwt1 keeps detached-at-main passing.
+
+# Set-PinLivePointer CFG TARGET: the config CLAUDE.md pointer an earlier install would have left.
+function Set-PinLivePointer([string]$Cfg, [string]$Target) {
+    New-Item -ItemType Directory -Force -Path $Cfg | Out-Null
+    $ptr = '@' + ($Target -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+    [IO.File]::WriteAllText((Join-Path $Cfg 'CLAUDE.md'), $ptr, [Text.UTF8Encoding]::new($false))
+}
+
+# Get-PinLiveListing DIR: every path under DIR, sorted, as one string. Compared before and after a run.
+function Get-PinLiveListing([string]$Dir) {
+    (Get-ChildItem -LiteralPath $Dir -Recurse -Force | ForEach-Object { $_.FullName } | Sort-Object) -join "`n"
+}
+
+$LwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinlivewt1-" + [guid]::NewGuid().ToString('N'))
+$LwHome = Join-Path $LwRoot 'home'
+$LwCfg  = Join-Path $LwRoot 'claude'
+$LwLogs = Join-Path $LwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $LwHome, $LwLogs | Out-Null
+try {
+    $lwMain = New-PinFixture $LwRoot
+    $lwPin  = $lwMain + '-live'
+    git -C $lwMain worktree add -q -b lane $lwPin | Out-Null
+    $lwBranch = (& git -C $lwPin symbolic-ref -q --short HEAD)
+    if ($LASTEXITCODE -ne 0 -or $lwBranch -ne 'lane') {
+        Write-Host "FAIL: pinlivewt1 fixture: the pinned path is not on branch lane"; $Failed++
+    } else {
+        Set-PinLivePointer $LwCfg $lwMain
+        $lwPtr  = Join-Path $LwCfg 'CLAUDE.md'
+        $lwWas  = [IO.File]::ReadAllText($lwPtr)
+        $lwSnap = Get-PinLiveListing $LwCfg
+        $lwRes  = Invoke-InstallProc (Join-Path $lwPin 'install.ps1') $LwCfg $LwHome $LwLogs
+        $lwNow  = [IO.File]::ReadAllText($lwPtr)
+        Check "pinlivewt1: install.ps1 run from <clone>-live on a lane branch exits non-zero" ($lwRes.Exit -ne 0)
+        Check "pinlivewt1: the refused run leaves the config CLAUDE.md pointer unchanged" ($lwNow -eq $lwWas)
+        Check "pinlivewt1: the refused run writes nothing under the config dir" ((Get-PinLiveListing $LwCfg) -eq $lwSnap)
+        if ($lwRes.Exit -eq 0) { Write-Host "  pinlivewt1 output: $($lwRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $LwRoot -ErrorAction SilentlyContinue
+}
+
+$LoRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinlivewt2-" + [guid]::NewGuid().ToString('N'))
+$LoHome = Join-Path $LoRoot 'home'
+$LoCfg  = Join-Path $LoRoot 'claude'
+$LoLogs = Join-Path $LoRoot 'logs'
+New-Item -ItemType Directory -Force -Path $LoHome, $LoLogs | Out-Null
+try {
+    $loMain = New-PinFixture $LoRoot
+    $loPin  = $loMain + '-live'
+    git -C $loMain worktree add -q --detach $loPin | Out-Null
+    # The pin stays at the old main; main then moves on, as it does between a merge and the move.
+    Add-Content -LiteralPath (Join-Path $loMain 'CLAUDE.md') -Value 'second' -Encoding ascii
+    git -C $loMain add -A | Out-Null
+    git -C $loMain -c user.email=t@example.com -c user.name=t commit -q -m second | Out-Null
+    $loAt     = (& git -C $loPin rev-parse HEAD).Trim()
+    $loMainAt = (& git -C $loMain rev-parse refs/heads/main).Trim()
+    if ($LASTEXITCODE -ne 0 -or $loAt -eq $loMainAt) {
+        Write-Host "FAIL: pinlivewt2 fixture: the pinned checkout did not stay behind main"; $Failed++
+    } else {
+        Set-PinLivePointer $LoCfg $loMain
+        $loPtr  = Join-Path $LoCfg 'CLAUDE.md'
+        $loWas  = [IO.File]::ReadAllText($loPtr)
+        $loSnap = Get-PinLiveListing $LoCfg
+        $loRes  = Invoke-InstallProc (Join-Path $loPin 'install.ps1') $LoCfg $LoHome $LoLogs
+        $loNow  = [IO.File]::ReadAllText($loPtr)
+        Check "pinlivewt2: install.ps1 run from <clone>-live detached off main exits non-zero" ($loRes.Exit -ne 0)
+        Check "pinlivewt2: the refused run leaves the config CLAUDE.md pointer unchanged" ($loNow -eq $loWas)
+        Check "pinlivewt2: the refused run writes nothing under the config dir" ((Get-PinLiveListing $LoCfg) -eq $loSnap)
+        if ($loRes.Exit -eq 0) { Write-Host "  pinlivewt2 output: $($loRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $LoRoot -ErrorAction SilentlyContinue
+}
+
+$LhRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinlivehook1-" + [guid]::NewGuid().ToString('N'))
+$LhHome = Join-Path $LhRoot 'home'
+$LhCfg  = Join-Path $LhRoot 'claude'
+$LhLogs = Join-Path $LhRoot 'logs'
+New-Item -ItemType Directory -Force -Path $LhHome, $LhLogs | Out-Null
+try {
+    $lhMain = New-PinFixture $LhRoot
+    $lhPin  = $lhMain + '-live'
+    git -C $lhMain worktree add -q --detach $lhPin | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAIL: pinlivehook1 fixture: git worktree add failed"; $Failed++
+    } else {
+        $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+        try { $lhRes = Invoke-InstallProc (Join-Path $lhPin 'install.ps1') $LhCfg $LhHome $LhLogs }
+        finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+        $lhSet  = Join-Path $LhCfg 'settings.json'
+        $lhHook = Join-Path $lhMain '.git\hooks\post-merge'
+        $lhGot  = if (Test-Path -LiteralPath $lhHook) { [IO.File]::ReadAllText($lhHook) } else { '' }
+        Check "pinlivehook1 fixture: settings.json is a copy, so copy mode ran" ((Test-Path -LiteralPath $lhSet) -and -not (Test-ReparsePoint $lhSet))
+        Check "pinlivehook1: install.ps1 run from <clone>-live exits 0" ($lhRes.Exit -eq 0)
+        Check "pinlivehook1: the post-merge hook lands in the clone's .git\hooks" ($lhGot.Contains('# claude-settings post-merge hook'))
+        if ($lhRes.Exit -ne 0) { Write-Host "  pinlivehook1 output: $($lhRes.Text)" }
+    }
+} finally {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $LhRoot -ErrorAction SilentlyContinue
+}
+
+$LsRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinlivestale1-" + [guid]::NewGuid().ToString('N'))
+$LsHome = Join-Path $LsRoot 'home'
+$LsCfg  = Join-Path $LsRoot 'claude'
+$LsLogs = Join-Path $LsRoot 'logs'
+New-Item -ItemType Directory -Force -Path $LsHome, $LsLogs | Out-Null
+try {
+    $lsMain = New-PinFixture $LsRoot
+    $lsPin  = $lsMain + '-live'
+    git -C $lsMain worktree add -q --detach $lsPin | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAIL: pinlivestale1 fixture: git worktree add failed"; $Failed++
+    } else {
+        Remove-Item -Recurse -Force $lsPin
+        $lsListed = @(& git -C $lsMain worktree list --porcelain) -match 'clone-live$'
+        if (-not $lsListed) {
+            Write-Host "FAIL: pinlivestale1 fixture: git no longer lists the stale pinned checkout"; $Failed++
+        } else {
+            $lsRes = Invoke-InstallProc (Join-Path $lsMain 'install.ps1') $LsCfg $LsHome $LsLogs
+            Check "pinlivestale1: install.ps1 with a deleted but still registered <clone>-live exits non-zero" ($lsRes.Exit -ne 0)
+            Check "pinlivestale1: the failure line carries git's message or names the stale registration" ($lsRes.Text -match 'registered|prune')
+            if ($lsRes.Exit -eq 0) { Write-Host "  pinlivestale1 output: $($lsRes.Text)" }
+        }
+    }
+} finally {
+    Remove-Item -Recurse -Force $LsRoot -ErrorAction SilentlyContinue
+}
+
+# ---- linkfallback1: a refused New-Item link falls back to mklink, and the link is made, not a copy ----
+# Measured 2026-10-15 15:20 CDT on the owner's machine, Windows PowerShell 5.1, not elevated: a
+# New-Item -ItemType SymbolicLink throws UnauthorizedAccessException (FullyQualifiedErrorId
+# NewItemSymbolicLinkElevationRequired), and `cmd /c mklink` makes a SymbolicLink. This case needs
+# no admin and no product seam. It loads New-Link from install.ps1 and shadows New-Item in this
+# process, so the link call is refused every time, as it is for an account without the symlink
+# right. Every other New-Item call still reaches the cmdlet. Install-File copies only when New-Link
+# throws, so a link here is the link path. New-Link is the one home for every symlink try.
+# Red now: New-Link throws on the refused call, so Install-File would copy. A probe skips the case
+# when mklink cannot make a symlink on this account; that is unknown, never red.
+$LfTmp  = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-linkfallback-" + [guid]::NewGuid().ToString('N'))
+$lfDDst = Join-Path $LfTmp 'dest-dir'
+$lfPrevForce = $env:CLAUDE_SETTINGS_FORCE_COPY
+New-Item -ItemType Directory -Force -Path $LfTmp | Out-Null
+try {
+    $lfProbeT = Join-Path $LfTmp 'probe-target.txt'
+    $lfProbeL = Join-Path $LfTmp 'probe-link.txt'
+    Set-Content -Path $lfProbeT -Value 'p' -Encoding utf8
+    cmd /c mklink "$lfProbeL" "$lfProbeT" | Out-Null
+    $lfMkExit = $LASTEXITCODE
+    $lfProbeI = Get-Item -LiteralPath $lfProbeL -Force -ErrorAction SilentlyContinue
+    $lfProbeOk = ($lfMkExit -eq 0) -and [bool]$lfProbeI -and ($lfProbeI.LinkType -eq 'SymbolicLink')
+
+    if (-not $lfProbeOk) {
+        Write-Host "SKIP: linkfallback1: mklink cannot make a symlink on this account (needs Developer Mode or elevation)"
+    } else {
+        # Load every function definition in install.ps1 this file has not defined yet. Definitions
+        # only: install.ps1's top-level code does not run, and the quiet Log above stays in place.
+        $lfAst = [System.Management.Automation.Language.Parser]::ParseInput($Source, [ref]$null, [ref]$null)
+        foreach ($lfFn in $lfAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+            if (-not (Test-Path -LiteralPath ('Function:\' + $lfFn.Name))) { Invoke-Expression $lfFn.Extent.Text }
+        }
+
+        $lfSrc  = Join-Path $LfTmp 'src-file.txt'
+        $lfDest = Join-Path $LfTmp 'dest-file.txt'
+        $lfDir  = Join-Path $LfTmp 'src-dir'
+        Set-Content -Path $lfSrc -Value 'v1' -Encoding utf8
+        New-Item -ItemType Directory -Force -Path $lfDir | Out-Null
+        $env:CLAUDE_SETTINGS_FORCE_COPY = $null   # New-Link must reach the New-Item call, not the forced-copy throw
+
+        # Refuse the link call the way the cmdlet does on a non-elevated account (measured above).
+        function New-Item {
+            if ("$args" -match 'SymbolicLink') {
+                throw [System.UnauthorizedAccessException]::new('Administrator privilege required for this operation.')
+            }
+            Microsoft.PowerShell.Management\New-Item @args
+        }
+        $lfErrF = $null
+        $lfErrD = $null
+        try { New-Link $lfDest $lfSrc } catch { $lfErrF = $_.Exception.Message }
+        try { New-Link $lfDDst $lfDir } catch { $lfErrD = $_.Exception.Message }
+        Remove-Item Function:\New-Item
+
+        $lfF = Get-Item -LiteralPath $lfDest -Force -ErrorAction SilentlyContinue
+        $lfD = Get-Item -LiteralPath $lfDDst -Force -ErrorAction SilentlyContinue
+        Check "linkfallback1: file: New-Link links when New-Item's link call is refused and mklink works" ((-not $lfErrF) -and [bool]$lfF -and ($lfF.LinkType -eq 'SymbolicLink'))
+        Check "linkfallback1: file: the link targets the source file" ([bool]$lfF -and (([string]($lfF.Target | Select-Object -First 1)) -eq $lfSrc))
+        Check "linkfallback1: directory: New-Link links the directory, not a copy (mklink /D)" ((-not $lfErrD) -and [bool]$lfD -and ($lfD.LinkType -eq 'SymbolicLink') -and $lfD.PSIsContainer)
+        if ($lfErrF) { Write-Host "  linkfallback1 file error: $lfErrF" }
+        if ($lfErrD) { Write-Host "  linkfallback1 directory error: $lfErrD" }
+    }
+} finally {
+    if (Test-Path 'Function:\New-Item') { Remove-Item Function:\New-Item }
+    $env:CLAUDE_SETTINGS_FORCE_COPY = $lfPrevForce
+    # A directory link goes by IO.Directory.Delete: a recursive delete can enter a link's target.
+    $lfDi = Get-Item -LiteralPath $lfDDst -Force -ErrorAction SilentlyContinue
+    if ($lfDi -and $lfDi.LinkType) { [IO.Directory]::Delete($lfDDst) }
+    Remove-Item -Recurse -Force $LfTmp -ErrorAction SilentlyContinue
 }
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
@@ -386,6 +670,13 @@ try {
     Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
     Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
     Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedps1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivewt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivewt2: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivehook1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------

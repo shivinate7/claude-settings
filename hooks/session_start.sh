@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
 # Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -107,8 +107,19 @@ fi
 # of the rules and the gates every session on this machine runs. A branch left checked out
 # there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
 # branch switch is a whole-tree act and another session may be working in it.
-if [ -n "$d" ] && [ -d "$d/.git" ]; then
+# `.git` is a directory in a full clone and a file in a linked worktree (the pinned `<clone>-live`).
+# A checkout detached at local main's commit counts as on main; detached anywhere else is off main.
+if [ -n "$d" ] && [ -e "$d/.git" ]; then
   pointer_branch=$(cd "$d" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ "$pointer_branch" = "HEAD" ]; then
+    pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
+    main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
+    if [ -n "$pin_head" ] && [ "$pin_head" = "$main_head" ]; then
+      pointer_branch=main
+    else
+      pointer_branch="a detached HEAD"
+    fi
+  fi
   if [ -n "$pointer_branch" ] && [ "$pointer_branch" != "main" ]; then
     printf 'claude-settings: %s is on %s, not main; global rules and hooks are that branch\n' \
       "$d" "$pointer_branch"
@@ -160,6 +171,25 @@ if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
     printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
       "$toplevel" "$default_branch"
   fi
+fi
+
+# More than AGENT_WORKTREE_LIMIT `.claude/worktrees/agent-*` worktrees: one notice with the count
+# (owner ruling 2026-10-15). Agent end and the janitor remove finished ones; this says when they
+# pile up anyway. One bounded worktree listing, counted with grep. A failed read is reported as
+# unknown, never as a count of zero.
+AGENT_WORKTREE_LIMIT=50
+aw_out=$(mktemp 2>/dev/null)
+if [ -n "$aw_out" ]; then
+  if bounded_git "$toplevel" "$aw_out" worktree list --porcelain; then
+    aw_count=$(grep -c '^worktree .*/\.claude/worktrees/agent-[^/]*$' "$aw_out" 2>/dev/null)
+    if [ -n "$aw_count" ] && [ "$aw_count" -gt "$AGENT_WORKTREE_LIMIT" ] 2>/dev/null; then
+      printf 'checkout %s: %s agent worktrees exist, more than %s; remove the finished ones\n' \
+        "$toplevel" "$aw_count" "$AGENT_WORKTREE_LIMIT"
+    fi
+  else
+    printf 'checkout %s: cannot list the worktrees; the agent worktree count is unknown\n' "$toplevel"
+  fi
+  rm -f "$aw_out" 2>/dev/null
 fi
 
 # The SessionEnd sweep is armed. The record is

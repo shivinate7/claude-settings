@@ -150,6 +150,9 @@ jobs:
       - name: Gate wrappers fixture suite
         run: python3 hooks/test_wrappers.py
 
+      - name: Session start notice suite
+        run: python3 hooks/test_session_start.py
+
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
@@ -338,8 +341,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
-    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s); 5 min leaves room for a slow runner start.
-    timeout-minutes: 5
+    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s), before install-set.test.ps1 joined. That
+    # test took 81 s to 156 s on a dev laptop, so 10 min leaves room for a slow runner.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -355,6 +359,11 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-no-gap.test.ps1
+
+      - name: Install set test, Windows PowerShell 5.1
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either, and it
@@ -489,6 +498,10 @@ jobs:
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_wrappers.py
+
+      - name: Session start notice suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_session_start.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
@@ -793,6 +806,10 @@ jobs:
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_wrappers.py
+
+      - name: Session start notice suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_session_start.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}

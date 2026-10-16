@@ -104,7 +104,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 
 | Slug | Gist | Link |
 |---|---|---|
-| `agent-end-reap-stops-what-a-finished-agent-left` | This record is step 2 of the plan in `which-start-shapes-outlive-the-agent-on-windows` (start shapes that outlive a subagent on Windows; PR #144). | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agent-end-reap-stops-what-a-finished-agent-left` | Kind: process Home: janitor/agent_end_reap.py | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `ask-steps-run-alone` | Owner ruling, 2026-10-14. | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
 | `background-needs-end-note` | Owner ruling, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
 | `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
@@ -147,6 +147,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `subagent-model-cap` | CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry records how the worker-model rule is mechanized after `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
 | `test-strategy-reset` | Owner ruling, 2026-10-14 17:14 CDT. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
+| `the-janitor-is-one-machine-wide-sweep` | Kind: process Home: janitor/sweep.py | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `unattended-sweep-stops-proven-orphans` | PR #132 added an orphaned-listener check to `janitor/sweep.py`. | [`decisions/unattended-sweep-stops-proven-orphans.md`](../decisions/unattended-sweep-stops-proven-orphans.md) |
 | `wsl-allow-list` | Owner ruling, 2026-10-13 15:20: "fixed test list is fine; surf the web for a consensus first". | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
 
@@ -155,14 +156,16 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
+| `an-agent-outside-its-home-tree-must-stop` | An agent outside its home tree must stop | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
-| `install-hooks-whole` | The installer writes each file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
+| `install-hooks-whole` | The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
 | `liveness-read-is-platform-specific-and-unreadable-is-not-death` | `hooks/guard.py`'s liveness oracle (`_process_start_ms`, `session_is_live`, `worktree_live_session`) folded two different facts into one answer. | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
 | `merge-net-retry` | Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times." | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
 | `merge-notice-checks-the-report` | CLAUDE.md: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." And: trust a guard only once it goes red on the defect it guards. | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
+| `merge-reinstalls-from-main` | Owner, 2026-10-11, owner, 2026-10-15 (the pinned checkout), and owner, 2026-10-15 17:40 CDT (the install switch): | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `owner-feedback-inbox` | Owner ruling, 2026-10-13, from an interview in the claude-settings audit session. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
 | `plain-diff-mod-limits` | The mod sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `prune-cases-skip-without-symlink-privilege` | Prune cases skip when this account cannot make a real symlink | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
@@ -184,7 +187,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `adoptions-declined-2026-09-28` | A review of public Claude Code configs and native features proposed these. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
 | `agent-worktree-discard-is-noted` | The shared-tree rule asks the owner before a discarding git command runs. | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Which way may an agent wait for a condition? | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
-| `an-agent-outside-its-home-tree-must-stop` | An agent outside its home tree must stop | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
 | `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | `hooks/test_config_watch.py`'s bypass cases handed `subprocess.run(["bash", "-c", command], ...)` a bare command name. | [`decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
 | `bash-path-breaks-only-when-the-snapshot-breaks` | The Bash tool's PATH breaks only when its shell snapshot breaks | [`decisions/bash-path-breaks-only-when-the-snapshot-breaks.md`](../decisions/bash-path-breaks-only-when-the-snapshot-breaks.md) |
 | `branch-delete-wrong-cause-was-a-filename-collision` | `decisions/branch-delete-wrong-cause-on-windows-unexplained.md` named a real defect and said its cause stayed unexplained. | [`decisions/branch-delete-wrong-cause-was-a-filename-collision.md`](../decisions/branch-delete-wrong-cause-was-a-filename-collision.md) |
@@ -207,7 +209,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
-| `merge-reinstalls-from-main` | `install.sh` links the shipped skills, hooks and tools into `~/.claude`. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
 | `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `playwright-browsers-path` | No. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
@@ -229,7 +230,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-lint-gloss-collapse` | `lint/ste_lint.py`'s `STE001` counts words per sentence. | [`decisions/ste-lint-gloss-collapse.md`](../decisions/ste-lint-gloss-collapse.md) |
 | `stop-guardrail-became-a-command-hook` | The `type: agent` Stop hook in `settings.json` judged every turn for a silent change to a decision, gate, build-order, CLAUDE.md rule, or setting. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
 | `tests-are-claims-not-law` | Tests are claims, not law | [`decisions/tests-are-claims-not-law.md`](../decisions/tests-are-claims-not-law.md) |
-| `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch when that branch holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `the-orchestrator-builds-by-verdict-not-by-line-count` | Supersedes README Decision 13, "the orchestrator and product code: judge the act, not the file". | [`decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md`](../decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md) |
 | `the-stop-guardrail-is-disarmed-until-the-command-hook-lands` | The `Stop` hook entry of `type: "agent"` is removed from `settings.json`. | [`decisions/the-stop-guardrail-is-disarmed-until-the-command-hook-lands.md`](../decisions/the-stop-guardrail-is-disarmed-until-the-command-hook-lands.md) |
 | `ux-house-rules` | Owner ruling, 2026-10-11: "build a ux folder". | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
@@ -297,6 +297,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `fb-done-unclosed-fence` | The close rule reads only the last line of a message. | [`debts/fb-done-unclosed-fence.md`](../debts/fb-done-unclosed-fence.md) |
 | `fb-inbox-append-race` | On Windows, two processes that append with `open(..., "ab")` at the same time lost 406 of 8000 lines in a stress test. | [`debts/fb-inbox-append-race.md`](../debts/fb-inbox-append-race.md) |
 | `fb-judge-marker-race` | The judge child checks that its message is still the last one, then removes the capture marker. | [`debts/fb-judge-marker-race.md`](../debts/fb-judge-marker-race.md) |
+| `finished-agent-lock-holds-tree` | A finished agent's worktree can hold the lock `claude agent agent-<id> (pid N)`, with no start time. | [`debts/finished-agent-lock-holds-tree.md`](../debts/finished-agent-lock-holds-tree.md) |
+| `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `frozen-path-ansi-c-quote` | Main allows `echo ok > $'<frozen path>'` at top level, and inside `bash -c`, `sh -c` and `eval`. | [`debts/frozen-path-ansi-c-quote.md`](../debts/frozen-path-ansi-c-quote.md) |
 | `gate-exit-7-unprobed` | With `onFailure: block`, a timeout refused the call (measured in the 2026-10-12 incident). | [`debts/gate-exit-7-unprobed.md`](../debts/gate-exit-7-unprobed.md) |
 | `gate-own-errors-fail-open` | Errors a gate catches itself fail open. | [`debts/gate-own-errors-fail-open.md`](../debts/gate-own-errors-fail-open.md) |
@@ -326,6 +328,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-log-tool-field-tab` | The reader reads `session` as field 6, and `matched` as field 5 plus the later fields. | [`debts/guard-log-tool-field-tab.md`](../debts/guard-log-tool-field-tab.md) |
 | `guard-lone-quote-overdeny` | Commit-message rules read heredoc bodies by both readings. | [`debts/guard-lone-quote-overdeny.md`](../debts/guard-lone-quote-overdeny.md) |
 | `guard-msg-blank-segment-split` | The guard blanks the message value of a commit or a pull request, so prose that names a shell reads as text. | [`debts/guard-msg-blank-segment-split.md`](../debts/guard-msg-blank-segment-split.md) |
+| `guard-old-install-mixes-once` | An install made before the switch rule copies guard files one at a time into `~/.claude/hooks`. | [`debts/guard-old-install-mixes-once.md`](../debts/guard-old-install-mixes-once.md) |
+| `guard-realpath-after-flip` | In link mode, `hooks/guard.py` sets `_HERE` from `realpath(__file__)`. | [`debts/guard-realpath-after-flip.md`](../debts/guard-realpath-after-flip.md) |
 | `guard-redirect-paren-heredoc` | These hide a refused command, and main allows them too: a leading redirect before the command word (`2>/dev/null pkill foo`), and `)#` that opens no comment. | [`debts/guard-redirect-paren-heredoc.md`](../debts/guard-redirect-paren-heredoc.md) |
 | `guard-shell-wrap-discard-unread` | A discard inside `sh -c`, `eval`, or a `$(…)` substitution is not read. | [`debts/guard-shell-wrap-discard-unread.md`](../debts/guard-shell-wrap-discard-unread.md) |
 | `guard-split-heredocs-here-string` | `guard_core._split_heredocs` reads a quoted or commented `<<X`, or a here-string `<<<word`, as a real heredoc. | [`debts/guard-split-heredocs-here-string.md`](../debts/guard-split-heredocs-here-string.md) |
@@ -353,6 +357,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `heredoc-script-then-run` | Main allows `cat <<EOF2 > x.sh`, with a body that holds a step the guard denies, followed by `sh x.sh` in the same command. | [`debts/heredoc-script-then-run.md`](../debts/heredoc-script-then-run.md) |
 | `hint-signed-commit-sha` | With `log.showSignature=true` in config, git prints a signature line before a signed commit's record. | [`debts/hint-signed-commit-sha.md`](../debts/hint-signed-commit-sha.md) |
 | `hold-own-hole-unrecorded` | The rule says where a held change records its hole: a limit under "Holes, named" in its decision, and a debt. | [`debts/hold-own-hole-unrecorded.md`](../debts/hold-own-hole-unrecorded.md) |
+| `home-cd-escaped-space` | The worktree-home rule refuses a lone `cd` back into some home paths. | [`debts/home-cd-escaped-space.md`](../debts/home-cd-escaped-space.md) |
+| `home-cwd-mutant-fragment` | The four `home_cwd` mutants require only the fragment `worktree-home:`. | [`debts/home-cwd-mutant-fragment.md`](../debts/home-cwd-mutant-fragment.md) |
 | `impeccable-piped-shell-body` | The impeccable rule keeps a heredoc body only when the shell word stands before `<<`. | [`debts/impeccable-piped-shell-body.md`](../debts/impeccable-piped-shell-body.md) |
 | `impeccable-python-body` | The impeccable rule reads a heredoc body when a shell word (`bash`, `sh`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`) stands before the `<<` on its header line. | [`debts/impeccable-python-body.md`](../debts/impeccable-python-body.md) |
 | `in-throwaway-reads-paths-only` | `in_throwaway` judges path text, not the repo git acts on. | [`debts/in-throwaway-reads-paths-only.md`](../debts/in-throwaway-reads-paths-only.md) |
@@ -363,14 +369,16 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-unreadable-drops-ids` | An unreadable inbox drops the open ids from the post-compaction note. | [`debts/inbox-unreadable-drops-ids.md`](../debts/inbox-unreadable-drops-ids.md) |
 | `index-row-drop-no-finding` | The records page can lose a row with no finding in two cases. | [`debts/index-row-drop-no-finding.md`](../debts/index-row-drop-no-finding.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
+| `install-early-exit-unlogged` | Refusals and lock timeouts exit before the start line. | [`debts/install-early-exit-unlogged.md`](../debts/install-early-exit-unlogged.md) |
 | `install-family-list-by-hand` | The guard's module list `_FAMILY_MODULES` is kept by hand. | [`debts/install-family-list-by-hand.md`](../debts/install-family-list-by-hand.md) |
 | `install-hook-path-from-checkout` | The post-merge git hook runs the installer from the checkout that ran the pull. | [`debts/install-hook-path-from-checkout.md`](../debts/install-hook-path-from-checkout.md) |
+| `install-lock-stale-by-age` | The install lock is a file made with noclobber. | [`debts/install-lock-stale-by-age.md`](../debts/install-lock-stale-by-age.md) |
+| `install-lock-trap-no-id` | The install lock file holds its holder's id. | [`debts/install-lock-trap-no-id.md`](../debts/install-lock-trap-no-id.md) |
 | `install-ps1-counts-store-alias` | A machine whose only python is the Store python gets the no-python remedy on every gated call. | [`debts/install-ps1-counts-store-alias.md`](../debts/install-ps1-counts-store-alias.md) |
 | `install-reader-can-die-silent` | `HookReader` counts each read fault, but two lines sit outside its try: the file-name read and the body index. | [`debts/install-reader-can-die-silent.md`](../debts/install-reader-can-die-silent.md) |
 | `install-sh-no-python-warning` | A Mac without `python3` gets no warning from `install.sh`. | [`debts/install-sh-no-python-warning.md`](../debts/install-sh-no-python-warning.md) |
 | `install-skill-fail-exits-0` | If `Install-Dir` cannot replace a skill folder, the run does not retry it and exits 0. | [`debts/install-skill-fail-exits-0.md`](../debts/install-skill-fail-exits-0.md) |
 | `install-stamp-line-unpinned` | Tests pin each stamper only to fixture copies. | [`debts/install-stamp-line-unpinned.md`](../debts/install-stamp-line-unpinned.md) |
-| `install-window-guard-refusals` | An install replaces the hook files one by one. | [`debts/install-window-guard-refusals.md`](../debts/install-window-guard-refusals.md) |
 | `install-worktree-check-gaps` | Four gaps, found in review: | [`debts/install-worktree-check-gaps.md`](../debts/install-worktree-check-gaps.md) |
 | `install-writes-in-place` | The `CLAUDE.md` pointer, `settings.json` in `install.sh`, the skills folder, the install log and the marker are written in place. | [`debts/install-writes-in-place.md`](../debts/install-writes-in-place.md) |
 | `interp-keep-body-unpinned` | The guard keeps the heredoc body under inspection for `ts-node -`, `babel-node -`, `git-bash.exe -c` and `node.cmd -`. | [`debts/interp-keep-body-unpinned.md`](../debts/interp-keep-body-unpinned.md) |
@@ -391,12 +399,14 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-slug-piped-body-unread` | A piped body, such as `echo ... \| gh pr create -F -`, is not read. | [`debts/lane-slug-piped-body-unread.md`](../debts/lane-slug-piped-body-unread.md) |
 | `lane-slug-tag-messages-unchecked` | Tag messages are out of scope. | [`debts/lane-slug-tag-messages-unchecked.md`](../debts/lane-slug-tag-messages-unchecked.md) |
 | `lane-slug-tilde-fence-refused` | A tilde fence (`~~~`) is not blanked. | [`debts/lane-slug-tilde-fence-refused.md`](../debts/lane-slug-tilde-fence-refused.md) |
+| `live-pin-first-move-gap` | The first move from a plain `<clone>-live` directory renames that directory to `<clone>-live-<commit>`. | [`debts/live-pin-first-move-gap.md`](../debts/live-pin-first-move-gap.md) |
 | `liveness-windows-arm-unproven` | The repository has no Windows machine to run the Windows arm on. | [`debts/liveness-windows-arm-unproven.md`](../debts/liveness-windows-arm-unproven.md) |
 | `local-time-hard-coded-dst` | The rule is the US rule in force since 2007, and it is coded in `hooks/local_time.py`. | [`debts/local-time-hard-coded-dst.md`](../debts/local-time-hard-coded-dst.md) |
 | `local-time-line-cost-unmeasured` | The token cost of one line per prompt is unmeasured. | [`debts/local-time-line-cost-unmeasured.md`](../debts/local-time-line-cost-unmeasured.md) |
 | `lock-delete-retry-window` | When `GhLock.acquire` finds an expired lock, it deletes it. | [`debts/lock-delete-retry-window.md`](../debts/lock-delete-retry-window.md) |
 | `lock-read-error-never-expires` | When `GhLock.read` cannot read the lock commit for a reason that is not a network or rate error, it returns an expiry of infinity. | [`debts/lock-read-error-never-expires.md`](../debts/lock-read-error-never-expires.md) |
 | `lock-ttl-rate-wait` | Every `GhLock` call retries a rate limit up to 3 times with a 60 s wait, so one call can wait 180 s. | [`debts/lock-ttl-rate-wait.md`](../debts/lock-ttl-rate-wait.md) |
+| `marker-writeback-loses-deletion` | A failed remove leaves `claude-removal-started` in the tree's admin dir, on an intact tree. | [`debts/marker-writeback-loses-deletion.md`](../debts/marker-writeback-loses-deletion.md) |
 | `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
 | `merge-head-any-check-licenses` | Any passing check licenses a skipped required job, not only `scope`. | [`debts/merge-head-any-check-licenses.md`](../debts/merge-head-any-check-licenses.md) |
 | `merge-head-empty-reads-green` | With no required names, zero checks and zero runs, the wait reads green after its 30 s settle. | [`debts/merge-head-empty-reads-green.md`](../debts/merge-head-empty-reads-green.md) |
@@ -427,10 +437,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-tests-glob-too-narrow` | The glob reaches only root-level `mods/<name>/*.test.mjs`. | [`debts/mods-tests-glob-too-narrow.md`](../debts/mods-tests-glob-too-narrow.md) |
 | `mutant-crash-audit-missing` | The fix colocates `guard.py` for `watch` mutants only. | [`debts/mutant-crash-audit-missing.md`](../debts/mutant-crash-audit-missing.md) |
 | `net-error-colon-http-refusal` | `NET_ERROR` matches `: HTTP 5xx (url)` at a line end. | [`debts/net-error-colon-http-refusal.md`](../debts/net-error-colon-http-refusal.md) |
+| `no-start-lock-has-no-pid-check` | The lock `claude agent agent-<id> (pid N)`, with no start time, has no pid-reuse check. | [`debts/no-start-lock-has-no-pid-check.md`](../debts/no-start-lock-has-no-pid-check.md) |
 | `node-file-server-unchecked` | `node <file>` under `run_in_background` is not refused without an `until:` note. | [`debts/node-file-server-unchecked.md`](../debts/node-file-server-unchecked.md) |
 | `off-line-fork-reads-pre-cut` | A branch can be cut from a PR branch that merged later. | [`debts/off-line-fork-reads-pre-cut.md`](../debts/off-line-fork-reads-pre-cut.md) |
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
+| `own-tree-reason-names-remover` | The hook's row for the ending agent's own tree says "left for the delayed remover", and comments name lane wt-reap-delay. | [`debts/own-tree-reason-names-remover.md`](../debts/own-tree-reason-names-remover.md) |
 | `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, a standalone run of the check has no generator, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
+| `pin-switch-in-place-mix` | A host can have no symlink rights. | [`debts/pin-switch-in-place-mix.md`](../debts/pin-switch-in-place-mix.md) |
 | `plain-diff-4mib-unconfirmed` | Output over the host's limit is cut, and the header says "Diff truncated". | [`debts/plain-diff-4mib-unconfirmed.md`](../debts/plain-diff-4mib-unconfirmed.md) |
 | `plain-diff-desktop-untested` | The pane draw, and the turn-text match against a real `$.session.messages()`, are untested in the desktop app. | [`debts/plain-diff-desktop-untested.md`](../debts/plain-diff-desktop-untested.md) |
 | `plain-diff-env-innocent-name` | A `.env` body under an innocent name, such as `notes.txt`, passes the path test. | [`debts/plain-diff-env-innocent-name.md`](../debts/plain-diff-env-innocent-name.md) |
@@ -553,7 +566,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-rewrite-unchecked-lands` | The STE fixer rewrites the text, then the lint cannot run. | [`debts/ste-rewrite-unchecked-lands.md`](../debts/ste-rewrite-unchecked-lands.md) |
 | `subagent-workflow-model-unasked` | The guard asks on a write of `CLAUDE_CODE_SUBAGENT_MODEL` or its `_FORCE` form only. | [`debts/subagent-workflow-model-unasked.md`](../debts/subagent-workflow-model-unasked.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
-| `sweep-no-deadline-many-trees` | The sweep checks each worktree in turn, with eight or more git calls per tree. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
+| `sweep-no-deadline-many-trees` | The SessionEnd run starts no phase and no tree read at or past its deadline, `JUDGE_BUDGET_SECONDS` (12 s) after it starts. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
 | `sweep-test-symlink-privilege` | On a Windows host with no symlink right, two tests in `janitor/test_sweep.py` stop with WinError 1314. | [`debts/sweep-test-symlink-privilege.md`](../debts/sweep-test-symlink-privilege.md) |
 | `sweep-tests-sleep-bounds` | `_peak_concurrency` sleeps 0.2 s inside each wrapped call to widen a race. | [`debts/sweep-tests-sleep-bounds.md`](../debts/sweep-tests-sleep-bounds.md) |
 | `symrun-link-gap-unmeasured` | The symrun case wants at least one mixed-id window during run 2. | [`debts/symrun-link-gap-unmeasured.md`](../debts/symrun-link-gap-unmeasured.md) |

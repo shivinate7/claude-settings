@@ -14,16 +14,37 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptPath = $MyInvocation.MyCommand.Path
 $RepoDir   = if ($ScriptPath) { Split-Path -Parent $ScriptPath } else { '' }
+# git with the error preference off: a failing native call must not throw. Output on stdout only.
+function Get-Git { $ErrorActionPreference = 'Continue'; & git @args 2>$null }
+function Get-FullDir([string]$p) { [IO.Path]::GetFullPath($p).TrimEnd('\') }
+$CloneDir = $RepoDir     # the clone that holds .git\hooks; $RepoDir moves to the pinned checkout below
+$IsLinked = $false
 # Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
 # checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
 # worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
+# Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked worktree
+# allowed, and only on a detached HEAD at the clone's local main commit. $CloneDir moves to the
+# clone, so the post-merge hook lands in the clone's .git\hooks.
 if ($RepoDir) {
     try {
-        $gd = & git -C $RepoDir rev-parse --git-dir 2>$null
-        if ($LASTEXITCODE -eq 0) { $gc = & git -C $RepoDir rev-parse --git-common-dir 2>$null }
+        $gd = Get-Git -C $RepoDir rev-parse --git-dir
+        if ($LASTEXITCODE -eq 0) { $gc = Get-Git -C $RepoDir rev-parse --git-common-dir }
         if ($LASTEXITCODE -eq 0 -and $gd -and $gc -and "$gd" -ne "$gc") {
-            Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone."
-            exit 1
+            $IsLinked = $true
+            $m = (Get-Git -C $RepoDir worktree list --porcelain | Select-Object -First 1) -replace '^worktree ', ''
+            if (-not $m -or (Get-FullDir $RepoDir) -ine ((Get-FullDir $m) + '-live')) {
+                Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone$(if ($m) { " $m" })."
+                exit 1
+            }
+            $mainAt = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+            Get-Git -C $RepoDir symbolic-ref -q HEAD | Out-Null
+            $onBranch = $LASTEXITCODE -eq 0
+            $headAt = Get-Git -C $RepoDir rev-parse HEAD
+            if ($onBranch -or -not $mainAt -or "$headAt" -ne "$mainAt") {
+                Write-Host "claude-settings: ERROR: the pinned checkout $RepoDir is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+                exit 1
+            }
+            $CloneDir = Get-FullDir $m
         }
     } catch { }
 }
@@ -41,12 +62,84 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
     exit 1
 }
 
+# ---- one install at a time, one start line and one end line in the install log -----------------------
+# Owner ruling 2026-10-15 (install-set). The lock is a file made with CreateNew and held open with no
+# sharing and delete-on-close, so it goes away when this run ends, even if it dies. install.sh and the
+# post-merge hook make the same file with noclobber, so the three paths wait on each other. A run waits
+# CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with nothing written.
+# A lock file older than 10 minutes is a dead sh run's: it is removed. The id is unique per run: the
+# time plus the process id. The log lines name it with the pid.
+$InstallId = (Get-Date -Format yyyyMMddHHmmssfff) + $PID
+$InstallLogPath = Join-Path $ClaudeDir 'claude-settings-install.log'
+function Add-InstallLogLine([string]$Line) {
+    [System.IO.File]::AppendAllText($InstallLogPath, "$Line`n", (New-Object System.Text.UTF8Encoding $false))
+}
+$script:ExitCode = 1
+function Exit-Install([int]$Code) { $script:ExitCode = $Code; exit $Code }
+$LockPath = Join-Path $ClaudeDir '.claude-settings-install.lock'
+$LockDeadline = (Get-Date).AddSeconds($(if ($env:CLAUDE_SETTINGS_LOCK_WAIT) { [int]$env:CLAUDE_SETTINGS_LOCK_WAIT } else { 60 }))
+$LockStream = $null
+# merge/install_from_main.sh holds the lock through its install.ps1 call. It writes its id into the
+# lock file and passes that id as CLAUDE_SETTINGS_LOCK_TOKEN; when the two match, this run works under
+# that lock: it does not wait, and it leaves the lock for its parent to remove.
+$HeldByParent = $false
+if ($env:CLAUDE_SETTINGS_LOCK_TOKEN) {
+    $held = Get-Content -LiteralPath $LockPath -TotalCount 1 -ErrorAction SilentlyContinue
+    $HeldByParent = ([string]$held).Trim() -eq $env:CLAUDE_SETTINGS_LOCK_TOKEN
+}
+while (-not $LockStream -and -not $HeldByParent) {
+    try { $LockStream = New-Object IO.FileStream($LockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::DeleteOnClose) }
+    catch {
+        $held = Get-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+        if ($held -and $held.LastWriteTime -lt (Get-Date).AddMinutes(-10)) { Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue; continue }
+        if ((Get-Date) -gt $LockDeadline) {
+            Log "ERROR: another install holds the lock $LockPath; nothing was changed. Run install.ps1 again when it ends, or delete that file if no install is running."
+            exit 1
+        }
+        Start-Sleep -Milliseconds 200
+    }
+}
+Add-InstallLogLine "$(Get-Date -Format s) install.ps1: start id=$InstallId pid=$PID"
+try {
+
+# Decision merge-reinstalls-from-main: run from a clone that has a branch named main, the links
+# point at the pinned checkout <clone>-live, a worktree on a detached HEAD at main's commit, never
+# at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh
+# moves it. A clone with no main branch stays unpinned.
+if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
+    $MainCommit = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+    if ($LASTEXITCODE -eq 0 -and $MainCommit) {
+        $Pin = (Get-FullDir $RepoDir) + '-live'
+        if (-not (Test-Path -LiteralPath $Pin)) {
+            $err = & { $ErrorActionPreference = 'Continue'; & git -C $RepoDir worktree add -q --detach --lock --reason 'claude-settings live pin' $Pin $MainCommit 2>&1 }
+            if ($LASTEXITCODE -ne 0) { Log "ERROR: cannot make the pinned checkout ${Pin}: $(($err | ForEach-Object { "$_" }) -join ' '); fix that and run install.ps1 again."; Exit-Install 1 }
+            Log "made the pinned checkout $Pin at main"
+        } else {
+            $pc = Get-Git -C $Pin rev-parse --path-format=absolute --git-common-dir
+            $rc = Get-Git -C $RepoDir rev-parse --path-format=absolute --git-common-dir
+            if (-not $pc -or -not $rc -or (Get-FullDir $pc) -ine (Get-FullDir $rc)) {
+                Log "ERROR: $Pin is not a worktree of $RepoDir; move it aside and run install.ps1 again."
+                Exit-Install 1
+            }
+            Get-Git -C $Pin symbolic-ref -q HEAD | Out-Null
+            $pinOnBranch = $LASTEXITCODE -eq 0
+            if ($pinOnBranch -or "$(Get-Git -C $Pin rev-parse HEAD)" -ne "$MainCommit") {
+                Log "ERROR: the pinned checkout $Pin is not detached at local main; run merge/install_from_main.sh from the clone $RepoDir to move it."
+                Exit-Install 1
+            }
+            # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
+            & { $ErrorActionPreference = 'Continue'; & git -C $RepoDir worktree lock --reason 'claude-settings live pin' $Pin 2>&1 | Out-Null }
+        }
+        $RepoDir = $Pin
+    } else {
+        Log "WARN: $RepoDir has no branch named main; the links follow the clone's checked-out branch"
+    }
+}
+
 # One dated line per install.ps1 run, on every exit path, so a copy-mode machine has a record
 # of what happened without re-reading Write-Host output.
-$InstallLogPath = Join-Path $ClaudeDir 'claude-settings-install.log'
 function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$HookMode) {
-    $line = "$(Get-Date -Format s) install.ps1: settings.json=$SettingsMode agents/lint=$AgentsMode hook=$HookMode`n"
-    [System.IO.File]::AppendAllText($InstallLogPath, $line, (New-Object System.Text.UTF8Encoding $false))
+    Add-InstallLogLine "$(Get-Date -Format s) install.ps1: settings.json=$SettingsMode agents/lint=$AgentsMode hook=$HookMode"
 }
 
 # Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
@@ -83,7 +176,7 @@ function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
 # Returns 'installed' or 'skipped', for the install-log summary.
 function Install-PostMergeHook {
-    $hooksDir = Join-Path $RepoDir '.git\hooks'
+    $hooksDir = Join-Path $CloneDir '.git\hooks'
     if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return 'skipped' }
     $hookPath = Join-Path $hooksDir 'post-merge'
     $marker   = '# claude-settings post-merge hook'
@@ -121,6 +214,25 @@ id="`$(date +%Y%m%d%H%M%S)`$`$"
 ph='$StampPlaceholder'
 cr="`$(printf '\r')"
 failed=0
+# One install at a time, and a start and an end line in the log: the same lock file install.ps1 and
+# install.sh take (owner ruling 2026-10-15, install-set). A run waits CLAUDE_SETTINGS_LOCK_WAIT seconds
+# (default 60), then prints one line and exits 1 with nothing written. A lock older than 10 minutes
+# is a dead run's.
+lock="`$cfg/.claude-settings-install.lock"
+mkdir -p "`$cfg"
+tries=`$(( `${CLAUDE_SETTINGS_LOCK_WAIT:-60} * 5 ))
+while ! ( set -C; printf '%s\n' "`$`$" > "`$lock" ) 2>/dev/null; do
+  if [ -n "`$(find "`$lock" -mmin +10 2>/dev/null)" ]; then rm -f "`$lock"; continue; fi
+  tries=`$((tries - 1))
+  if [ "`$tries" -le 0 ]; then
+    echo "claude-settings: another install holds the lock `$lock; nothing was changed. Run install.ps1 again when it ends, or delete that file if no install is running." >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+logline() { printf '%s post-merge: %s id=%s pid=%s\n' "`$(date +%Y-%m-%dT%H:%M:%S)" "`$1" "`$id" "`$`$" >> "`$log"; }
+logline start
+trap 'rc=`$?; logline "end exit=`$rc"; rm -f "`$lock"' EXIT
 put() {
   t="`$2.cs-new"
   case "`$1" in
@@ -139,6 +251,27 @@ put() {
   echo "`$(date) post-merge: could not replace `$2" >> "`$log"
   failed=1
   return 1
+}
+# land_guard_set SRC DEST: the guard files, as one set (owner ruling 2026-10-15, install-set). Step 1
+# writes every guard file, stamped with this run's id, into DEST/guard.d/<id>/, where no guard reads it
+# yet. Step 2 replaces DEST/guard.py, the one landing that switches: a stamped guard.py loads
+# guard.d/<its id>/. Step 3 lands the flat guard_*.py. The folder of the set before this one stays;
+# older ones go. A step 1 failure removes the new folder and lands nothing: the old set stays whole.
+land_guard_set() {
+  gdir="`$2/guard.d/`$id"
+  prev=`$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "`$2/guard.py" 2>/dev/null | head -n1)
+  mkdir -p "`$gdir" || { failed=1; return 1; }
+  for gf in "`$1"/guard.py "`$1"/guard_*.py; do
+    [ -f "`$gf" ] || continue
+    put "`$gf" "`$gdir/`$(basename "`$gf")" || { rm -rf "`$gdir"; return 1; }
+  done
+  [ -f "`$1/guard.py" ] && { put "`$1/guard.py" "`$2/guard.py" || { rm -rf "`$gdir"; return 1; }; }
+  for gf in "`$1"/guard_*.py; do [ -f "`$gf" ] && put "`$gf" "`$2/`$(basename "`$gf")"; done
+  for gd in "`$2"/guard.d/*; do
+    [ -d "`$gd" ] || continue
+    case "`$(basename "`$gd")" in "`$id"|"`$prev") ;; *) rm -rf "`$gd" ;; esac
+  done
+  return 0
 }
 dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
@@ -165,8 +298,11 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
     done
     continue
   fi
+  gset=0
+  if [ "`$sub" = hooks ] && [ ! -L "`$cfg/hooks/guard.py" ]; then gset=1; land_guard_set "`$repo/hooks" "`$cfg/hooks"; fi
   for f in "`$repo/`$sub"/*; do
     [ -f "`$f" ] || continue
+    case "`$(basename "`$f")" in guard.py|guard_*.py) [ "`$gset" = 1 ] && continue ;; esac
     d="`$cfg/`$sub/`$(basename "`$f")"
     [ -L "`$d" ] || { put "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
@@ -246,7 +382,18 @@ $AgentFailed = $false
 # runs on any machine (install-no-gap.test.ps1).
 function New-Link([string]$Path, [string]$Target) {
     if ($env:CLAUDE_SETTINGS_FORCE_COPY -eq '1') { throw 'symlink forced off by CLAUDE_SETTINGS_FORCE_COPY' }
-    New-Item -ItemType SymbolicLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null
+    try { New-Item -ItemType SymbolicLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null; return }
+    catch { $newItemErr = $_.Exception.Message }
+    # Windows PowerShell 5.1 New-Item needs admin even in Developer Mode; mklink does not
+    # (measured 2026-10-15). Try it before the caller copies.
+    if ($env:OS -eq 'Windows_NT') {
+        $flag = if (Test-Path -LiteralPath $Target -PathType Container) { '/D ' } else { '' }
+        $out = cmd /c "mklink $flag`"$Path`" `"$Target`" 2>&1"
+        $i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -eq 0 -and $i -and $i.LinkType) { return }
+        throw "mklink failed ($out); New-Item failed ($newItemErr)"
+    }
+    throw $newItemErr
 }
 
 # Removes a leftover file, directory, or link. A directory link goes without -Recurse, so
@@ -288,7 +435,6 @@ public static class ClaudeSettingsMove {
 # The repo copy holds the placeholder. No other line is touched: a prose line that starts the same
 # way stays as it is. The post-merge hook above builds its sed from $StampPlaceholder; install.sh
 # holds the same literal, because sh cannot share this code.
-$InstallId = Get-Date -Format yyyyMMddHHmmssfff
 $StampPlaceholder = '# INSTALL_ID = "uninstalled"'
 $StampLineRe = '(?m)^' + [regex]::Escape($StampPlaceholder) + '(?=\r?$)'
 function Test-StampTarget([string]$Name) { return ($Name -ceq 'guard.py' -or $Name -clike 'guard_*.py') }
@@ -383,10 +529,55 @@ function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) 
     }
     return $how
 }
+# Copy mode, the guard files. Owner ruling 2026-10-15 (install-set): a guard run sees the old set or the
+# new set, never a mix. Step 1 (here) writes every guard file, stamped with this run's id, into
+# hooks\guard.d\<id>\, where no guard reads it yet. Step 2 is the landing loop below, which lands
+# guard.py first: the one landing that switches, because a stamped guard.py loads guard.d\<its id>\
+# (see the comment above INSTALL_ID in hooks\guard.py). The flat guard_*.py land after it, kept beside
+# it for tools that read them by path. The folder of the set before this one stays until the next
+# install; older ones go. A step 1 failure removes the new folder and lands no guard file: the old set
+# stays whole and the run exits 1. Links need no set: a link reads the repo file.
+$GuardSetMode = $false
+$GuardStageFailed = $false
+$PrevGuardId = ''
+function Test-LinksWork([string]$AnySrc) {
+    $probe = Join-Path $ClaudeDir '.cs-linkprobe'
+    try { Remove-Leftover $probe; New-Link $probe $AnySrc; Remove-Leftover $probe; return $true }
+    catch { try { Remove-Leftover $probe } catch { }; return $false }
+}
+function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
+    $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
+    if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
+    $script:GuardSetMode = $true
+    $entry = Join-Path $DestDir 'guard.py'
+    if (Test-Path -LiteralPath $entry) {
+        try { $m = [regex]::Match([IO.File]::ReadAllText($entry), '(?m)^INSTALL_ID = "([^"]*)"'); if ($m.Success) { $script:PrevGuardId = $m.Groups[1].Value } } catch { }
+    }
+    $gdir = Join-Path $DestDir "guard.d\$InstallId"
+    New-Item -ItemType Directory -Force -Path $gdir | Out-Null
+    foreach ($f in $names) {
+        $how = Install-File $f.FullName (Join-Path $gdir $f.Name)
+        if ($how -eq 'failed') {
+            $FailedFiles.Remove((Join-Path $gdir $f.Name))
+            try { Remove-Item -LiteralPath $gdir -Recurse -Force } catch { }
+            Log "the new guard set could not be written; the guard files stay as they were"
+            $script:GuardStageFailed = $true
+            return
+        }
+        if ($how -eq 'copied') { $script:AgentCopied = $true }
+    }
+}
+function Remove-StaleSets {
+    foreach ($d in @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $ClaudeDir 'hooks') 'guard.d') -Directory -ErrorAction SilentlyContinue)) {
+        if ($d.Name -eq $InstallId -or $d.Name -eq $PrevGuardId) { continue }
+        try { Remove-Item -LiteralPath $d.FullName -Recurse -Force } catch { Log "could not remove $($d.FullName) ($($_.Exception.Message)); left behind" }
+    }
+}
 foreach ($sub in (Get-LandedDirs $RepoDir)) {
     $srcDir  = Join-Path $RepoDir $sub
     $destDir = Join-Path $ClaudeDir $sub
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+    if ($sub -eq 'hooks') { Install-GuardSet $srcDir $destDir }
 
     # skills/ lands differently: each skills/<name>/ is ONE whole-directory symlink, never
     # a per-file link, since a per-file loop skips a directory entry outright (Get-ChildItem
@@ -429,7 +620,11 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         continue
     }
 
-    foreach ($src in @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)) {
+    $srcFiles = @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)
+    # Guard set: guard.py goes first, the landing that switches; see the comment above Install-GuardSet.
+    if ($GuardSetMode -and $sub -eq 'hooks') { $srcFiles = @($srcFiles | Sort-Object @{ Expression = { $_.Name -cne 'guard.py' } }, Name) }
+    foreach ($src in $srcFiles) {
+        if ($GuardStageFailed -and $sub -eq 'hooks' -and (Test-StampTarget $src.Name)) { continue }
         $dest = Join-Path $destDir $src.Name
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue
         if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
@@ -476,12 +671,14 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
 # at its end; the guard then fails closed and its text names this installer as the remedy.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
 $StillFailed = [ordered]@{}
+if ($GuardStageFailed) { $StillFailed['the new guard set'] = '' }
 function Resolve-Failures {
     $hooksDest = Join-Path $ClaudeDir 'hooks'
     $hooksSrc  = Join-Path $RepoDir 'hooks'
     $stampRe   = '(?m)^INSTALL_ID = "([^"]*)"'
     foreach ($delay in 2, 4, 8, 0) {
         foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })) {
+            if ($GuardStageFailed) { break }
             $d = Join-Path $hooksDest $f.Name
             $i = Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
             if ($i -and $i.LinkType) { continue }
@@ -512,6 +709,7 @@ function Resolve-Failures {
     $FailedFiles.Clear()
 }
 Resolve-Failures
+if ($GuardSetMode) { Remove-StaleSets }
 if ($StillFailed.Count -gt 0) { $AgentFailed = $true }
 
 # 'copy+failed': some files were copied and at least one replace failed (the run prints which).
@@ -536,7 +734,7 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     if ($AgentCopied) { $HookMode = Install-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
     Complete-Run $AgentFailed
-    exit $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
+    Exit-Install $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
 }
 
 # A real file here: on the first local install ever, it is a person's own settings.json,
@@ -570,4 +768,9 @@ if ($env:OS -ne 'Windows_NT') {
         Log "added $BinDir to your user PATH; a new session picks it up"
     }
 }
-if ($StillFailed.Count -gt 0) { exit 1 }
+if ($StillFailed.Count -gt 0) { Exit-Install 1 }
+$script:ExitCode = 0
+} finally {
+    Add-InstallLogLine "$(Get-Date -Format s) install.ps1: end id=$InstallId pid=$PID exit=$($script:ExitCode)"
+    if ($LockStream) { $LockStream.Dispose() }
+}
