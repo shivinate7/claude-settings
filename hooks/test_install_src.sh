@@ -196,9 +196,10 @@ case2() {
 
 # ---- Case 3: local ./install.sh from a clone -> unchanged, SRC is the clone --------------
 case3() {
-  name="case3: local install.sh from a clone uses the clone"
+  name="case3: local install.sh from a clone points the pointer at the pinned checkout <clone>-live"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
   make_checkout "$co" "# repo CLAUDE.md case3"
+  git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
@@ -210,8 +211,8 @@ case3() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
-    bad "$name" "pointer target [$pointer] != clone [$co]"
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co-live")" ]; then
+    bad "$name" "pointer target [$pointer] != pinned checkout [$co-live]"
   else
     ok "$name"
   fi
@@ -1967,16 +1968,17 @@ keep_check() {
 }
 
 keep_wt1() {
-  name="keep_wt1: main clone of a repo with a linked worktree still installs"
+  name="keep_wt1: main clone of a repo with a linked worktree still installs and points at its pinned checkout"
   co="$work/keep_wt1-main"; wt="$work/keep_wt1-wt"; cfg="$work/keep_wt1-cfg"
   h=$(mktemp -d); h=$(realpwd "$h")
   make_checkout "$co" "# keep_wt1 main"
+  git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
   git -C "$co" worktree add -q --detach "$wt" >/dev/null 2>&1 \
     || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
   rc=$?
-  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$co"
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$co-live"
   rm -rf "$h"
 }
 
@@ -1990,6 +1992,392 @@ keep_plain1() {
   out=$(cd "$dir" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
   rc=$?
   keep_check "$name" "$rc" "$out" "$cfg" "$h" "$dir"
+  rm -rf "$h"
+}
+
+# ---- pinned_wt1: install.sh run from the pinned checkout is not refused -----------------------
+# Owner ruling 2026-10-15: the linked-worktree refusal allows exactly <clone>-live. The pinned
+# checkout is a linked worktree on a detached HEAD at main's commit, at that path. Red while the
+# guard refuses every linked worktree. refuse_wt1 keeps the other side: any other linked worktree
+# is still refused.
+pinned_wt1() {
+  name="pinned_wt1: install.sh run from the pinned checkout <clone>-live is not refused"
+  co="$work/pinned_wt1-main"; pin="$work/pinned_wt1-main-live"; cfg="$work/pinned_wt1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinned_wt1 main"
+  force_main_branch "$co"
+  git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  if [ "$(git -C "$pin" rev-parse HEAD)" != "$(git -C "$co" rev-parse refs/heads/main)" ]; then
+    bad "$name" "fixture: the pinned checkout is not at local main"; rm -rf "$h"; return
+  fi
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  keep_check "$name" "$rc" "$out" "$cfg" "$h" "$pin"
+  rm -rf "$h"
+}
+
+# ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the ~/.claude links point at <clone>-live,
+# a detached worktree at main's commit. session_start.sh must not print an off-main line for that
+# checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
+# origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
+# commit behind main prints exactly one off-main line, and it names the pin. pinoff3: a full clone
+# (not a worktree) detached at main's commit prints no off-main line.
+# Each case checks its own fixture first, so a broken setup never reads as a hook result.
+
+# pin_fixture TAG BEHIND AT KIND: a bare origin on main, a clone whose main is one commit past its
+# first commit, origin/main BEHIND commits past that main, and a pin at main (AT=main) or at the
+# commit before it (AT=old). KIND=worktree makes the pin a linked worktree, KIND=clone a full clone.
+# Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
+pin_fixture() {
+  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_msg=""
+  pf_co="$work/$pf_tag-clone"; pf_pin="$work/$pf_tag-clone-live"
+  pf_cfg="$work/$pf_tag-cfg"; pf_bare="$work/$pf_tag-origin.git"; pf_extra="$work/$pf_tag-extra"
+  git init -q --bare "$pf_bare"
+  git -C "$pf_bare" symbolic-ref HEAD refs/heads/main
+  make_checkout "$pf_co" "# $pf_tag content" "$pf_bare"
+  force_main_branch "$pf_co"
+  printf '# %s second\n' "$pf_tag" >> "$pf_co/CLAUDE.md"
+  if ! ( cd "$pf_co" && git add CLAUDE.md && git commit -q -m second && git push -q origin main ); then
+    pf_msg="clone setup failed"; return 1
+  fi
+  pf_main=$(git -C "$pf_co" rev-parse HEAD)
+  pf_old=$(git -C "$pf_co" rev-parse HEAD~1)
+  if [ "$pf_behind" -gt 0 ]; then
+    git clone -q "$pf_bare" "$pf_extra" || { pf_msg="clone to advance origin failed"; return 1; }
+    i=1
+    while [ "$i" -le "$pf_behind" ]; do
+      if ! ( cd "$pf_extra" && git config user.email t@example.com && git config user.name t \
+          && echo "e$i" >> extra.txt && git add extra.txt && git commit -q -m "extra$i" ); then
+        pf_msg="extra commit $i failed"; return 1
+      fi
+      i=$((i + 1))
+    done
+    ( cd "$pf_extra" && git push -q origin main ) || { pf_msg="push to origin failed"; return 1; }
+  fi
+  behind_built=$(git -C "$pf_bare" rev-list --count "$pf_main..main")
+  if [ "$behind_built" != "$pf_behind" ]; then
+    pf_msg="origin/main is $behind_built commits past the clone's main, wanted $pf_behind"; return 1
+  fi
+  if [ "$pf_at" = old ]; then pf_commit="$pf_old"; else pf_commit="$pf_main"; fi
+  if [ "$pf_kind" = clone ]; then
+    git clone -q "$pf_bare" "$pf_pin" && git -C "$pf_pin" checkout -q --detach "$pf_commit" \
+      || { pf_msg="full clone pin failed"; return 1; }
+    [ -d "$pf_pin/.git" ] || { pf_msg="pin is not a full clone"; return 1; }
+  else
+    git -C "$pf_co" worktree add -q --detach "$pf_pin" "$pf_commit" \
+      || { pf_msg="git worktree add failed"; return 1; }
+    [ -f "$pf_pin/.git" ] || { pf_msg="pin is not a linked worktree"; return 1; }
+  fi
+  pf_head=$(git -C "$pf_pin" rev-parse HEAD 2>/dev/null)
+  if [ "$pf_head" != "$pf_commit" ]; then pf_msg="pin HEAD $pf_head is not $pf_commit"; return 1; fi
+  if git -C "$pf_pin" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    pf_msg="pin is on a branch, not detached"; return 1
+  fi
+  mkdir -p "$pf_cfg"
+  printf '@%s/CLAUDE.md\n' "$pf_pin" > "$pf_cfg/CLAUDE.md"
+  return 0
+}
+
+pinoff1() {
+  name="pinoff1: pinned worktree at main's commit, origin/main 2 ahead: one freshness line, no off-main line"
+  if ! pin_fixture pinoff1 2 main worktree; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff1.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff1.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+  stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "0" ]; then
+    bad "$name" "false off-main line for a checkout at main's commit: $out"
+  elif [ "$stale_lines" != "1" ]; then
+    bad "$name" "expected one freshness line, got $stale_lines: $out"
+  else
+    ok "$name"
+  fi
+}
+
+pinoff2() {
+  name="pinoff2: pinned worktree one commit behind main: exactly one off-main line, naming the pin"
+  if ! pin_fixture pinoff2 0 old worktree; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff2.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff2.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+  named_lines=$(printf '%s\n' "$out" | grep 'not main' | grep -c 'clone-live')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "1" ]; then
+    bad "$name" "expected exactly one off-main line, got $off_lines: $out"
+  elif [ "$named_lines" != "1" ]; then
+    bad "$name" "the off-main line does not name the pinned checkout: $out"
+  else
+    ok "$name"
+  fi
+}
+
+pinoff3() {
+  name="pinoff3: full clone detached at main's commit: no off-main line"
+  if ! pin_fixture pinoff3 0 main clone; then bad "$name" "FIXTURE $pf_msg"; return; fi
+  out=$(cd "$pf_pin" && CLAUDE_CONFIG_DIR="$pf_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pinoff3.err")
+  rc=$?
+  errsize=$(wc -c < "$work/pinoff3.err" | tr -d '[:space:]')
+  off_lines=$(printf '%s\n' "$out" | grep -c 'not main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$off_lines" != "0" ]; then
+    bad "$name" "false off-main line for a detached clone at main's commit: $out"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- install-set cases (owner ruling 2026-10-15 17:40): one install swaps every guard file at once,
+# and one install runs at a time. Copy mode is `install.sh --cloud`: only that path stamps each guard
+# file with its INSTALL_ID through put_file, so only that path can show a mix. install.sh has no
+# seam, so a `mv` shim first on PATH holds an install between two guard landings. That is the stall a
+# held file makes on Windows (install-set.test.ps1 uses a share lock). The shim logs each guard landing
+# with its build. The stall outlasts guard.py's own load wait (_LOAD_WAIT_SECONDS, read from guard.py),
+# so a guard that still fails after that wait is a crash a user would see.
+TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 150"
+
+# The two files the install-set cases share: the probe that prints the INSTALL_IDs the guard loads, and
+# the guard payload, a plain `ls`. install-set.test.ps1 has the same probe (Get-LoadedId).
+install_set_setup() {
+  cat > "$work/loaded-ids.py" <<'EOF'
+import runpy, sys
+ns = runpy.run_path(sys.argv[1], run_name="guard_probe")
+ids = {str(getattr(m, "INSTALL_ID", "(none)")) for name, m in list(sys.modules.items()) if name.startswith("guard")}
+ids.add(str(ns.get("INSTALL_ID", "(none)")))
+print("\n".join(sorted(ids)))
+EOF
+  printf '%s' '{"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/"}' > "$work/guard-payload.json"
+}
+
+# A guard fixture at build $2 in clone folder $1: install.sh, the landed-dirs list, the install files, and
+# guard.py and each guard_*.py from this repo with a "# build $2" line appended. Mirrors New-Clone in
+# install-set.test.ps1.
+make_guard_clone() {
+  mkdir -p "$1/hooks"
+  cp "$INSTALL_SH" "$1/install.sh"
+  cp "$REPO_ROOT/landed-dirs.txt" "$1/landed-dirs.txt"
+  printf '# fixture CLAUDE.md %s\n' "$2" > "$1/CLAUDE.md"
+  printf '{}\n' > "$1/settings.json"
+  for f in "$REPO_ROOT/hooks/guard.py" "$REPO_ROOT"/hooks/guard_*.py; do
+    b=$(basename "$f")
+    { cat "$f"; printf '\n# build %s\n' "$2"; } > "$1/hooks/$b"
+  done
+}
+
+# The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
+# shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
+# logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds. It runs the real mv. After the landing
+# it logs "landed <epoch seconds> <build>". Every other mv passes straight through.
+make_swap_bin() {
+  mkdir -p "$1"
+  real_mv=$(command -v mv)
+  cat > "$1/mv" <<EOF
+#!/bin/sh
+dest=""
+for a in "\$@"; do dest="\$a"; done
+case "\$dest" in
+  */hooks/guard*.py)
+    if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ]; then
+      printf 'paused\n' >> "\$SWAP_EVENTS"; sleep "\$SWAP_PAUSE"
+    fi ;;
+esac
+"$real_mv" "\$@" || exit \$?
+case "\$dest" in
+  */hooks/guard*.py)
+    printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest" | head -n1)" >> "\$SWAP_EVENTS" ;;
+esac
+EOF
+  chmod +x "$1/mv"
+}
+
+# One copy-mode install of clone $1 into config dir $2, logging guard landings to events file $3. $4,
+# when given, is the stall in seconds before the second guard landing. The caller sets $h (home) and
+# $swap_bin (the shim folder). Run it in the background to overlap two installs.
+run_cloud() {
+  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" ${4:+SWAP_PAUSE="$4"} \
+      PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud )
+}
+
+# The distinct INSTALL_ID values the real guard loads from config dir $1, one per line.
+loaded_ids() {
+  env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$1" HOME="$h" PYTHONPATH= \
+    python3 -B "$work/loaded-ids.py" "$1/hooks/guard.py" 2>/dev/null | sort -u
+}
+
+# One guard run through the installed hook, the way Claude Code runs it: the payload on stdin. Stdout
+# goes to file $2. Empty stdout is an allow. A crash deny names guard-crash.
+guard_run() {
+  env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$1" HOME="$h" CLAUDE_GUARD_ROOT_PID="$$" PYTHONPATH= \
+    python3 -B "$1/hooks/guard.py" < "$work/guard-payload.json" > "$2" 2>/dev/null
+}
+
+# ---- swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash ----
+swap1sh() {
+  name="swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash, and after it the guard loads one new set"
+  install_set_setup
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/swap1sh-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/swap1sh-one" one
+  make_guard_clone "$work/swap1sh-two" two
+  wait_s=$(sed -n 's/^_LOAD_WAIT_SECONDS = \([0-9][0-9]*\).*/\1/p' "$REPO_ROOT/hooks/guard.py" | head -n1)
+  pause=$(( ${wait_s:-5} * 2 + 2 ))
+  ev1="$work/swap1sh-ev1"; ev2="$work/swap1sh-ev2"; : > "$ev1"; : > "$ev2"
+  run_cloud "$work/swap1sh-one" "$cfg" "$ev1" > "$work/swap1sh-run1" 2>&1; rc1=$?
+  id1=$(loaded_ids "$cfg")
+  run_cloud "$work/swap1sh-two" "$cfg" "$ev2" "$pause" > "$work/swap1sh-run2" 2>&1 &
+  p2=$!
+  # Bounded sampler: real guard runs while install 2 is alive, at most 300 of them.
+  loads=0; crashes=0; others=0; n=0; gout="$work/swap1sh-guard.out"
+  while kill -0 "$p2" 2>/dev/null && [ "$n" -lt 300 ]; do
+    n=$((n + 1))
+    guard_run "$cfg" "$gout"
+    loads=$((loads + 1))
+    if grep -q 'guard-crash' "$gout"; then crashes=$((crashes + 1))
+    elif [ -s "$gout" ]; then others=$((others + 1)); fi
+  done
+  wait "$p2"; rc2=$?
+  stalled=$(grep -c '^paused' "$ev2")
+  id2=$(loaded_ids "$cfg")
+
+  if [ "$rc1" -ne 0 ] || [ "$(printf '%s\n' "$id1" | grep -c .)" != 1 ]; then
+    bad "$name" "setup: install 1 exit $rc1, loaded ids [$id1]"
+  elif [ "$stalled" != 1 ]; then bad "$name" "precondition: the stall never fired, so the case proves nothing"
+  elif [ "$rc2" -ne 0 ]; then bad "$name" "install 2 exit $rc2: $(cat "$work/swap1sh-run2")"
+  elif [ "$crashes" -gt 0 ]; then bad "$name" "$crashes of $loads guard runs during install 2 were guard-crash denies, while install 2 was stalled between guard landings"
+  elif [ "$others" -gt 0 ]; then bad "$name" "$others of $loads guard runs during install 2 were a deny, not an allow"
+  elif [ "$loads" -lt 3 ]; then bad "$name" "precondition: only $loads guard runs during install 2, so the window is not covered"
+  elif [ "$(printf '%s\n' "$id2" | grep -c .)" != 1 ] || [ "$id2" = "$id1" ]; then
+    bad "$name" "after install 2 the guard loads [$id2] (install 1: [$id1]), want one new id"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- lock1sh: a second install waits for the first, or refuses with one clear line ----------------
+lock1sh() {
+  name="lock1sh: a second copy-mode install started while the first is stalled lands no guard file before the first exits, or exits with one lock line"
+  install_set_setup
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/lock1sh-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/lock1sh-one" A
+  make_guard_clone "$work/lock1sh-two" B
+  evA="$work/lock1sh-evA"; evB="$work/lock1sh-evB"; : > "$evA"; : > "$evB"
+  run_cloud "$work/lock1sh-one" "$cfg" "$evA" 6 > "$work/lock1sh-runA" 2>&1 &
+  pA=$!
+  sleep 0.3
+  alive=no; kill -0 "$pA" 2>/dev/null && alive=yes
+  run_cloud "$work/lock1sh-two" "$cfg" "$evB" > "$work/lock1sh-runB" 2>&1 &
+  pB=$!
+  # Bounded sampler: it records the second when install A exits, at most 3000 polls.
+  aExit=""; n=0
+  while { kill -0 "$pA" 2>/dev/null || kill -0 "$pB" 2>/dev/null; } && [ "$n" -lt 3000 ]; do
+    n=$((n + 1))
+    if [ -z "$aExit" ] && ! kill -0 "$pA" 2>/dev/null; then aExit=$(date +%s); fi
+    sleep 0.05
+  done
+  wait "$pA"; rcA=$?
+  wait "$pB"; rcB=$?
+  [ -n "$aExit" ] || aExit=$(date +%s)
+  bFirst=$(sed -n 's/^landed \([0-9][0-9]*\) .*/\1/p' "$evB" | head -n1)
+  lockLines=$(grep -ciE 'lock|another install|already running|waiting' "$work/lock1sh-runB")
+
+  if [ "$alive" != yes ]; then bad "$name" "precondition: install A had already exited when install B started, so the case proves nothing"
+  elif [ "$(grep -c '^paused' "$evA")" -lt 1 ]; then
+    bad "$name" "precondition: install A never stalled, so the case proves nothing; A events [$(tr '\n' ' ' < "$evA")], A output [$(tail -n 3 "$work/lock1sh-runA" | tr '\n' ' ')]"
+  elif [ -n "$bFirst" ] && [ $((aExit - bFirst)) -ge 2 ]; then
+    bad "$name" "install B landed its first guard file $((aExit - bFirst)) s before install A exited, while A was stalled"
+  elif [ -z "$bFirst" ] && [ "$lockLines" != 1 ]; then
+    bad "$name" "install B landed no guard file and printed $lockLines lock line(s), want one clear line"
+  elif [ "$rcA" -ne 0 ]; then bad "$name" "install A exit $rcA: $(cat "$work/lock1sh-runA")"
+  elif [ -n "$bFirst" ] && [ "$rcB" -ne 0 ]; then bad "$name" "install B landed its guard files but exit $rcB"
+  else
+    builds=$(sed -n 's/^# build //p' "$cfg"/hooks/guard*.py | sort -u | wc -l | tr -d ' ')
+    if [ "$builds" = 1 ]; then ok "$name"
+    else bad "$name" "after both installs the guard files carry $builds builds, want one whole set"
+    fi
+  fi
+  rm -rf "$h"
+}
+
+# ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
+# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the path <clone>-live is not enough. A linked
+# worktree at that path is allowed only when it is detached at the clone's local main commit.
+# pinlive1: a -live worktree on a lane branch is refused. pinlive2: a -live worktree detached at a
+# commit that is not main is refused. pinned_wt1 keeps the other side: detached at main passes.
+
+# pinlive_check NAME RC OUT CFG HOME PTR SNAP: a refusal exits non-zero, leaves the pointer and the
+# config dir listing unchanged, and writes nothing into the fake HOME.
+pinlive_check() {
+  why=""
+  [ "$2" -ne 0 ] || why="$why exit 0, want non-zero;"
+  [ "$(cat "$4/CLAUDE.md" 2>/dev/null)" = "$6" ] || why="$why pointer changed to [$(cat "$4/CLAUDE.md" 2>/dev/null)];"
+  [ "$(find "$4" | sort)" = "$7" ] || why="$why config dir changed;"
+  [ -z "$(ls -A "$5")" ] || why="$why fake HOME was written;"
+  if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why output: $3"; fi
+}
+
+pinlive1() {
+  name="pinlive1: install.sh run from <clone>-live on a lane branch is refused and writes nothing"
+  co="$work/pinlive1-main"; pin="$work/pinlive1-main-live"; cfg="$work/pinlive1-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinlive1 main"
+  force_main_branch "$co"
+  git -C "$co" worktree add -q -b lane "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  if [ "$(git -C "$pin" symbolic-ref -q --short HEAD)" != lane ]; then
+    bad "$name" "fixture: the pinned path is not on branch lane"; rm -rf "$h"; return
+  fi
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  seed_pointer "$cfg" "$co"
+  ptr=$(cat "$cfg/CLAUDE.md"); snap=$(find "$cfg" | sort)
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pinlive_check "$name" "$rc" "$out" "$cfg" "$h" "$ptr" "$snap"
+  rm -rf "$h"
+}
+
+pinlive2() {
+  name="pinlive2: install.sh run from <clone>-live detached at a commit that is not main is refused and writes nothing"
+  co="$work/pinlive2-main"; pin="$work/pinlive2-main-live"; cfg="$work/pinlive2-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h")
+  make_checkout "$co" "# pinlive2 main"
+  force_main_branch "$co"
+  git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
+    || { bad "$name" "fixture: git worktree add failed"; rm -rf "$h"; return; }
+  # The pin stays at the old main; main then moves on, as it does between a merge and the move.
+  printf '# pinlive2 second\n' >> "$co/CLAUDE.md"
+  if ! git -C "$co" commit -q -am second; then
+    bad "$name" "fixture: commit on main failed"; rm -rf "$h"; return
+  fi
+  if [ "$(git -C "$pin" rev-parse HEAD)" = "$(git -C "$co" rev-parse refs/heads/main)" ]; then
+    bad "$name" "fixture: the pinned checkout did not stay behind main"; rm -rf "$h"; return
+  fi
+  cp "$INSTALL_SH" "$pin/install.sh"
+  for sub in $(landed_dirs); do mkdir -p "$pin/$sub"; done
+  seed_pointer "$cfg" "$co"
+  ptr=$(cat "$cfg/CLAUDE.md"); snap=$(find "$cfg" | sort)
+  out=$(cd "$pin" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pinlive_check "$name" "$rc" "$out" "$cfg" "$h" "$ptr" "$snap"
   rm -rf "$h"
 }
 
@@ -2059,6 +2447,14 @@ run refuse_wt1
 run refuse_wt2
 run keep_wt1
 run keep_plain1
+run pinned_wt1
+run pinoff1
+run pinoff2
+run pinoff3
+run swap1sh
+run lock1sh
+run pinlive1
+run pinlive2
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

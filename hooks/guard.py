@@ -199,6 +199,14 @@ _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer"
 # with different ids, means an install landed between two of our reads: wait, clear the modules, and load again. The wait is bounded; after it the
 # fallback below fails closed, never open. This is the one home of the stamp check.
 # INSTALL_ID = "uninstalled"
+# An installed copy (a stamped INSTALL_ID) loads its guard_*.py modules from guard.d/<its id>/ beside
+# it, when that folder is there. The installer writes that whole folder first and replaces this file
+# last, so the replace of this one file switches the whole set: a load sees the old set or the new
+# set, never a mix, however long the install stalls between two files. No folder, or a repo copy
+# with no stamp, loads the modules beside this file.
+_SET_DIR = os.path.join(_HERE, "guard.d", str(globals().get("INSTALL_ID", "")))
+if "INSTALL_ID" in globals() and os.path.isdir(_SET_DIR):
+    sys.path.insert(0, _SET_DIR)
 _PLACEHOLDER = None
 _LOAD_WAIT_SECONDS = 5.0
 _LOAD_STEP_SECONDS = 0.25
