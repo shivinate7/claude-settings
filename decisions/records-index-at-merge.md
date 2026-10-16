@@ -8,6 +8,8 @@ How does a reader find a decision or a debt without a search, and how does the i
 
 Owner ruling, 2026-10-14 10:59 and 13:18 CDT. Each repo that keeps records has one generated index page, `docs/records.md`. It lists each decision and debt with a one-line gist. The merge tool rebuilds the page at merge time, the same way that it claims record numbers at merge. A branch never edits the page by hand. When only the page conflicts, the tool rebuilds it on the merged tree.
 
+Owner ruling, 2026-10-16 10:28 CDT: "Also add a guard". The page is rebuilt only at merge. A lane never commits a change to `docs/records.md`, not even one made by `lint/hook_catalog.py`. PR CI already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR run). The guard refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base. A merge of the base into the lane brings the base's page, so it is allowed. Incident: on 2026-10-16 each lane rebuilt the page, and three batches conflicted on it.
+
 Kind: build
 Plan: decisions/records-index-at-merge.md#ruling (all)
 Home: lint/hook_catalog.py
