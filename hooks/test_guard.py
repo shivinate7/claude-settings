@@ -3996,8 +3996,10 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
 # after: the foreground deny cases, the read-only allow cases, and the data cases. They pin that the
 # change refuses no read and no text that only names the command.
 # A refusal's reason may name no pause (`sleep` is in FORBIDDEN_IN_A_REASON) and no settings file.
-CI_WAIT_REMEDY = ("CI-wake", "bin/merge")  # any-of: the CI-wake notice, or the merge tool
-NO_RUN_WATCH = ("run watch", "--exit-status")  # the remedy never names the refused call or its flag
+CI_WAIT_REMEDY = "CI-wake"  # the remedy names the CI-wake notice
+# The remedy never names the refused call, its flag, or bin/merge: the ruling says Claude's own wait
+# ends in a merge, so the remedy points at the CI-wake notice only.
+NO_RUN_WATCH = ("run watch", "--exit-status", "bin/merge")
 
 for _tool, _command in (
         ("Bash", "gh run watch 7"),
@@ -4027,15 +4029,15 @@ for _tool, _command in (
         tool=_tool, cwd=NOGIT, command=_command)
 
 # Every remedy the stream family prints, reached by its own trigger. The two checks are apart, so
-# each goes red alone: the refused call is named, and the CI-wake wait is not named.
+# each goes red alone: the refused call or bin/merge is named, and the CI-wake notice is not named.
 for _label, _trigger in (
         ("a foreground gh run watch", "gh run watch 7 --exit-status"),
         ("a loop around a pause", "until [ -s f ]; do sleep 2; done"),
         ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done"),
 ):
-    add("ci-wait: the remedy of %s never names the refused call" % _label, "deny", "waiter",
+    add("ci-wait: the remedy of %s never names the refused call or bin/merge" % _label, "deny", "waiter",
         cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
-    add("ci-wait: the remedy of %s names the CI-wake notice or bin/merge" % _label, "deny",
+    add("ci-wait: the remedy of %s names the CI-wake notice" % _label, "deny",
         "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
