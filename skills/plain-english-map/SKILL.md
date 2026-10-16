@@ -1,0 +1,53 @@
+---
+name: plain-english-map
+description: Use only in a repository that has `map.config.json` at its root. Use when a change adds, moves or deletes a tracked code file, a migration table or a screen key, when a MAP check fails, or when the user says "update the map" or "plain-english map". Keeps the plain-English map in `docs/map/` in sync with the code, and builds the map page.
+---
+
+`docs/map/` is the plain-English map of the code. A check holds it in sync. This skill says how to
+change the map, and how to build its picture.
+
+The skill runs in the host repository, and the root of every run is the working directory. Start each
+command at the repository root. The skill finds no config when `map.config.json` is missing there, so
+do not use this skill in that repository.
+
+The repository values live in `map.config.json` at the repository root. The keys are `title`,
+`codeExtensions`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir` and `requireAllKeys`.
+`scripts/lib/map-config.mjs` checks the whole shape.
+
+## Steps
+
+1. **Scout.** Read the diff. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
+   repository root. Each failed line names the file, table or screen key that has no map entry. The
+   command binds no model-call reader, so it skips the `modelSeam` call-site check and prints a note.
+   A host that has its own gate may run the same check bodies there.
+2. **Build.** Add a map line for each new code file, table or screen key. Add a trace step for each new
+   step in a screen's path. Fix each line that names a file the change moved or deleted.
+3. **Review.** Run the same command until it is green. Then run
+   `node ~/.claude/skills/plain-english-map/scripts/map-picture.mjs` from the repository root and read the page.
+   It writes `map.html` in the root, or the path you give it, and it refuses a path inside the repository.
+
+## Formats
+
+- **A map line.** In an area file, `docs/map/<area-id>.md`, under `## Code files`:
+  `- ` + backtick path + ` — ` + one plain sentence that says what the file does.
+- **A table line.** Under `## Tables`: `- ` + backtick table name + ` — ` + what the table holds.
+- **A screen line.** Under `## Screens`: `- ` + backtick screen key + ` — ` + title + ` — ` + what the screen does.
+- **A trace step.** In `docs/map/traces/<screen-key>.md`, under a `## <path name>` heading, a numbered line:
+  `1. ` + backtick path + ` — ` + what the step does. Each step must be reached from an earlier step,
+  by an import or by a web call to the route that answers it.
+
+## Files
+
+- `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 8 MAP checks. Run it from a repository root, and it runs the 8 checks there. It prints one line for each check, and exits non-zero on a FAIL.
+- `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
+- `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
+- `scripts/lib/` also holds `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
+- `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. The host installs nothing.
+- `assets/page.html` is the page template.
+- `tests/` holds the skill's tests and a small fixture repository. Run `node --test` in that folder.
+
+## What a host repository may add
+
+A host may register the 8 check bodies with its own gate, and it may bind its own readers. The model-call
+readers go in through `bindConfig` and `bindSeamReader`, and the page readers go in through `bindReaders`.
+With no model-call reader bound, the AI calls tab is empty. A host may also pin a copy of this folder.

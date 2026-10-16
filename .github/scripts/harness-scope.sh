@@ -44,8 +44,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
-      # Mod tests: no other CI job reads mods/.
-      mods/*) on="$on mods " ;;
+      # Mod tests: no other CI job reads mods/. The plain-english-map skill tests run in the same step group,
+      # and they read the skill, package.json and package-lock.json.
+      mods/*|skills/plain-english-map/*|package.json|package-lock.json) on="$on mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.
       lint/test_scanner_traps.mjs) on="$on mods code " ;;

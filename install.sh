@@ -515,6 +515,19 @@ while IFS= read -r sub || [ -n "$sub" ]; do
   if [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
 done < "$SRC/landed-dirs.txt"
 
+# Packages that a skill loads (typescript, for plain-english-map): one `npm ci` in the clone root.
+# A skill is linked, so its real path is in the clone, and it finds the clone's node_modules. A failure
+# is logged and never fails the install. A cloud copy of a skill sits outside the clone, so cloud skips this.
+if [ "$CLOUD" != 1 ] && [ -f "$SRC/package-lock.json" ]; then
+  if command -v npm >/dev/null 2>&1; then
+    (cd "$SRC" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1) \
+      && log "npm ci ran in $SRC" \
+      || log "WARNING: npm ci failed in $SRC; the plain-english-map skill cannot load typescript until it passes"
+  else
+    log "WARNING: npm not found; run npm ci in $SRC so the plain-english-map skill can load typescript"
+  fi
+fi
+
 # Stale files from the old Banchi janitor. Nothing runs them, and bin/claude-janitor now runs
 # janitor/sweep.py. Only these exact names are removed, and only when they are not a link into
 # this repo's bin/. Nothing else under bin/ is ever touched.

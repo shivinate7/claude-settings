@@ -126,6 +126,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
 | `local-time-central` | Owner, 2026-10-12: US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
+| `map-skill-lives-here` | Owner, 2026-10-16: `skills/plain-english-map/` in claude-settings is the one home of the skill. | [`decisions/map-skill-lives-here.md`](../decisions/map-skill-lives-here.md) |
 | `merge-needs-a-proven-head` | Owner, 2026-10-12: "Fix both now, one lane." | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
 | `mods-deferred-table` | Owner word, 2026-10-13 21:00 CDT: leave these as deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |

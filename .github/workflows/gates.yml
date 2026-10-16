@@ -335,6 +335,17 @@ jobs:
           done
           exit "$fail"
 
+      # The plain-english-map skill: its tests load typescript from this checkout's node_modules, as an
+      # install does. They run from the skill's own tests/ folder, with no q_max path. Same `mods` flag
+      # as the step above, because harness-scope.sh turns it on for a change under skills/plain-english-map/.
+      - name: Plain-english-map skill tests
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        shell: bash
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd skills/plain-english-map/tests
+          node --test
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:

@@ -661,6 +661,19 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
     }
 }
+# Packages that a skill loads (typescript, for plain-english-map): one `npm ci` in the clone root.
+# A skill is linked, so its real path is in the clone, and it finds the clone's node_modules.
+# A failure is logged and never fails the install.
+if (Test-Path (Join-Path $RepoDir 'package-lock.json')) {
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Push-Location $RepoDir
+        # cmd /c keeps npm's stderr out of PowerShell, where it would raise a NativeCommandError.
+        try { & cmd /c 'npm ci --ignore-scripts --no-audit --no-fund >nul 2>&1'; $npmOk = ($LASTEXITCODE -eq 0) } catch { $npmOk = $false } finally { Pop-Location }
+        if ($npmOk) { Log "npm ci ran in $RepoDir" } else { Log "WARNING: npm ci failed in $RepoDir; the plain-english-map skill cannot load typescript until it passes" }
+    } else {
+        Log "WARNING: npm not found; run npm ci in $RepoDir so the plain-english-map skill can load typescript"
+    }
+}
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
     Log "python3 not found on PATH; the guard, STE gate and other gates refuse Bash, Write and Edit calls until Python 3 is installed"
 }
