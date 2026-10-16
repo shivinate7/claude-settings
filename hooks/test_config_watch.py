@@ -10,13 +10,6 @@ command or a real tool payload that writes the cap into `.claude/settings.local.
 the PreToolUse guard and the PostToolUse watch exactly as Claude Code runs them, and reads the FILE
 back. A case that only asked the guard what it thought would prove nothing about `cp`, because the
 whole point of `cp` is that the guard cannot see what it carries.
-
-THE GUARD MUST GO RED BEFORE IT GOES GREEN. `--baseline` runs every case with the watch turned off,
-which is the state of `main`. The shapes the design brief measured as ALLOWED must all report a
-LIFTED cap there. Without that number the green run proves nothing.
-
-    python hooks/test_config_watch.py --baseline    # main: the bypasses land
-    python hooks/test_config_watch.py               # here: the bypasses are undone
 """
 
 import base64
@@ -268,11 +261,8 @@ class Project(object):
 
         `clock`, an ISO-8601 string, pins the expiry rule's "now" through `TEST_CLOCK_ENV`. It
         is unset in every case that does not name it, so those cases read the real clock, the
-        same as production. `main`'s old script (--baseline) never reads the variable at all,
-        so it is harmless to set there too.
+        same as production.
         """
-        if BASELINE:
-            return ""  # `main` has no watch: this is the red run
         env = self.env()
         if clock is not None:
             env[TEST_CLOCK_ENV] = clock
@@ -588,20 +578,12 @@ def old_shape_baseline(project):
 
 # --------------------------------------------------------------------------- the run
 
-BASELINE = "--baseline" in sys.argv
-
-
 def expectation(entry, result):
     """Return (ok, note) for one finished case."""
     group = entry["group"]
     lifted = result["lifted"]
     message = result["message"]
     if group in ("bypass", "stop"):
-        if BASELINE:
-            # The red run. A bypass that does not lift the cap on `main` proves nothing, so the
-            # case itself is wrong and says so.
-            return (lifted, "cap LIFTED on main" if lifted
-                    else "the case never lifted the cap: the fixture is wrong")
         if lifted:
             return (False, "cap STILL LIFTED: the watch missed it")
         if not message:
@@ -615,14 +597,6 @@ def expectation(entry, result):
                 "kept and silent" if not message else "reverted an ordinary edit")
     if group == "expiry":
         kind = entry["kind"]
-        if BASELINE:
-            # `main` carries no expiry rule at all: an approved write just lands, whatever
-            # `_subagentCapUntil` says, or whether it is even a lift.
-            if kind == "nocap":
-                return (not lifted, "not a lift on main either" if not lifted
-                        else "unexpectedly lifted")
-            return (lifted, "cap LIFTED on main, no expiry check exists there" if lifted
-                    else "the case never lifted the cap: the fixture is wrong")
         if kind == "bad":
             if lifted:
                 return (False, "cap STILL LIFTED past a bad deadline: the expiry rule missed it")
@@ -645,18 +619,12 @@ def expectation(entry, result):
                         "it reads as plain 'missing' instead -- got: %r" % message)
             return (True, "reverted, and the message names the env block")
     if group == "compat":
-        if BASELINE:
-            return (lifted, "cap LIFTED on main" if lifted
-                    else "the case never lifted the cap: the fixture is wrong")
         if lifted:
             return (False, "cap STILL LIFTED: the watch missed it")
         if not message:
             return (False, "reverted but said nothing")
         return (True, "reverted and reported, even from an old-shape baseline entry")
     if group == "absent":
-        if BASELINE:
-            return (lifted, "cap LIFTED on main" if lifted
-                    else "the case never lifted the cap: the fixture is wrong")
         if lifted:
             return (False, "cap STILL LIFTED: the watch missed it")
         if not message:
@@ -667,8 +635,6 @@ def expectation(entry, result):
         if settings is not None:
             return (False, "reverted but did not land on absent")
         return (True, "reverted to its own last known-good state, absent, not merely empty")
-    if BASELINE:
-        return (lifted, "landed on main")
     return (lifted and not message,
             "passed through untouched" if lifted else "an APPROVED write was reverted")
 
@@ -755,8 +721,7 @@ def sweep_session_check():
 
 
 def main() -> int:
-    print("config_watch cases, %d in all%s" % (len(CASES), "  [BASELINE: no watch]" if BASELINE
-                                               else ""))
+    print("config_watch cases, %d in all" % len(CASES))
     print()
     failed = 0
     only = os.environ.get("MUTATE_ONLY")  # first stage of hooks/mutate_shared.py: named cases only

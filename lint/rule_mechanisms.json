@@ -422,8 +422,9 @@
     },
     "building-scanner-respects-strings": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook sees every scanner shape. Prompt checklists carry the rule; no check reads them. Revisit a hook if a third incident is a comment-stripping regex."
+        "kind": "gate",
+        "ref": "lint/test_scanner_traps.mjs",
+        "test": "lint/test_scanner_traps.mjs::decision-watch machinePaths: comment opener // in a string does not hide the defect after it"
       }
     },
     "building-land-design-or-abandon": {
