@@ -1706,11 +1706,13 @@ def count_steps(text: str) -> int:
     return steps
 
 
-def settle_ask(tool: str, stripped: str) -> None:
+def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
     rule, reason, matched, step = PENDING_ASK[0]
-    if count_steps(stripped) > 1:
+    # An interpreter heredoc (python, node, perl, ruby) is one step: its body is not counted line by line.
+    # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
+    if count_steps(strip_heredoc_bodies(raw, shells_only=True)) > 1:
         refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
     refuse(tool, "ask", rule, reason, matched)
 
@@ -2004,7 +2006,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if change:
             ask_step("subagent-model-cap", cap_ask_reason(change, matched),
                      log_path_and_text(matched, change), "settings write")
-    settle_ask(tool, stripped)
+    settle_ask(tool, raw)
 
 # ------------------------------------------------------------------ impeccable is review-only
 #
