@@ -5242,10 +5242,12 @@ class SimulatorTierActTests(unittest.TestCase):
 #   sweep.JUDGE_BUDGET_SECONDS  the budget for the WHOLE pass: the idle sort, the judging, the
 #                               removals, the branch loop, the folder scans and reaps, and the
 #                               process reaps. Not the judging alone.
-# The deadline applies to the SessionEnd run only: `--confirm` with no `--attended`, the argv
-# session_end_sweep.py sends. No flag names that run, so the cases key on the argv. A person's run
-# (`--attended`, with or without `--confirm`, or a plain preview) has no deadline and judges every
-# tree and every phase, however late the clock is (owner ruling 2026-10-15 15:08 CDT).
+# A deadline comes only from an explicit `--deadline-seconds N`, the time left that
+# session_end_sweep.py passes. The budget is N minus a tail, never more than JUDGE_BUDGET_SECONDS
+# (12 s in the product). A run with no `--deadline-seconds` has no deadline and judges every tree
+# and every phase, however late the clock is: the scheduled `--confirm`, a person's bare
+# `--confirm`, `--attended`, or a plain preview (owner ruling 2026-10-15 15:08 CDT: only the
+# SessionEnd run has a deadline).
 # In the SessionEnd run, one deadline covers every phase in TIMED_PHASES. Each phase checks the
 # clock before it starts, and none starts at or past the deadline. No git read whose `-C` folder is
 # a tree starts at or past the deadline, the per-tree primary-checkout read included. Each tree's
@@ -5291,6 +5293,13 @@ def _clock_and_budget(clock, budget):
     """The seams read CLOCK[0], a mutable list the test advances."""
     with mock.patch.object(sweep, "_now", lambda: clock[0], create=True), \
             mock.patch.object(sweep, "JUDGE_BUDGET_SECONDS", budget, create=True):
+        yield
+
+
+@contextlib.contextmanager
+def _clock_only(clock):
+    """The clock seam alone: the product's own JUDGE_BUDGET_SECONDS stays in force."""
+    with mock.patch.object(sweep, "_now", lambda: clock[0], create=True):
         yield
 
 
@@ -5392,7 +5401,12 @@ class SweepFinishesTests(unittest.TestCase):
         def capture(found, confirm, out=None):
             results.extend(found)
 
-        seams = _no_deadline() if clock is None else _clock_and_budget(clock, budget)
+        if clock is None:
+            seams = _no_deadline()
+        elif budget is None:
+            seams = _clock_only(clock)
+        else:
+            seams = _clock_and_budget(clock, budget)
         with _watch_git(calls), _timed_git(self.git_reads, clock), _process_table({}), \
                 _machine_quiet(), seams, \
                 (extra or contextlib.nullcontext()), \
@@ -5400,7 +5414,13 @@ class SweepFinishesTests(unittest.TestCase):
                 mock.patch.object(sweep, "decide_worktree", judging), \
                 mock.patch.object(sweep, "print_sweep_report", side_effect=capture), \
                 mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": os.path.join(self.base, "runs.jsonl")}):
-            sweep.main([self.repo, *argv, "--restore-log", self.restore_log])
+            try:
+                sweep.main([self.repo, *argv, "--restore-log", self.restore_log])
+            except SystemExit as exc:  # argparse refused an argument
+                if "--deadline-seconds" not in argv:
+                    raise
+                self.fail("sweep.py rejects --deadline-seconds (exit %r): the SessionEnd time "
+                          "left cannot reach the sweep" % (exc.code,))
         return calls, results, judged
 
     def assert_one_root(self, results):
@@ -5437,7 +5457,7 @@ class SweepFinishesTests(unittest.TestCase):
     def test_a_pass_past_its_deadline_stops_judging_and_reports_the_rest_not_judged(self):
         # Budget 15 s, 10 s a judged tree: the clock reads 0, then 10, then 20. The pass judges two.
         clock = [0.0]
-        _calls, results, judged = self.run_pass(["--confirm"], clock=clock, budget=15.0, tick=10.0)
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=15.0, tick=10.0)
         self.assertEqual(len(results), 1, "the pass reported %d roots, not 1" % len(results))
         self.assertEqual(len(judged), 2, "a 15 s budget at 10 s a tree judges 2 trees; the pass "
                                          "judged %r" % judged)
@@ -5469,7 +5489,7 @@ class SweepFinishesTests(unittest.TestCase):
         # read costs 10 s of the 15 s budget, so the second read ends the budget. No idle read may
         # start at or past the deadline. The rest of the pass is "not judged"; every folder stays.
         clock = [0.0]
-        _calls, results, judged = self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=0.0,
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=0.0,
                                                 idle_tick=10.0)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
@@ -5532,7 +5552,7 @@ class SweepFinishesTests(unittest.TestCase):
         extra = mock.patch.multiple(sweep, find_dead_rooted=mock.Mock(return_value=[dead_rooted]),
                                     print_grace_period_report=mock.Mock())
         clock = [0.0]
-        _calls, results, _judged = self.run_pass(["--confirm"], clock=clock, budget=BUDGET,
+        _calls, results, _judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET,
                                                  tick=10.0, extra=extra)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
@@ -5547,7 +5567,7 @@ class SweepFinishesTests(unittest.TestCase):
     def test_no_removal_starts_past_the_deadline(self):
         # Budget 15 s, 10 s a judged tree: the first removal starts at 10 s, the second at 20 s.
         clock = [0.0]
-        _calls, results, _judged = self.run_pass(["--confirm"], clock=clock, budget=BUDGET,
+        _calls, results, _judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET,
                                                  tick=10.0)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
@@ -5601,7 +5621,7 @@ class SweepFinishesTests(unittest.TestCase):
     def test_no_git_read_in_a_tree_folder_starts_past_the_deadline(self):
         # Trees 3 to 5 are reached only after two judged trees tick the clock past the deadline.
         clock = [0.0]
-        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=10.0)
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=10.0)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
         late = self.tree_reads_at_or_after(BUDGET)
@@ -5610,7 +5630,7 @@ class SweepFinishesTests(unittest.TestCase):
 
     def test_no_husk_or_trash_scan_starts_past_the_deadline(self):
         clock = [0.0]
-        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=10.0)
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=10.0)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
         late = _starts_at_or_after(self.events, ("husk scan", "trash scan"), BUDGET)
@@ -5629,7 +5649,7 @@ class SweepFinishesTests(unittest.TestCase):
         require(verdict[0] is True, "the trash folder is not reapable on this machine: %r"
                 % (verdict,))
         clock = [0.0]
-        self.run_pass(["--confirm"], clock=clock, budget=BUDGET, tick=0.0, idle_tick=20.0)
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=0.0, idle_tick=20.0)
         self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
                                                   "case proved nothing")
         late = _starts_at_or_after(self.events, ("trash reap",), BUDGET)
@@ -5664,6 +5684,50 @@ class SweepFinishesTests(unittest.TestCase):
 
     def test_an_attended_confirm_run_has_no_deadline(self):
         self.assert_a_person_run_has_no_deadline(["--attended", "--confirm"])
+
+    def test_a_bare_confirm_run_has_no_deadline(self):
+        # The scheduled job and a person's bare `--confirm` send this argv. Only a run that passes
+        # --deadline-seconds (the SessionEnd run) has a deadline (owner ruling 2026-10-15 15:08 CDT).
+        self.assert_a_person_run_has_no_deadline(["--confirm"])
+
+    def test_a_session_end_budget_is_capped_at_12_seconds(self):
+        # N is far above the cap, so the 12 s cap is the only bound. The product's own budget
+        # constant stays in force (clock seam only). A read at 12 s or later must not start.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"],
+                                                clock=clock, tick=10.0)
+        self.assertGreaterEqual(clock[0], 12.0, "the pass never reached 12 s, so this case "
+                                                "proved nothing")
+        late = self.tree_reads_at_or_after(12.0)
+        self.assertEqual(late, [], "a 1000 s budget read a tree at or past the 12 s cap: %r"
+                         % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def test_a_session_end_budget_is_its_value_minus_a_tail(self):
+        # N is 10 s and the second tree read starts at 9.99 s. A budget of exactly N would let that
+        # read start (9.99 < 10), so refusing it pins a tail of at least 0.01 s.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "10"],
+                                                clock=clock, tick=9.99)
+        self.assertGreaterEqual(clock[0], 9.99, "the pass never reached 9.99 s, so this case "
+                                                "proved nothing")
+        late = self.tree_reads_at_or_after(9.99)
+        self.assertEqual(late, [], "a 10 s budget read a tree at or past 9.99 s, so its budget "
+                                   "is not N minus a tail: %r" % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def test_a_two_second_budget_starts_no_tree_or_idle_read_at_or_past_two_seconds(self):
+        # Idle reads cost 1.5 s each, so a third idle read would start at 3 s. Neither a tree read
+        # nor an idle read may start at or past 2 s. Every tree keeps a decision either way.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "2"],
+                                                clock=clock, tick=10.0, idle_tick=1.5)
+        late = self.tree_reads_at_or_after(2.0)
+        self.assertEqual(late, [], "git reads in a tree folder started at or past 2 s: %r"
+                         % (late,))
+        late_idle = _starts_at_or_after(self.events, ("idle read",), 2.0)
+        self.assertEqual(late_idle, [], "idle reads started at or past 2 s: %r" % (late_idle,))
+        self.assert_unjudged_trees_kept(results, judged)
 
 
 if __name__ == "__main__":

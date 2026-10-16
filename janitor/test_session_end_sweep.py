@@ -485,5 +485,56 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         self.assertNotIn("--attended", calls[0])  # strict is the default
 
 
+def deadline_value(argv):
+    """The number after `--deadline-seconds` (as two arguments or as `=N`), or None when absent."""
+    for i, arg in enumerate(argv):
+        if arg == "--deadline-seconds" and i + 1 < len(argv):
+            return float(argv[i + 1])
+        if arg.startswith("--deadline-seconds="):
+            return float(arg.split("=", 1)[1])
+    return None
+
+
+class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
+    """Arm: HookPassesItsTimeLeft. The SessionEnd run is the only run with a deadline (owner ruling
+    2026-10-15 15:08 CDT), so `handle` must hand the sweep its time left as an explicit
+    `--deadline-seconds N`. N is `remaining_sweep_timeout_seconds(elapsed)`, the same number the
+    hook uses as its own subprocess timeout. Recorded as in the arm above, never a real sweep."""
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def sweep_argv_for(self, repo, elapsed):
+        calls = []
+        real_run = self.mod.subprocess.run
+
+        def record_call(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
+                calls.append(argv)
+                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+            return real_run(*args, **kwargs)
+
+        self.mod.subprocess.run = record_call
+        try:
+            self.mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=elapsed)
+        finally:
+            self.mod.subprocess.run = real_run
+        return calls
+
+    def test_the_sweep_is_passed_the_time_left_as_a_deadline_flag(self):
+        repo = os.path.join(ROOT, "deadline_flag_repo")
+        make_repo(repo)
+        # elapsed 0 leaves the fixed 25 s cap; elapsed 45 leaves 55 - 45 - 3 = 7 s.
+        for elapsed in (0.0, 45.0):
+            with self.subTest(elapsed=elapsed):
+                calls = self.sweep_argv_for(repo, elapsed)
+                self.assertEqual(len(calls), 1, "the hook ran the sweep %d times" % len(calls))
+                value = deadline_value(calls[0])
+                self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
+                self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
