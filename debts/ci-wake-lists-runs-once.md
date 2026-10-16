@@ -7,5 +7,5 @@ list is never judged, so the hook can print green while that run goes on.
 
 **Decision.** ci-wait-reads-run-status (CI waits read the run status).
 
-**Retire.** `wait_for` lists the runs again after each judged run, until no new run shows.
+**Retire.** `wait_for` lists the runs again after each judged run. It stops when no new run shows.
 A test_ci_wake.py case adds a run after the first list and is not green until it ends.

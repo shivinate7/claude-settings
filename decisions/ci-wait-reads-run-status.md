@@ -58,3 +58,4 @@ another repo on the same account several times.
   minute. Unmeasured on a real run.
 
 Kind: build
+Plan: decisions/ci-wait-reads-run-status.md#the-ruling (all)

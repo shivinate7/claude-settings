@@ -262,6 +262,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cap-write-by-python-unseen` | A Python command that writes `CLAUDE_CODE_SUBAGENT_MODEL` into a settings file is allowed with no ask. | [`debts/cap-write-by-python-unseen.md`](../debts/cap-write-by-python-unseen.md) |
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
 | `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
+| `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs once. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
 | `cites-lack-gloss-unchecked` | Some cites of record ids, in decisions and debts, carry no gloss. | [`debts/cites-lack-gloss-unchecked.md`](../debts/cites-lack-gloss-unchecked.md) |
 | `cmd-c-quote-count-bash-reader` | cmd reads `\` as a plain character, and each `"` toggles its quote state. | [`debts/cmd-c-quote-count-bash-reader.md`](../debts/cmd-c-quote-count-bash-reader.md) |
