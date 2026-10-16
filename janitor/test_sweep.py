@@ -5729,6 +5729,43 @@ class SweepFinishesTests(unittest.TestCase):
         self.assertEqual(late_idle, [], "idle reads started at or past 2 s: %r" % (late_idle,))
         self.assert_unjudged_trees_kept(results, judged)
 
+    def assert_no_tree_judged(self, value):
+        """A `--deadline-seconds VALUE` pass with no time left judges no tree. Each tree is kept as
+        "not judged", and no git read starts in a tree folder."""
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", value],
+                                                clock=clock, tick=10.0)
+        self.assertEqual(judged, [], "a %s budget judged %r; it has no time left" % (value, judged))
+        self.assert_unjudged_trees_kept(results, judged)
+        self.assertEqual(self.tree_reads_at_or_after(0.0), [],
+                         "a %s budget read a tree folder" % (value,))
+
+    def test_a_nan_deadline_has_no_time_left_and_judges_no_tree(self):
+        # `nan - 7.5` is nan, and min(12, nan) is 12, so only the NaN branch makes the budget 0.
+        # A NaN is no time left, never no deadline.
+        self.assert_no_tree_judged("nan")
+
+    def test_a_negative_deadline_has_no_time_left_and_judges_no_tree(self):
+        self.assert_no_tree_judged("-5")
+
+    def test_a_7_5_second_deadline_is_all_tail_so_its_budget_is_zero(self):
+        self.assert_no_tree_judged("7.5")
+
+    def test_a_25_second_deadline_gives_a_12_second_budget(self):
+        # 25 minus the 7.5 s tail is 17.5 s, so the 12 s cap is the bound. A 6 s tick puts the tree
+        # reads at 0, 6, 12 and 18 s: 0 and 6 start, 12 is refused. A 17.5 s budget would start the
+        # read at 12 s, and a 10 s tick cannot tell 12 s from 17.5 s.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "25"],
+                                                clock=clock, tick=6.0)
+        self.assertGreaterEqual(clock[0], 12.0, "the pass never reached 12 s, so this case "
+                                                "proved nothing")
+        self.assertEqual(len(judged), 2, "a 25 s deadline judged %r; its budget is 12 s, so 2 "
+                                         "trees start before 12 s" % (judged,))
+        late = self.tree_reads_at_or_after(12.0)
+        self.assertEqual(late, [], "a 25 s deadline read a tree at or past 12 s: %r" % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
