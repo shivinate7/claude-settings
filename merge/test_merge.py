@@ -1097,7 +1097,8 @@ class GhHalf(Env):
         f.write_text(json.dumps(s))
 
     def calls(self):
-        return pathlib.Path(self.state, "calls.log").read_text()
+        p = pathlib.Path(self.state, "calls.log")
+        return p.read_text() if p.exists() else ""  # a case that makes no gh call leaves no log
 
     def gh_host(self, required=("gates",), pause=None, ignore=None):
         def tick(s):
@@ -1554,12 +1555,13 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
+    def test_green_run_waits_without_a_watch_and_merges_pinned_to_the_claim_head(self):
         self.set(checks_seq=[[("gates", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("gates", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         log = self.calls()
-        self.assertIn("run watch 99 --exit-status", log)
+        self.assertNotIn("run watch", log)  # decision ci-wait-reads-run-status
+        self.assertIn(30, self.paused)  # the wait between two reads of the checks
         self.assertIn("pr merge 7 --merge --match-head-commit " + sh(self.co, "git", "rev-parse", "origin/main^2"), log)
         self.assertNotIn("--admin", log)
         self.assertNotIn("--delete-branch", log)
@@ -1621,9 +1623,17 @@ class GhHalf(Env):
         self.assertIn("still shows the head before the push", out)
         self.assertNotIn("pr merge", self.calls())
 
-    def test_a_fast_run_watch_pauses_a_full_minute(self):
+    # Decision ci-wait-reads-run-status: block never runs `gh run watch`. It pauses 30 s, and the next pass of the wait loop reads.
+    # The old spin guard ("a watch that returned at once pauses a full minute") went with the watch.
+    def test_a_pending_run_pauses_30_seconds_and_returns(self):
         self.gh_host().block(["gates"], {"gates": [("pending", "https://x/actions/runs/5/job/1")]})
-        self.assertEqual(self.paused, [60])
+        self.assertEqual(self.paused, [30])  # one pause, and not host.minute (60 here)
+
+    def test_a_pending_run_starts_no_gh_watch_and_makes_no_gh_call(self):
+        self.gh_host().block(["gates", "lint"], {"gates": [("pending", "https://x/actions/runs/5/job/1")],
+                                                  "lint": [("pending", "https://x/actions/runs/6/job/2")]})
+        self.assertNotIn("run watch", self.calls())
+        self.assertEqual(self.calls(), "")  # block only pauses; the wait loop reads the checks and the runs
 
     def test_dirty_in_the_wait_reverts_the_claim(self):
         self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]], dirty_after_checks=1)
