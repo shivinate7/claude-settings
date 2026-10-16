@@ -62,7 +62,8 @@ The reaper stops one process only when each read below answers a confirmed yes:
 3. The root of its process tree inside the target is orphaned. The reaper climbs from the
    process to each live parent whose cwd is also inside the target. Then it asks
    `sweep.is_orphan` about the last one. A live parent outside the target means keep. A
-   harness or a terminal is such a parent.
+   harness or a terminal is such a parent. Read 3 does not apply to the ending agent's own
+   worktree (Part 4).
 4. The current user owns the process.
 
 An unreadable read means keep. The signal goes by pid through `sweep.send_signal`, once.
@@ -77,7 +78,8 @@ The owner's constraints hold:
 - Ownership is judged by the checkout that holds the cwd, never by a name.
 - The primary checkout is never a target.
 - A worktree that a live session uses is never touched.
-- A process that a live parent outside the worktree holds is never touched.
+- A process that a live parent outside the worktree holds is never touched, except in the
+  ending agent's own worktree (Part 4).
 
 Owner ruling 3, 2026-09-27: this scope is accepted. The reaper stops each orphaned tree
 inside an ended agent's worktree, not only listeners.
@@ -87,7 +89,8 @@ only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
 
 ## Part 4. The worktree is removed at agent end
 
-Owner ruling, 2026-10-15 (plan step 3). Status: decided, not built. Lane wt-reap builds it.
+Owner rulings, 2026-10-15: plan step 3, and the 19:43 CDT rulings below. Status: decided,
+not built. Lane wt-reap builds it.
 Until that lane merges, the reaper stops processes and removes no worktree.
 
 Why. On 2026-10-15 the machine held 610 agent worktrees. The reaper stopped processes only.
@@ -100,13 +103,24 @@ Rule. At each SubagentStop, the reaper removes two kinds of worktree:
 - each other finished agent's worktree that is idle 30 min or more.
 
 Idle is read as the sweep reads it (see "The sweep removes a finished agent worktree").
+
+Agent end stops the processes that the ending agent started in its own worktree. This
+includes its own shells. Then it removes that worktree. The reaper never stops a process
+whose cwd is inside another tree. In the ending agent's own worktree, Part 3 read 3 does
+not apply. The parent of its shells is a live harness outside the tree. Part 3 reads 1, 2
+and 4 still hold. (Owner ruling, 2026-10-15 19:43 CDT.)
+
+A clean tree has no uncommitted and no untracked file. Git-ignored files do not keep a
+tree. A clean, pushed worktree is removed even when it holds git-ignored files, such as
+build output, packages or `.env.local`. (Owner ruling, 2026-10-15 19:43 CDT.)
+
 A worktree is removed only when all of these hold:
 
 - it is clean;
 - it is pushed;
 - it is unlocked;
-- no process has a cwd inside it;
-- no live session uses it (the constraint in Part 3).
+- no live session uses it (the constraint in Part 3);
+- no process has a cwd inside it. In the ending agent's own worktree, the stop above runs first.
 
 A read that cannot tell keeps the worktree.
 
@@ -119,7 +133,8 @@ Related, same ruling:
 - Drain today's pile of 610 (plan step 5). The ruling names no method.
 
 Accepted cost: a resume of a finished agent fails once its worktree is gone. A fresh agent
-gets the old report instead.
+gets the old report instead. Removal also deletes the tree's git-ignored files, a copied
+`.env.local` included. The sweep's Limits note says the same.
 
 ## Reap timeout, 2026-10-10
 
@@ -250,6 +265,7 @@ gives 1 of 596 cases wrong, and that case is the only one. The full harness ran 
 - A payload in the log that disagrees with the fields above.
 - A subagent worktree name that is not `agent-<agent_id>`.
 - A server that a live agent needed, stopped by this reaper or the sweep.
-- A tree that Part 4 removes while it is dirty, unpushed, locked, or in use.
+- A tree that Part 4 removes with an uncommitted or untracked file, unpushed, locked, or in use.
+- A process in another tree that the reaper stops.
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A batch read, or a full run on about 1,300 pids, that takes 60 s or more.

@@ -1,5 +1,8 @@
 # The janitor is one machine-wide sweep
 
+Kind: process
+Home: janitor/sweep.py
+
 The sweep deletes a local branch when that branch holds no unique work. It
 also removes a spent worktree. This entry
 records where it lives, and what it leaves to each repository.
