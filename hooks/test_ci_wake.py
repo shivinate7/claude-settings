@@ -7,8 +7,10 @@ Run it from the repository root:
 
 The hook is a PostToolUse command hook for the Bash and PowerShell tools, registered with
 `asyncRewake: true`. Claude Code runs it in the background. Exit 2 wakes the session, and its
-stderr shows as a system reminder. Every case runs the real hook as a subprocess, with the hook
-JSON on stdin and its stdout and stderr written to files. No case imports the module.
+stderr shows as a system reminder. Every case but the `watch_run` cases runs the real hook as a
+subprocess, with the hook JSON on stdin and its stdout and stderr written to files. The `watch_run`
+cases import the module and swap its `gh`, `time`, `subprocess` and `shutil` for fakes: no gh runs
+and no wait is real.
 
 Decision, from decision handoff-hooks-wave-2, part 3 (CI wake-up):
 - Only `gh pr ready <N>` starts a watch. A `git push` in any form starts none, and makes no gh call.
@@ -22,6 +24,13 @@ Decision, from decision handoff-hooks-wave-2, part 3 (CI wake-up):
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
 
+Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
+`gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
+status` at once, then at most once every 30 s, and returns when the status is `completed` or when
+the deadline passes: its last pause ends at the deadline, never past it. A call made at its deadline
+or past it makes no read and returns at once. A failed or non-JSON read raises Unknown, so the wake
+line is `CI unknown`.
+
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
 A cancelled run beside a run of the same name that ran, on the same head, reads as the ran one,
 in either list order, completed or in progress (decision merge-needs-a-proven-head). A cancelled
@@ -33,22 +42,32 @@ Seams under test (the builder must read these names):
 - CI_WAKE_MODULE: the module under test (default hooks/ci_wake.py beside this file).
 - CI_WAKE_LOCK_DIR: the folder that holds the per-PR watch locks. Each case sets its own.
 - CI_WAKE_DEADLINE: the watch budget in seconds. Unset, the hook uses its own default.
+- `watch_run(run_id, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). It
+  reads through the module's `gh()`, reads the clock with the module's `time.monotonic`, pauses
+  with the module's `time.sleep`, and makes no direct `subprocess` call.
+- `time.sleep` in the hook process: a case run through FAST_SLEEP_LAUNCHER caps it at 0.05 s, so the
+  30 s status pause costs 0.05 s there. Every pause of the hook must go through `time.sleep`.
 
 The gh stub: a `gh` launcher in a temp folder, the only PATH entry for these cases, so no real gh
 is ever reached. On Windows the launcher is `gh.cmd`, and a list-form subprocess call of "gh"
 skips a .cmd stand-in (decision list-form-subprocess-ignores-a-path-shim-on-windows). So the hook
 must find gh with shutil.which. The stub answers the --json forms of `pr view <N|branch>`,
-`pr list --head B`, `run list --commit SHA`, `run view <id>` and `run watch <id>` from a JSON
-fixture. It writes every call to its own file beside the log (one file per call, so parallel calls never share one). A run marked in_progress_until_watch stays in progress
-until `run watch` names it. A run with hang_seconds: `run watch` first connects to the localhost
-port in GH_STUB_READY_PORT, so a case can wait for the watch with one accept() and no polling.
-Then the stub closes fds 0-2 and sleeps, which models a run still pending. Fixture mode "error"
+`pr list --head B`, `run list --commit SHA` and `run view <id>` from a JSON fixture. `run view`
+prints only the fields `--json` names. `run watch` exits 1: the hook must never run it. The stub
+writes every call to its own file beside the log (one file per call, so parallel calls never share one).
+A run marked in_progress_at_list reads in progress at `run list` and as its fixture says at
+`run view`. A run with ping_on_status_read: its status read (`run view <id> --json status`) first
+connects to the localhost port in GH_STUB_READY_PORT, so a case can wait for that read with one
+accept() and no polling. A run with fail_status_read: that read exits 1. A run with in_progress_reads N: its first N
+`run view <id>` reads (any --json fields, counted from the call log) show it in progress with no
+conclusion, and later reads show the fixture: a run that ends only after N reads. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
 
 Scratch files live in one temp directory, removed at exit.
 """
 
 import atexit
+import importlib.util
 import json
 import os
 import re
@@ -58,6 +77,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Absolute: each case runs the hook with its own temp folder as cwd, so a relative path breaks there.
@@ -123,29 +144,27 @@ def read_log(base):
             out.append(json.loads(f.read()))
     return out
 
-def logged_calls():
-    return read_log(os.environ["GH_STUB_LOG"])
-
-def view(r, watched, with_jobs):
-    hidden = bool(r.get("in_progress_until_watch")) and str(r["databaseId"]) not in watched
+def view(r, listed):
+    """One run as `gh --json` prints it. listed: the `run list` form, which has no jobs. A run
+    marked in_progress_at_list reads in progress there, and as its fixture says at `run view`."""
+    hidden = bool(r.get("in_progress_at_list")) and listed
     out = {"databaseId": r["databaseId"], "name": r["name"], "workflowName": r["workflowName"],
            "headSha": r["headSha"], "event": r["event"],
            "status": "in_progress" if hidden else r["status"],
            "conclusion": None if hidden else r["conclusion"]}
-    if with_jobs:
-        out["jobs"] = [] if hidden else r["jobs"]
+    if not listed:
+        out["jobs"] = r["jobs"]
     return out
+
+def views_of(key):
+    """How many `run view <key>` calls the log holds, this one too (log_call ran first). Each gh
+    call is a new process, so the log is the only count that outlives one."""
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:3] == ["run", "view", key])
 
 def ready_ping():
     port = os.environ.get("GH_STUB_READY_PORT")
     if port:
         socket.create_connection(("127.0.0.1", int(port)), timeout=10).close()
-
-def hang(seconds):
-    devnull = os.open(os.devnull, os.O_RDWR)
-    for fd in (0, 1, 2):
-        os.dup2(devnull, fd)
-    time.sleep(seconds)
 
 def main(args):
     log_call(args)
@@ -160,7 +179,6 @@ def main(args):
     obj = args[0] if args else ""
     verb = args[1] if len(args) > 1 else ""
     key = args[2] if len(args) > 2 else ""
-    watched = set(str(c[2]) for c in logged_calls() if c[:2] == ["run", "watch"] and len(c) > 2)
     if obj == "pr" and verb == "view":
         hits = [p for p in fx["prs"] if str(p["number"]) == key or p["headRefName"] == key]
         if not hits:
@@ -176,22 +194,30 @@ def main(args):
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         hits = [r for r in fx["runs"] if commit is None or r["headSha"].startswith(commit)]
-        sys.stdout.write(json.dumps([view(r, watched, False) for r in hits]) + "\n")
+        sys.stdout.write(json.dumps([view(r, True) for r in hits]) + "\n")
         return 0
-    if obj == "run" and verb in ("view", "watch"):
+    if obj == "run" and verb == "watch":
+        sys.stderr.write("stub gh: the hook must not run `gh run watch`\n")
+        return 1
+    if obj == "run" and verb == "view":
         hits = [r for r in fx["runs"] if str(r["databaseId"]) == key]
         if not hits:
             sys.stderr.write("could not find any workflow run with id %s\n" % key)
             return 1
         r = hits[0]
-        if verb == "view":
-            sys.stdout.write(json.dumps(view(r, watched, True)) + "\n")
-            return 0
-        ready_ping()
-        if r.get("hang_seconds"):
-            hang(r["hang_seconds"])
-        sys.stdout.write("Run %s (%s) completed with '%s'\n" % (r["name"], r["databaseId"], r["conclusion"]))
-        return 0 if r["conclusion"] in ("success", "skipped", "neutral") else 1
+        fields = flag(args, "--json")
+        if fields == "status" and r.get("fail_status_read"):
+            sys.stderr.write("HTTP 502: Bad Gateway\n")
+            return 1
+        if fields == "status" and r.get("ping_on_status_read"):
+            ready_ping()
+        if views_of(key) <= r.get("in_progress_reads", 0):
+            r = dict(r, status="in_progress", conclusion=None)
+        out = view(r, False)
+        if fields:
+            out = {k: v for k, v in out.items() if k in fields.split(",")}
+        sys.stdout.write(json.dumps(out) + "\n")
+        return 0
     sys.stderr.write("stub gh: unsupported: %s\n" % " ".join(args))
     return 1
 
@@ -240,6 +266,19 @@ FLUSH_LAUNCHER = os.path.join(TMP, "flaky_flush.py")
 with open(FLUSH_LAUNCHER, "w", encoding="utf-8") as f:
     f.write(FLUSH_SRC)
 
+FAST_SLEEP_SRC = r'''
+import runpy, sys, time
+
+_real_sleep = time.sleep
+# A cap, not a no-op: the 30 s status pause costs 0.05 s, and a negative sleep still raises.
+time.sleep = lambda seconds: _real_sleep(min(seconds, 0.05))
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
+FAST_SLEEP_LAUNCHER = os.path.join(TMP, "fast_sleep.py")
+with open(FAST_SLEEP_LAUNCHER, "w", encoding="utf-8") as f:
+    f.write(FAST_SLEEP_SRC)
+
 
 def pr(number, draft=False, branch="hook-wave-2", sha=SHA):
     return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
@@ -250,13 +289,17 @@ def job(name, conclusion):
     return {"name": name, "conclusion": conclusion, "status": "completed"}
 
 
-def run(run_id, name, conclusion, jobs, in_progress_until_watch=False, sha=SHA,
-        status="completed", hang=0):
+def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
+        status="completed", ping=False, fail_status=False, in_progress_reads=0):
     out = {"databaseId": run_id, "name": name, "workflowName": name, "headSha": sha,
            "event": "pull_request", "status": status, "conclusion": conclusion,
-           "jobs": jobs, "in_progress_until_watch": in_progress_until_watch}
-    if hang:
-        out["hang_seconds"] = hang
+           "jobs": jobs, "in_progress_at_list": in_progress_at_list}
+    if ping:
+        out["ping_on_status_read"] = True
+    if fail_status:
+        out["fail_status_read"] = True
+    if in_progress_reads:
+        out["in_progress_reads"] = in_progress_reads
     return out
 
 
@@ -281,10 +324,14 @@ RED_B = run(911, "gates", "failure", [job("unit", "failure")], sha=SHA_B)
 CANCEL_903 = run(903, "gates", "cancelled", [job("unit", "cancelled")])
 RAN_904 = run(904, "gates", "success", [job("unit", "success")])
 CANCEL_905 = run(905, "gates", "cancelled", [job("unit", "cancelled")])
-INPROG_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_until_watch=True)
-INPROG_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_until_watch=True)
-PENDING = run(908, "gates", None, [], status="in_progress", hang=10)  # still running at 10 s
-HOLD = run(909, "gates", "success", [job("unit", "success")], hang=15)  # a watch that stays live
+INPROG_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True)
+LATE_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True,
+               in_progress_reads=2)  # in progress for 2 reads of `run view`, completed at the 3rd
+LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True,
+               in_progress_reads=3)  # in progress for 3 reads, completed at the 4th
+PENDING = run(908, "gates", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
+HOLD = run(909, "gates", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
+BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
 
 PUSH_FORMS = [
     "git push",
@@ -394,7 +441,13 @@ def start_watcher(payload, scen, extra=None):
 
 
 def watched(res):
-    return [c[2] for c in res.calls if c[:2] == ["run", "watch"] and len(c) > 2]
+    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each."""
+    return [c[2] for c in res.calls if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
+
+
+def run_watches(res):
+    """Every `gh run watch` call. The decision ci-wait-reads-run-status allows none."""
+    return [c for c in res.calls if c[:2] == ["run", "watch"]]
 
 
 def count(res, *prefix):
@@ -441,7 +494,8 @@ def expect_silent(label, res):
 
 
 def expect_no_watch(label, res):
-    check("%s: no run watch" % label, watched(res) == [], why(res))
+    check("%s: no wait on a run (no status read, no run watch)" % label,
+          watched(res) == [] and run_watches(res) == [], why(res))
 
 
 def expect_no_gh(label, res):
@@ -449,9 +503,12 @@ def expect_no_gh(label, res):
 
 
 def expect_watch(label, res, ids):
-    """One blocking watch per run, and the run list read once (no polling)."""
-    check("%s: watches %s once each, runs listed once" % (label, ids),
-          sorted(watched(res)) == sorted(ids) and count(res, "run", "list") <= 1, why(res))
+    """The status reads, as ids: one read per run for a run that is completed at its first read, and
+    one more id per read for a run still in progress (in_progress_reads). The run list is read once
+    (no polling), and there is no `gh run watch`."""
+    check("%s: status reads are %s, runs listed once, no run watch" % (label, ids),
+          sorted(watched(res)) == sorted(ids) and run_watches(res) == []
+          and count(res, "run", "list") <= 1, why(res))
 
 
 def guard_silent(label, command, scen=None, tool=bash):
@@ -470,7 +527,9 @@ def watch_pr12(label, command):
 
 def case_one_watcher_per_pr():
     """A live watcher holds PR 12. A second one exits at once. A killed or finished watcher
-    releases PR 12. The handshake is one accept() on a localhost port the stub connects to."""
+    releases PR 12. The handshake is one accept() on a localhost port the stub connects to, at the
+    first watcher's first status read. The watcher then pauses 30 s with the lock held, and the
+    case kills it."""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.bind(("127.0.0.1", 0))
     srv.listen(1)
@@ -485,14 +544,14 @@ def case_one_watcher_per_pr():
             reached = True
         except OSError:
             reached = False
-        check("first watcher reached its blocking run watch (handshake within 20 s)", reached,
+        check("first watcher reached its first status read (handshake within 20 s)", reached,
               "no connection from the stub")
         if reached:
             second = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=lock)
             check("second watcher for PR 12 while the first is live: exit 0, no output",
                   second.rc == 0 and not second.hung and second.lines == [], why(second))
-            check("second watcher for PR 12 while the first is live: no run watch, exits at once",
-                  watched(second) == [] and second.elapsed < 5, why(second))
+            check("second watcher for PR 12 while the first is live: no wait on a run, exits at once",
+                  watched(second) == [] and run_watches(second) == [] and second.elapsed < 5, why(second))
     finally:
         if proc is not None:
             proc.kill()
@@ -559,8 +618,8 @@ def case_background_separator_starts_each_watch():
           res.rc == 2 and not res.hung and vs is not None
           and sorted((v[0], v[1]) for v in vs) == sorted([("green", SHA7), ("red", SHA7_B)]),
           why(res))
-    check("gh pr ready 12 & gh pr ready 13: watches runs 901 and 911, one each",
-          sorted(watched(res)) == ["901", "911"], why(res))
+    check("gh pr ready 12 & gh pr ready 13: reads the status of runs 901 and 911, one each, no run watch",
+          sorted(watched(res)) == ["901", "911"] and run_watches(res) == [], why(res))
     watch_pr12("gh pr ready 12 2>&1: the redirect starts one watch", "gh pr ready 12 2>&1")
     # A single & inside quotes or after a comment opener is no separator (guards for the fix).
     guard_silent("single & inside double quotes is no separator", 'echo "a & gh pr ready 12"')
@@ -576,6 +635,176 @@ def case_lock_folder_unusable_wakes_unknown():
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=blocker)
     expect_verdict("lock folder is a file (OSError at the lock)", res, "unknown")
     expect_no_watch("lock folder is a file", res)
+
+
+# watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
+STATUS_READ = ["run", "view", "7", "--json", "status"]
+T0 = 1000.0   # where the fake clock starts
+
+
+class FakeTime:
+    """The module's `time`. It moves only when the code sleeps. A loop that never ends fails
+    after 400 sleeps, so it cannot hang the run."""
+
+    def __init__(self):
+        self.now, self.sleeps = T0, []
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        if len(self.sleeps) > 400:
+            raise AssertionError("runaway wait: 400 sleeps")
+        self.now += max(seconds, 0)
+
+
+def status_reply(status):
+    return (0, json.dumps({"status": status}) + "\n", "")
+
+
+def watch_run_on_fakes(replies, budget):
+    """Run watch_run(7, cwd, deadline) in process. The module's `gh` is scripted: one
+    (rc, stdout, stderr) per call, the last repeats. Its `time` is the fake clock. Its `subprocess`
+    and `shutil` are fakes that record a direct call (the old `gh run watch` path) and start nothing.
+    budget: seconds from the clock's start to the deadline.
+    -> (module, exception or None, clock, gh calls [(time, args)], direct subprocess calls)."""
+    spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    clock, calls, direct = FakeTime(), [], []
+
+    def fake_gh(args, cwd, timeout=None):
+        calls.append((clock.now, list(args)))
+        if len(calls) > 400:
+            raise AssertionError("runaway reads: 400 gh calls")
+        return replies[min(len(calls), len(replies)) - 1]
+
+    class Proc:
+        returncode, args = 0, []
+
+        def wait(self, timeout=None):
+            return 0
+
+        def communicate(self, *a, **kw):
+            return b"", b""
+
+        def poll(self):
+            return 0
+
+        def kill(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def popen(argv, *a, **kw):
+        direct.append(list(argv)[1:])
+        return Proc()
+
+    def run_(argv, *a, **kw):
+        popen(argv)
+        return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"", args=argv)
+
+    fake_subprocess = types.SimpleNamespace(Popen=popen, run=run_, DEVNULL=-3, PIPE=-1, STDOUT=-2,
+                                            TimeoutExpired=subprocess.TimeoutExpired)
+    fake_shutil = types.SimpleNamespace(which=lambda name, *a, **kw: "gh-fake")
+    deadline = clock.now + budget
+    with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
+            mock.patch.object(mod, "subprocess", fake_subprocess), mock.patch.object(mod, "shutil", fake_shutil):
+        try:
+            mod.watch_run(7, os.getcwd(), deadline)
+            raised = None
+        except Exception as e:   # Unknown is the one the cases look for
+            raised = e
+    return mod, raised, clock, calls, direct
+
+
+def read_times(calls):
+    return [t for t, a in calls if a == STATUS_READ]
+
+
+def spaced(times, gap=30):
+    return all(b - a >= gap for a, b in zip(times, times[1:]))
+
+
+def watch_detail(raised, clock, calls, direct):
+    return "raised=%r gh=%r direct=%r sleeps=%r" % (raised, [" ".join(a) for _, a in calls], direct, clock.sleeps)
+
+
+def case_watch_run_reads_the_status_until_completed():
+    """in_progress, in_progress, completed: three reads of `run view 7 --json status`, 30 s or more
+    apart, the first before any pause, none after `completed`. Never `gh run watch`, direct or by gh()."""
+    label = "watch_run, in_progress twice then completed"
+    mod, raised, clock, calls, direct = watch_run_on_fakes(
+        [status_reply("in_progress"), status_reply("in_progress"), status_reply("completed")], 3600)
+    times, detail = read_times(calls), watch_detail(raised, clock, calls, direct)
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: never starts `gh run watch`" % label,
+          direct == [] and not any(a[:2] == ["run", "watch"] for _, a in calls), detail)
+    check("%s: reads `gh run view 7 --json status` three times, and makes no other gh call" % label,
+          [a for _, a in calls] == [STATUS_READ] * 3, detail)
+    check("%s: reads at least 30 s apart" % label, len(times) == 3 and spaced(times), detail)
+    check("%s: the first read comes before any pause" % label, times[:1] == [T0], detail)
+
+
+def case_watch_run_completed_at_the_first_read_does_not_pause():
+    label = "watch_run, completed at the first read"
+    mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], 3600)
+    check("%s: one read, no pause, no exception, no `gh run watch`" % label,
+          raised is None and [a for _, a in calls] == [STATUS_READ] and clock.sleeps == [] and direct == [],
+          watch_detail(raised, clock, calls, direct))
+
+
+def case_watch_run_returns_at_the_deadline():
+    """The run never completes. watch_run returns, no exception, with its last pause ending at the
+    deadline: not before it, not past it. Reads stay 30 s or more apart."""
+    for budget in (100, 10):
+        label = "watch_run, always in_progress, deadline in %d s" % budget
+        mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
+        times, detail = read_times(calls), watch_detail(raised, clock, calls, direct)
+        check("%s: returns, no exception, no `gh run watch`" % label, raised is None and direct == [], detail)
+        check("%s: returns at the deadline, not before it and not past it" % label,
+              abs(clock.now - (T0 + budget)) < 1e-6, "%s now=%.1f" % (detail, clock.now - T0))
+        check("%s: only status reads, at least 30 s apart" % label,
+              len(times) >= 1 and len(times) == len(calls) and spaced(times), detail)
+        if budget == 100:
+            check("%s: keeps reading while the run is in progress (3 reads or more)" % label,
+                  len(times) >= 3, detail)
+
+
+def case_watch_run_at_or_past_the_deadline_reads_nothing():
+    """A call made at its deadline (budget 0) or past it (budget below 0) makes no read and returns
+    at once, though the run is in progress: the clock does not move, so no pause either. Review
+    round 1 found the first read came before any deadline check."""
+    for budget in (0, -30):
+        label = "watch_run, always in_progress, deadline already passed (%d s)" % budget
+        mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
+        detail = watch_detail(raised, clock, calls, direct)
+        check("%s: returns, no exception, no `gh run watch`" % label, raised is None and direct == [], detail)
+        check("%s: makes no gh call, so no `run view` read" % label, calls == [], detail)
+        check("%s: returns at once, the clock does not move" % label, clock.now == T0, detail)
+
+
+def case_watch_run_failed_read_is_unknown():
+    """A failed read, or one that is not JSON, ends the wait: Unknown, no retry."""
+    rows = (
+        ("gh exits 1 at the first read", [(1, "", "HTTP 401: Bad credentials")], 1),
+        ("gh prints non-JSON at the first read", [(0, "<html>not json</html>", "")], 1),
+        ("gh exits 1 at the second read", [status_reply("in_progress"), (1, "", "HTTP 502: Bad Gateway")], 2),
+    )
+    for label, replies, reads in rows:
+        mod, raised, clock, calls, direct = watch_run_on_fakes(replies, 3600)
+        detail = watch_detail(raised, clock, calls, direct)
+        check("watch_run, %s: raises Unknown" % label, isinstance(raised, mod.Unknown), detail)
+        check("watch_run, %s: %d read(s) and no retry, no `gh run watch`" % (label, reads),
+              len(calls) == reads and direct == [], detail)
 
 
 def main():
@@ -599,8 +828,8 @@ def main():
     check("gh pr ready 12 && gh pr ready 13: one line per PR (12 green on sha7, 13 red on sha7)",
           vs is not None and sorted((v[0], v[1]) for v in vs) == sorted([("green", SHA7), ("red", SHA7_B)]),
           why(res))
-    check("gh pr ready 12 && gh pr ready 13: watches runs 901 and 911, one each",
-          sorted(watched(res)) == ["901", "911"], why(res))
+    check("gh pr ready 12 && gh pr ready 13: reads the status of runs 901 and 911, one each, no run watch",
+          sorted(watched(res)) == ["901", "911"] and run_watches(res) == [], why(res))
     check("gh pr ready 12 && gh pr ready 13: run list read at most twice",
           count(res, "run", "list") <= 2, why(res))
 
@@ -654,7 +883,7 @@ def main():
     vs = verdicts_of(res)
     check("heredoc body ignored, gh pr ready 13 after the delimiter still watches",
           res.rc == 2 and vs is not None and [(v[0], v[1]) for v in vs] == [("red", SHA7_B)]
-          and sorted(watched(res)) == ["911"], why(res))
+          and sorted(watched(res)) == ["911"] and run_watches(res) == [], why(res))
 
     # A lone quote, a # inside quotes, and a multi-line quote do not hide a later gh pr ready.
     watch_pr12("lone quote in earlier text: gh pr ready 12 still watches", "echo don't && gh pr ready 12")
@@ -681,9 +910,14 @@ def main():
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [CANCEL_905]))
     expect_verdict("cancelled run with no twin", res, "cancelled")
 
-    res = run_hook(bash("gh pr ready 12"), fixture(READY, [INPROG_906, INPROG_907]))
-    expect_verdict("two in-progress runs, both waited on", res, "green")
-    expect_watch("two in-progress runs", res, ["906", "907"])
+    # Two runs that end only after several reads (906 after 2, 907 after 3): each is read again until
+    # it completes, 3 and 4 status reads. A hook that stops after one read gets 1 and 1, and a
+    # "still running" line, because the stub shows the run in progress at the final read too.
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LATE_906, LATE_907]),
+                   launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict("two in-progress runs, both waited on until each completes", res, "green")
+    expect_watch("two in-progress runs, both waited on until each completes", res,
+                 ["906"] * 3 + ["907"] * 4)
 
     # Own deadline: a run still pending at the deadline wakes with a still-running line.
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [PENDING]), extra={"CI_WAKE_DEADLINE": "1"})
@@ -691,8 +925,14 @@ def main():
     check("deadline 1 s, run still pending: exit 2, one unknown line with sha7 and 'still running'",
           res.rc == 2 and not res.hung and v is not None and v[0] == "unknown" and v[1] == SHA7
           and "still running" in v[2], why(res))
-    check("deadline 1 s, run still pending: wakes at its deadline, not when the run ends (under 6 s)",
-          not res.hung and res.elapsed < 6, "elapsed=%.1f s; the run ends at 10 s" % res.elapsed)
+    check("deadline 1 s, run still pending: wakes at its deadline (under 6 s): the 30 s pause stops at the deadline",
+          not res.hung and res.elapsed < 6, "elapsed=%.1f s; the run never ends" % res.elapsed)
+
+    # Decision ci-wait-reads-run-status: a failed status read ends the wait as unknown, with no retry.
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [BAD_STATUS]))
+    expect_verdict("status read exits 1", res, "unknown")
+    check("status read exits 1: one status read, no retry, no run watch",
+          watched(res) == ["912"] and run_watches(res) == [], why(res))
 
     # One watcher per PR.
     case_one_watcher_per_pr()
@@ -729,6 +969,13 @@ def main():
     case_final_flush_error_wakes_unknown()
     case_background_separator_starts_each_watch()
     case_lock_folder_unusable_wakes_unknown()
+
+    # Decision ci-wait-reads-run-status: watch_run on fakes.
+    case_watch_run_reads_the_status_until_completed()
+    case_watch_run_completed_at_the_first_read_does_not_pause()
+    case_watch_run_returns_at_the_deadline()
+    case_watch_run_at_or_past_the_deadline_reads_nothing()
+    case_watch_run_failed_read_is_unknown()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))

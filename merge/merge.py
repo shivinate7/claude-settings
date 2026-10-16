@@ -466,8 +466,7 @@ class Host:
         """Wait until every check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
         Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
-        not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
-        most a minute, then the loop reads again."""
+        not, ends the wait, and any pending check, required or not, is waited on. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
         listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
         say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
         names = self.required_names()
@@ -617,18 +616,12 @@ class Host:
         return "green", ""
 
     def block(self, pending, got):
-        """Wait up to a minute for something to change."""
+        """Pause for something to change. A check with an Actions run pauses 30 s, else a minute. Neither makes a gh call."""
         ids = [m.group(1) for k in pending for _, l in got.get(k, []) for m in [re.search(r"/actions/runs/(\d+)", l)] if m]
-        if not ids:  # ponytail: a check outside Actions has no run to watch, so this is a plain pause. Fine while the loop exits at the deadline.
+        if not ids:  # ponytail: a check outside Actions has no run link, so this is a plain pause. Fine while the loop exits at the deadline.
             self.pause(self.minute)
             return
-        t0 = self.now()
-        try:
-            subprocess.run([resolve_program("gh"), "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.minute)
-        except subprocess.TimeoutExpired:
-            pass
-        if self.now() - t0 < 1:  # watch returned at once: do not spin on the API
-            self.pause(self.minute)
+        self.pause(30)  # no gh call: the next pass reads the checks (decision ci-wait-reads-run-status)
 
     def merge(self, n, method, sha):
         """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).

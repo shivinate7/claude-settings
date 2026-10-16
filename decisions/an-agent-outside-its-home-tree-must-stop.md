@@ -54,7 +54,13 @@ non-isolated agent. Nothing changes for it: allow.
 
 - Bash / PowerShell: the payload `cwd` is not inside the recorded home.
   This covers the home folder being gone entirely. A resolved path
-  compares correctly whether or not it still exists.
+  compares correctly whether or not it still exists. A Git Bash `cwd` in
+  the `/c/...` form is read as `C:\...` for this rule only.
+  One exception: a lone move back into the home is allowed. The move is
+  `cd` in Bash, or `cd`, `Set-Location`, `sl`, `chdir` or `pushd` in
+  PowerShell. The home path is its only argument, and the command has no
+  separator. (Owner question 2026-10-15: why agents stuck outside their
+  tree cannot use PowerShell.)
 - Write / Edit / MultiEdit / NotebookEdit: the target sits inside the
   same clone, under the primary checkout, but outside the recorded home.
   A target outside the clone, such as a scratchpad file, is allowed. This
@@ -79,7 +85,19 @@ then gets ignored.
 
 **The predicate is the act**, not the command's text
 (decisions/predicate-is-the-act.md). This rule reads `agent_id`, `cwd`,
-and the write target only. No command string is matched.
+and the write target. The lone-move exception reads the command text, and
+only to allow. Any doubt in that read refuses, as main did.
+
+## Holes, named
+
+- A home path that holds a space escaped with `\` in Bash, or a trailing
+  newline after the path, refuses the move. Quoted forms are allowed.
+  Debt `home-cd-escaped-space` (an escaped space refuses the move home).
+- A home path that holds `&`, `;`, `(`, `)` or `$` refuses the move. No
+  such path is on this machine. Same debt.
+- The four `home_cwd` mutants in hooks/mutate_guard.py need only the
+  fragment `worktree-home:`. A kill proves the rule, not the named case.
+  Debt `home-cwd-mutant-fragment` (home_cwd mutants name no case).
 
 ## What reopens it
 
@@ -89,3 +107,6 @@ and the write target only. No command string is matched.
   `.claude/worktrees/`.
 - A confirmed case on Windows or in a Write/Edit payload that disagrees
   with the shapes recorded here.
+
+Kind: build
+Plan: decisions/an-agent-outside-its-home-tree-must-stop.md#the-rule (all)

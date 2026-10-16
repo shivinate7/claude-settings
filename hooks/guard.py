@@ -228,7 +228,8 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_powershell, is_worktree, log_path_and_text, nested_script, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
@@ -2252,6 +2253,10 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
+    # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
+    # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
+    # rule sees `cwd` as main does.
+    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
 
     # 0. Each subagent stays inside its own worktree. `status` is "none" for the orchestrator
     # (no `agent_id`) and for tools this rule does not judge; "unknown" when the record could
@@ -2259,19 +2264,21 @@ def judge(payload) -> None:
     # non-isolated agent, which allows everything; "home" once the agent's worktree is known,
     # from this call or an earlier one. Read/Grep are never checked here: the agent must still be
     # able to read and report (decisions/an-agent-outside-its-home-tree-must-stop.md).
-    home_status, home, home_primary = agent_worktree_home(payload, cwd)
+    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status == "home":
         if tool in SHELL_TOOLS:
-            if path_is_inside(cwd, home) is False:
-                refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                       "shell cwd outside recorded agent home")
+            if path_is_inside(home_cwd, home) is False:
+                # The one allowed call is a lone `cd` back into the home (a recovery step).
+                if not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home):
+                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
+                           "shell cwd outside recorded agent home")
         elif tool in WRITE_TOOLS:
             for write_target in (write_targets(tool_input) if home_primary else ()):
                 # A relative `file_path` resolves against the CALLER's cwd, the payload's own
                 # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
                 # `is_project_config` for the same reason) joins it before either check.
                 try:
-                    resolved_target = _resolved(write_target, cwd)
+                    resolved_target = _resolved(write_target, home_cwd)
                 except Exception:
                     resolved_target = write_target
                 if (path_is_inside(resolved_target, home_primary) is True
