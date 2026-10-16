@@ -7030,6 +7030,15 @@ records_allow("a merge commit that brings the base's page", VCS + " commit -m x"
 records_allow("a merge commit that brings the base's page, under PowerShell", VCS + " commit -m x",
               REC_LANES["merge"], tool="PowerShell")
 records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
+# The stage-then-commit forms must hold the same line. A guard that refuses whenever the page on disk
+# differs from HEAD's, with no look at the base, refuses the merge and the remedy: both false alarms.
+for _lane in ("merge", "copy-base"):
+    records_allow("stage then commit: commit -am with the base's page, lane %s" % _lane, VCS + " commit -am x",
+                  REC_LANES[_lane])
+    records_allow("stage then commit: add -A and commit with the base's page, lane %s" % _lane,
+                  VCS + " add -A && " + VCS + " commit -m x", REC_LANES[_lane])
+records_allow("stage then commit: add -A and commit with the base's page, under PowerShell",
+              VCS + " add -A; " + VCS + " commit -m x", REC_LANES["copy-base"], tool="PowerShell")
 
 # 4. Nothing to compare, or git cannot be read: no hit.
 records_allow("a commit in a repository with no page", VCS + " commit -m x", REC_NOPAGE)
