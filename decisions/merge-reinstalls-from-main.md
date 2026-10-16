@@ -54,11 +54,14 @@ Home: merge/install_from_main.sh
 ## Holes, named
 
 Debts: `install-pin-move-in-place` (without symlink rights, the pin move switches in place and
-can show a mix), `live-pin-first-move-gap` (the first move from a plain directory leaves
-`<clone>-live` absent for milliseconds), `install-lock-stale-by-age` (the lock is stale by age
-only; a stale lock that cannot be removed loops with no timeout, and two waiters can both take
-it), `install-early-exit-unlogged` (refusals and lock timeouts exit before the start line, so
-they log nothing), `guard-old-install-mixes-once` (a guard install made before this rule mixes
+can show a mix), `pin-switch-in-place-mix` (the in-place switch on a host with no link rights),
+`live-pin-first-move-gap` (the first move from a plain directory leaves `<clone>-live` absent for
+milliseconds), `install-lock-stale-by-age` (the lock is stale by age only; a stale lock that
+cannot be removed loops with no timeout, two waiters can both take it, and a live run past 10
+minutes can overlap a second install), `install-lock-trap-no-id` (the EXIT trap removes the lock
+with no id check, so a run that outlives the stale age can remove a later holder's lock),
+`install-early-exit-unlogged` (refusals and lock timeouts exit before the start line, so they log
+nothing), `guard-old-install-mixes-once` (a guard install made before this rule mixes
 once, until the first install under it), `guard-realpath-after-flip` (in link mode,
 `realpath(__file__)` can run after a link flip, so guard.py and its modules can come from two
 main commits for milliseconds).
