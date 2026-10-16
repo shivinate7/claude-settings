@@ -3469,20 +3469,31 @@ class _AgentEndFixture(unittest.TestCase):
         with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
             return json.loads(handle.readlines()[-1])
 
-    def own_row(self, path):
-        """The decision row the last hook run wrote for PATH, or None."""
+    def row_for_tree(self, path):
+        """The decision row the last hook run wrote for the worktree at PATH, or None."""
         last = self.last_row()
         for row in last.get("worktrees") or []:
             if _norm_path(str(row.get("path", ""))) == _norm_path(path):
                 return row
         return None
 
-    def assert_own_reaped(self, path):
-        """The hook decided REAP for PATH and the tree is gone. A keep prints the row's reason."""
-        row = self.own_row(path)
+    def assert_own_left(self, path):
+        """The hook kept the ending agent's own tree at PATH, and its row names the delayed remover
+        (owner ruling 2026-10-15 23:01 CDT). The tree is still a git worktree on disk."""
+        row = self.row_for_tree(path)
         self.assertIsNotNone(row, "the hook wrote no decision row for the own tree")
-        self.assertEqual(row.get("action"), "reap", "the own tree was kept: %s" % row.get("reason"))
-        self.assertRemoved(path)
+        self.assertEqual(row.get("action"), "keep", "the own tree was not kept: %s" % row.get("reason"))
+        self.assertIn("left for the delayed remover", str(row.get("reason")))
+        self.assertKept(path)
+
+    def control_tree(self, name):
+        """Another finished agent's clean, pushed tree. The hook must remove it in the same run. Call
+        age_control() on it right before the hook runs, because git calls before the run reset its idle."""
+        return self.add(name)
+
+    def age_control(self, path):
+        _age_admin_files(path, 31 * 60)
+        require(sweep.worktree_idle_seconds(path) >= 31 * 60 - 60, "control tree %s is not 31 min idle" % path)
 
     def lock(self, path, reason):
         require(run_vcs(self.primary, "worktree", "lock", path, "--reason", reason).returncode == 0,
@@ -3509,38 +3520,42 @@ class _AgentEndFixture(unittest.TestCase):
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
-    """Owner ruling 2026-10-15: when an agent ends (SubagentStop), janitor/agent_end_reap.py removes
-    the ending agent's OWN worktree under `.claude/worktrees/agent-*` when it is clean, holds no
-    untracked file, has HEAD on a remote-tracking ref, and has no process inside. A lock does not hold
-    it when the lock names the host pid the hook runs under, or a dead pid. A lock held by another live
-    process keeps it. No idle time applies to the ending agent's own tree.
+    """Owner ruling 2026-10-15 23:01 CDT: when an agent ends (SubagentStop), janitor/agent_end_reap.py
+    KEEPS the ending agent's OWN worktree under `.claude/worktrees/agent-*`, whatever its state. Its
+    row names the delayed remover (lane wt-reap-delay). The hook never stops a process whose parent is
+    live: the agent's own shells, the hook's wrapper and any host-started process survive. An orphan
+    (dead parent) inside the own tree keeps main's stop, and that is covered in AgentEndReapTests. The
+    removal of OTHER finished agents' trees idle 30 minutes or more is unchanged, and is covered in
+    AgentEndOtherWorktreeTests.
 
-    Each keep arm runs beside a clean, pushed control twin that must be removed in the same test, so a
+    Each keep arm is checked by the own row's reason, not only by the tree still existing. Each keep arm
+    runs beside another agent's clean, pushed tree idle 31 minutes that the same run must remove, so a
     keep arm cannot pass on a hook that deletes nothing."""
 
     def keep_case(self, name, damage, proof):
         """PROOF reads the damage back, so a keep arm cannot pass on a fixture that never took."""
-        twin, subject = self.add(name + "twin"), self.add(name)
+        control, subject = self.control_tree(name + "ctl"), self.add(name)
         damage(subject)
         proof(subject)
-        self.fire(name + "twin", twin)
-        with self.subTest(control="clean pushed twin is removed"):
-            self.assertRemoved(twin)
+        self.age_control(control)
         self.fire(name, subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
         with self.subTest(arm=name):
-            self.assertKept(subject)
+            self.assert_own_left(subject)
 
-    def test_subagent_stop_removes_its_own_clean_pushed_worktree(self):
-        # Owner ruling 2026-10-15 deleted the 2026-09-27 ruling that kept WorktreeRemove unwired.
-        # SubagentStop is the trigger. Stop and WorktreeRemove name no worktree to end.
+    def test_subagent_stop_keeps_its_own_clean_pushed_worktree(self):
+        # Red on 8209120: the hook removes the own tree at agent end. Stop and WorktreeRemove name no
+        # worktree to end.
         self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.primary}))
         own = self.add("trigger")
         self.assertIsNone(self.reap.target_worktree(
             {"hook_event_name": "WorktreeRemove", "worktree_path": own}))
         self.fire("trigger", own)
-        self.assertRemoved(own)
+        self.assert_own_left(own)
 
-    def test_a_stale_lock_does_not_hold_the_own_worktree(self):
+    def test_a_stale_lock_does_not_change_the_own_worktree_keep(self):
+        # Red on 8209120: the stale lock lets the hook remove the own tree.
         gone = subprocess.Popen([sys.executable, "-c", "pass"])
         gone.wait()
         dead_pid = gone.pid
@@ -3553,7 +3568,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assertTrue(sweep.stale_agent_lock_verdict(reason), "the fixture lock is not stale: %r" % reason)
         self.lock(own, reason)
         self.fire("stalelock", own)
-        self.assertRemoved(own)
+        self.assert_own_left(own)
 
     def test_a_dirty_own_worktree_is_kept(self):
         self.keep_case("dirty", self.dirty, lambda p: self.assertTrue(guard.porcelain(p), "no dirty edit"))
@@ -3565,16 +3580,17 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.keep_case("unpushed", self.unpushed, lambda p: self.assertEqual(
             run_vcs(p, "branch", "-r", "--contains", "HEAD").stdout.strip(), "", "HEAD is pushed"))
 
-    def test_own_tree_locked_by_its_host_pid_is_unlocked_and_removed(self):
-        # Red on 2104e94: the measured lock text has no start time, so AGENT_LOCK_RE never matches and
-        # every lock keeps the tree, the host's included.
+    def test_own_tree_locked_by_its_host_pid_is_kept(self):
+        # Red on 8209120: the host lock is lifted and the own tree removed. Nothing is asserted about the
+        # host lock itself: whether the hook leaves it is an open question (Input Needed).
         own = self.add("hostlock")
         self.lock(own, self.host_lock("hostlock"))
         self.assertTrue(guard.worktree_locked(self.primary, own), "the fixture lock did not take")
         self.fire_under_host("hostlock", own)
-        self.assert_own_reaped(own)
+        self.assert_own_left(own)
 
-    def test_own_tree_locked_by_a_dead_pid_in_the_measured_form_is_unlocked_and_removed(self):
+    def test_own_tree_locked_by_a_dead_pid_in_the_measured_form_is_kept(self):
+        # Red on 8209120: the dead-pid lock is lifted and the own tree removed.
         gone = subprocess.Popen([sys.executable, "-c", "pass"])
         gone.wait()
         dead_pid = gone.pid
@@ -3584,85 +3600,113 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         own = self.add("deadlock")
         self.lock(own, "claude agent agent-deadlock (pid %d)" % dead_pid)
         self.fire_under_host("deadlock", own)
-        self.assert_own_reaped(own)
+        self.assert_own_left(own)
 
     def test_own_tree_locked_by_a_different_live_pid_is_kept_and_stays_locked(self):
         other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.root,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, other)
-        twin, subject = self.add("othertwin"), self.add("otherpid")
-        self.lock(twin, self.host_lock("othertwin"))
+        control, subject = self.control_tree("othertwin"), self.add("otherpid")
         self.lock(subject, "claude agent agent-otherpid (pid %d)" % other.pid)
-        self.fire_under_host("othertwin", twin)
-        with self.subTest(control="host-locked clean pushed twin is removed"):
-            self.assertRemoved(twin)
+        self.age_control(control)
         self.fire_under_host("otherpid", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
         with self.subTest(arm="another live process holds the lock"):
-            self.assertKept(subject)
+            self.assert_own_left(subject)
             self.assertTrue(guard.worktree_locked(self.primary, subject), "the other pid's lock was lifted")
             self.assertIsNone(other.poll(), "the fixture process exited")
 
-    def test_own_tree_locked_by_its_host_pid_but_dirty_is_kept_and_stays_locked(self):
-        twin, subject = self.add("dirtytwin"), self.add("dirtyhost")
-        self.lock(twin, self.host_lock("dirtytwin"))
+    def test_own_tree_locked_by_its_host_pid_but_dirty_is_kept(self):
+        control, subject = self.control_tree("dirtyctl"), self.add("dirtyhost")
         self.lock(subject, self.host_lock("dirtyhost"))
         self.dirty(subject)
         self.assertTrue(guard.porcelain(subject), "no dirty edit")
-        self.fire_under_host("dirtytwin", twin)
-        with self.subTest(control="host-locked clean pushed twin is removed"):
-            self.assertRemoved(twin)
+        self.age_control(control)
         self.fire_under_host("dirtyhost", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
         with self.subTest(arm="dirty, locked by its host pid"):
-            self.assertKept(subject)
-            self.assertTrue(guard.worktree_locked(self.primary, subject), "the dirty tree was unlocked")
+            self.assert_own_left(subject)
 
     def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
         # Guard, green on 2104e94: the exemption must cover the ending agent's own tree only. Every
         # agent tree of one session carries the same host pid.
         own, sibling = self.add("ownsib"), self.add("sibhost")
+        control = self.control_tree("sibctl")
         self.lock(sibling, self.host_lock("sibhost"))
         _age_admin_files(sibling, 31 * 60)
         self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
                                 "the sibling is not 31 min idle")
+        self.age_control(control)
         self.fire_under_host("ownsib", own)
-        with self.subTest(control="own tree, no lock, is removed"):
-            self.assertRemoved(own)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="own tree is kept for the delayed remover"):
+            self.assert_own_left(own)
         with self.subTest(arm="sibling locked by the same host pid, idle 31 min"):
             self.assertKept(sibling)
             self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
 
-    def test_a_host_started_process_inside_the_own_worktree_is_stopped_then_the_tree_removed(self):
-        # Owner ruling 2026-10-15 19:43 CDT, point 1. Re-points the old keep-a-process case, which
-        # asserted the opposite. Red on abf5f8e: the host is a live parent outside the tree, so
-        # tree_root_orphaned keeps the process ("not-orphaned").
-        twin, subject = self.add("proctwin"), self.add("proc")
+    def test_a_host_started_process_inside_the_own_worktree_is_not_stopped(self):
+        # Owner ruling 2026-10-15 19:43 CDT, point 1, as narrowed by the 23:01 ruling: a live parent is
+        # never stopped, and the host is a live parent. Red on 8209120: the host-started shell is
+        # stopped, then the own tree removed.
+        control, subject = self.control_tree("proctwin"), self.add("proc")
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=subject,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, proc)
         inside, _unreadable = sweep.processes_in(subject)
         self.assertIn(proc.pid, inside or [], "the fixture process is not inside the worktree")
-        self.fire_under_host("proctwin", twin)
-        with self.subTest(control="clean pushed twin is removed"):
-            self.assertRemoved(twin)
+        self.age_control(control)
         self.fire_under_host("proc", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
         with self.subTest(arm="host-started process inside the own tree"):
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.fail("the host-started process inside the own worktree was not stopped")
-            self.assert_own_reaped(subject)
+            self.assertIsNone(proc.poll(), "the host-started process inside the own worktree was stopped")
+            self.assert_own_left(subject)
 
-    def test_hook_run_from_inside_its_own_tree_removes_it(self):
-        # Red on 149921d: the hook's own pid is in processes_in, so the own tree reads process-inside
-        # and the row's reason names the hook's pid. The hook runs with its cwd inside the tree, as
-        # the harness runs it. Its removal needs the hook to leave that cwd first: a live process
-        # cwd inside a tree blocks git's delete on Windows (measured on a scratch repo: rc 255,
-        # Permission denied; the same remove after a chdir out: rc 0).
+    def test_a_fake_hook_process_and_a_fake_agent_shell_with_a_live_parent_survive(self):
+        # Coordinator correction 2026-10-15: the hook never stops a process with a live parent. Both
+        # fakes sit inside the own tree and are children of this test process (the host, alive). The
+        # wrapper's command line names the hook script, so it reads as the hook's own wrapper.
+        own = self.add("survive")
+        fake_hook_dir = os.path.join(self.root, "fake-hook")
+        os.makedirs(fake_hook_dir)
+        fake_hook = os.path.join(fake_hook_dir, "agent_end_reap.py")
+        write(fake_hook, "import time\ntime.sleep(120)\n")
+        shell = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=own,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, shell)
+        wrapper = subprocess.Popen([sys.executable, fake_hook], cwd=own,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, wrapper)
+        inside, _unreadable = sweep.processes_in(own)
+        with self.subTest(precondition="both fakes are inside the own tree"):
+            self.assertIn(shell.pid, inside or [], "the fake agent shell is not inside the own tree")
+            self.assertIn(wrapper.pid, inside or [], "the fake hook process is not inside the own tree")
+        self.fire_under_host("survive", own)
+        with self.subTest(arm="fake agent shell with a live parent survives"):
+            self.assertIsNone(shell.poll(), "the fake agent shell was stopped")
+        with self.subTest(arm="fake hook process with a live parent survives"):
+            self.assertIsNone(wrapper.poll(), "the fake hook process was stopped")
+        with self.subTest(arm="neither fake is reaped or signalled"):
+            fakes = (shell.pid, wrapper.pid)
+            signalled = [d for d in (self.last_row().get("decisions") or [])
+                         if d.get("pid") in fakes and (d.get("action") == "reap" or "signalled" in d)]
+            self.assertEqual(signalled, [], "the hook reaped or signalled a fake: %r" % signalled)
+        self.assert_own_left(own)
+
+    def test_hook_run_from_inside_its_own_tree_keeps_it(self):
+        # Red on 8209120: the hook removes the own tree. The hook runs with its cwd inside the tree, as
+        # the harness runs it, and it must still exit 0 and keep the tree.
         own = self.add("inside")
         self.fire("inside", own, cwd=own)
-        self.assert_own_reaped(own)
+        self.assert_own_left(own)
 
     def test_hook_never_signals_its_own_wrapper_chain(self):
         # Red on 149921d: the wrapper has its cwd inside the own tree and its parent is CLAUDE_PID,
@@ -3738,11 +3782,13 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
 
 
 class AgentEndRulingTests(_AgentEndFixture):
-    """Owner rulings 2026-10-15 19:43 CDT, from review round 1 of the agent-end stage. Each case names
-    its review point. Most cases run the hook in a subprocess (`fire`, `fire_under_host`). A fault that
-    must land inside the stage (a faked cwd read, a lock taken mid-stage, a killed git call) runs
-    `handle()` in this process instead: the same entry the hook's main calls. Real git and real
-    processes everywhere else. Review point 5 (ruling point 2) is a pin: green on abf5f8e, must stay green."""
+    """Owner rulings 2026-10-15 19:43 CDT and 23:01 CDT, from review round 1 of the agent-end stage. Each
+    case names its review point. Most cases run the hook in a subprocess (`fire`, `fire_under_host`). A
+    fault that must land inside the stage (a faked cwd read, a lock taken mid-stage, a killed git call)
+    runs `handle()` in this process instead: the same entry the hook's main calls. Real git and real
+    processes everywhere else. The own tree is always kept (23:01): a case about the removal race or the
+    unreadable-pid gate runs on ANOTHER finished agent's idle tree, where that stage still removes.
+    Review point 5 (ruling point 2) is a pin: green on abf5f8e, must stay green."""
 
     def run_in_process(self, agent, path):
         """`handle()` on a SubagentStop payload for AGENT, in this process. CLAUDE_PID names this test
@@ -3795,12 +3841,16 @@ class AgentEndRulingTests(_AgentEndFixture):
         proc = self.sleeper(sibling)
         inside, _unreadable = sweep.processes_in(sibling)
         self.assertIn(proc.pid, inside or [], "the fixture process is not inside the sibling")
+        control = self.control_tree("sibctl")
         _age_admin_files(sibling, 31 * 60)
         self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
                                 "the sibling is not 31 min idle")
+        self.age_control(control)
         self.fire_under_host("sibown", own)
-        with self.subTest(control="own tree with no process inside is removed"):
-            self.assert_own_reaped(own)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(control="own tree with no process inside is kept for the delayed remover"):
+            self.assert_own_left(own)
         with self.subTest(arm="process inside a sibling tree"):
             self.assertIsNone(proc.poll(), "a process inside a sibling tree was stopped")
             self.assertKept(sibling)
@@ -3830,45 +3880,17 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertTrue(sweep.pid_alive(grand), "a process the host did not start was stopped")
             self.assertKept(own)
 
-    def test_an_unreadable_host_descendant_keeps_the_own_worktree_at_agent_end(self):
-        """Review point 2, re-pointed 2026-10-15 on the coordinator's ruling. An unreadable pid that
-        descends from the host may sit inside the tree, so at agent end it keeps the tree. An
-        unreadable pid outside the host is out of scope (the next case). Red on abf5f8e: processes_in
-        lists the pid as unreadable and decide_worktree drops it (sweep.py ~2040, ~714). Driven through
-        handle(), because the fault is a faked cwd read. The control twin runs on the real reads: 252 of
-        612 live pids are unreadable here (measured), none descend from the host, so a rule that keeps
-        on any unreadable pid keeps the twin too."""
-        if sys.platform == "darwin":
-            self.skipTest("macOS reads every cwd in one lsof call; process_cwd is not on that path")
-        twin, subject = self.add("unrtwin"), self.add("unr")
-        proc = self.sleeper(self.root)
-        real = sweep.process_cwd
-
-        def hidden(pid):
-            return None if pid == proc.pid else real(pid)
-
-        self.run_in_process("unrtwin", twin)
-        with self.subTest(control="clean pushed twin is removed on the real reads"):
-            self.assertRemoved(twin)
-        with mock.patch.object(sweep, "process_cwd", new=hidden):
-            record = self.run_in_process("unr", subject)
-        with self.subTest(arm="unreadable pid that descends from the host"):
-            row = self.row_for(record, subject)
-            self.assertIsNotNone(row, "the stage wrote no row for the own tree")
-            self.assertEqual(row.get("action"), "keep",
-                             "the own tree was reaped past an unreadable host descendant: %s"
-                             % row.get("reason"))
-            self.assertKept(subject)
-
     def test_an_unreadable_pid_outside_the_host_is_out_of_scope(self):
-        """Review point 2, guard: green on abf5f8e. An unreadable pid that does not descend from the
-        host is out of scope at agent end, as WorktreeProcessPreCheckTests states for the pre-check.
-        The pid's parent is a sponsor that has exited, so no host sits on its chain. Windows reads an
-        exited parent as no parent. POSIX reparents such an orphan to init, which host_pids() holds as
-        an ancestor of the hook, so this arm runs on Windows only."""
+        """Review point 2, guard, re-pointed 2026-10-15 23:01 CDT. An unreadable pid that does not descend
+        from the host is out of scope at agent end, as WorktreeProcessPreCheckTests states for the pre-check.
+        The own tree is always kept now, so the unreadable-host-descendant case that sat beside this one is
+        removed (its gate only ever kept the own tree). This case runs on ANOTHER finished agent's idle tree,
+        which the stage still removes. The pid's parent is a sponsor that has exited, so no host sits on its
+        chain. Windows reads an exited parent as no parent. POSIX reparents such an orphan to init, which
+        host_pids() holds as an ancestor of the hook, so this arm runs on Windows only."""
         if sys.platform != "win32":
             self.skipTest("POSIX reparents an orphan to init, which host_pids() holds as an ancestor")
-        subject = self.add("unrout")
+        ending, subject = self.add("unrend"), self.control_tree("unrout")
         pidfile = os.path.join(self.root, "unrout.pid")
         sponsor_code = ("import subprocess, sys\n"
                         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
@@ -3886,45 +3908,52 @@ class AgentEndRulingTests(_AgentEndFixture):
         def hidden(pid):
             return None if pid == orphan else real(pid)
 
+        self.age_control(subject)
         with mock.patch.object(sweep, "process_cwd", new=hidden):
-            record = self.run_in_process("unrout", subject)
-        with self.subTest(arm="unreadable pid outside the host"):
-            row = self.row_for(record, subject)
+            record = self.run_in_process("unrend", ending)
+        with self.subTest(arm="own tree is kept for the delayed remover"):
+            row = self.row_for(record, ending)
             self.assertIsNotNone(row, "the stage wrote no row for the own tree")
-            self.assertEqual(row.get("action"), "reap",
-                             "an unreadable pid outside the host kept the tree: %s" % row.get("reason"))
+            self.assertIn("left for the delayed remover", str(row.get("reason")))
+        with self.subTest(arm="unreadable pid outside the host does not keep another idle tree"):
             self.assertRemoved(subject)
 
     def test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock(self):
-        """Review point 3. decide_worktree reads a stale lock early (sweep.py ~666), and
-        remove_worktree unlocks by name later (~2189). A live lock taken in between must keep the tree
-        and survive. The injection runs inside processes_in: after the lock read, before the unlock.
-        The lock names a separate child, never a host pid, so _OWN_AGENT cannot lift it. Red on
-        abf5f8e: the unlock clears the live lock by name. The control twin has the same dead-pid lock
-        with no injection, and must be removed, so the case reaches the unlock path."""
-        twin, subject = self.add("reltwin"), self.add("relock")
+        """Review point 3, re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree. The own
+        tree is always kept now, so no own-tree removal reaches its unlock. decide_agent_end_worktree reads
+        idle first, decide_worktree reads a stale lock early (sweep.py ~666), and remove_worktree unlocks by
+        name later (~2189). A live lock taken in between must keep the tree and survive. The injection runs
+        inside processes_in: after the lock read, before the unlock. The lock names a separate child, never a
+        host pid. Red on abf5f8e: the unlock clears the live lock by name. The control twin has the same
+        dead-pid lock with no injection, and must be removed, so the case reaches the unlock path."""
+        ending = self.add("relend")
+        control, subject = self.control_tree("reltwin"), self.control_tree("relock")
         dead = self.dead_pid()
-        self.lock(twin, "claude agent agent-reltwin (pid %d)" % dead)
+        self.lock(control, "claude agent agent-reltwin (pid %d)" % dead)
         self.lock(subject, "claude agent agent-relock (pid %d)" % dead)
         holder = self.sleeper(self.root)
         live = "claude agent agent-relock (pid %d)" % holder.pid
         real_processes_in = sweep.processes_in
+        injected = []
 
         def take_live_lock(path):
             found = real_processes_in(path)
             if _norm_path(path) == _norm_path(subject):
+                injected.append(path)
                 # The other session's act, between the lock read and the unlock.
                 require(run_vcs(self.primary, "worktree", "unlock", subject).returncode == 0,
                         "unlock in the window failed")
                 self.lock(subject, live)
             return found
 
-        self.run_in_process("reltwin", twin)
-        with self.subTest(control="dead-pid lock, no injection, is removed"):
-            self.assertRemoved(twin)
+        self.age_control(control)
+        self.age_control(subject)
         with mock.patch.object(sweep, "processes_in", new=take_live_lock):
-            self.run_in_process("relock", subject)
+            self.run_in_process("relend", ending)
+        with self.subTest(control="dead-pid lock, no injection, is removed"):
+            self.assertRemoved(control)
         with self.subTest(arm="live lock taken between the lock read and the unlock"):
+            self.assertTrue(injected, "the fault never landed: processes_in was not read for the subject")
             self.assertKept(subject)
             self.assertEqual(self.lock_reason(subject), live, "the live lock was cleared or replaced")
 
@@ -3934,52 +3963,64 @@ class AgentEndRulingTests(_AgentEndFixture):
         the row says "remove failed" and the tree stays, with nothing that says it was cut short.
         The fault is SIMULATED, not measured: the first worktree remove with a finite timeout deletes
         one tracked file and raises TimeoutExpired. Git calls without a timeout run for real, so a
-        builder who drops the timeout, or moves the removal into a detached child, is not faulted."""
-        subject = self.add("cutshort")
+        builder who drops the timeout, or moves the removal into a detached child, is not faulted.
+        Re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept
+        now, so the first finite-timeout remove the fault targets is the other tree's, matched by name."""
+        ending = self.add("cutend")
+        subject = self.control_tree("cutshort")
+        name = os.path.basename(subject)
         real_run = subprocess.run
         injected = []
 
         def cut_short(argv, *args, **kwargs):
             timeout = kwargs.get("timeout")
             if (not injected and isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
-                    and timeout is not None):
+                    and timeout is not None and any(name in str(part) for part in argv)):
                 injected.append(argv)
                 os.remove(os.path.join(subject, "f.txt"))
                 raise subprocess.TimeoutExpired(argv, timeout)
             return real_run(argv, *args, **kwargs)
 
+        self.age_control(subject)
         with mock.patch.object(subprocess, "run", new=cut_short):
-            first = self.run_in_process("cutshort", subject)
-        self.assertTrue(injected, "the fault never landed: no finite-timeout worktree remove ran")
+            first = self.run_in_process("cutend", ending)
+        self.assertTrue(injected, "the fault never landed: no finite-timeout worktree remove ran for the subject")
         if os.path.exists(subject):
             with self.subTest(arm="tree left behind by the cut-short remove"):
                 row = self.row_for(first, subject) or {}
                 self.assertRegex(json.dumps(row), r"cut[- ]short",
                                  "a cut-short removal left the tree and did not say so")
             with self.subTest(arm="the next run finishes the removal"):
-                self.run_in_process("cutshort", subject)
+                # A fresh ending tree: on 8209120 the first run already removed `ending`, so the next run has
+                # no target. The subject is aged again, since the first run's git calls reset its idle time.
+                finisher = self.add("cutnext")
+                self.age_control(subject)
+                self.run_in_process("cutnext", finisher)
                 self.assertRemoved(subject)
         else:
             self.assertRemoved(subject)
 
     def test_a_clean_pushed_tree_holding_git_ignored_files_is_removed(self):
         """Review point 5 (ruling point 2), a pin: green on abf5f8e, must stay green. A clean, pushed
-        tree goes even when it holds git-ignored files (build output, .env.local). The proof reads show
-        the files are ignored and not untracked, so the case tests the ruling and not a fixture that
-        never took."""
+        tree goes even when it holds git-ignored files (build output, .env.local). Re-pointed 2026-10-15
+        23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept now. The proof reads
+        show the files are ignored and not untracked, so the case tests the ruling and not a fixture that
+        never took. Both trees are aged last, after every git read."""
         with open(os.path.join(self.primary, ".git", "info", "exclude"), "a", encoding="utf-8") as handle:
             handle.write(".env.local\nbuild/\n")
-        twin, subject = self.add("igntwin"), self.add("ign")
+        ending = self.add("igned")
+        control, subject = self.control_tree("igntwin"), self.control_tree("ign")
         write(os.path.join(subject, ".env.local"), "API_TOKEN=test-only\n")
         write(os.path.join(subject, "build", "out.bin"), "built\n")
         self.assertEqual(guard.porcelain(subject), [], "the fixture tree is not clean")
         self.assertTrue(any(line.startswith("!! ") for line in guard.porcelain(subject, ignored=True)),
                         "the fixture files are not git-ignored")
-        self.fire("igntwin", twin)
-        with self.subTest(control="clean pushed twin is removed"):
-            self.assertRemoved(twin)
-        self.fire("ign", subject)
-        with self.subTest(arm="clean, pushed, holding ignored files"):
+        self.age_control(control)
+        self.age_control(subject)
+        self.fire("igned", ending)
+        with self.subTest(control="clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="clean, pushed, holding ignored files, idle 31 min"):
             self.assertRemoved(subject)
 
 
