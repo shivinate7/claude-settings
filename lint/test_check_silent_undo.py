@@ -1577,6 +1577,45 @@ class RecordsPage(unittest.TestCase):
         self.assertEqual(got, [], (got, r.notes))
         self.assertTrue(any("ALLOWED docs/records.md" in n for n in r.notes), r.notes)
 
+    TOOL = os.path.join(HERE, "hook_catalog.py")  # the merge tool's own generator: the oracle when upstream has none
+
+    def run_generator(self, r, path):
+        """Run the generator at `path` against r as a person does (--records-only), and check that it wrote the page."""
+        run = subprocess.run([sys.executable, path, "--records-only", "--root", r.dir],
+                             cwd=r.dir, capture_output=True, text=True, env=self.PY)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("wrote docs/records.md", run.stdout, run.stdout + run.stderr)
+
+    def test_a_head_generator_never_judges_the_page_when_upstream_has_none(self):
+        """Limit 1, round 3 of review: with no generator on the base, the page is judged by the merge tool's own
+        generator. Here the base has no lint/ folder. The head ships its own generator, which drops the debt rows, and
+        regenerates the page with it. The tool's generator still writes the debt row, so the head's page differs and
+        is refused. If the head's generator were the oracle, the page would match it and pass."""
+        r = base_repo()
+        self.put_lf(r, {"plans/keep.md": self.KEEP})
+        self.run_generator(r, self.TOOL)
+        self.commit_all(r, "the records page, with no generator on main")
+        self.put_lf(r, {"debts/d-one.md": self.DEBT})
+        self.run_generator(r, self.TOOL)
+        self.commit_all(r, "a debt and its row")
+        r.push()
+        self.assertNotIn("lint/hook_catalog.py", r.sh("ls-tree", "-r", "--name-only", "origin/main"))  # the base has no generator
+        r.sh("checkout", "-q", "-b", "oops")
+        with open(self.TOOL, encoding="utf-8", newline="") as f:
+            text = f.read()
+        old = 'RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")'
+        self.assertIn(old, text)  # a no-op edit would make a false red
+        with open(os.path.join(HERE, "check_skill_model_rows.py"), encoding="utf-8", newline="") as f:
+            skill_rows = f.read()  # the generator imports it; without it the head's generator crashes and fails closed
+        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "deferred", "plans")'),
+                        "lint/check_skill_model_rows.py": skill_rows})
+        self.run_generator(r, os.path.join(r.dir, "lint", "hook_catalog.py"))
+        with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
+            self.assertNotIn("d-one", f.read())  # the head's own page really lost the debt row
+        self.commit_all(r, "drop the debts from the records page, with the generator that drops them")
+        got, notes = C.check(r.dir, "origin/main", "HEAD", tool=self.TOOL)
+        self.assertTrue(any("docs/records.md" in p for p in got), (got, notes))
+
 
 if __name__ == "__main__":
     unittest.main()

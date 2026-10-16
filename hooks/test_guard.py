@@ -9390,6 +9390,47 @@ def merge_tool_missing_case():
     return True, "deny, the tool could not be loaded; the unread folder list is logged, not denied"
 
 
+def merge_import_exits_case():
+    """A merge tool that exits at import (its records generator will not load) is unknown, and denies.
+
+    merge/merge.py calls sys.exit when lint/hook_catalog.py will not load, so the exit is a
+    SystemExit, not an Exception. merge_module() catches only Exception, so the exit escapes the
+    guard: the guard exits 1, prints no decision, and `gh pr merge` is allowed. This copy has the
+    real merge tool and no generator beside it. GHPEND is on PATH, a head with a check pending: a
+    fix that loads the tool lazily then denies as pending, and a fix that catches the exit denies
+    as unknown. A green gh would let a lazy-load fix allow the merge, so it is not used.
+    """
+    folder = os.path.join(ROOT, "mergeexit")
+    hooks = os.path.join(folder, "hooks")
+    for sub in (hooks, os.path.join(folder, "merge"), os.path.join(folder, "lint"), os.path.join(folder, "cfg")):
+        os.makedirs(sub, exist_ok=True)
+    for name in os.listdir(os.path.dirname(GUARD)):
+        if name.startswith("guard") and name.endswith(".py"):
+            shutil.copy(os.path.join(os.path.dirname(GUARD), name), hooks)
+    # Read at run time, so a fix to the real tool is the one this case judges.
+    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(folder, "merge", "merge.py"))
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
+    env["PATH"] = GHPEND + os.pathsep + PY_PATH
+    result = subprocess.run(
+        [sys.executable, os.path.join(hooks, "guard.py")],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"},
+                          "cwd": NOGIT}),
+        capture_output=True, text=True, env=env, timeout=60)
+    where = "exit %d, stdout %r, stderr %r" % (result.returncode, result.stdout[:120], result.stderr[:200])
+    try:
+        decision = json.loads(result.stdout)["hookSpecificOutput"]
+    except (ValueError, KeyError, TypeError):
+        return False, "no decision printed, so the merge is allowed (" + where + ")"
+    reason = str(decision.get("permissionDecisionReason", ""))
+    if decision.get("permissionDecision") != "deny" or not reason.startswith("merge-checks:"):
+        return False, "expected a merge-checks deny, got " + where
+    if "unknown" not in reason and "pending" not in reason:
+        return False, "expected unknown or pending in the reason, got " + reason[:160]
+    return True, "a merge tool that exits at import denies the merge: " + reason[:80]
+
+
 def merge_hang_timeout_case():
     """A `gh` that never answers must still end in a deny, and that deny must not depend on the
     hook's 60s budget being outlived first.
@@ -10062,6 +10103,8 @@ LOG_CHECKS = (
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("merge-checks: a merge tool that exits at import is unknown or pending, and denies",
+     merge_import_exits_case),
     ("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
      cite_unread_folders_case),
     ("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
@@ -11589,6 +11632,7 @@ LOG_RULE_FAMILY = (
     ("cap: the printed reason is bounded", "model-cap"),
     ("trim: a guard crash fails open", "paths"),
     ("merge-checks: a merge tool that cannot load", "merge"),
+    ("merge-checks: a merge tool that exits at import", "merge"),
     ("merge-checks: a gh that never answers", "merge"),
     ("powershell: a backslash path survives", "paths"),
     ("log: an unreadable subject", "shared-tree"),
