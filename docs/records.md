@@ -111,6 +111,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `debts-have-their-own-store` | Every known gap is a debt. | [`decisions/debts-have-their-own-store.md`](../decisions/debts-have-their-own-store.md) |
 | `decision-watch-mod-limits` | Yes. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
 | `design-skills` | Owner ruling, 2026-10-10. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
+| `draft-until-reviewed` | Owner rulings, 2026-10-10 and 2026-10-13. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
 | `drops-lines-trailer-exempt` | Owner, 2026-10-12: the `Drops-lines: <record path> -- <reason>` trailer is the one place a record path is allowed in a commit message. | [`decisions/drops-lines-trailer-exempt.md`](../decisions/drops-lines-trailer-exempt.md) |
 | `env-file-wrappers` | The `env-file` rule allows `--env-file` only when the command word is a runner (`ENV_LOADER_COMMANDS`). | [`decisions/env-file-wrappers.md`](../decisions/env-file-wrappers.md) |
 | `gate-hooks-fail-closed` | Owner, 2026-10-12: a gate whose script or python is missing refuses the call. | [`decisions/gate-hooks-fail-closed.md`](../decisions/gate-hooks-fail-closed.md) |
@@ -130,6 +131,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
 | `mods-tests-run-in-gates` | Merge session, 2026-10-13, 13:16 CDT. | [`decisions/mods-tests-run-in-gates.md`](../decisions/mods-tests-run-in-gates.md) |
 | `mutant-cause-of-death` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry is that sentence applied to the guard's own test harness. | [`decisions/mutant-cause-of-death.md`](../decisions/mutant-cause-of-death.md) |
+| `mutation-harnesses-run-when-their-code-changes` | `.github/scripts/harness-scope.sh` reads `git diff --name-only` against the merge base and sets one output per harness. | [`decisions/mutation-harnesses-run-when-their-code-changes.md`](../decisions/mutation-harnesses-run-when-their-code-changes.md) |
 | `one-context-bar` | Owner ruling, 2026-10-14. | [`decisions/one-context-bar.md`](../decisions/one-context-bar.md) |
 | `opt-in-ci-templates-composite` | Owner approved six templates any repo can adopt. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
 | `purge-keeps-younger-restore-ref` | The purge drops a restore ref only when both hold: | [`decisions/purge-keeps-younger-restore-ref.md`](../decisions/purge-keeps-younger-restore-ref.md) |
@@ -194,7 +196,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `default-discover-roots-needed-normpath-on-windows` | `default_discover_roots()` needed `normpath`, and its test needed `USERPROFILE` | [`decisions/default-discover-roots-needed-normpath-on-windows.md`](../decisions/default-discover-roots-needed-normpath-on-windows.md) |
 | `docs-only-prs-skip-code-suites` | `hooks/test_install_src.sh` takes case names as arguments and runs only those. | [`decisions/docs-only-prs-skip-code-suites.md`](../decisions/docs-only-prs-skip-code-suites.md) |
 | `docs-only-prs-skip-review` | Docs-only pull requests skip the reviewer | [`decisions/docs-only-prs-skip-review.md`](../decisions/docs-only-prs-skip-review.md) |
-| `draft-until-reviewed` | Owner rulings, 2026-10-10 and 2026-10-13. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
 | `every-lint-rule-blocks-or-does-not-exist` | CLAUDE.md says: "Judge every rule, check, and design by the outcome for the person the software serves." `lint/ste_lint.py` held 19 rules. | [`decisions/every-lint-rule-blocks-or-does-not-exist.md`](../decisions/every-lint-rule-blocks-or-does-not-exist.md) |
 | `fewest-words-mandate` | On 2026-09-28 the owner asked for a verbiage mandate. | [`decisions/fewest-words-mandate.md`](../decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Rule 7 resolves shell variables before it matches a write target | [`decisions/frozen-path-resolves-shell-vars.md`](../decisions/frozen-path-resolves-shell-vars.md) |
@@ -206,7 +207,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
 | `merge-reinstalls-from-main` | `install.sh` links the shipped skills, hooks and tools into `~/.claude`. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
-| `mutation-harnesses-run-when-their-code-changes` | `.github/scripts/harness-scope.sh` reads `git diff --name-only` against the merge base and sets one output per harness. | [`decisions/mutation-harnesses-run-when-their-code-changes.md`](../decisions/mutation-harnesses-run-when-their-code-changes.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
 | `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `playwright-browsers-path` | No. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
@@ -334,7 +334,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `harness-scope-mods-flag-missing` | `STEP_FLAGS` (line 24 of `lint/test_harness_scope.py`) lacks `mods`. | [`debts/harness-scope-mods-flag-missing.md`](../debts/harness-scope-mods-flag-missing.md) |
 | `harness-scope-pipe-regex-quotes` | The pipe regex in `mods_step_problems` ignores quotes and comments. | [`debts/harness-scope-pipe-regex-quotes.md`](../debts/harness-scope-pipe-regex-quotes.md) |
 | `harness-scope-stale-comment` | `lint/test_harness_scope.py` lines 215-217 hold the stale comment "ALL stays as it is". | [`debts/harness-scope-stale-comment.md`](../debts/harness-scope-stale-comment.md) |
-| `headroom-check-no-caller` | The headroom tests and mutant were cut. | [`debts/headroom-check-no-caller.md`](../debts/headroom-check-no-caller.md) |
 | `here-string-scan-quadratic` | The guard finds PowerShell here-strings with a lazy match. | [`debts/here-string-scan-quadratic.md`](../debts/here-string-scan-quadratic.md) |
 | `heredoc-indented-close` | `_split_heredocs` matches the closing line after `.strip()`, so an indented ` EOF` closes a heredoc. | [`debts/heredoc-indented-close.md`](../debts/heredoc-indented-close.md) |
 | `heredoc-run-other-path` | Some bodies run, but the guard reads them as text. | [`debts/heredoc-run-other-path.md`](../debts/heredoc-run-other-path.md) |
@@ -539,6 +538,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
 | `sweep-no-deadline-many-trees` | The sweep checks each worktree in turn, with eight or more git calls per tree. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
 | `sweep-test-symlink-privilege` | On a Windows host with no symlink right, two tests in `janitor/test_sweep.py` stop with WinError 1314. | [`debts/sweep-test-symlink-privilege.md`](../debts/sweep-test-symlink-privilege.md) |
+| `sweep-tests-sleep-bounds` | `_peak_concurrency` sleeps 0.2 s inside each wrapped call to widen a race. | [`debts/sweep-tests-sleep-bounds.md`](../debts/sweep-tests-sleep-bounds.md) |
 | `symrun-link-gap-unmeasured` | The symrun case wants at least one mixed-id window during run 2. | [`debts/symrun-link-gap-unmeasured.md`](../debts/symrun-link-gap-unmeasured.md) |
 | `test-guard-posix-gates-no-skip` | Two case blocks in the guard test suite run only on one platform: Windows (`os.name == "nt"`) and macOS (`sys.platform == "darwin"`). | [`debts/test-guard-posix-gates-no-skip.md`](../debts/test-guard-posix-gates-no-skip.md) |
 | `timeout-moved-server-unchecked` | A foreground server that the harness moves to background at its 120 s timeout is not checked. | [`debts/timeout-moved-server-unchecked.md`](../debts/timeout-moved-server-unchecked.md) |
