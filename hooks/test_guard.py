@@ -10159,6 +10159,173 @@ def worktree_home_cd_out_case():
     return True, "a cd or Set-Location outside the home, or to its suffixed sibling, is refused"
 
 
+# A lone move into the home is allowed only when its raw command holds no separator. A backslash
+# before a quote hides the separator from the splitter, which reads the quote as an opener, while
+# the shell still runs the step after it. These cases cover that gap, and the plain separators.
+QUOTED_MOVES = (
+    ("Bash", 'cd %s\\";git push\\"'),
+    ("Bash", "cd %s\\';git push\\'"),
+    ("Bash", 'cd %s\\"\ngit push\\"'),
+    ("Bash", 'cd %s\\"\rgit push\\"'),
+    ("PowerShell", 'Set-Location %s\\";git push\\"'),
+    ("PowerShell", "Set-Location %s\\';git push\\'"),
+)
+PLAIN_MOVES = (
+    ("Bash", "cd %s;git push"), ("Bash", "cd %s&git push"), ("Bash", "cd %s|git push"),
+    ("Bash", "cd %s\ngit push"), ("Bash", "cd %s\rgit push"),
+    ("PowerShell", "Set-Location %s;git push"), ("PowerShell", "Set-Location %s\ngit push"),
+)
+
+
+def worktree_home_quoted_move_case():
+    """Rule 0: a lone move into the recorded home is refused when its raw command holds a `;`, `&`,
+    `|`, CR or LF, quote or no quote, from a cwd outside the home, in both path forms."""
+    agent_id = "wthomequote1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    for shell, template in QUOTED_MOVES + PLAIN_MOVES:
+        for home in (worktree, _posix_form(worktree)):
+            _expect_call(problems, "%s %r into %s from outside" % (shell, template, home), "deny",
+                         shell, primary, agent_id, template % home, rule="worktree-home")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a move whose raw command holds a separator is refused, quoted or not"
+
+
+# Bash has no `sl`, `chdir` or `set-location`: those are PowerShell names. In Bash the call moves
+# nothing, so it is no recovery step, and a call to one from outside the home is refused.
+BASH_NOT_MOVES = ("sl", "chdir", "set-location")
+
+
+def worktree_home_bash_alias_case():
+    """Rule 0: `sl`, `chdir` and `set-location` are not moves in Bash, so a Bash call to one with the
+    recorded home as its argument is refused from a cwd outside the home, in both path forms."""
+    agent_id = "wthomealias1"
+    primary, worktree, problems = _home_fixture(agent_id)
+    for word in BASH_NOT_MOVES:
+        for home in (worktree, _posix_form(worktree)):
+            _expect_call(problems, "Bash %s into %s from outside" % (word, home), "deny", "Bash",
+                         primary, agent_id, "%s %s" % (word, home), rule="worktree-home")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "sl, chdir and set-location are refused from outside the home in Bash"
+
+
+# Rule 0 reads a Git Bash `/c/` cwd in drive form before every other rule runs (guard.py judge()).
+# Each case below pins the verdict that main (0bdbbcc, the lane's base) gives a `/c/` cwd for one
+# rule that reads cwd. A red case means that verdict moved on this branch. Off Windows, `/c/` is a
+# real folder and the spelling has no meaning, so the cases do not run there.
+C_FORM_OFF_WINDOWS = "a /c/ cwd is read only on Windows, where Git Bash spells the drive that way"
+
+
+def _c_form_fixture(name):
+    """A clean checkout under ROOT, with one source file and one test file. Returns its path."""
+    primary = os.path.join(ROOT, "cform_" + name)
+    make_repo(primary, {"src/app.py": "print(1)\n", "tests/test_app.py": "x\n"})
+    return primary
+
+
+def _c_form_decide(tool, cwd, agent_type=None, agent_id=None, command=None, **tool_input):
+    """decide() for one call whose cwd is the `/c/` spelling. A subagent names both agent fields."""
+    if command is not None:
+        tool_input["command"] = command
+    return decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
+                   "config": None, "agent_id": agent_id, "agent_type": agent_type,
+                   "process_cwd": None, "tool_input": tool_input})
+
+
+def worktree_home_cwd_merge_case():
+    """Pins the merge rule (judge(), merge_gate) for a `/c/` cwd: main denies a merge whose head it
+    cannot settle, and the merge rule must still deny it from that spelling."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    primary = _c_form_fixture("merge")
+    got, reason = _c_form_decide("mcp__github__merge_pull_request", _posix_form(primary),
+                                 pullNumber=1)
+    if got != "deny" or "merge-checks" not in reason:
+        return False, "/c/ cwd, merge: expected deny merge-checks (main), got %s (%s)" % (
+            got, reason[:120])
+    return True, "a /c/ cwd gives the merge rule the verdict main gives: deny merge-checks"
+
+
+def worktree_home_cwd_shared_tree_case():
+    """Pins the shared-tree rule (judge_shell) for a `/c/` cwd: on main a hard reset from that
+    spelling is denied, because the checkout's state cannot be read from it. A clean checkout read
+    in drive form allows the reset, so a red here means the lane changed that verdict."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    primary = _c_form_fixture("shared")
+    got, reason = _c_form_decide("Bash", _posix_form(primary), command="git reset --hard")
+    if got != "deny" or "shared-tree" not in reason:
+        return False, "/c/ cwd, clean checkout, git reset --hard: expected deny shared-tree (main), " \
+                      "got %s (%s)" % (got, reason[:120])
+    return True, "a /c/ cwd gives the shared-tree rule the verdict main gives: deny shared-tree"
+
+
+def worktree_home_cwd_builder_case():
+    """Pins the builder test-edit rule (role_write_hit) for a `/c/` cwd: a builder's write to a test
+    file is denied, and a write to product code is allowed."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    primary = _c_form_fixture("builder")
+    cwd = _posix_form(primary)
+    problems = []
+    got, reason = _c_form_decide("Write", cwd, agent_type="builder", agent_id="wthomecwd1",
+                                 file_path="tests/test_app.py", content="x")
+    if got != "deny" or "builder-test-edit" not in reason:
+        problems.append("builder write to a test file: expected deny builder-test-edit, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _c_form_decide("Write", cwd, agent_type="builder", agent_id="wthomecwd1",
+                                 file_path="src/app.py", content="x")
+    if got != "allow":
+        problems.append("builder write to product code: expected allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a /c/ cwd gives the builder test-edit rule the verdict main gives"
+
+
+def worktree_home_cwd_frozen_case():
+    """Pins the frozen-path rule (is_frozen) for a `/c/` cwd. Main allows a relative write to the
+    global CLAUDE.md from that spelling, because the relative path does not resolve there. A red
+    here means the lane changed that verdict: it denies the same write from the drive form."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    os.makedirs(CFG, exist_ok=True)
+    got, reason = _c_form_decide("Write", _posix_form(CFG), file_path="CLAUDE.md", content="x")
+    if got != "allow":
+        return False, "/c/ cwd, relative CLAUDE.md write: expected allow (main), got %s (%s)" % (
+            got, reason[:120])
+    return True, "a /c/ cwd gives the frozen-path rule the verdict main gives: allow"
+
+
+def worktree_home_cwd_config_case():
+    """Pins the config-edit rule (is_project_config) for a `/c/` cwd: a project's own settings write
+    is allowed, and it is only logged. The verdict must not change with the spelling."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    primary = _c_form_fixture("config")
+    got, reason = _c_form_decide("Write", _posix_form(primary),
+                                 file_path=".claude/settings.local.json", content="{}")
+    if got != "allow":
+        return False, "/c/ cwd, project settings write: expected allow, got %s (%s)" % (
+            got, reason[:120])
+    return True, "a /c/ cwd gives the config-edit rule the verdict main gives: allow"
+
+
+def worktree_home_cwd_cap_case():
+    """Pins the subagent cap rule (is_settings_file) for a `/c/` cwd: a settings write that sets the
+    cap asks. The basename decides this one, so the case pins the verdict, not the cwd read."""
+    if os.name != "nt":
+        return SKIP, C_FORM_OFF_WINDOWS
+    primary = _c_form_fixture("cap")
+    got, reason = _c_form_decide("Write", _posix_form(primary), file_path="settings.json",
+                                 content=CAP_LINE)
+    if got != "ask" or "subagent-model-cap" not in reason:
+        return False, "/c/ cwd, settings write with the cap: expected ask subagent-model-cap, " \
+                      "got %s (%s)" % (got, reason[:120])
+    return True, "a /c/ cwd gives the subagent cap rule the verdict main gives: ask"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -10220,6 +10387,20 @@ LOG_CHECKS = (
      worktree_home_posix_cwd_case),
     ("worktree-home: a cd or Set-Location outside the home, or to its suffixed sibling, is denied",
      worktree_home_cd_out_case),
+    ("worktree-home: a lone move with a separator is refused, quoted or not",
+     worktree_home_quoted_move_case),
+    ("worktree-home: sl, chdir and set-location are not moves in Bash",
+     worktree_home_bash_alias_case),
+    ("worktree-home: the merge rule reads a /c/ cwd as main does", worktree_home_cwd_merge_case),
+    ("worktree-home: the shared-tree rule reads a /c/ cwd as main does",
+     worktree_home_cwd_shared_tree_case),
+    ("worktree-home: the builder test-edit rule reads a /c/ cwd as main does",
+     worktree_home_cwd_builder_case),
+    ("worktree-home: the frozen-path rule reads a /c/ cwd as main does",
+     worktree_home_cwd_frozen_case),
+    ("worktree-home: the config-edit rule reads a /c/ cwd as main does",
+     worktree_home_cwd_config_case),
+    ("worktree-home: the subagent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -11325,6 +11506,13 @@ WINDOWS_CHECKERS = {
     worktree_live_session_unreadable_case,
     worktree_live_session_two_spellings_case,
     worktree_live_session_path_unresolvable_case,
+    # Each reads a `/c/` cwd through the Windows drive conversion, so it runs in the Windows slice.
+    worktree_home_cwd_merge_case,
+    worktree_home_cwd_shared_tree_case,
+    worktree_home_cwd_builder_case,
+    worktree_home_cwd_frozen_case,
+    worktree_home_cwd_config_case,
+    worktree_home_cwd_cap_case,
 }
 # audit-high: the fail-closed checks read no Windows-only code, but the Windows slice runs on
 # every pull request, and a missing sibling is the Windows incident. They run in that slice too.
@@ -11733,6 +11921,14 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),
     ("worktree-home: a /c/ cwd inside", "worktree-home"),
     ("worktree-home: a cd or Set-Location outside the home", "worktree-home"),
+    ("worktree-home: a lone move with a separator", "worktree-home"),
+    ("worktree-home: sl, chdir and set-location", "worktree-home"),
+    ("worktree-home: the merge rule reads", "worktree-home"),
+    ("worktree-home: the shared-tree rule reads", "worktree-home"),
+    ("worktree-home: the builder test-edit rule reads", "worktree-home"),
+    ("worktree-home: the frozen-path rule reads", "worktree-home"),
+    ("worktree-home: the config-edit rule reads", "worktree-home"),
+    ("worktree-home: the subagent cap rule reads", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
