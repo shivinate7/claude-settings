@@ -94,7 +94,7 @@ RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-RATE_WAIT_CAP = 60  # seconds: a real gh call shows no Retry-After header, and a GitHub secondary limit needs about a minute; 3 retries bound the wait at 180 s
+RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (owner ruling 2026-10-16: 3 retries stay). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
@@ -128,22 +128,51 @@ def is_net(c, out):
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
 
-def net_wait(out):
-    """Seconds to wait before a retry: RATE_WAIT_CAP on a rate-limit text, else NET_PAUSE."""
-    return RATE_WAIT_CAP if RATE_LIMIT.search(out) else NET_PAUSE
+_HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*\n(.*?\r?\n)?\r?\n", re.S)  # what `gh api -i` prints first: the status line, the headers, a blank line
 
-def retry_net(call, pause, retries=NET_RETRIES, what="the call"):
-    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(out))` while it fails with a network error, up to `retries` times.
-    Before a rate wait it prints one line that names `what`, so a 60 s wait never looks like a hang."""
+def split_headers(out):
+    """-> (headers, body). A reply that starts with a status line has a header block: its names are lower case in `headers`, and `body` has no block.
+    A header-like line anywhere else is text, and the body is the whole reply."""
+    m = _HEAD_BLOCK.match(out)
+    if not m:
+        return {}, out
+    pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
+    return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+def _seconds(value):
+    """A header value as whole seconds, or None when it is not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+def rate_wait(headers, n, now):
+    """Seconds to wait before retry n of a rate limit. `Retry-After` always counts. `X-Ratelimit-Reset` (an epoch) counts only while
+    `X-Ratelimit-Remaining` is 0, as GitHub documents. A header that is missing, unreadable or not in the future gives the ladder rung. Capped at the last rung."""
+    after = _seconds(headers.get("retry-after"))
+    reset = _seconds(headers.get("x-ratelimit-reset"))
+    if after is None or after <= 0:
+        after = reset - now if reset is not None and headers.get("x-ratelimit-remaining") == "0" else 0
+    return min(after if after > 0 else RATE_LADDER[min(n, len(RATE_LADDER)) - 1], RATE_LADDER[-1])
+
+def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, until=None):
+    """-> (code, output, retries used). The output has no `gh api -i` header block. Runs `call` again after `pause(wait)` while it fails with a network
+    error, up to `retries` times. The wait is NET_PAUSE, or on a rate limit rate_wait(). Before a rate wait it prints one line that names `what`.
+    A rate wait that would end after `until` (epoch s, the lock's expiry) is a NetStop at once, in place of the wait."""
     n = 0
     while True:
         c, out = call()
+        headers, out = split_headers(out)
         if n >= retries or not is_net(c, out):
             return c, out, n
         n += 1
-        wait = net_wait(out)
-        if RATE_LIMIT.search(out):
-            say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
+        if not RATE_LIMIT.search(out):
+            pause(NET_PAUSE)
+            continue
+        wait = rate_wait(headers, n, now())
+        if until is not None and now() + wait > until:
+            raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s would pass the end of the merge lock. Stopped before the lock expires. Run again.\n{out}")
+        say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
         pause(wait)
 
 UNDO_MEMO = {}
@@ -337,10 +366,11 @@ class GhLock(Lock):
 
     def api(self, *a):
         """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
-        (RATE_WAIT_CAP on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
-        ponytail: no retry inside `shared_deadline`, as in Host.gh. Long rate waits can outlast the lock TTL spare (debt lock-ttl-rate-wait)."""
+        (the ladder or GitHub's reset time on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
+        Every call asks for the headers (-i), and retry_net drops the block. A rate wait never ends after the lock's expiry once this run holds it.
+        ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, rate waits have no bound (the ladder is 21 minutes at most)."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
-        c, out, _ = retry_net(lambda: sh(["gh", "api", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"the lock call {path}")
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"the lock call {path}", self.now, self.until)
         return c, out
 
     def read(self, b):
@@ -411,11 +441,13 @@ class Host:
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
 
+    until = None  # epoch s: the latest end of a rate wait. confirm sets it once the lock is held (the lock's spare); no gh call has a bound before
+
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`")
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.until)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, out
@@ -1015,6 +1047,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
+    if lock.until:  # only the spare is for rate waits (debt lock-ttl-rate-wait): the checks waits keep their whole budget
+        host.until = lock.until - WAITS * m["deadlineMinutes"] * 60
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)
