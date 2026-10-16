@@ -56,8 +56,7 @@ Out of scope (not a hole):
 
 This ruling covers the guard hooks (`hooks/guard*.py`) only. For a guard hook, a safety hole counts
 only when Claude could write the act by mistake or from a misread task. The rule
-`roles-review-cap-three` (a change gets three review rounds) and `hold-unsafe-after-round-3` (hold
-a guard, gate or check change whose net safety value is not positive) say so. Other gates and checks keep the wider
+`roles-review-cap-three` (a change gets three review rounds) and `hold-unsafe-after-round-3` (net-value hold after round 3) say so. Other gates and checks keep the wider
 definition.
 
 Kind: process
