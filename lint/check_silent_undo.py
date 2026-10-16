@@ -34,8 +34,10 @@ import collections
 import difflib
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
@@ -486,6 +488,37 @@ def resolve_upstream(cwd, upstream):
     raise Unknown("no %s here, nothing to compare against" % upstream)
 
 
+def generated_page(cwd, head, paths, upstream="origin/main"):
+    """(page path, True when head's copy equals what the generator writes for head's tree).
+    The generator is the upstream's own lint/hook_catalog.py, never the head's: a head that edits the generator and
+    regenerates the page must not pass on its own say. It runs against head's records, as a subprocess, in a checkout of
+    upstream. A generator that is missing, fails, or reports a problem makes the page a finding (fail closed).
+    A change to the generator itself thus needs a trailer. The generator runs only when `paths`, the paths with a finding, holds its page."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hook_catalog as gen
+    if gen.RECORDS_PAGE not in paths:
+        return gen.RECORDS_PAGE, False
+    page = blob(cwd, head, gen.RECORDS_PAGE)
+    tmp = tempfile.mkdtemp(prefix="undo-gen-")
+    base, wt = os.path.join(tmp, "base"), os.path.join(tmp, "wt")
+    try:
+        git(cwd, "worktree", "add", "-q", "--detach", base, resolve_upstream(cwd, upstream))
+        git(cwd, "worktree", "add", "-q", "--detach", wt, head)
+        out = os.path.join(wt, *gen.RECORDS_PAGE.split("/"))
+        if os.path.exists(out):
+            os.remove(out)  # the generator writes nothing for a repo with no records: a stale copy must not stand in
+        run = subprocess.run([sys.executable, "-B", os.path.join(base, "lint", "hook_catalog.py"), "--records-only", "--root", wt],
+                             cwd=wt, capture_output=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        if run.returncode != 0 or not os.path.isfile(out):
+            return gen.RECORDS_PAGE, False
+        with open(out, encoding="utf-8", newline="") as f:
+            return gen.RECORDS_PAGE, bool(page) and page == f.read()
+    finally:
+        for d in (base, wt):
+            git(cwd, "worktree", "remove", "--force", d, ok=(0, 128))
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check(cwd, upstream, head, default=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
@@ -516,6 +549,9 @@ def check(cwd, upstream, head, default=None):
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
+    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream)
+    if same:
+        ok = dict(ok, **{page: "the page is the generator's output for the head"})
     bad, notes = judge(items, ok)
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 

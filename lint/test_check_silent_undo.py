@@ -1471,5 +1471,112 @@ class DropsLinesHint(unittest.TestCase):
         self.assertLessEqual(fault.n, 2, "git spawns for 50 candidate commits: %d" % fault.n)
 
 
+class RecordsPage(unittest.TestCase):
+    """docs/records.md is excused only when it equals the generator's output for the head. Here the generator
+    writes the d-one row, the debt file still stands, and a hand edit drops the row: an undo, so it is refused."""
+
+    def test_a_page_that_differs_from_the_generator_is_still_refused(self):
+        import hook_catalog as gen
+        debts = "## Debts\n\n| Slug | Gist | Link |\n|---|---|---|\n"
+        row = "| `d-one` | Keep the page honest. | [`debts/d-one.md`](../debts/d-one.md) |\n"
+        r = base_repo()
+        r.commit("records index", **{"docs/records.md": gen.RECORDS_INTRO})
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("add debt d-one", **{"debts/d-one.md": "**What.** Keep the page honest.\n", "docs/records.md": gen.RECORDS_INTRO + debts + row})
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("drop the d-one row by hand", **{"docs/records.md": gen.RECORDS_INTRO})
+        got = r.verdict()
+        self.assertTrue(any("docs/records.md" in p for p in got), got)
+        self.assertEqual(C.generated_page(r.dir, "HEAD", {"docs/records.md"}), ("docs/records.md", False))
+
+    SHIPPED = ("check_silent_undo.py", "hook_catalog.py", "check_skill_model_rows.py")  # the generator imports the last
+    KEEP = "# Keep the records index\n"
+    DEBT = "**What.** Keep the page honest.\n"
+    GONE = "| `d-gone` | Gone. | [`debts/d-gone.md`](../debts/d-gone.md) |\n"
+    PY = dict(ENV, PYTHONDONTWRITEBYTECODE="1")  # no __pycache__ in a fixture: `git add -A` would commit it
+
+    def put_lf(self, r, files):
+        """Write files with LF endings, as the generator does. Repo.put writes the platform's endings."""
+        for path, text in files.items():
+            full = os.path.join(r.dir, *path.split("/"))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+
+    def commit_all(self, r, msg):
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", msg)
+
+    def regenerate(self, r):
+        """Run the repo's own generator as a person does (--records-only), and check that it wrote the page."""
+        run = subprocess.run([sys.executable, os.path.join(r.dir, "lint", "hook_catalog.py"), "--records-only", "--root", r.dir],
+                             cwd=r.dir, capture_output=True, text=True, env=self.PY)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("wrote docs/records.md", run.stdout, run.stdout + run.stderr)
+
+    def fixture(self):
+        """A pushed base. The checker and its generator are committed before the fork, so a later change to them is
+        outside the reversal window. The debt block lands as its own insertion into a page that already exists,
+        the shape the reversal check reads as an undo: a page made whole in one commit is not."""
+        r = base_repo()
+        shipped = {}
+        for name in self.SHIPPED:
+            with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
+                shipped["lint/" + name] = f.read()
+        self.put_lf(r, shipped)
+        self.put_lf(r, {"plans/keep.md": self.KEEP})
+        self.regenerate(r)
+        self.commit_all(r, "the checker, its generator, a plan and the records page")
+        self.put_lf(r, {"debts/d-one.md": self.DEBT})
+        self.regenerate(r)
+        self.commit_all(r, "a debt and its row")
+        r.push()
+        return r
+
+    def test_a_generator_that_drops_the_debt_rows_is_refused_when_it_regenerates_the_page(self):
+        """Hole: a page was excused when it equalled the generator that the head ships. Here the head edits that generator
+        to drop the debt rows, regenerates the page, and passes with no trailer. The fixture runs its own checker, as CI
+        runs the head's checkout, so the head's generator is the oracle that the hole trusted."""
+        r = self.fixture()
+        r.sh("checkout", "-q", "-b", "oops")
+        with open(os.path.join(r.dir, "lint", "hook_catalog.py"), encoding="utf-8", newline="") as f:
+            text = f.read()
+        old = 'RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")'
+        self.assertIn(old, text)  # a no-op edit would make a false red
+        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "deferred", "plans")')})
+        self.regenerate(r)
+        self.commit_all(r, "drop the debts from the records page")
+        with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
+            self.assertNotIn("d-one", f.read())  # the regenerated page really lost the debt row
+        run = subprocess.run([sys.executable, os.path.join(r.dir, "lint", "check_silent_undo.py"), "--repo", r.dir],
+                             cwd=r.dir, capture_output=True, text=True, env=self.PY)
+        out = run.stdout + run.stderr
+        self.assertNotIn("UNKNOWN", out, out)
+        self.assertEqual(run.returncode, 1, out)
+        self.assertIn("silent-undo: FAIL:", out, out)  # the debt rows vanished with no trailer: refused
+
+    def test_a_regenerated_page_with_no_hand_edit_is_accepted(self):
+        """Accepted: the head's page is the generator's output and no one typed in it. The fork commit typed a row for
+        a debt with no file. Regenerating drops that row. The reversal is real, and the page's equality excuses it."""
+        r = self.fixture()
+        with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
+            page = f.read()
+        stale = page.replace("| `d-one`", self.GONE + "| `d-one`", 1)
+        self.assertNotEqual(stale, page)  # the typed row really went in
+        self.put_lf(r, {"docs/records.md": stale})
+        self.commit_all(r, "type a row for a debt with no file")
+        r.push()
+        r.sh("checkout", "-q", "-b", "regen")
+        self.regenerate(r)
+        self.commit_all(r, "regenerate the records page")
+        got = r.verdict()
+        self.assertEqual(got, [], (got, r.notes))
+        self.assertTrue(any("ALLOWED docs/records.md" in n for n in r.notes), r.notes)
+
+
 if __name__ == "__main__":
     unittest.main()

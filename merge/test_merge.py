@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
+import ast, contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -114,6 +114,18 @@ class FakeHost:
         sh(o, "git", "push", "-q", "origin", self.base)
         return sh(o, "git", "rev-parse", "HEAD"), ""
 
+def wait_sites(src):
+    """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
+    times, so a caller trusts the count only when in_loop is False."""
+    found = []
+    def walk(node, looped):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "wait_checks":
+                found.append(looped)
+            walk(child, looped or isinstance(child, (ast.For, ast.While, ast.AsyncFor)))
+    walk(ast.parse(src), False)
+    return len(found), any(found)
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
@@ -196,13 +208,22 @@ class Flow(Env):
         rc, out = self.run_merge("7")
         self.assertIn("head checks: red: gates: fail", out)
 
-    def test_the_lock_outlives_two_waits(self):
+    def test_the_lock_outlives_every_wait_one_run_can_take(self):
+        # Each wait_checks call site in merge.py is one wait, and none sits in a loop, so one run takes at most one wait per
+        # site: the head, the claim, the merge commit. Limit: a helper that wraps wait_checks and is called N times undercounts.
+        with open(merge.__file__, encoding="utf-8") as f:
+            sites, looped = wait_sites(f.read())
+        self.assertGreater(sites, 0)
+        self.assertFalse(looped, "a wait_checks call sits in a loop, so the site count is no bound")
+        d = merge.MERGE_DEFAULTS["deadlineMinutes"]  # the code's default deadline, set in the base config as the tool reads it
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=d))))
         ttls = []
         acquire = self.lock.acquire
         self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(ttls[0], (2 * CONFIG["merge"]["deadlineMinutes"] + 10) * 60)  # head wait, claim wait, ten spare
+        need = sites * d * 60
+        self.assertGreaterEqual(ttls[0], need, "lock ttl %d s; %d waits of %d min need %d s" % (ttls[0], sites, d, need))
 
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
@@ -648,7 +669,8 @@ class Stopped(Env):
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
         self.assertEqual(self.head(), claim_head)
-        self.now += 21 * 60  # 2 * deadlineMinutes 5 + 10, passed
+        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/merge-lock/main"))  # the expiry the child wrote
+        self.now = expires + 1  # past that lock, whatever its ttl
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)
@@ -788,7 +810,7 @@ class BaseAware(Env):
         self.put_locks(self.BASE)  # live on integ, none on main
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
-        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() joins its lines with spaces
+        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() prints each line on its own line
 
     def test_B_a_head_that_holds_an_old_claim_stops_before_the_wait_on_another_base(self):
         o = self.other
@@ -3566,6 +3588,629 @@ class WaitStepLines(unittest.TestCase):
         host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
         before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
         self.assertRegex(before, r"(?m)^merge: merging #7", f"printed before the merge call: {before!r}")
+
+# ---- the records page is rebuilt at merge time --------------------------------------------------------------------
+
+# The records-only mode the builder adds to lint/hook_catalog.py: it writes docs/records.md and nothing else. The merge
+# tool passes it with --root on every run, so a root with catalog parts gets no docs/catalog.md in its merge commit.
+RECORDS_ONLY = "--records-only"
+
+FAKE_RECORDS = '''import json, os, sys
+a = sys.argv[1:]
+root = a[a.index("--root") + 1]
+with open(os.environ["RECORDS_CALLS"], "a") as f:
+    f.write(json.dumps(a) + "\\n")
+if os.path.exists(os.path.join(root, "debts", "bad.md")):
+    print("records: debts/bad.md has no What")
+    sys.exit(1)
+d = os.path.join(root, "debts")
+names = sorted(n[:-3] for n in os.listdir(d)) if os.path.isdir(d) else []
+os.makedirs(os.path.join(root, "docs"), exist_ok=True)
+with open(os.path.join(root, "docs", "records.md"), "w", newline="\\n") as f:
+    f.write("records\\n" + "".join("- %s\\n" % n for n in names))
+'''
+DEBT_TEXT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
+
+def page(*names):
+    """The page the fake generator writes for these debts."""
+    return "records\n" + "".join("- %s\n" % n for n in names)
+
+def put_lf(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="\n") as f:
+        f.write(text)
+
+class RecordsEnv(Env):
+    """Helpers for the records-page cases. Holds no test."""
+    def kinds_off(self):
+        """The base holds claude-settings' own config: no stamp kinds, so no claim."""
+        self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+
+    def on(self, branch, files, msg="records"):
+        """Push one commit to origin/<branch> from the second clone, as a person or another run would."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        for rel, text in files.items():
+            put_lf(os.path.join(o, rel), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
+
+    def drop(self, branch, rel, msg):
+        """Push one commit to origin/<branch> from the second clone that removes rel, as a person would."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        sh(o, "git", "rm", "-q", rel); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
+
+    def rev(self, expr):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "rev-parse", expr)
+
+    def log1(self, fmt, ref):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "log", "-1", f"--format={fmt}", ref)
+
+    def tree_names(self, ref):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "ls-tree", "-r", "--name-only", ref).splitlines()
+
+class RecordsRebuild(RecordsEnv):
+    """Owner ruling 2026-10-14 13:18 CDT: the records index is rebuilt at merge time, the way record numbers are claimed
+    from the slug form at merge. Lane records-index, round 1. Red on 1ac9851: merge.py never runs a records generator.
+
+    The builder's contract for merge/merge.py. The seam is confirm() and preview(), beside do_claim and commit_claim.
+    - One home: `merge.RECORDS`, the path of lint/hook_catalog.py beside merge/ in the same checkout, as `merge.STAMP` is
+      for the stamp engine. The tool brings the generator, so a repo adds no config and no script. These cases patch it.
+    - Run `python3 <RECORDS> --root <worktree>`, nothing else, in the detached worktree that holds the head: the tree
+      that merges, never the caller's checkout. A non-zero exit is one Stop line starting "merge: " that names the
+      generator's reason once. Nothing is pushed, and the lock is freed.
+    - When: after the claim, only when the pull request's base is the default branch (the claim's own rule), and also
+      when the base config has `kinds: []` or no config at all (claude-settings itself has `kinds: []`). The rebuild
+      does not depend on the pull request touching a record: a stale page heals at the next merge.
+    - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
+      the page in the same commit. Without: the subject "Rebuild the records page", and no Record-claim trailer.
+      The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red check on it
+      reverts that commit, as for a claim.
+    - Nothing changed in the worktree: no commit, and one wait.
+    - Proof before the merge call: after the last fetch of the base, merge origin/<base> into the worktree without a
+      commit and run the generator. When it would change the page, the page on the head is stale for the merge result
+      (the base moved with a record): refuse with a line that says "records page" and "stale", revert the rebuild
+      commit, merge nothing. A base that moved with an unrelated change merges. The lock keeps other tool merges out,
+      so only a push that did not use the tool can trip it.
+    - The preview prints one line `  records: rebuild ...` or `  records: current`, and presses nothing.
+    """
+    def setUp(self):
+        super().setUp()
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: red on 1ac9851 is a failure, not an error
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
+    def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
+        self.assertEqual(self.claims(), 1)
+        self.assertEqual(sh(self.co, "git", "rev-list", "--count", f"{before}..origin/main^2"), "1")  # one commit, claim and page together
+        changed = sh(self.co, "git", "show", "--name-only", "--format=", "origin/main^2").splitlines()
+        self.assertIn("docs/records.md", changed)
+        self.assertIn("docs/decisions/second.md", changed)
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
+
+    def test_a_repo_with_no_stamp_kinds_still_gets_the_page(self):
+        mark = stamp_marker(self)
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(mark), "stamp.mjs ran")
+        self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
+        self.assertEqual(self.log1("%s", "origin/main^2"), "Rebuild the records page")
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--count", f"{before}..origin/main^2"), "1")
+        (s1, p1), (s2, p2) = self.host.waits  # the claim's order: the head first, then the rebuild commit
+        self.assertIsNone(p1)
+        self.assertEqual(p2, s1)
+        self.assertNotEqual(s1, s2)
+
+    def test_a_stale_page_heals_even_when_the_pr_touches_no_record(self):
+        self.kinds_off()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.show("main", "docs/records.md"), page().strip())
+        self.assertEqual(self.log1("%s", "origin/main^2"), "Rebuild the records page")
+
+    def test_a_current_page_adds_no_commit_and_waits_once(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), before)
+        self.assertEqual(len(self.host.waits), 1)
+        self.assertTrue(os.path.exists(self.calls), "the generator did not run on a page that was already current")
+
+    def test_a_base_that_is_not_the_default_is_left_alone(self):
+        # Regression pin, green on 1ac9851: a lane merged into an integration branch must not carry the page, or the
+        # lanes conflict on it. The pull request that takes that branch into the default branch rebuilds it.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(self.calls), "the generator ran for a base that is not the default branch")
+        self.assertEqual(self.rev("origin/integ^2"), before)
+        self.assertNotIn("docs/records.md", self.tree_names("origin/integ"))
+
+    def test_the_generator_runs_in_the_merge_worktree_in_records_only_mode(self):
+        # Re-pointed from the --root-only pin (stale, owner ruling test-strategy-reset). The merge tool runs the records-only
+        # mode, RECORDS_ONLY, and no other argument. Red on 392cc37: the call is --root <wt> with no mode flag.
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.exists(self.calls), "the generator never ran")
+        ran = [json.loads(l) for l in open(self.calls).read().splitlines()]
+        self.assertTrue(ran, "the generator log is empty")
+        for args in ran:
+            self.assertIn("--root", args, args)
+            path = args[args.index("--root") + 1]
+            self.assertEqual(set(args), {"--root", path, RECORDS_ONLY}, args)
+            self.assertEqual(len(args), 3, args)
+            self.assertTrue(os.path.basename(os.path.dirname(path)).startswith("merge-wt-"), path)  # the detached worktree
+            self.assertNotEqual(os.path.realpath(path), os.path.realpath(self.co))
+
+    def test_the_preview_says_what_the_merge_will_do_to_the_page_and_presses_nothing(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.startswith("  records:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("rebuild", line[0])
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_the_preview_says_when_the_page_is_current(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.startswith("  records:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("current", line[0])
+        self.assertEqual(self.refs(), before)
+
+    def test_a_generator_that_refuses_stops_with_one_line_and_pushes_nothing(self):
+        self.kinds_off()
+        self.on("feat", {"debts/bad.md": DEBT_TEXT})
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if "debts/bad.md has no What" in l]
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("merge: "), lines[0])
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.head(), before)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_red_check_on_the_rebuild_commit_reverts_it(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        self.host.seq = [(True, ""), (False, "a check is red: gates: fail")]  # the head is green, the rebuild commit is red
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted", out)
+        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")  # the branch tree is as it was
+        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_main_gaining_a_record_during_the_wait_refuses_and_reverts(self):
+        # A push that did not use the tool: a debt lands on main and the page is not rebuilt. The merge result
+        # would hold a stale page, so the merge must not happen.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        self.host.on_wait = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("records page", out.lower())
+        self.assertIn("stale", out.lower())
+        self.assertIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_main_gaining_an_unrelated_change_during_the_wait_still_merges_a_fresh_page(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.on_wait = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
+
+    def test_the_preview_on_a_non_default_base_says_nothing_about_the_page(self):
+        # Pin, green on 6fb3ac0. The records line sits inside the default-branch block of preview(), so a pull request
+        # into another base prints no page line, and confirm does not rebuild there either.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        for line in [l for l in out.splitlines() if l.startswith("  records:")]:
+            self.assertNotIn("rebuild", line)
+        self.assertEqual(self.refs(), before)
+
+    def test_the_preview_and_confirm_agree_on_a_resumed_head_that_needs_the_page(self):
+        # Red on 6fb3ac0. The preview says the page needs a rebuild. Confirm skips the rebuild on a resumed head,
+        # so the stale page is refused at the end. Both must agree: rebuild when the page lands, not otherwise.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put_lf(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("already claimed (D-002)", out)  # precondition: the head is a resumed claim
+        line = [l for l in out.splitlines() if l.startswith("  records:")]
+        self.assertEqual(len(line), 1, out)
+        rc, out = self.run_merge("7", "--confirm")
+        on_main = "docs/records.md" in self.tree_names("origin/main")
+        self.assertEqual("rebuild" in line[0], on_main, f"{line[0]}\n{out}")
+
+class RecordsRebuildReal(RecordsEnv):
+    """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
+    def test_the_default_generator_is_the_one_in_this_checkout(self):
+        want = os.path.join(HERE, "..", "lint", "hook_catalog.py")
+        self.assertTrue(getattr(merge, "RECORDS", None), "merge.RECORDS is not defined")
+        self.assertTrue(os.path.samefile(merge.RECORDS, want), merge.RECORDS)
+
+    def test_a_pr_that_adds_a_debt_gets_a_real_page_on_main(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        text = self.show("main", "docs/records.md")
+        self.assertIn("gap-one", text)
+        self.assertIn("../debts/gap-one.md", text)
+        self.assertIn("The check misses one case.", text)
+
+    def test_a_repo_with_no_records_gains_no_page_and_no_commit(self):
+        # Regression pin, green on 1ac9851. The tool runs the generator on every repo, so an empty repo must stay empty.
+        self.kinds_off()
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), before)
+        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+
+    def generated(self, ref):
+        """The page the real generator writes for the tree at ref, made in a scratch worktree that is removed again."""
+        self.rev(ref)  # fetches origin first
+        wt = os.path.join(self.t, "gen")
+        sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, ref)
+        try:
+            sh(wt, sys.executable, merge.RECORDS, "--root", wt)
+            with open(os.path.join(wt, "docs", "records.md"), encoding="utf-8") as f:
+                return f.read().strip()
+        finally:
+            sh(self.co, "git", "worktree", "remove", "--force", wt)
+
+    def test_a_conflict_only_on_the_page_is_rebuilt_on_the_merged_tree(self):
+        # Red on 6fb3ac0. records_stale() reads any conflict as "cannot be proved fresh" and reverts the claim. Here only
+        # the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
+        self.kinds_off()
+        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                "a debt and a hand-written page on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        page = self.show("main", "docs/records.md")
+        self.assertIn("gap-one", page)
+        self.assertIn("main-gap", page)
+        self.assertEqual(page, self.generated("origin/main"))
+
+    def test_a_conflict_on_another_file_still_refuses_and_reverts(self):
+        # Pin, green on 6fb3ac0. A conflict outside the generated page must still stop the merge. This blocks a blanket
+        # -X ours or -X theirs that would silence every conflict.
+        self.kinds_off()
+        self.on("main", {"notes.txt": "main side\n"}, "a note on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "notes.txt": "head side\n"}, "a debt and a note")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not merge cleanly", out)
+        self.assertIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+class RecordsScope(RecordsEnv):
+    """The real generator, lint/hook_catalog.py. merge.py runs it on every root, so a root with catalog parts must merge, and
+    its merge commit may carry the records page alone (the records-only mode, RECORDS_ONLY). Red on 392cc37: the whole
+    generator refuses a root with hooks/ and no settings.json, and it writes docs/catalog.md into the merge."""
+    def test_a_page_edited_on_both_sides_with_no_records_stops_the_merge(self):
+        # Red on 392cc37: the generator writes nothing here, so the page with conflict markers is committed and merged.
+        self.kinds_off()
+        self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"))  # the defect: markers reach main
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "conflict" in l and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.head(), before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_page_edited_on_both_sides_with_nine_char_markers_stops_the_merge(self):
+        # Red on 741a17e: the heal looks for seven-character markers only. A page with nine-character markers passes that look.
+        self.kinds_off()
+        self.on("main", {".gitattributes": "docs/records.md conflict-marker-size=9\n", "docs/records.md": "records\n- base\n"},
+                "a hand-written page, nine-character markers")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        self.assertIn("conflict-marker-size: 9", sh(o, "git", "check-attr", "conflict-marker-size", "--", "docs/records.md"))  # the precondition
+        put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"), "the defect: nine-character markers reach main")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "conflict" in l and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.head(), before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def delete_edit_setup(self, head_files=None, generated=False, trailer=False):
+        """The page is in the base. The head edits it: by hand, or, when generated, to the generator's own output for the head's
+        debts (head_files are written first, so the generator sees them). Then main deletes it. trailer adds the Drops-lines
+        trailer on the head's commit, as the heal's merge commit carries it."""
+        self.kinds_off()
+        self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        for rel, text in (head_files or {}).items():
+            put_lf(os.path.join(o, rel), text)
+        if generated:
+            sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        else:
+            put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
+        msg = ["-m", "the head edits the page"] + (["-m", "Drops-lines: docs/records.md -- a generated page, rebuilt by the generator"] if trailer else [])
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", *msg); sh(o, "git", "push", "-q", "origin", "feat")
+        self.drop("main", "docs/records.md", "main drops the page")
+
+    def test_a_page_deleted_on_main_and_edited_on_the_head_with_no_records_stops_the_merge(self):
+        # Red on 741a17e: the generator writes nothing here, and the head's page has no marker, so the head's page is committed to main.
+        self.delete_edit_setup()
+        before, head_before = self.rev("origin/main"), self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("docs/records.md", self.tree_names("origin/main"), "the defect: the head's page reaches main")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.startswith("merge: ") and "records" in l]
+        self.assertTrue(lines, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/main"), before)
+        self.assertEqual(self.head(), head_before)  # nothing pushed to feat
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_generated_page_deleted_on_main_with_records_rebuilds_and_merges(self):
+        # The control, red on 741a17e: a root with a record folder. The head's page is the generator's output for its debt, and main
+        # deletes the page. The rebuild should go on. The silent-undo check refuses the head's commit: it drops a base line and
+        # carries no Drops-lines trailer. The heal's merge commit carries one, and the next case shows it goes through with it.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+
+    def test_a_generated_page_with_a_drops_trailer_deleted_on_main_with_records_rebuilds_and_merges(self):
+        # Green control, as the heal's merge commit does it: the same head commit with the Drops-lines trailer. The page is generated,
+        # so the drop of a base line is excused, and the merge goes on.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+
+    def test_a_root_with_hooks_and_no_settings_merges(self):
+        # Red on 392cc37: "hook_catalog: cannot read settings.json", so the records page cannot be rebuilt.
+        self.kinds_off()
+        self.on("feat", {"hooks/guard.sh": "#!/bin/sh\necho hi\n", "debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        changed = sh(self.co, "git", "diff", "--name-only", "origin/main^1", "origin/main").split()  # the merge commit
+        self.assertIn("docs/records.md", changed)
+        self.assertNotIn("docs/catalog.md", changed, changed)  # no generated catalog page: the records-only mode
+
+    def test_the_merge_commit_carries_no_catalog_page(self):
+        # Red on 392cc37: the root renders a catalog, so the generator writes docs/catalog.md and the merge brings it in.
+        self.kinds_off()
+        self.on("feat", {"settings.json": "{}\n", "hooks/.gitkeep": "", "skills/.gitkeep": "",
+                         "decisions/subagent-model-cap.md": "# Subagent model cap\n\nOwner ruling. The table names each role model.\n",
+                         "debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.rev("origin/main")  # fetches
+        changed = sh(self.co, "git", "diff", "--name-only", "origin/main^1", "origin/main").split()
+        self.assertIn("docs/records.md", changed)
+        self.assertNotIn("docs/catalog.md", changed, changed)
+
+class RecordsHeal(RecordsEnv):
+    """The keep paths of the heal wait in confirm(): the third wait of a run, on the merge commit that heals the page. The
+    fake generator writes the page, so the heal is a real conflict on docs/records.md. Each push or red check fires on the
+    third wait only (len(host.waits) == 3). These pin keep paths that had no test: green on 392cc37, the code already keeps."""
+    def setUp(self):
+        super().setUp()
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
+    def heal_setup(self):
+        """A debt and a hand-written page on main; the head adds a debt. The head's rebuild commits one page, and the heal merges both."""
+        self.kinds_off()
+        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                "a debt and a hand-written page on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+
+    def on_heal_wait(self, action):
+        """Run action when the heal wait starts: the third wait, on the merge commit."""
+        self.host.on_wait = lambda: action() if len(self.host.waits) == 3 else None
+
+    def assert_kept(self, rc, out):
+        """The merge commit that heals the page stays on feat: no revert, no merge, lock free."""
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(self.host.waits), 3, self.host.waits)
+        self.assertIn("stays on feat", out)
+        self.assertNotIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0])
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
+        self.heal_setup()
+        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: gates: fail")]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("are not green", out)
+        self.assertIn("gates: fail", out)
+
+    def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("records page is stale", out)
+
+    def test_a_page_edit_landing_on_main_during_the_heal_wait_stops_the_second_heal(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"docs/records.md": "records\n- rival\n"}, "untooled page edit"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("conflicts again", out)
+
+    def test_a_non_page_conflict_landing_on_main_during_the_heal_wait_refuses(self):
+        self.heal_setup()
+        self.on_heal_wait(lambda: self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Rival gap one")}, "untooled debt"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_kept(rc, out)
+        self.assertIn("does not merge cleanly", out)
+
+    def test_the_heal_commit_names_only_the_page_in_drops_lines(self):
+        self.heal_setup()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.rev("origin/main")  # fetches
+        body = sh(self.co, "git", "log", "-1", "--format=%B", "origin/main^2")  # the heal commit: the merge's second parent
+        drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
+        self.assertEqual(drops, [["docs/records.md"]], body)
+
+class MergeImport(unittest.TestCase):
+    """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
+    exits non-zero, with no traceback. Red on 392cc37: the import error is a traceback."""
+    def tool_root(self):
+        """A root with merge/merge.py copied in, and a gh shim that fails if the tool reaches it."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        tool = os.path.join(root, "merge", "merge.py")
+        os.makedirs(os.path.dirname(tool))
+        shutil.copyfile(merge.__file__, tool)
+        put_shim(os.path.join(root, "bin", "gh"), "#!/bin/sh\necho gh-blocked >&2\nexit 1\n")  # a stray gh call fails here
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = os.path.join(root, "bin") + os.pathsep + old
+        self.addCleanup(os.environ.__setitem__, "PATH", old)
+        return root, tool
+
+    def assert_one_clear_line(self, r, *names):
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertNotIn("Traceback", out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("merge: "), out)
+        self.assertRegex(lines[0], r"hook_catalog|records")
+        for n in names:  # the error's own type, so a different one-line failure does not pass
+            self.assertIn(n, lines[0], out)
+
+    def test_a_blocked_generator_import_stops_with_one_line(self):
+        root, tool = self.tool_root()
+        code = "import runpy, sys; sys.modules['hook_catalog'] = None; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+        r = subprocess.run([sys.executable, "-c", code, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r)
+
+    def test_a_syntax_error_in_the_generator_stops_with_one_line(self):
+        # The generator file is real and broken at import: merge.py must name the error in one line, as it does for ImportError.
+        root, tool = self.tool_root()
+        put(os.path.join(root, "lint", "hook_catalog.py"), "RECORDS_PAGE = 'docs/records.md'\ndef broken(:\n    pass\n")
+        r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r, "SyntaxError")
+
+    def test_a_name_error_in_the_generator_stops_with_one_line(self):
+        # A top-level name the module never binds: the import raises NameError before RECORDS_PAGE exists.
+        root, tool = self.tool_root()
+        put(os.path.join(root, "lint", "hook_catalog.py"), "RECORDS_PAGE = missing_name\n")
+        r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
+        self.assert_one_clear_line(r, "NameError")
+
+class RecordsPageHome(unittest.TestCase):
+    """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy.
+    Red on d027e3d: merge.py:16 is a literal copy of the path."""
+    def test_merge_holds_no_copy_of_the_records_page_path(self):
+        with open(merge.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        copies = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "docs/records.md"]
+        self.assertEqual(copies, [], "merge.py copies the records page path at line %s. Import it from the generator." % copies)
+
+    def test_merge_and_the_generator_name_one_value(self):
+        self.assertTrue(hasattr(merge, "RECORDS_PAGE"), "merge.py must bind RECORDS_PAGE, from the generator")
+        with open(merge.RECORDS, encoding="utf-8") as f:
+            homes = [n.value for n in ast.parse(f.read()).body
+                     if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RECORDS_PAGE" for t in n.targets)]
+        self.assertEqual(len(homes), 1, "lint/hook_catalog.py must assign RECORDS_PAGE exactly once")
+        self.assertEqual(merge.RECORDS_PAGE, ast.literal_eval(homes[0]))
+
 
 def assert_one_rate_wait_line(test, text, snapshots):
     """A rate wait prints one line that says it waits, why (a rate limit) and for how long (60 s). `snapshots` holds the

@@ -15,3 +15,7 @@ Home: lint/hook_catalog.py
 ## Why
 
 The records grew past 300 files. A reader had to search the folders to find the ruling for a question. A hand-kept index goes stale at the first merge that forgets it, so the tool owns it.
+
+## Holes, named
+
+Review round 3 left these open. Lane records-heal-scope closed four. The heal stops when the generator writes no page for a conflicted page. The merge runs only the records mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop paths have tests. Three debts from round 3 stay open: `old-before-was-flags-history` (the history rule flags a plain description), `catalog-root-needs-skills-dir` (a settings root with hooks/ and no skills/ crashes the catalog), and `merge-by-button-stale-page` (a merge through the GitHub button leaves a stale page). Three more stay open from round 2. `silent-undo-oracle-hides-cause` (the check hides why the page failed). `page-excuse-trailer-only` (outside claude-settings, a trailer alone excuses a page drop). `index-row-drop-no-finding` (a row can drop with no finding).
