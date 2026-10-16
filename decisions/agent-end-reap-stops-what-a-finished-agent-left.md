@@ -62,8 +62,8 @@ The reaper stops one process only when each read below answers a confirmed yes:
 3. The root of its process tree inside the target is orphaned. The reaper climbs from the
    process to each live parent whose cwd is also inside the target. Then it asks
    `sweep.is_orphan` about the last one. A live parent outside the target means keep. A
-   harness or a terminal is such a parent. Read 3 does not apply to the ending agent's own
-   worktree (Part 4).
+   harness or a terminal is such a parent. Read 3 applies in the ending agent's own worktree
+   too. The remover's stop of the agent's own shells is a separate test (Part 4).
 4. The current user owns the process.
 
 An unreadable read means keep. The signal goes by pid through `sweep.send_signal`, once.
@@ -78,8 +78,8 @@ The owner's constraints hold:
 - Ownership is judged by the checkout that holds the cwd, never by a name.
 - The primary checkout is never a target.
 - A worktree that a live session uses is never touched.
-- A process that a live parent outside the worktree holds is never touched, except in the
-  ending agent's own worktree (Part 4).
+- A process that a live parent outside the worktree holds is never stopped by the hook.
+  The remover stops the agent's own shells under Part 4's own test.
 
 Owner ruling 3, 2026-09-27: this scope is accepted. The reaper stops each orphaned tree
 inside an ended agent's worktree, not only listeners.
@@ -90,8 +90,11 @@ only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
 ## Part 4. The worktree is removed at agent end
 
 Owner rulings, 2026-10-15: plan step 3, the 19:43 CDT rulings below, and the 23:00 CDT
-ruling "Build a delayed remover". Status: decided, not built. Lane wt-reap builds it.
-Until that lane merges, the reaper stops processes and removes no worktree.
+ruling "Build a delayed remover". The 23:01 CDT ruling drops own-tree removal from lane
+wt-reap for now. Status: decided, not built. Lane wt-reap builds the removal of other
+finished agents' worktrees idle 30 min or more. Lane wt-reap-delay builds the delayed
+remover for the ending agent's own tree. Until those lanes merge, the reaper stops
+processes and removes no worktree.
 
 Why. On 2026-10-15 the machine held 610 agent worktrees. The reaper stopped processes only.
 Removal fell to the session-end sweep. The sweep costs about 7.5 s per tree. Its budget is
@@ -116,8 +119,8 @@ MEASURED 2026-10-15, Windows, lane wt-reap try 4:
 
 Flow for the ending agent's own tree:
 
-1. The hook checks `agent-<agent_id>`: clean, pushed, and free of a live lock. A failed
-   check keeps the tree. The hook exits.
+1. The hook applies Part 3 to `agent-<agent_id>`. Then it checks the tree: clean, pushed,
+   and free of a live lock. A failed check keeps the tree. The hook exits.
 2. The hook starts a remover. The remover is detached, is not a child of the hook chain,
    and has its cwd outside the tree. The hook then exits.
 3. The remover waits, up to a fixed limit, until every hook process inside the tree has
@@ -129,15 +132,17 @@ Flow for the ending agent's own tree:
 7. If the limit ends first, the remover keeps the tree. The next agent end or the sweep
    removes it.
 
-The hook stops no process, in any tree.
+The hook keeps main's Part 3 stops, read 3 in force, in the ending agent's tree. It stops an
+orphan whose parent is dead. It never stops a process with a live parent, so the guard's
+wrapper is never stopped. Read 3 keeps that wrapper, because its parent is the live host
+outside the tree. Unmeasured. Part 3 targets only the ending agent's tree, so the hook stops
+nothing in another tree, as on main.
 
 The 19:43 CDT rulings now belong to the remover. It stops the agent's own shells, then
-removes the tree, even with git-ignored files. In the ending agent's own worktree, Part 3
-read 3 does not apply. The parent of its shells is a live host outside the tree. Part 3
-reads 1, 2 and 4 still hold. (Owner ruling, 2026-10-15 19:43 CDT.)
-
-Not ruled: an orphaned process in another tree, or in a dirty tree, has no stopper. Part 3
-ruling 3 covers it. This ruling does not.
+removes the tree, even with git-ignored files. Read 3 does not decide these stops. The
+shells' parent is the live host outside the tree, so the hook keeps them, and the remover
+stops them under step 4. Part 3 reads 1, 2 and 4 still hold for the remover's stops.
+(Owner ruling, 2026-10-15 19:43 CDT.)
 
 A clean tree has no uncommitted and no untracked file. Git-ignored files do not keep a
 tree. A clean, pushed worktree is removed even when it holds git-ignored files, such as
