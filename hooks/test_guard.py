@@ -75,6 +75,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
+    "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the subagent model cap",
@@ -6871,6 +6872,198 @@ for _name, _command in (
 sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
    "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+
+# =========================================================================== 5c. the records page
+FAMILY = "records-page"
+#
+# `records-page`. Owner ruling 2026-10-16 10:28 CDT ("Also add a guard"), decision records-index-at-merge.
+# The page docs/records.md is rebuilt only at merge, by the merge tool. A lane never commits a change
+# to it. Incident 2026-10-16: each lane rebuilt the page, and three batches conflicted on it. The guard
+# refuses a lane commit whose page differs from the page on the lane's base. A merge of the base into
+# the lane brings the base's page, so that commit is allowed.
+#
+# THE SEAM. The base is `resolve_default_base(root)` of guard_core (origin/HEAD, then local main, then
+# local master), read at its TIP. The fixture makes local `main` STALE (page v0) while `origin/main`
+# holds page v1, and every lane is cut from the stale `main`. So a guard that reads local `main`, or
+# the merge base, reads v0 and refuses the merge case. A commit is refused only when the page it would
+# hold differs from HEAD's page AND from the base tip's page. Any read that fails is no hit.
+#
+# BEYOND THE BRIEF'S FIVE CASES (named in "stage then commit"): the hook runs BEFORE the shell chain, so
+# `git add -A && git commit` and `git commit -am` stage the page after the hook has read the index.
+# Those are the usual way an agent commits the page it just rebuilt, so they are pinned here too.
+RECORDS_RULE = "records-page"
+RECORDS_SAYS = ("docs/records.md", "merge", ("drop", "Drop"))   # the rule named plainly, and the remedy
+RECORDS_NEVER = (VCS + " restore", VCS + " reset", VCS + " stash", VCS + " checkout")
+REC_V0, REC_V1 = "records page v0, as the lane was cut\n", "records page v1, rebuilt on main\n"
+REC_LANE = "records page v2, rebuilt by the lane\n"
+RECROOT = os.path.join(ROOT, "recpage")
+RECMAIN = os.path.join(RECROOT, "main")
+# One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
+# the index is per tree.
+REC_LANES = {name: os.path.join(RECROOT, "lane-" + name) for name in (
+    "staged", "unstaged", "product", "merge", "merge-rebuilt", "copy-base")}
+REC_NOPAGE = os.path.join(RECROOT, "nopage")   # a repository that has no page at all
+REC_NOBASE = os.path.join(RECROOT, "nobase")   # a page change staged, and no origin, main or master
+
+
+def _build_records_page():
+    def run(where, *args):
+        done = run_vcs(where, *IDENT, *args)
+        if done.returncode != 0:
+            sys.exit("fixture setup failed in _build_records_page: %s %s in %r: %s"
+                     % (VCS, " ".join(args), where, done.stderr.strip()))
+        return done.stdout.strip()
+
+    def need(ok, what):
+        if not ok:
+            sys.exit("fixture setup failed in _build_records_page: " + what)
+
+    def page(where):
+        return os.path.join(where, "docs", "records.md")
+
+    make_repo(RECMAIN, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(RECMAIN, "checkout", "-q", "-b", "advance")           # main's tip moves the page after the cut
+    write(page(RECMAIN), REC_V1)
+    run(RECMAIN, "commit", "-q", "-am", "main moves the page")
+    run(RECMAIN, "update-ref", "refs/remotes/origin/main", "advance")
+    run(RECMAIN, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(RECMAIN, "checkout", "-q", "main")                    # local main stays at the cut: stale
+    run(RECMAIN, "branch", "-q", "-D", "advance")
+    need(run(RECMAIN, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/main",
+         "origin/HEAD does not resolve to origin/main")
+    need(run(RECMAIN, "show", "origin/main:docs/records.md") == REC_V1.strip(), "origin/main page is not v1")
+    need(run(RECMAIN, "show", "main:docs/records.md") == REC_V0.strip(), "local main page is not v0")
+    for name, where in REC_LANES.items():
+        run(RECMAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+
+    def merged(name):
+        run(REC_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        need(run(REC_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD"),
+             "no merge is in progress in the lane %r" % name)
+
+    def stage(name, rel):
+        run(REC_LANES[name], "add", rel)
+
+    write(page(REC_LANES["staged"]), REC_LANE)           # rebuilt, then staged
+    stage("staged", "docs/records.md")
+    write(page(REC_LANES["unstaged"]), REC_LANE)         # rebuilt, nothing staged
+    write(os.path.join(REC_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    stage("product", "src/app.py")
+    merged("merge")                                      # origin/main merged in: the page is the base's
+    merged("merge-rebuilt")                              # the same merge, then the page rebuilt by hand
+    write(page(REC_LANES["merge-rebuilt"]), REC_LANE)
+    stage("merge-rebuilt", "docs/records.md")
+    write(page(REC_LANES["copy-base"]), REC_V1)          # the base's page copied over, no merge
+    stage("copy-base", "docs/records.md")
+    staged = lambda name: run(REC_LANES[name], "diff", "--cached", "--name-only")   # noqa: E731
+    need(run(REC_LANES["staged"], "show", ":docs/records.md") == REC_LANE.strip(), "staged page is not v2")
+    need(staged("unstaged") == "" and run(REC_LANES["unstaged"], "diff", "--name-only") == "docs/records.md",
+         "the unstaged lane is not 'page edited, nothing staged'")
+    need(staged("product") == "src/app.py", "the product lane stages more than src/app.py")
+    need(run(REC_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip(), "the merged lane page is not v1")
+    need(run(REC_LANES["merge-rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
+         "the rebuilt merge lane page is not v2")
+    need(run(REC_LANES["copy-base"], "show", ":docs/records.md") == REC_V1.strip(), "the copy-base page is not v1")
+
+    make_repo(REC_NOPAGE, {"src/app.py": "x = 1\n"})
+    write(os.path.join(REC_NOPAGE, "src", "app.py"), "x = 2\n")
+    run(REC_NOPAGE, "add", "src/app.py")
+    os.makedirs(REC_NOBASE, exist_ok=True)
+    run(REC_NOBASE, "init", "-q", "-b", "trunk", ".")
+    write(page(REC_NOBASE), REC_V0)
+    run(REC_NOBASE, "add", "-A")
+    run(REC_NOBASE, "commit", "-q", "-m", "first")
+    write(page(REC_NOBASE), REC_LANE)
+    run(REC_NOBASE, "add", "docs/records.md")
+    need(run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/main").returncode != 0
+         and run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/master").returncode != 0
+         and not run(REC_NOBASE, "remote"), "the nobase repository has a base")
+
+
+lazy_fixture([RECMAIN, REC_NOPAGE, REC_NOBASE, *REC_LANES.values()], _build_records_page)
+
+
+def records_deny(name, command, lane, **kw):
+    sh("records-page: %s is refused" % name, command, "deny", RECORDS_RULE, cwd=REC_LANES[lane],
+       carries=RECORDS_SAYS, lacks=RECORDS_NEVER, **kw)
+
+
+def records_allow(name, command, cwd, **kw):
+    sh("records-page: %s is allowed" % name, command, "allow", cwd=cwd, **kw)
+
+
+# 1. A staged page that is not the base's page: refused, under Bash and PowerShell, and for a builder.
+records_deny("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
+records_deny("a lane commit of a staged page that differs from the base's, under PowerShell",
+             VCS + " commit -m x", "staged", tool="PowerShell")
+records_deny("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
+             "staged", agent_id="bld1", agent_type="builder")
+# A merge commit is no exemption: only the base's own page rides in on a merge.
+records_deny("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
+# Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
+records_deny("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
+records_deny("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
+             "unstaged", tool="PowerShell")
+records_deny("stage then commit: add -A and commit with an edited page",
+             VCS + " add -A && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add -A and commit with an edited page, under PowerShell",
+             VCS + " add -A; " + VCS + " commit -m x", "unstaged", tool="PowerShell")
+records_deny("stage then commit: add . and commit with an edited page",
+             VCS + " add . && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add of the page and commit with an edited page",
+             VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
+
+# 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
+records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
+              REC_LANES["product"])
+records_allow("a commit that stages no page change, under PowerShell", VCS + " commit -m x",
+              REC_LANES["product"], tool="PowerShell")
+# The page edited and left unstaged is no commit of the page. A guard that refuses every commit after
+# a lint run is a false alarm.
+records_allow("a plain commit with an edited page left unstaged", VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("a commit of a product file added alone, with an edited page left unstaged",
+              VCS + " add src/app.py && " + VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("an add of the page, with no commit", VCS + " add docs/records.md", REC_LANES["unstaged"])
+
+# 3. The base's own page: allowed, as a merge of the base into the lane, or as a copy of its page.
+records_allow("a merge commit that brings the base's page", VCS + " commit -m x", REC_LANES["merge"])
+records_allow("a merge commit that brings the base's page, under PowerShell", VCS + " commit -m x",
+              REC_LANES["merge"], tool="PowerShell")
+records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
+
+# 4. Nothing to compare, or git cannot be read: no hit.
+records_allow("a commit in a repository with no page", VCS + " commit -m x", REC_NOPAGE)
+records_allow("a commit of a staged page when the base cannot be read", VCS + " commit -m x", REC_NOBASE)
+records_allow("a commit in a directory that is no repository", VCS + " commit -m x", NOGIT)
+if os.name != "nt":
+    records_allow("a commit of a staged page when git cannot answer", VCS + " commit -m x",
+                  REC_LANES["staged"], env_path=GITBLIND)
+else:
+    skip_case("records-page: a commit of a staged page when git cannot answer is allowed", NO_STAND_IN)
+
+# 5. Text that only names the page is no commit of it.
+for _name, _command in (
+    ("a message that names the page", VCS + ' commit -m "docs/records.md is rebuilt only at merge"'),
+    ("a message that names the page, in a -F heredoc",
+     VCS + " commit -F - <<'EOF'\nthe page docs/records.md is not mine to rebuild\nEOF"),
+    ("an echo of a commit of the page", "echo '" + VCS + " commit -m x docs/records.md'"),
+    ("a log of the page", VCS + " log --oneline -- docs/records.md"),
+    ("a show of the page", VCS + " show origin/main:docs/records.md"),
+    ("a read of the page", "cat docs/records.md"),
+):
+    records_allow(_name, _command, REC_LANES["product"])
+
+# ---- the same two readings of a lone quote, a multi-line quoted message and a comment opener in a
+# string, building-scanner-respects-strings: the guard reads the command for a commit, so a quote or an
+# opener inside a message must neither hide a commit of the page nor invent one.
+records_deny("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
+             "staged")
+records_deny("a commit of a staged page after a comment opener inside a string",
+             'echo "# note // /* x"\n' + VCS + " commit -m x", "staged")
+records_deny("a commit of a staged page with a multi-line quoted message",
+             VCS + ' commit -m "first line\nsecond line"', "staged")
+records_allow("an echo of a commit inside a multi-line quoted string, with a staged page",
+              'echo "first\n' + VCS + ' commit -m x\nlast"', REC_LANES["staged"])
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
