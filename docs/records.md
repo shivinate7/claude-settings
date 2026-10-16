@@ -247,6 +247,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `agent-type-match-case-sensitive` | `Builder` or `explore` gets the general writer scope, not the scope of its role. | [`debts/agent-type-match-case-sensitive.md`](../debts/agent-type-match-case-sensitive.md) |
 | `alias-skip-misses-case-forms` | The alias skip matches `/WindowsApps/` in the POSIX path Git Bash prints. | [`debts/alias-skip-misses-case-forms.md`](../debts/alias-skip-misses-case-forms.md) |
 | `ansi-c-escape-not-decoded` | Lane cap-ask-hole decodes a plain `$'path'` word for the frozen and model-cap checks. | [`debts/ansi-c-escape-not-decoded.md`](../debts/ansi-c-escape-not-decoded.md) |
+| `ask-alone-echo-amp-overdeny` | `UNSAFE_TEXT` marks `<`, `>` and `&` in a segment, quoted or not. | [`debts/ask-alone-echo-amp-overdeny.md`](../debts/ask-alone-echo-amp-overdeny.md) |
+| `ask-alone-empty-segment-denies` | An empty last segment ends the tail loop in `harmless_steps`, so a harmless tail before it is not counted. | [`debts/ask-alone-empty-segment-denies.md`](../debts/ask-alone-empty-segment-denies.md) |
+| `ask-alone-ps-backslash-denies` | `UNSAFE_TEXT` reads `\"` as an escaped quote in every shell. | [`debts/ask-alone-ps-backslash-denies.md`](../debts/ask-alone-ps-backslash-denies.md) |
+| `ask-alone-sl-chdir-denies` | `sl` and `chdir` are PowerShell aliases of `Set-Location`, and `Push-Location` also changes folder. | [`debts/ask-alone-sl-chdir-denies.md`](../debts/ask-alone-sl-chdir-denies.md) |
+| `ask-alone-tail-args-unchecked` | `harmless_tail` takes any arguments to `echo` and `Write-Host`. | [`debts/ask-alone-tail-args-unchecked.md`](../debts/ask-alone-tail-args-unchecked.md) |
+| `ask-alone-tail-test-gap` | `hooks/test_guard.py` has ask-alone rows for a quoted `#`, a quoted `/*` and a lone apostrophe. | [`debts/ask-alone-tail-test-gap.md`](../debts/ask-alone-tail-test-gap.md) |
 | `ask-step-hidden-in-script` | The guard does not see a settings write of the subagent model cap in some shapes. | [`debts/ask-step-hidden-in-script.md`](../debts/ask-step-hidden-in-script.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
@@ -256,8 +262,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
 | `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
+| `cites-lack-gloss-unchecked` | Some cites of record ids, in decisions and debts, carry no gloss. | [`debts/cites-lack-gloss-unchecked.md`](../debts/cites-lack-gloss-unchecked.md) |
+| `cmd-c-quote-count-bash-reader` | cmd reads `\` as a plain character, and each `"` toggles its quote state. | [`debts/cmd-c-quote-count-bash-reader.md`](../debts/cmd-c-quote-count-bash-reader.md) |
+| `cmd-c-script-skips-kill` | `cmd /c taskkill /F /IM node.exe` is allowed. | [`debts/cmd-c-script-skips-kill.md`](../debts/cmd-c-script-skips-kill.md) |
 | `debt-decision-link-unchecked` | No check confirms that a debt's decision still names its gap. | [`debts/debt-decision-link-unchecked.md`](../debts/debt-decision-link-unchecked.md) |
 | `debts-no-check-reads-parts` | No check reads the four parts of a debt file. | [`debts/debts-no-check-reads-parts.md`](../debts/debts-no-check-reads-parts.md) |
+| `discards-output-slow-path` | Unmeasured. | [`debts/discards-output-slow-path.md`](../debts/discards-output-slow-path.md) |
 | `drops-cite-forms-unchecked` | `git commit --trailer`, a `Refs:deferred/a.md` token with no space, `git merge -m` and `git tag -m` are never cite-checked. | [`debts/drops-cite-forms-unchecked.md`](../debts/drops-cite-forms-unchecked.md) |
 | `drops-dot-slash-guard-lint` | `./deferred/a.md` after the `Drops-lines:` key passes the guard. | [`debts/drops-dot-slash-guard-lint.md`](../debts/drops-dot-slash-guard-lint.md) |
 | `drops-mixed-paragraph-exempt` | The guard exempts a last paragraph that mixes a prose line with the Drops-lines trailer. | [`debts/drops-mixed-paragraph-exempt.md`](../debts/drops-mixed-paragraph-exempt.md) |
@@ -316,7 +326,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-redirect-paren-heredoc` | These hide a refused command, and main allows them too: a leading redirect before the command word (`2>/dev/null pkill foo`), and `)#` that opens no comment. | [`debts/guard-redirect-paren-heredoc.md`](../debts/guard-redirect-paren-heredoc.md) |
 | `guard-shell-wrap-discard-unread` | A discard inside `sh -c`, `eval`, or a `$(…)` substitution is not read. | [`debts/guard-shell-wrap-discard-unread.md`](../debts/guard-shell-wrap-discard-unread.md) |
 | `guard-split-heredocs-here-string` | `guard_core._split_heredocs` reads a quoted or commented `<<X`, or a here-string `<<<word`, as a real heredoc. | [`debts/guard-split-heredocs-here-string.md`](../debts/guard-split-heredocs-here-string.md) |
-| `guard-split-ignores-backslash` | The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. | [`debts/guard-split-ignores-backslash.md`](../debts/guard-split-ignores-backslash.md) |
+| `guard-split-ignores-backslash` | The split now honors every backslash escape outside single quotes. | [`debts/guard-split-ignores-backslash.md`](../debts/guard-split-ignores-backslash.md) |
 | `guard-split-mutant-needs-git` | PR0 measured a kill count of 310 of 314 on the branch, against 309 on main. | [`debts/guard-split-mutant-needs-git.md`](../debts/guard-split-mutant-needs-git.md) |
 | `guard-split-sibling-mutant-case` | PR2 needs a case that kills a sibling mutant through the in-process load in `hooks/test_guard.py`. | [`debts/guard-split-sibling-mutant-case.md`](../debts/guard-split-sibling-mutant-case.md) |
 | `guard-substitution-in-token` | A command inside a token is not read as a command: `$(...)` glued after other text, backticks, and `x=$(...)`. | [`debts/guard-substitution-in-token.md`](../debts/guard-substitution-in-token.md) |
@@ -339,9 +349,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `heredoc-run-other-path` | Some bodies run, but the guard reads them as text. | [`debts/heredoc-run-other-path.md`](../debts/heredoc-run-other-path.md) |
 | `heredoc-script-then-run` | Main allows `cat <<EOF2 > x.sh`, with a body that holds a step the guard denies, followed by `sh x.sh` in the same command. | [`debts/heredoc-script-then-run.md`](../debts/heredoc-script-then-run.md) |
 | `hint-signed-commit-sha` | With `log.showSignature=true` in config, git prints a signature line before a signed commit's record. | [`debts/hint-signed-commit-sha.md`](../debts/hint-signed-commit-sha.md) |
-| `hold-own-hole-unrecorded` | The rule turns each open finding after round 3 into a debt. | [`debts/hold-own-hole-unrecorded.md`](../debts/hold-own-hole-unrecorded.md) |
+| `hold-own-hole-unrecorded` | The rule says where a held change records its hole: a limit under "Holes, named" in its decision, and a debt. | [`debts/hold-own-hole-unrecorded.md`](../debts/hold-own-hole-unrecorded.md) |
 | `impeccable-piped-shell-body` | The impeccable rule keeps a heredoc body only when the shell word stands before `<<`. | [`debts/impeccable-piped-shell-body.md`](../debts/impeccable-piped-shell-body.md) |
 | `impeccable-python-body` | The impeccable rule reads a heredoc body when a shell word (`bash`, `sh`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`) stands before the `<<` on its header line. | [`debts/impeccable-python-body.md`](../debts/impeccable-python-body.md) |
+| `in-throwaway-reads-paths-only` | `in_throwaway` judges path text, not the repo git acts on. | [`debts/in-throwaway-reads-paths-only.md`](../debts/in-throwaway-reads-paths-only.md) |
 | `inbox-done-forms` | While capture is open, `fb:done` and `` `fb done` `` in backticks are captured and do not close it. | [`debts/inbox-done-forms.md`](../debts/inbox-done-forms.md) |
 | `inbox-midturn-prompt-untested` | UserPromptSubmit fired for owner messages sent mid-turn in the audit session of 2026-10-13, and the time line showed on each. | [`debts/inbox-midturn-prompt-untested.md`](../debts/inbox-midturn-prompt-untested.md) |
 | `inbox-partial-write-fence` | A partial write can leave a fence open. | [`debts/inbox-partial-write-fence.md`](../debts/inbox-partial-write-fence.md) |
@@ -427,10 +438,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-quoted-path-label` | A quoted path with an emoji shows a wrong label, so no turn note matches it. | [`debts/plain-diff-quoted-path-label.md`](../debts/plain-diff-quoted-path-label.md) |
 | `plain-diff-secret-file-names` | Some secret file names are not caught by name. | [`debts/plain-diff-secret-file-names.md`](../debts/plain-diff-secret-file-names.md) |
 | `plain-diff-trimnote-regex` | The table-row regex in `trimNote` was quadratic only on absurd input. | [`debts/plain-diff-trimnote-regex.md`](../debts/plain-diff-trimnote-regex.md) |
+| `printf-quote-walk-bandaid` | `discards_output` cuts each `$( )` out of the segment, reads the rest again, and fails closed when the cut is too deep. | [`debts/printf-quote-walk-bandaid.md`](../debts/printf-quote-walk-bandaid.md) |
 | `process-record-dead-plan-line` | The record mods-tests-run-in-gates is `Kind: process`, but it also holds a `Plan:` line. | [`debts/process-record-dead-plan-line.md`](../debts/process-record-dead-plan-line.md) |
 | `prompt-hooks-fail-open` | Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can deny, but the docs give them no `onFailure`. | [`debts/prompt-hooks-fail-open.md`](../debts/prompt-hooks-fail-open.md) |
 | `prune-symlink-positive-unproven` | No Windows machine here can grant `SeCreateSymbolicLinkPrivilege` to this account. | [`debts/prune-symlink-positive-unproven.md`](../debts/prune-symlink-positive-unproven.md) |
 | `ps-quote-forms-unread` | On main, a frozen path in smart quotes (U+201C, U+201D, U+2018, U+2019) and a `<# note #> Set-Content P` read as plain text or as no command. | [`debts/ps-quote-forms-unread.md`](../debts/ps-quote-forms-unread.md) |
+| `ps-script-block-not-read` | `_substitutions` has no branch for `{ }`. | [`debts/ps-script-block-not-read.md`](../debts/ps-script-block-not-read.md) |
 | `purge-bad-row-key-raises` | A log row with a list or dict `branch` or `commit`, and a live `time_ms`, raises TypeError. | [`debts/purge-bad-row-key-raises.md`](../debts/purge-bad-row-key-raises.md) |
 | `purge-confirm-total-wrong` | The "purge: N" total in the confirm report counts rows whose ref was kept. | [`debts/purge-confirm-total-wrong.md`](../debts/purge-confirm-total-wrong.md) |
 | `purge-git-trace-missing-ref` | With `GIT_TRACE=1` or `GIT_TRACE2=1` set, git writes to stderr on a missing ref. | [`debts/purge-git-trace-missing-ref.md`](../debts/purge-git-trace-missing-ref.md) |
@@ -439,6 +452,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `purge-realpath-per-row` | `realpath` runs once per unexpired row, in preview too. | [`debts/purge-realpath-per-row.md`](../debts/purge-realpath-per-row.md) |
 | `purge-snapshot-race` | The set of unexpired rows is read once, at purge start. | [`debts/purge-snapshot-race.md`](../debts/purge-snapshot-race.md) |
 | `purge-update-ref-mutant-missing` | The harness has no mutant that drops only the commit argument of `update-ref -d`. | [`debts/purge-update-ref-mutant-missing.md`](../debts/purge-update-ref-mutant-missing.md) |
+| `pwsh-cmd-script-gaps` | These shapes are allowed on main and on this branch. | [`debts/pwsh-cmd-script-gaps.md`](../debts/pwsh-cmd-script-gaps.md) |
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
 | `question-problem-line-forms` | `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as Problem lines. | [`debts/question-problem-line-forms.md`](../debts/question-problem-line-forms.md) |
@@ -542,6 +556,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `symrun-link-gap-unmeasured` | The symrun case wants at least one mixed-id window during run 2. | [`debts/symrun-link-gap-unmeasured.md`](../debts/symrun-link-gap-unmeasured.md) |
 | `test-guard-posix-gates-no-skip` | Two case blocks in the guard test suite run only on one platform: Windows (`os.name == "nt"`) and macOS (`sys.platform == "darwin"`). | [`debts/test-guard-posix-gates-no-skip.md`](../debts/test-guard-posix-gates-no-skip.md) |
 | `timeout-moved-server-unchecked` | A foreground server that the harness moves to background at its 120 s timeout is not checked. | [`debts/timeout-moved-server-unchecked.md`](../debts/timeout-moved-server-unchecked.md) |
+| `trigger-call-unchecked` | Whether a change changes a guard, gate or check is the reviewer's reading. | [`debts/trigger-call-unchecked.md`](../debts/trigger-call-unchecked.md) |
+| `trigger-omits-agent-caps` | The trigger in decision `hold-unsafe-after-round-3` (net-value hold after round 3) omits the `settings.json` env caps `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and the `model:` and `effort:` lines in `agents/*.md`. | [`debts/trigger-omits-agent-caps.md`](../debts/trigger-omits-agent-caps.md) |
 | `undo-scan-cr-nul-false-alarm` | The scan reads `git log -p` as text. | [`debts/undo-scan-cr-nul-false-alarm.md`](../debts/undo-scan-cr-nul-false-alarm.md) |
 | `unknown-reads-nonbool-skips` | The check prints PASS for True, FAIL for False, and SKIP for any other answer. | [`debts/unknown-reads-nonbool-skips.md`](../debts/unknown-reads-nonbool-skips.md) |
 | `unknown-stash-word-tree-only` | An unknown stash word is read as a push, so the guard judges it on the working tree only. | [`debts/unknown-stash-word-tree-only.md`](../debts/unknown-stash-word-tree-only.md) |
