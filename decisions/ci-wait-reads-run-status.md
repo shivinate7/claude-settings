@@ -60,6 +60,11 @@ another repo on the same account several times.
   told "unknown", never green. Debt `ci-wake-read-no-retry` (a failed read is not retried).
 - The test stub models only `in_progress`. A change that stops at a `queued` run would wake
   early with an unknown line, and no case catches it. It cannot read green. Same debt.
+- A background `gh pr checks --watch` is still allowed, because the ruling names only
+  `gh run watch`. Its API cost is unmeasured. Debt `pr-checks-watch-unmeasured` (the
+  background checks watch is unmeasured).
+- The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`. Guards
+  stop Claude's mistakes, not an attacker (decision guard-guards-mistakes-only). Same debt.
 
 Kind: build
 Plan: decisions/ci-wait-reads-run-status.md#the-ruling (all)
