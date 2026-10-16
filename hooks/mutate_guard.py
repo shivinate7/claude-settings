@@ -1072,8 +1072,8 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
      "guard", "worktree-home:"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
-     '            if path_is_inside(cwd, home) is False:',
-     '            if path_is_inside(cwd, home) is None:',
+     '            if path_is_inside(home_cwd, home) is False:',
+     '            if path_is_inside(home_cwd, home) is None:',
      "guard", "worktree-home:"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '                if (path_is_inside(resolved_target, home_primary) is True\n'
@@ -1082,23 +1082,23 @@ MUTATIONS = [
      '                        and path_is_inside(resolved_target, home) is None):',
      "guard", "worktree-home:"),
     ("worktree-home: an unreadable home record denies instead of allowing",
-     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "home":',
-     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "unknown":\n'
      '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "unreadable state")\n'
      '    if home_status == "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
-     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "home":',
-     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "no-record":\n'
      '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "no record")\n'
      '    if home_status == "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
-     '                try:\n                    resolved_target = _resolved(write_target, cwd)\n'
+     '                try:\n                    resolved_target = _resolved(write_target, home_cwd)\n'
      '                except Exception:\n                    resolved_target = write_target\n'
      '                if (path_is_inside(resolved_target, home_primary) is True\n'
      '                        and path_is_inside(resolved_target, home) is False):',

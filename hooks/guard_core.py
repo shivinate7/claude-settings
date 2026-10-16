@@ -1771,7 +1771,13 @@ def path_is_inside(path: str, root: str):
 # its home must still be able to `cd` back, or it is stuck (the PowerShell tool keeps its cwd
 # between calls). Rule verification-recovery-not-gated-on-own-state. Any other word, any chained
 # step, or a target not plainly inside `home` is no recovery, and stays refused.
+# `sl`, `chdir` and `set-location` are PowerShell names. In Bash they move nothing, so they are no
+# recovery step there.
 _MOVE_WORDS = {"cd", "chdir", "set-location", "sl"}
+_BASH_MOVE_WORDS = {"cd"}
+# A `;`, `&`, `|`, CR or LF anywhere in the raw text. A backslash before a quote hides the separator
+# from the splitter, which reads the quote as an opener, while the shell still runs the step after it.
+_MOVE_SEPARATOR = re.compile(r"[;&|\r\n]")
 _MOVE_FLAGS = {"-path", "-literalpath"}
 _MOVE_TARGET_UNSAFE = re.compile(r"[$`()&<>|*?{}]")
 
@@ -1779,6 +1785,8 @@ _MOVE_TARGET_UNSAFE = re.compile(r"[$`()&<>|*?{}]")
 def is_move_into(tool: str, command: str, cwd: str, home: str) -> bool:
     """True when `command` is one `cd` or `Set-Location` whose target is inside `home`."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
+    if _MOVE_SEPARATOR.search(command):
+        return False
     segments = [s for s in split_segments(command) if s.strip()]
     if len(segments) != 1:
         return False
@@ -1788,7 +1796,7 @@ def is_move_into(tool: str, command: str, cwd: str, home: str) -> bool:
         return False
     if len(tokens) == 3 and tokens[1].lower() in _MOVE_FLAGS:
         del tokens[1]
-    if len(tokens) != 2 or tokens[0].lower() not in _MOVE_WORDS \
+    if len(tokens) != 2 or tokens[0].lower() not in (_MOVE_WORDS if tool == "PowerShell" else _BASH_MOVE_WORDS) \
             or _MOVE_TARGET_UNSAFE.search(tokens[1]):
         return False
     return path_is_inside(_expanded(tokens[1], cwd), home) is True
