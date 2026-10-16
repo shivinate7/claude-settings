@@ -16,12 +16,13 @@ refuses only real waste:
 - a loop that pauses, in bash or PowerShell;
 - two or more pauses in one command, the sleep-then-poll form;
 - one pause of 25 s or more;
-- a CI watcher (`gh pr checks --watch`, `gh run watch`) in the foreground;
+- `gh pr checks --watch` in the foreground;
+- `gh run watch` in the foreground or the background (decision ci-wait-reads-run-status, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
 
-It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a watcher run
-with `run_in_background`. A word inside a quoted string or a heredoc body is not a call. The
-remedy names a background watcher run once, or Monitor.
+It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background
+`gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The
+remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
 
 Why: Claude Code's own check refuses only a leading `sleep` of 25 s or more (flag
 `tengu_amber_sentinel`, threshold 25, read from claude.exe 2.1.295). Of 468 measured refusals,
@@ -63,3 +64,6 @@ use Monitor for a wait. An agent that followed that text was refused. An agent t
 
 A measured count of Monitor failures in agent reports, or a `waiter` deny count that does not
 fall after this change.
+
+Kind: process
+Home: hooks/guard_stream.py

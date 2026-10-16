@@ -105,6 +105,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-end-reap-stops-what-a-finished-agent-left` | Kind: process Home: janitor/agent_end_reap.py | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agents-wait-with-monitor` | Which way may an agent wait for a condition? | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
 | `ask-steps-run-alone` | Owner ruling, 2026-10-14. | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
 | `background-needs-end-note` | Owner ruling, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
 | `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
@@ -187,7 +188,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-test-fixture-name-can-overflow-windows-path-length` | A fixture name built from a test's own description can overflow Windows path length | [`decisions/a-test-fixture-name-can-overflow-windows-path-length.md`](../decisions/a-test-fixture-name-can-overflow-windows-path-length.md) |
 | `adoptions-declined-2026-09-28` | A review of public Claude Code configs and native features proposed these. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
 | `agent-worktree-discard-is-noted` | The shared-tree rule asks the owner before a discarding git command runs. | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
-| `agents-wait-with-monitor` | Which way may an agent wait for a condition? | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
 | `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | `hooks/test_config_watch.py`'s bypass cases handed `subprocess.run(["bash", "-c", command], ...)` a bare command name. | [`decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
 | `bash-path-breaks-only-when-the-snapshot-breaks` | The Bash tool's PATH breaks only when its shell snapshot breaks | [`decisions/bash-path-breaks-only-when-the-snapshot-breaks.md`](../decisions/bash-path-breaks-only-when-the-snapshot-breaks.md) |
 | `branch-delete-wrong-cause-was-a-filename-collision` | `decisions/branch-delete-wrong-cause-on-windows-unexplained.md` named a real defect and said its cause stayed unexplained. | [`decisions/branch-delete-wrong-cause-was-a-filename-collision.md`](../decisions/branch-delete-wrong-cause-was-a-filename-collision.md) |
@@ -455,6 +455,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-quoted-path-label` | A quoted path with an emoji shows a wrong label, so no turn note matches it. | [`debts/plain-diff-quoted-path-label.md`](../debts/plain-diff-quoted-path-label.md) |
 | `plain-diff-secret-file-names` | Some secret file names are not caught by name. | [`debts/plain-diff-secret-file-names.md`](../debts/plain-diff-secret-file-names.md) |
 | `plain-diff-trimnote-regex` | The table-row regex in `trimNote` was quadratic only on absurd input. | [`debts/plain-diff-trimnote-regex.md`](../debts/plain-diff-trimnote-regex.md) |
+| `pr-checks-watch-unmeasured` | The guard still allows `gh pr checks --watch` in the background. | [`debts/pr-checks-watch-unmeasured.md`](../debts/pr-checks-watch-unmeasured.md) |
 | `printf-quote-walk-bandaid` | `discards_output` cuts each `$( )` out of the segment, reads the rest again, and fails closed when the cut is too deep. | [`debts/printf-quote-walk-bandaid.md`](../debts/printf-quote-walk-bandaid.md) |
 | `process-record-dead-plan-line` | The record mods-tests-run-in-gates is `Kind: process`, but it also holds a `Plan:` line. | [`debts/process-record-dead-plan-line.md`](../debts/process-record-dead-plan-line.md) |
 | `prompt-hooks-fail-open` | Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can deny, but the docs give them no `onFailure`. | [`debts/prompt-hooks-fail-open.md`](../debts/prompt-hooks-fail-open.md) |
