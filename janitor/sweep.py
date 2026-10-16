@@ -445,10 +445,7 @@ def _is_primary_checkout(entry_path: str):
     return own == common
 
 
-AGENT_LOCK_RE = re.compile(r"^claude agent agent-([\w-]+) \(pid (\d+)(?: start (.+))?\)$")
-# Set by the agent-end hook for one stage, like _LIVE_HEADS: {"id": the ending agent's id, "hosts":
-# the pids of the host claude process running the hook}. A lock naming that id and a host pid goes.
-_OWN_AGENT = None
+AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
 def stale_agent_lock_verdict(reason: str):
@@ -457,16 +454,12 @@ def stale_agent_lock_verdict(reason: str):
     `claude agent agent-<id> (pid N)` with no start time. N is the HOST claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
     reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
-    process now holds keeps its lock. The ending agent's own tree (`_OWN_AGENT`) also goes when N is
-    the hook's host: the host is alive at SubagentStop, so no other rule could lift it. False when
-    the holder still runs, or the reason is any other lock. None when the start time or the process
-    read could not tell. Only True lets a lock go."""
+    process now holds keeps its lock. False when the holder still runs, or the reason is any other
+    lock. None when the start time or the process read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
-    agent, pid, start = found.group(1), int(found.group(2)), found.group(3)
-    if _OWN_AGENT and agent == _OWN_AGENT["id"] and pid in _OWN_AGENT["hosts"]:
-        return True
+    pid, start = int(found.group(1)), found.group(2)
     locked_ms = None
     if start is not None:
         try:
@@ -723,14 +716,14 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
 
 
 # Owner ruling 2026-10-15: at agent end, ANOTHER finished agent's tree needs 30 minutes of quiet.
-# The ending agent's own tree needs none. AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
+# AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
 AGENT_END_IDLE_SECONDS = 30 * 60
 
 
 def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
-    the seconds of git quiet the tree needs (None: none, the ending agent's own tree). Idle is read
-    first: `git status` can rewrite the index and make every tree look active. The rest is
+    the seconds of git quiet the tree needs (None: none). Idle is read first: `git status` can
+    rewrite the index and make every tree look active. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
