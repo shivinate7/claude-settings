@@ -3983,6 +3983,196 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertRemoved(subject)
 
 
+_DETACHED_FLAGS = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+
+def _same_path(a, b):
+    return os.path.normcase(os.path.realpath(str(a))) == os.path.normcase(os.path.realpath(str(b)))
+
+
+class _Runaway(BaseException):
+    """Raised by a fake sleep after too many calls, so a wait that never ends fails its case instead
+    of hanging it. BaseException, so an `except Exception` in the remover cannot swallow it."""
+
+
+def _fake_time(step, on_sleep=None, max_calls=50):
+    """An injected clock and sleep. Each sleep moves the clock forward STEP seconds, then calls
+    ON_SLEEP(call number). Returns (clock, sleep, state); state["calls"] counts the sleeps."""
+    state = {"now": 0.0, "calls": 0}
+
+    def clock():
+        return state["now"]
+
+    def sleep(_seconds):
+        state["calls"] += 1
+        if state["calls"] > max_calls:
+            raise _Runaway("the wait never ended after %d sleeps" % max_calls)
+        state["now"] += step
+        if on_sleep is not None:
+            on_sleep(state["calls"])
+
+    return clock, sleep, state
+
+
+class AgentEndDelayedRemoverTests(_AgentEndFixture):
+    """Decision agent-end-reap-stops-what-a-finished-agent-left, Part 4 (owner ruling 2026-10-15
+    23:00 CDT), with Part 3 read 3 kept. The agent-end hook keeps main's stop of an orphan (a process
+    whose parent is dead). It never stops a process with a live parent, such as a hook wrapper or an
+    agent shell. When the ending agent's own tree is clean, pushed and free of a live lock, the hook
+    starts a detached remover and returns. The remover waits, up to a fixed limit, until every hook
+    process inside the tree has exited. Then it stops the agent's own shells, re-checks clean, pushed,
+    lock and session, and removes the tree without --force. When the limit ends first, it keeps the tree.
+
+    Seams the builder provides (these cases call them by these names):
+    - `agent_end_reap.start_remover(target, host)`: the one way the hook starts the remover. It makes
+      one `subprocess.Popen` call: detached, cwd outside TARGET, stdin/stdout/stderr on DEVNULL.
+    - `agent_end_reap.remove_own_tree(target, host, clock=, sleep=)`: the remover's body. Every wait
+      reads `clock` and calls `sleep`, so a case can end the limit at once. Returns the decision row.
+
+    A hook process is one whose command line names a hook script (`agent_end_reap.py`, or a path under
+    `hooks/`). The fake hook's argv names `<root>/hooks/agent_end_reap.py`, so it counts by either rule.
+    The fake agent shell is a sleeping python child of this test process, which is the host. Every fake
+    is a real process this test starts and stops.
+    """
+
+    def hook_path(self):
+        return os.path.join(self.root, "hooks", "agent_end_reap.py")
+
+    def sleeper(self, tree, argv_tail):
+        """A real process with cwd TREE that sleeps. A child of this test process, so the host."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)", argv_tail],
+                                cwd=tree, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        return proc
+
+    def run_hook(self, name, tree):
+        """Run the SubagentStop hook in this process, which is the host. Returns the hook's record, the
+        mock of the start seam, and the mock of the remover, which the hook must not call inline."""
+        raw = json.dumps({"hook_event_name": "SubagentStop", "agent_id": name, "cwd": tree,
+                          "session_id": "agent-end-delay-cases"})
+        start, inline = mock.MagicMock(name="start_remover"), mock.MagicMock(name="remove_own_tree")
+        env = {"CLAUDE_CONFIG_DIR": self.cfg, "CLAUDE_PID": str(os.getpid())}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(self.reap, "start_remover", start, create=True), \
+                mock.patch.object(self.reap, "remove_own_tree", inline, create=True):
+            record = self.reap.handle(raw)
+        return record, start, inline
+
+    def test_the_hook_stops_no_process_with_a_live_parent_inside_the_tree(self):
+        """Both fakes are children of this test process, the host, which is alive, so neither is an
+        orphan. The hook keeps main's orphan stop, and main's cases cover that; this case pins the rest."""
+        tree = self.add("hookstops")
+        hook = self.sleeper(tree, self.hook_path())
+        shell = self.sleeper(tree, "agent-shell")
+        self.run_hook("hookstops", tree)
+        with self.subTest(process="fake hook process, live parent"):
+            self.assertIsNone(hook.poll(), "the hook stopped a hook process with a live parent")
+        with self.subTest(process="fake agent shell, live parent"):
+            self.assertIsNone(shell.poll(), "the hook stopped the agent shell with a live parent")
+
+    def test_the_hook_starts_the_remover_and_leaves_the_tree_to_it(self):
+        tree = self.add("detaches")
+        _record, start, inline = self.run_hook("detaches", tree)
+        with self.subTest(seam="start_remover called once for the own tree"):
+            self.assertEqual(start.call_count, 1, "the hook made %d start calls, not one" % start.call_count)
+            self.assertTrue(any(_same_path(a, tree) for a in start.call_args[0]),
+                            "the start call names no tree")
+        with self.subTest(inline="the hook did not run the remover"):
+            self.assertEqual(inline.call_count, 0, "the hook ran the remover inline")
+        with self.subTest(tree="still in place when the hook returns"):
+            self.assertKept(tree)
+
+    def test_the_remover_is_a_detached_child_that_starts_outside_the_tree(self):
+        tree = self.add("spawned")
+        with mock.patch.object(self.reap.subprocess, "Popen") as popen:
+            self.reap.start_remover(tree, os.getpid())
+        self.assertEqual(popen.call_count, 1, "start_remover made %d spawns, not one" % popen.call_count)
+        kwargs = popen.call_args[1]
+        argv = popen.call_args[0][0] if popen.call_args[0] else kwargs.get("args", [])
+        with self.subTest(arm="cwd outside the tree"):
+            self.assertFalse(sweep._cwd_under_checkout(kwargs.get("cwd") or os.getcwd(), tree),
+                             "the remover starts inside the tree")
+        with self.subTest(arm="detached from the hook"):
+            detached = kwargs.get("start_new_session") or bool(kwargs.get("creationflags", 0) & _DETACHED_FLAGS)
+            self.assertTrue(detached, "the remover is not detached from the hook")
+        with self.subTest(arm="no inherited stdio"):
+            for stream in ("stdin", "stdout", "stderr"):
+                self.assertEqual(kwargs.get(stream), subprocess.DEVNULL, "the remover inherits %s" % stream)
+        with self.subTest(arm="argv names the tree"):
+            self.assertTrue(any(_same_path(a, tree) for a in argv), "the remover's argv names no tree")
+
+    def test_the_remover_waits_for_a_hook_process_then_stops_the_shell_and_removes(self):
+        tree = self.add("waits")
+        hook, shell = self.sleeper(tree, self.hook_path()), self.sleeper(tree, "agent-shell")
+        self.run_hook("waits", tree)
+        with self.subTest(hook="the hook returns with the hook process and the shell alive"):
+            self.assertIsNone(hook.poll(), "the hook stopped the hook process")
+            self.assertIsNone(shell.poll(), "the hook stopped the agent shell")
+        seen = []
+
+        def end_hook_on_first_wait(_call):
+            if not seen:
+                seen.append({"hook": hook.poll() is None, "shell": shell.poll() is None,
+                             "tree": os.path.isdir(tree)})
+                self.stop(hook)  # the hook process exits, so the wait can end
+
+        clock, sleep, _state = _fake_time(1.0, end_hook_on_first_wait)
+        self.reap.remove_own_tree(tree, os.getpid(), clock=clock, sleep=sleep)
+        with self.subTest(wait="ran with the hook, the shell and the tree in place"):
+            self.assertEqual(seen, [{"hook": True, "shell": True, "tree": True}],
+                             "the remover did not wait for the hook process")
+        with self.subTest(removal="tree gone and agent shell stopped"):
+            self.assertRemoved(tree)
+            self.assertIsNotNone(shell.poll(), "the remover left the agent shell running")
+
+    def test_the_limit_ends_the_wait_and_keeps_the_tree_while_a_hook_process_is_inside(self):
+        tree = self.add("limit")
+        hook = self.sleeper(tree, self.hook_path())
+        self.run_hook("limit", tree)
+        with self.subTest(hook="the hook returns with the hook process alive"):
+            self.assertIsNone(hook.poll(), "the hook stopped the hook process")
+        twin = self.add("limittwin")
+        clock, sleep, _state = _fake_time(3600.0)
+        twin_row = self.reap.remove_own_tree(twin, os.getpid(), clock=clock, sleep=sleep)
+        with self.subTest(control="clean pushed twin is removed"):
+            self.assertEqual((twin_row or {}).get("action"), "reap", "the control twin was kept")
+            self.assertRemoved(twin)
+        clock, sleep, state = _fake_time(3600.0)
+        row = self.reap.remove_own_tree(tree, os.getpid(), clock=clock, sleep=sleep)
+        with self.subTest(arm="limit ends with the hook process still inside"):
+            self.assertGreaterEqual(state["calls"], 1, "the remover did not wait at all")
+            self.assertEqual((row or {}).get("action"), "keep", "the remover did not keep the tree")
+            self.assertKept(tree)
+            self.assertIsNone(hook.poll(), "the remover stopped the hook process")
+
+    def test_the_remover_keeps_the_tree_when_it_is_dirty_or_unpushed_at_the_recheck(self):
+        for label, damage in (("dirty", self.dirty), ("untracked", self.untracked),
+                              ("unpushed", self.unpushed)):
+            with self.subTest(arm=label):
+                twin = self.add(label + "twin")
+                clock, sleep, _state = _fake_time(1.0)
+                twin_row = self.reap.remove_own_tree(twin, os.getpid(), clock=clock, sleep=sleep)
+                self.assertEqual((twin_row or {}).get("action"), "reap", "the control twin was kept")
+                self.assertRemoved(twin)
+                tree = self.add(label)
+                hook = self.sleeper(tree, self.hook_path())
+                damaged = []
+
+                def damage_then_end_hook(_call):
+                    if not damaged:
+                        damage(tree)  # the agent's last write lands during the wait
+                        damaged.append(True)
+                        self.stop(hook)
+
+                clock, sleep, _state = _fake_time(1.0, damage_then_end_hook)
+                row = self.reap.remove_own_tree(tree, os.getpid(), clock=clock, sleep=sleep)
+                self.assertTrue(damaged, "the remover did not wait for the hook process")
+                self.assertEqual((row or {}).get("action"), "keep",
+                                 "the remover removed a tree it re-checked as %s" % label)
+                self.assertKept(tree)
+
+
 BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
 REAP_HOOK = os.path.join(HERE, "agent_end_reap.py")
 JANITOR = os.path.join(HERE, "sweep.py")
