@@ -27,8 +27,9 @@ Decision, from decision handoff-hooks-wave-2, part 3 (CI wake-up):
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
 status` at once, then at most once every 30 s, and returns when the status is `completed` or when
-the deadline passes: its last pause ends at the deadline, never past it. A failed or non-JSON read
-raises Unknown, so the wake line is `CI unknown`.
+the deadline passes: its last pause ends at the deadline, never past it. A call made at its deadline
+or past it makes no read and returns at once. A failed or non-JSON read raises Unknown, so the wake
+line is `CI unknown`.
 
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
 A cancelled run beside a run of the same name that ran, on the same head, reads as the ran one,
@@ -44,6 +45,8 @@ Seams under test (the builder must read these names):
 - `watch_run(run_id, cwd, deadline)` keeps its signature (deadline: a time.monotonic() value). It
   reads through the module's `gh()`, reads the clock with the module's `time.monotonic`, pauses
   with the module's `time.sleep`, and makes no direct `subprocess` call.
+- `time.sleep` in the hook process: a case run through FAST_SLEEP_LAUNCHER caps it at 0.05 s, so the
+  30 s status pause costs 0.05 s there. Every pause of the hook must go through `time.sleep`.
 
 The gh stub: a `gh` launcher in a temp folder, the only PATH entry for these cases, so no real gh
 is ever reached. On Windows the launcher is `gh.cmd`, and a list-form subprocess call of "gh"
@@ -55,7 +58,9 @@ writes every call to its own file beside the log (one file per call, so parallel
 A run marked in_progress_at_list reads in progress at `run list` and as its fixture says at
 `run view`. A run with ping_on_status_read: its status read (`run view <id> --json status`) first
 connects to the localhost port in GH_STUB_READY_PORT, so a case can wait for that read with one
-accept() and no polling. A run with fail_status_read: that read exits 1. Fixture mode "error"
+accept() and no polling. A run with fail_status_read: that read exits 1. A run with in_progress_reads N: its first N
+`run view <id>` reads (any --json fields, counted from the call log) show it in progress with no
+conclusion, and later reads show the fixture: a run that ends only after N reads. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
 
 Scratch files live in one temp directory, removed at exit.
@@ -151,6 +156,11 @@ def view(r, listed):
         out["jobs"] = r["jobs"]
     return out
 
+def views_of(key):
+    """How many `run view <key>` calls the log holds, this one too (log_call ran first). Each gh
+    call is a new process, so the log is the only count that outlives one."""
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:3] == ["run", "view", key])
+
 def ready_ping():
     port = os.environ.get("GH_STUB_READY_PORT")
     if port:
@@ -201,6 +211,8 @@ def main(args):
             return 1
         if fields == "status" and r.get("ping_on_status_read"):
             ready_ping()
+        if views_of(key) <= r.get("in_progress_reads", 0):
+            r = dict(r, status="in_progress", conclusion=None)
         out = view(r, False)
         if fields:
             out = {k: v for k, v in out.items() if k in fields.split(",")}
@@ -254,6 +266,19 @@ FLUSH_LAUNCHER = os.path.join(TMP, "flaky_flush.py")
 with open(FLUSH_LAUNCHER, "w", encoding="utf-8") as f:
     f.write(FLUSH_SRC)
 
+FAST_SLEEP_SRC = r'''
+import runpy, sys, time
+
+_real_sleep = time.sleep
+# A cap, not a no-op: the 30 s status pause costs 0.05 s, and a negative sleep still raises.
+time.sleep = lambda seconds: _real_sleep(min(seconds, 0.05))
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
+FAST_SLEEP_LAUNCHER = os.path.join(TMP, "fast_sleep.py")
+with open(FAST_SLEEP_LAUNCHER, "w", encoding="utf-8") as f:
+    f.write(FAST_SLEEP_SRC)
+
 
 def pr(number, draft=False, branch="hook-wave-2", sha=SHA):
     return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
@@ -265,7 +290,7 @@ def job(name, conclusion):
 
 
 def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
-        status="completed", ping=False, fail_status=False):
+        status="completed", ping=False, fail_status=False, in_progress_reads=0):
     out = {"databaseId": run_id, "name": name, "workflowName": name, "headSha": sha,
            "event": "pull_request", "status": status, "conclusion": conclusion,
            "jobs": jobs, "in_progress_at_list": in_progress_at_list}
@@ -273,6 +298,8 @@ def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
         out["ping_on_status_read"] = True
     if fail_status:
         out["fail_status_read"] = True
+    if in_progress_reads:
+        out["in_progress_reads"] = in_progress_reads
     return out
 
 
@@ -298,7 +325,10 @@ CANCEL_903 = run(903, "gates", "cancelled", [job("unit", "cancelled")])
 RAN_904 = run(904, "gates", "success", [job("unit", "success")])
 CANCEL_905 = run(905, "gates", "cancelled", [job("unit", "cancelled")])
 INPROG_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True)
-INPROG_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True)
+LATE_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True,
+               in_progress_reads=2)  # in progress for 2 reads of `run view`, completed at the 3rd
+LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True,
+               in_progress_reads=3)  # in progress for 3 reads, completed at the 4th
 PENDING = run(908, "gates", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
 HOLD = run(909, "gates", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
 BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
@@ -473,9 +503,10 @@ def expect_no_gh(label, res):
 
 
 def expect_watch(label, res, ids):
-    """One status read per run (the stub's runs are completed at the first read), the run list read
-    once (no polling), and no `gh run watch`."""
-    check("%s: reads the status of %s once each, runs listed once, no run watch" % (label, ids),
+    """The status reads, as ids: one read per run for a run that is completed at its first read, and
+    one more id per read for a run still in progress (in_progress_reads). The run list is read once
+    (no polling), and there is no `gh run watch`."""
+    check("%s: status reads are %s, runs listed once, no run watch" % (label, ids),
           sorted(watched(res)) == sorted(ids) and run_watches(res) == []
           and count(res, "run", "list") <= 1, why(res))
 
@@ -748,6 +779,19 @@ def case_watch_run_returns_at_the_deadline():
                   len(times) >= 3, detail)
 
 
+def case_watch_run_at_or_past_the_deadline_reads_nothing():
+    """A call made at its deadline (budget 0) or past it (budget below 0) makes no read and returns
+    at once, though the run is in progress: the clock does not move, so no pause either. Review
+    round 1 found the first read came before any deadline check."""
+    for budget in (0, -30):
+        label = "watch_run, always in_progress, deadline already passed (%d s)" % budget
+        mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
+        detail = watch_detail(raised, clock, calls, direct)
+        check("%s: returns, no exception, no `gh run watch`" % label, raised is None and direct == [], detail)
+        check("%s: makes no gh call, so no `run view` read" % label, calls == [], detail)
+        check("%s: returns at once, the clock does not move" % label, clock.now == T0, detail)
+
+
 def case_watch_run_failed_read_is_unknown():
     """A failed read, or one that is not JSON, ends the wait: Unknown, no retry."""
     rows = (
@@ -866,9 +910,14 @@ def main():
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [CANCEL_905]))
     expect_verdict("cancelled run with no twin", res, "cancelled")
 
-    res = run_hook(bash("gh pr ready 12"), fixture(READY, [INPROG_906, INPROG_907]))
-    expect_verdict("two in-progress runs, both waited on", res, "green")
-    expect_watch("two in-progress runs", res, ["906", "907"])
+    # Two runs that end only after several reads (906 after 2, 907 after 3): each is read again until
+    # it completes, 3 and 4 status reads. A hook that stops after one read gets 1 and 1, and a
+    # "still running" line, because the stub shows the run in progress at the final read too.
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [LATE_906, LATE_907]),
+                   launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict("two in-progress runs, both waited on until each completes", res, "green")
+    expect_watch("two in-progress runs, both waited on until each completes", res,
+                 ["906"] * 3 + ["907"] * 4)
 
     # Own deadline: a run still pending at the deadline wakes with a still-running line.
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [PENDING]), extra={"CI_WAKE_DEADLINE": "1"})
@@ -925,6 +974,7 @@ def main():
     case_watch_run_reads_the_status_until_completed()
     case_watch_run_completed_at_the_first_read_does_not_pause()
     case_watch_run_returns_at_the_deadline()
+    case_watch_run_at_or_past_the_deadline_reads_nothing()
     case_watch_run_failed_read_is_unknown()
 
     print()
