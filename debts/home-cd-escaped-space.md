@@ -1,7 +1,7 @@
 # An escaped space refuses the move home
 
-**What.** The worktree-home rule refuses a lone `cd` back into the home when the path has a
-space escaped with `\`, a trailing newline, or one of `&`, `;`, `(`, `)` or `$`. The refusal
+**What.** The worktree-home rule refuses a lone `cd` back into some home paths. These are
+a space escaped with `\`, a trailing newline, and one of `&`, `;`, `(`, `)` or `$`. The refusal
 fails closed: the agent stops and reports.
 
 **Where.** `hooks/guard_core.py`, `is_move_into`.
