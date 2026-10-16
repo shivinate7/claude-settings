@@ -11,8 +11,24 @@ command at the repository root. The skill finds no config when `map.config.json`
 do not use this skill in that repository.
 
 The repository values live in `map.config.json` at the repository root. The keys are `title`,
-`codeExtensions`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir` and `requireAllKeys`.
+`codeExtensions`, `formatVersion`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir` and `requireAllKeys`.
 `scripts/lib/map-config.mjs` checks the whole shape.
+
+## The format version
+
+`formatVersion` in `map.config.json` is a whole number: the format of the map files. The skill holds
+the version it reads in `MAP_FORMAT_VERSION`, in `scripts/lib/map-config.mjs`. A config with no
+`formatVersion` is version 1.
+
+- **Same version.** The commands run as usual.
+- **Older map.** The check command and the picture command fail, and the message names the upgrade command.
+  They never rewrite a file. Run `node ~/.claude/skills/plain-english-map/scripts/map-upgrade.mjs` from the
+  repository root. It brings the map up in place, one step at a time, keeps every sentence, and sets
+  `formatVersion`. A second run changes no file. Then run the check command again.
+- **Newer map.** Every command refuses, and the message says to update the skill. No command writes a downgrade.
+
+To change the map format: raise `MAP_FORMAT_VERSION`, and add one step to the list in `scripts/map-upgrade.mjs`.
+Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines carried.
 
 ## Steps
 
@@ -41,6 +57,7 @@ The repository values live in `map.config.json` at the repository root. The keys
 
 - `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 8 MAP checks. Run it from a repository root, and it runs the 8 checks there. It prints one line for each check, and exits non-zero on a FAIL.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
+- `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
 - `scripts/lib/` also holds `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
 - `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. Through the install link, the host installs nothing. A copy of the skill outside the clone finds no `typescript`: the error says to run the skill from its install link, or to install `typescript` in the host.
