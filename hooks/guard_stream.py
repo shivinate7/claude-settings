@@ -161,8 +161,8 @@ def waiter_hit(segment: str) -> str:
     return ""
 
 
-def gh_watches(rest) -> bool:
-    """True for `gh run watch` and `gh pr checks` with --watch or --watch=...; no other gh call.
+def gh_watches(rest) -> str:
+    """"run" for `gh run watch`, "checks" for `gh pr checks` with --watch or --watch=...; else ''.
 
     The global `-R`/`--repo` flag may sit between the group and the verb. `-w` on `gh pr checks`
     is `--web`, and `--watch` has no short form."""
@@ -173,8 +173,8 @@ def gh_watches(rest) -> bool:
         if not (t in ("-R", "--repo") or t.startswith(("--repo=", "-R"))):
             words.append(t)
     if words == ["run", "watch"]:
-        return True
-    return words == ["pr", "checks"] and watch_flag(rest[i:])
+        return "run"
+    return "checks" if words == ["pr", "checks"] and watch_flag(rest[i:]) else ""
 
 
 def watch_flag(args) -> bool:
@@ -194,9 +194,10 @@ def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
-    more, `timeout /t`, and a foreground watcher. Allowed: one short sleep, and a watcher that
-    runs with run_in_background."""
-    sleeps, loop, watcher = [], False, ""
+    more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
+    `gh pr checks --watch`. Allowed: one short sleep, and `gh pr checks --watch` with
+    run_in_background."""
+    sleeps, loop, watcher, run_watch = [], False, "", ""
     for segment in segments:
         # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
         tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
@@ -214,22 +215,25 @@ def waiter_verdict(segments, background: bool) -> str:
         if word in WAITER_COMMANDS:
             pass
         elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
-            watcher = watcher or "gh " + " ".join(tokens[index + 1:index + 3])
+            found = "gh " + " ".join(tokens[index + 1:index + 3])
+            watcher = watcher or found
+            if gh_watches(tokens[index + 1:]) == "run":
+                run_watch = run_watch or found
         elif waiter_hit(segment):
             return waiter_hit(segment)
     if sleeps and loop:
         return sleeps[0][0]
     if len(sleeps) > 1 or any(seconds >= SLEEP_LIMIT for _, seconds in sleeps):
         return sleeps[0][0]
-    return "" if background else watcher
+    return run_watch or ("" if background else watcher)
 
 
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
-    "Remedy: use the Monitor tool to wait once for the condition, or run the long command in the background and wait for its completion notice, "
-    "or run a watcher such as gh run watch <id> --exit-status once, with run_in_background. "
+    "Remedy: wait for the CI-wake notice that follows gh pr ready. "
+    "To wait for another condition, use the Monitor tool once, or run the long command in the background and wait for its completion notice. "
     "A single pause under 25 seconds is allowed. Avoid "
-    "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
+    "gh pr checks --watch in the foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
 )
 
@@ -401,8 +405,8 @@ PATTERN_POLLER_REASON = (
     "the loop's own condition polls for a process by name or by pattern. That pattern can match "
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
-    "Remedy: wait on one pid this session started, such as `kill -0 $PID`, or use a tool that "
-    "waits once, such as gh run watch <id> --exit-status run with run_in_background."
+    "Remedy: wait on one pid this session started, such as `kill -0 $PID`. To wait for CI, wait "
+    "for the CI-wake notice that follows gh pr ready."
 )
 
 

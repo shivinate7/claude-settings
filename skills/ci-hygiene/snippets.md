@@ -168,11 +168,12 @@ pipx run zizmor==1.30.1 .github/ actions/
 ## 9. Wait without loops
 
 ```sh
-gh run watch <run-id> --exit-status > run-watch.log 2>&1   # run in the background, once
-gh pr checks <pr-number> --watch > pr-checks.log 2>&1      # run in the background, once
+gh pr ready <pr-number>                               # the CI-wake hook waits and wakes you
+gh run view <run-id> --json status,conclusion         # one read, after the notice
 ```
 
-Read the log when it exits. Never send the output to `/dev/null`.
+Never run `gh run watch`: it makes about 131 API calls a minute. Never send a command's output
+to `/dev/null`.
 
 ## 10. Prove a gate red
 
