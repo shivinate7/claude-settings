@@ -585,6 +585,16 @@ MUTATIONS = [
      '            [sys.executable, SWEEP_PATH, root, "--confirm",',
      '            [sys.executable, SWEEP_PATH, root, "--confirm", "--attended",',
      "test_the_sweep_is_not_passed_the_attended_flag"),
+    ("session-end argv: the deadline flag is dropped, so the sweep runs with no deadline",
+     "session_end_sweep",
+     '             "--deadline-seconds", str(sweep_timeout)],',
+     '             ],',
+     "test_the_sweep_is_passed_the_time_left_as_a_deadline_flag"),
+    ("session-end argv: the time left is replaced by the constant 25",
+     "session_end_sweep",
+     '             "--deadline-seconds", str(sweep_timeout)],',
+     '             "--deadline-seconds", "25"],',
+     "test_the_sweep_is_passed_the_time_left_as_a_deadline_flag"),
 
     # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
     ("loose processes: an unreadable owner is left out instead of listed",
