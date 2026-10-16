@@ -17,7 +17,7 @@ You do the work yourself. In a fresh worktree, run the repo's setup command befo
 Run the tests you write, and show each one fails for the right reason before the build, or
 passes after it. Before you stop for any reason, commit your work to your own branch and push it.
 
-Make a red-proof checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. Agent end removes it.
+Make a red-proof checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
 
 Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text, per building-scanner-respects-strings.
 
