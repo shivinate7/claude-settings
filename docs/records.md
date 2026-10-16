@@ -116,9 +116,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gate-hooks-fail-closed` | Owner, 2026-10-12: a gate whose script or python is missing refuses the call. | [`decisions/gate-hooks-fail-closed.md`](../decisions/gate-hooks-fail-closed.md) |
 | `guard-audit-high` | Which guard refusals are false alarms or gaps? | [`decisions/guard-audit-high.md`](../decisions/guard-audit-high.md) |
 | `guard-command-position` | One resolver finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
+| `guard-guards-mistakes-only` | Owner ruling, 2026-10-15 15:47 CDT. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
 | `guard-log-read-weekly` | `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
 | `haiku-prompt-hooks` | The owner ruled on 2026-10-07 which hooks may call a model. | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
-| `hold-unsafe-after-round-3` | Owner rulings, 2026-10-14, CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
+| `hold-unsafe-after-round-3` | Owner ruling, 2026-10-15 12:00 CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
 | `janitor-dirty-test-stays` | Owner word, 2026-10-13 15:56 CDT: option A. | [`decisions/janitor-dirty-test-stays.md`](../decisions/janitor-dirty-test-stays.md) |
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
@@ -245,10 +246,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `agent-plan-scope-line-general` | Plan and claude-code-guide get the general scope line, which names only reviewer and Explore as never-edit. | [`debts/agent-plan-scope-line-general.md`](../debts/agent-plan-scope-line-general.md) |
 | `agent-type-match-case-sensitive` | `Builder` or `explore` gets the general writer scope, not the scope of its role. | [`debts/agent-type-match-case-sensitive.md`](../debts/agent-type-match-case-sensitive.md) |
 | `alias-skip-misses-case-forms` | The alias skip matches `/WindowsApps/` in the POSIX path Git Bash prints. | [`debts/alias-skip-misses-case-forms.md`](../debts/alias-skip-misses-case-forms.md) |
+| `ansi-c-escape-not-decoded` | Lane cap-ask-hole decodes a plain `$'path'` word for the frozen and model-cap checks. | [`debts/ansi-c-escape-not-decoded.md`](../debts/ansi-c-escape-not-decoded.md) |
 | `ask-step-hidden-in-script` | The guard does not see a settings write of the subagent model cap in some shapes. | [`debts/ask-step-hidden-in-script.md`](../debts/ask-step-hidden-in-script.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
 | `blind-git-fixtures-unaudited` | The entry does not audit every blind-command fixture in the repository for the PATH shim gap. | [`debts/blind-git-fixtures-unaudited.md`](../debts/blind-git-fixtures-unaudited.md) |
+| `cap-basename-false-alarm` | A heredoc that writes a fixture named like a settings file (`fixtures/settings.json`) with the cap key asks, though no real settings file changes. | [`debts/cap-basename-false-alarm.md`](../debts/cap-basename-false-alarm.md) |
+| `cap-write-by-python-unseen` | A Python command that writes `CLAUDE_CODE_SUBAGENT_MODEL` into a settings file is allowed with no ask. | [`debts/cap-write-by-python-unseen.md`](../debts/cap-write-by-python-unseen.md) |
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
 | `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
@@ -280,6 +284,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `fb-done-unclosed-fence` | The close rule reads only the last line of a message. | [`debts/fb-done-unclosed-fence.md`](../debts/fb-done-unclosed-fence.md) |
 | `fb-inbox-append-race` | On Windows, two processes that append with `open(..., "ab")` at the same time lost 406 of 8000 lines in a stress test. | [`debts/fb-inbox-append-race.md`](../debts/fb-inbox-append-race.md) |
 | `fb-judge-marker-race` | The judge child checks that its message is still the last one, then removes the capture marker. | [`debts/fb-judge-marker-race.md`](../debts/fb-judge-marker-race.md) |
+| `frozen-path-ansi-c-quote` | Main allows `echo ok > $'<frozen path>'` at top level, and inside `bash -c`, `sh -c` and `eval`. | [`debts/frozen-path-ansi-c-quote.md`](../debts/frozen-path-ansi-c-quote.md) |
 | `gate-exit-7-unprobed` | With `onFailure: block`, a timeout refused the call (measured in the 2026-10-12 incident). | [`debts/gate-exit-7-unprobed.md`](../debts/gate-exit-7-unprobed.md) |
 | `gate-own-errors-fail-open` | Errors a gate catches itself fail open. | [`debts/gate-own-errors-fail-open.md`](../debts/gate-own-errors-fail-open.md) |
 | `gate-remedy-needs-bash` | The remedy names `sh install.sh`. | [`debts/gate-remedy-needs-bash.md`](../debts/gate-remedy-needs-bash.md) |
@@ -332,6 +337,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `headroom-check-no-caller` | The headroom tests and mutant were cut. | [`debts/headroom-check-no-caller.md`](../debts/headroom-check-no-caller.md) |
 | `here-string-scan-quadratic` | The guard finds PowerShell here-strings with a lazy match. | [`debts/here-string-scan-quadratic.md`](../debts/here-string-scan-quadratic.md) |
 | `heredoc-indented-close` | `_split_heredocs` matches the closing line after `.strip()`, so an indented ` EOF` closes a heredoc. | [`debts/heredoc-indented-close.md`](../debts/heredoc-indented-close.md) |
+| `heredoc-run-other-path` | Some bodies run, but the guard reads them as text. | [`debts/heredoc-run-other-path.md`](../debts/heredoc-run-other-path.md) |
+| `heredoc-script-then-run` | Main allows `cat <<EOF2 > x.sh`, with a body that holds a step the guard denies, followed by `sh x.sh` in the same command. | [`debts/heredoc-script-then-run.md`](../debts/heredoc-script-then-run.md) |
 | `hint-signed-commit-sha` | With `log.showSignature=true` in config, git prints a signature line before a signed commit's record. | [`debts/hint-signed-commit-sha.md`](../debts/hint-signed-commit-sha.md) |
 | `hold-own-hole-unrecorded` | The rule turns each open finding after round 3 into a debt. | [`debts/hold-own-hole-unrecorded.md`](../debts/hold-own-hole-unrecorded.md) |
 | `impeccable-piped-shell-body` | The impeccable rule keeps a heredoc body only when the shell word stands before `<<`. | [`debts/impeccable-piped-shell-body.md`](../debts/impeccable-piped-shell-body.md) |
@@ -391,6 +398,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-net-stop-may-have-merged` | The NetStop text says "Run again." The merge may have landed. | [`debts/merge-net-stop-may-have-merged.md`](../debts/merge-net-stop-may-have-merged.md) |
 | `merge-notice-unrelated-number` | A reply's blockquote can hold digits that match a merged PR's number for an unrelated reason. | [`debts/merge-notice-unrelated-number.md`](../debts/merge-notice-unrelated-number.md) |
 | `merge-say-surrogate-crash` | The merge tool prints ALLOWED notes and an excused UNKNOWN to stdout with a plain print. | [`debts/merge-say-surrogate-crash.md`](../debts/merge-say-surrogate-crash.md) |
+| `merge-text-allows-untested` | Test rows allow `grep` and `git log` commands that name merge words. | [`debts/merge-text-allows-untested.md`](../debts/merge-text-allows-untested.md) |
 | `mod-gate-name-edges` | A mod folder with a non-ASCII name that the marketplace does not list comes back quoted from git. | [`debts/mod-gate-name-edges.md`](../debts/mod-gate-name-edges.md) |
 | `model-clip-unmeasured` | The prompt now goes to `claude -p` on stdin, so no argv cap bounds it. | [`debts/model-clip-unmeasured.md`](../debts/model-clip-unmeasured.md) |
 | `mods-check-mjs-skipped` | `mods/plain-diff/check.mjs` is a self-check script, and the glob skips it. | [`debts/mods-check-mjs-skipped.md`](../debts/mods-check-mjs-skipped.md) |
@@ -421,6 +429,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `process-record-dead-plan-line` | The record mods-tests-run-in-gates is `Kind: process`, but it also holds a `Plan:` line. | [`debts/process-record-dead-plan-line.md`](../debts/process-record-dead-plan-line.md) |
 | `prompt-hooks-fail-open` | Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can deny, but the docs give them no `onFailure`. | [`debts/prompt-hooks-fail-open.md`](../debts/prompt-hooks-fail-open.md) |
 | `prune-symlink-positive-unproven` | No Windows machine here can grant `SeCreateSymbolicLinkPrivilege` to this account. | [`debts/prune-symlink-positive-unproven.md`](../debts/prune-symlink-positive-unproven.md) |
+| `ps-quote-forms-unread` | On main, a frozen path in smart quotes (U+201C, U+201D, U+2018, U+2019) and a `<# note #> Set-Content P` read as plain text or as no command. | [`debts/ps-quote-forms-unread.md`](../debts/ps-quote-forms-unread.md) |
 | `purge-bad-row-key-raises` | A log row with a list or dict `branch` or `commit`, and a live `time_ms`, raises TypeError. | [`debts/purge-bad-row-key-raises.md`](../debts/purge-bad-row-key-raises.md) |
 | `purge-confirm-total-wrong` | The "purge: N" total in the confirm report counts rows whose ref was kept. | [`debts/purge-confirm-total-wrong.md`](../debts/purge-confirm-total-wrong.md) |
 | `purge-git-trace-missing-ref` | With `GIT_TRACE=1` or `GIT_TRACE2=1` set, git writes to stderr on a missing ref. | [`debts/purge-git-trace-missing-ref.md`](../debts/purge-git-trace-missing-ref.md) |
@@ -436,11 +445,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
+| `reload-missing-file-unpinned` | Lane merge-guard-b removed `_damage_missing` and its two reload cases: a missing `guard_pointer.py` that comes back during the wait is allowed, and one that stays missing is refused. | [`debts/reload-missing-file-unpinned.md`](../debts/reload-missing-file-unpinned.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
 | `ruling-home-isabs-unproven` | `value_resolves` refuses each absolute `home:` value. | [`debts/ruling-home-isabs-unproven.md`](../debts/ruling-home-isabs-unproven.md) |
 | `ruling-kind-dir-equals-open` | `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name. | [`debts/ruling-kind-dir-equals-open.md`](../debts/ruling-kind-dir-equals-open.md) |
-| `safety-hole-test-is-judgment` | No check decides whether a change holds a safety hole that main lacks. | [`debts/safety-hole-test-is-judgment.md`](../debts/safety-hole-test-is-judgment.md) |
-| `safety-line-unread-at-merge` | No check makes the orchestrator read the round-3 line `Safety hole vs main:` before a merge. | [`debts/safety-line-unread-at-merge.md`](../debts/safety-line-unread-at-merge.md) |
+| `safety-hole-test-is-judgment` | No check measures a change's net safety value against main. | [`debts/safety-hole-test-is-judgment.md`](../debts/safety-hole-test-is-judgment.md) |
+| `safety-line-unread-at-merge` | No check makes the orchestrator read the round-3 line `Net safety value:` before a merge. | [`debts/safety-line-unread-at-merge.md`](../debts/safety-line-unread-at-merge.md) |
 | `sb-agents-json-cost` | `claude agents --json` runs on each board refresh. | [`debts/sb-agents-json-cost.md`](../debts/sb-agents-json-cost.md) |
 | `sb-auto-approve-unseen` | An auto-approve mode can answer an "ask" with no person present. | [`debts/sb-auto-approve-unseen.md`](../debts/sb-auto-approve-unseen.md) |
 | `sb-backoff-cap` | A quick git read resets the back-off. | [`debts/sb-backoff-cap.md`](../debts/sb-backoff-cap.md) |
@@ -461,6 +471,15 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `sendmessage-judge-dup-names` | When two sessions share a name, `receiverState` returns unseen and the message is allowed with no state check. | [`debts/sendmessage-judge-dup-names.md`](../debts/sendmessage-judge-dup-names.md) |
 | `sendmessage-wording-judge-always` | The SendMessage prompt hook in `settings.json` runs a model call on every send. | [`debts/sendmessage-wording-judge-always.md`](../debts/sendmessage-wording-judge-always.md) |
 | `server-wrappers-unread` | The `background-end` rule does not read some wrappers and forms, so a background server behind them is not refused without an `until:` note. | [`debts/server-wrappers-unread.md`](../debts/server-wrappers-unread.md) |
+| `shell-write-miss-dq-substitution` | A write inside a command substitution in double quotes, `"$( ... > P)"`, is not seen, for the same glued-parenthesis reason. | [`debts/shell-write-miss-dq-substitution.md`](../debts/shell-write-miss-dq-substitution.md) |
+| `shell-write-miss-eval-heredoc` | An eval of a heredoc body that writes a settings or frozen path is not seen. | [`debts/shell-write-miss-eval-heredoc.md`](../debts/shell-write-miss-eval-heredoc.md) |
+| `shell-write-miss-git-config-file` | `git config --file P a.b c` writes P, but the flag value is not read as a target, so the write is not seen. | [`debts/shell-write-miss-git-config-file.md`](../debts/shell-write-miss-git-config-file.md) |
+| `shell-write-miss-git-diff-output` | `git diff --output=P` writes P, but the flag value is not read as a target, so the write is not seen. | [`debts/shell-write-miss-git-diff-output.md`](../debts/shell-write-miss-git-diff-output.md) |
+| `shell-write-miss-noclobber` | `echo x >\| P` writes P, but `REDIRECT` reads only `>` and `>>`, so the word after it is `\|P` and the write is not seen. | [`debts/shell-write-miss-noclobber.md`](../debts/shell-write-miss-noclobber.md) |
+| `shell-write-miss-pipe-heredoc` | A heredoc piped into a shell (`cat <<EOF \| sh`) that writes a settings or frozen path is not seen. | [`debts/shell-write-miss-pipe-heredoc.md`](../debts/shell-write-miss-pipe-heredoc.md) |
+| `shell-write-miss-sort-output` | `sort -o P` writes P, but `sort` is not in `MUTATING_COMMAND` and `-o` is not a redirect, so the write is not seen. | [`debts/shell-write-miss-sort-output.md`](../debts/shell-write-miss-sort-output.md) |
+| `shell-write-miss-spaced-target` | `cat > "dir with space/.claude/settings.json"` writes the settings file, but the reader splits the quoted path on its space, and no fragment of it follows the `>`. | [`debts/shell-write-miss-spaced-target.md`](../debts/shell-write-miss-spaced-target.md) |
+| `shell-write-miss-subshell` | A write inside a subshell, `( ... > P)`, is not seen: the closing parenthesis stays glued to the path word, so the path never matches. | [`debts/shell-write-miss-subshell.md`](../debts/shell-write-miss-subshell.md) |
 | `sim-boot-check-xcodebuild` | The ruling 5 boot check runs only after `simctl boot` and MCP `launch`. | [`debts/sim-boot-check-xcodebuild.md`](../debts/sim-boot-check-xcodebuild.md) |
 | `skill-rows-dir-named-skill-md` | A directory named `SKILL.md` counts as a skill. | [`debts/skill-rows-dir-named-skill-md.md`](../debts/skill-rows-dir-named-skill-md.md) |
 | `skill-rows-fence-indent` | In the check, a line of 4 spaces, then a fence mark, inside a fence closes it. | [`debts/skill-rows-fence-indent.md`](../debts/skill-rows-fence-indent.md) |
@@ -476,6 +495,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `smstate-temp-root-kept` | Each run makes a folder in the temp directory and never removes it. | [`debts/smstate-temp-root-kept.md`](../debts/smstate-temp-root-kept.md) |
 | `source-prose-scanner-cases` | Rule `building-scanner-respects-strings` asks each scanner for two test shapes. | [`debts/source-prose-scanner-cases.md`](../debts/source-prose-scanner-cases.md) |
 | `split-comment-shapes-unmeasured` | The comment rule is unmeasured against every quoting shape a real shell accepts. | [`debts/split-comment-shapes-unmeasured.md`](../debts/split-comment-shapes-unmeasured.md) |
+| `split-paren-pkill-unpinned` | Lane merge-guard-b dropped the row `echo don't (x; pkill foo`. | [`debts/split-paren-pkill-unpinned.md`](../debts/split-paren-pkill-unpinned.md) |
+| `split-quoted-hash-unpinned` | Lane merge-guard-b dropped the row `echo a's # b'; pkill foo`. | [`debts/split-quoted-hash-unpinned.md`](../debts/split-quoted-hash-unpinned.md) |
 | `split-reader-misses-cd-forms` | `split_segments` does not model `$'...'` ANSI-C quoting, `$(...)`, or backtick substitution. | [`debts/split-reader-misses-cd-forms.md`](../debts/split-reader-misses-cd-forms.md) |
 | `stall-closes-on-quoted-notice` | The closing match also reads the text of user tool_result blocks. | [`debts/stall-closes-on-quoted-notice.md`](../debts/stall-closes-on-quoted-notice.md) |
 | `stall-list-result-first-block` | A list-form result closes a job only from its first text block. | [`debts/stall-list-result-first-block.md`](../debts/stall-list-result-first-block.md) |
@@ -499,6 +520,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stash-help-flag-refused-as-push` | `git stash -h` and `git stash --help` are refused over a dirty tree. | [`debts/stash-help-flag-refused-as-push.md`](../debts/stash-help-flag-refused-as-push.md) |
 | `stash-read-to-run-race` | An empty tree or an empty stack still passes. | [`debts/stash-read-to-run-race.md`](../debts/stash-read-to-run-race.md) |
 | `stash-reminder-text-outside-repo` | The harness worktree reminder still tells a worker to push a tagged entry. | [`debts/stash-reminder-text-outside-repo.md`](../debts/stash-reminder-text-outside-repo.md) |
+| `stdin-python-read-as-code` | A quoted cap key or frozen path piped into an interpreter denies: `python hooks/guard.py`, `python run.py`, `python -`, and wrappers such as `head`, `tail`, `sort`, `VAR=x python`, `python3.12`, `py` or `verdict python`. | [`debts/stdin-python-read-as-code.md`](../debts/stdin-python-read-as-code.md) |
 | `ste-autofix-tests-linux-only` | `lint/test_ste_autofix.py` runs on the Linux job only. | [`debts/ste-autofix-tests-linux-only.md`](../debts/ste-autofix-tests-linux-only.md) |
 | `ste-comment-gt-mask-early` | A comment that holds `>` ends its mask early. | [`debts/ste-comment-gt-mask-early.md`](../debts/ste-comment-gt-mask-early.md) |
 | `ste-edit-fence-blind` | The Edit and MultiEdit path tracks only plain fences and front matter. | [`debts/ste-edit-fence-blind.md`](../debts/ste-edit-fence-blind.md) |
@@ -538,7 +560,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | Banchi build steps are not claimed by the shared stamp | [`deferred/banchi-build-steps.md`](../deferred/banchi-build-steps.md) |
 | `bare-gh-merge-refusal` | A bare `gh pr merge` in a repo that uses `merge` | [`deferred/bare-gh-merge-refusal.md`](../deferred/bare-gh-merge-refusal.md) |
 | `build-disk-guard` | Low-disk guard refuses builds below 20 GB | [`deferred/build-disk-guard.md`](../deferred/build-disk-guard.md) |
-| `hold-rule-owner-confirm` | The owner confirms how the hold rule reads | [`deferred/hold-rule-owner-confirm.md`](../deferred/hold-rule-owner-confirm.md) |
 | `install-copies-from-main` | Install copies from main, not links into the clone | [`deferred/install-copies-from-main.md`](../deferred/install-copies-from-main.md) |
 | `measured-time-table` | A measured-time table for machine steps | [`deferred/measured-time-table.md`](../deferred/measured-time-table.md) |
 | `merge-retarget-before-merge` | A base change just before the merge command is not caught | [`deferred/merge-retarget-before-merge.md`](../deferred/merge-retarget-before-merge.md) |
