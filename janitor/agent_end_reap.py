@@ -18,7 +18,8 @@ A process is stopped only when all of these answer a confirmed yes:
 - no live session has a cwd inside the target (`guard.worktree_live_session`)
 - the root of its in-worktree process tree is orphaned: climb from the process through each
   live parent whose cwd is also inside the target, then `sweep.is_orphan` on the last one.
-  A live parent outside the target (a harness, a terminal) means keep.
+  A live parent outside the target (a harness, a terminal) means keep, except the host claude
+  process (`host_pid`): the agent's own shells are stopped (owner ruling 2026-10-15 19:43 CDT).
 - it is owned by the current user (`sweep.is_current_user_process`)
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
@@ -33,6 +34,7 @@ Worktrees (owner ruling 2026-10-15): when the gates above hold for the whole wor
 removes the ending agent's OWN worktree, and every other `.claude/worktrees/agent-*` worktree idle
 30 minutes or more. `sweep.decide_agent_end_worktree` decides each one: clean (no dirty or untracked
 file), no process inside, no live lock (the own tree's lock goes when it names the hook's host pid), HEAD on a remote-tracking ref. A tree it cannot prove keeps.
+A pid whose cwd cannot be read keeps the own tree only when it descends from the host.
 The own tree goes first, and the stage stops at WORKTREE_SECONDS or the hook's own budget, so the
 hook stays inside its 60 s timeout. A removed own tree has no build folders left to reap.
 
@@ -162,9 +164,10 @@ def parent_pid(pid: int):
 BATCH_TIMEOUT = 30  # seconds for the one cwd batch read; the hook's own limit is 60
 
 
-def tree_root_orphaned(pid: int, target: str, cwd_of=None):
-    """True when the root of PID's in-TARGET process tree is orphaned. False when a live parent
-    outside TARGET holds the tree. None when a read could not tell."""
+def tree_root_orphaned(pid: int, target: str, cwd_of=None, host=None):
+    """True when the root of PID's in-TARGET process tree is orphaned, or when its live parent outside
+    TARGET is HOST (owner ruling 2026-10-15 19:43 CDT, point 1: the ending agent's host started it).
+    False when any other live parent outside TARGET holds the tree. None when a read could not tell."""
     cwd_of = cwd_of or sweep.process_cwd
     current = pid
     for _ in range(MAX_CLIMB):
@@ -172,6 +175,8 @@ def tree_root_orphaned(pid: int, target: str, cwd_of=None):
         if orphan is not False:
             return orphan
         parent = parent_pid(current)
+        if host is not None and parent == host:
+            return True
         cwd = cwd_of(parent) if parent else None
         if cwd is None:
             return None
@@ -181,46 +186,49 @@ def tree_root_orphaned(pid: int, target: str, cwd_of=None):
     return None
 
 
-def decide(target: str):
+def decide(target: str, host=None):
     """Return (reason, decisions). REASON is set when nothing in TARGET may be touched."""
-    reason, decisions, _ = _decide(target)
+    reason, decisions, _, _ = _decide(target, host)
     return reason, decisions
 
 
-def _decide(target: str):
-    """`decide` plus the cwd of every process read, for the build-folder gate."""
+def _decide(target: str, host=None):
+    """`decide` plus the cwd of every process read, for the build-folder gate, and the pids whose cwd
+    could not be read, for the host-descendant gate. HOST: see `tree_root_orphaned`."""
     primary = sweep._is_primary_checkout(target)
     if primary is None:
-        return "unreadable-subject", [], []
+        return "unreadable-subject", [], [], []
     if primary:
-        return "primary-checkout", [], []
+        return "primary-checkout", [], [], []
     live = guard.worktree_live_session(target)
     if live is None:
-        return "unreadable-subject", [], []
+        return "unreadable-subject", [], [], []
     if live:
-        return "live-session", [], []
+        return "live-session", [], [], []
     pids = sweep.list_all_pids()
     if pids is None:
-        return "unreadable-subject", [], []
+        return "unreadable-subject", [], [], []
     cwd_of = sweep.process_cwd
     if sys.platform == "darwin":
         # One `lsof` for every pid: 1,300 per-pid reads at 27 ms overran the 60 s hook limit.
         # A failed batch keeps everything; it never falls back to per-pid reads.
         table = sweep._read_all_cwds_macos(BATCH_TIMEOUT)
         if table is None:
-            return "unreadable-subject", [], []
+            return "unreadable-subject", [], [], []
         cwd_of = sweep._first_cwd_by_pid(table).get
-    decisions, cwds = [], []
+    decisions, cwds, unreadable = [], [], []
     for pid in pids:
         if pid == os.getpid():
             continue
         cwd = cwd_of(pid)
-        if cwd is not None:
-            cwds.append(cwd)
-        if cwd is None or not sweep._cwd_under_checkout(cwd, target):
+        if cwd is None:
+            unreadable.append(pid)
+            continue
+        cwds.append(cwd)
+        if not sweep._cwd_under_checkout(cwd, target):
             continue
         base = {"pid": pid, "cwd": cwd, "command": sweep.process_command(pid)}
-        orphan = tree_root_orphaned(pid, target, cwd_of)
+        orphan = tree_root_orphaned(pid, target, cwd_of, host)
         if orphan is None:
             decisions.append(dict(base, action="keep", reason="unreadable-subject"))
             continue
@@ -235,7 +243,7 @@ def _decide(target: str):
             decisions.append(dict(base, action="keep", reason="not-current-user"))
             continue
         decisions.append(dict(base, action="reap", reason="agent-ended"))
-    return None, decisions, cwds
+    return None, decisions, cwds, unreadable
 
 
 BUILD_SCAN_SECONDS = 20  # the scan stops here and keeps the rest; the hook's own limit is 60
@@ -307,15 +315,85 @@ def host_pids():
     return pids
 
 
+def host_pid():
+    """The host claude process for the stop and the descent gate: CLAUDE_PID, else the process that
+    ran this hook. MEASURED 2026-10-15: the tool shell's CLAUDE_PID names its claude.exe. Not
+    measured for a SubagentStop hook's env, so each run logs CLAUDE_PID. Narrower than `host_pids`
+    on purpose: that set climbs to init or explorer when CLAUDE_PID is unset, and every process
+    descends from those. LIMIT: with CLAUDE_PID unset and a shell between the host and the hook,
+    the host's other children are not seen as host-started."""
+    if os.environ.get("CLAUDE_PID", "").isdigit():
+        return int(os.environ["CLAUDE_PID"])
+    return parent_pid(os.getpid())
+
+
+def parent_table():
+    """{pid: ppid} for every process, from one read, or None when it could not be read."""
+    if sys.platform.startswith("win"):
+        return dict(sweep._toolhelp_process_entries()) or None
+    try:
+        answer = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return None
+    rows = [line.split() for line in answer.stdout.splitlines()] if answer.returncode == 0 else []
+    table = {int(r[0]): int(r[1]) for r in rows if len(r) == 2 and r[0].isdigit() and r[1].isdigit()}
+    return table or None
+
+
+def host_descendants(pids, host):
+    """The PIDS (cwd unreadable) that descend from HOST, or None when that cannot be told. Owner call,
+    2026-10-15: such a pid may sit inside the own tree, so it keeps the tree. A pid not in the table
+    has exited. The hook's own chain up to HOST is not a reason to keep."""
+    if not pids:
+        return []
+    table = parent_table() if host is not None else None
+    if table is None:
+        return None
+    chain, current = {host}, os.getpid()
+    for _ in range(MAX_CLIMB):
+        if current is None or current in chain:
+            break
+        chain.add(current)
+        current = table.get(current)
+    found = []
+    for pid in pids:
+        if pid in chain or pid not in table:
+            continue
+        current, seen = table[pid], set()
+        while current is not None and current not in seen and len(seen) < MAX_CLIMB:
+            if current == host:
+                found.append(pid)
+                break
+            seen.add(current)
+            current = table.get(current)
+    return found
+
+
+STOP_WAIT_SECONDS = 5  # the stopped pids get this long to leave the tree before the worktree stage
+
+
+def wait_gone(pids, target: str):
+    """Wait, at most STOP_WAIT_SECONDS, until no pid in PIDS reads a cwd inside TARGET. A stopped
+    process can still be listed for a moment, and the worktree stage would keep the tree for it.
+    ponytail: a fixed bound; a pid still inside after it keeps the tree through the stage's own
+    process check."""
+    end = time.monotonic() + STOP_WAIT_SECONDS
+    while pids and time.monotonic() < end:
+        pids = [p for p in pids if sweep._cwd_under_checkout(sweep.process_cwd(p) or "", target)]
+        if pids:
+            time.sleep(0.05)
+
+
 WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits for the next agent end
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
 
-def reap_worktrees(target: str, deadline: float):
+def reap_worktrees(target: str, deadline: float, own_keep=None):
     """Remove TARGET (the ending agent's own worktree, first) and every other finished
     `.claude/worktrees/agent-*` worktree of its repository that `sweep.decide_agent_end_worktree`
     clears. The caller has proven the process gates for TARGET. Returns one decision per tree
-    decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
+    decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short. OWN_KEEP,
+    when set, is the caller's reason to keep TARGET."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     entries = sweep.parse_worktree_list(root)
     if entries is None:
@@ -336,7 +414,10 @@ def reap_worktrees(target: str, deadline: float):
             if time.monotonic() > deadline:
                 rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
                 break
-            decision = sweep.decide_agent_end_worktree(root, entry, min_idle)
+            if min_idle is None and own_keep:
+                decision = {"path": entry["path"], "action": "keep", "reason": own_keep}
+            else:
+                decision = sweep.decide_agent_end_worktree(root, entry, min_idle)
             if decision["action"] == "reap":
                 sweep.remove_worktree(root, entry["path"], decision)
             rows.append(decision)
@@ -357,15 +438,27 @@ def handle(raw: str, started=None):
     record = {"raw": raw, "target": target}
     if not target:
         return record
-    reason, decisions, cwds = _decide(target)
+    host = host_pid()
+    reason, decisions, cwds, unreadable = _decide(target, host)
+    stopped = []
     for decision in decisions:
         if decision["action"] == "reap":
             decision["signalled"] = sweep.send_signal(decision["pid"])
-    record.update(reason=reason, decisions=decisions)
+            stopped.append(decision["pid"])
+    record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"), host=host)
     if reason is None:
+        wait_gone(stopped, target)
+        # A stopped pid can read as unreadable while it exits (a zombie), so it is not counted.
+        held = host_descendants([p for p in unreadable if p not in stopped], host)
+        if held is None:
+            own_keep = "unreadable-subject: the host's descendants could not be read"
+        elif held:
+            own_keep = "unreadable-subject: pid %s descends from the host" % ", ".join(map(str, held))
+        else:
+            own_keep = None
         now = time.monotonic()
         deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
-        record["worktrees"] = reap_worktrees(target, deadline)
+        record["worktrees"] = reap_worktrees(target, deadline, own_keep)
         if os.path.isdir(target):  # a removed own tree has no build folders left
             record["buildDirs"] = reap_build_dirs(target, cwds)
     return record

@@ -733,7 +733,8 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     first: `git status` can rewrite the index and make every tree look active. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
-    remote-tracking ref. Any failed read keeps."""
+    remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
+    (`_restore_cut_short`) gets its deleted tracked files back first, so it can be decided again."""
     path = entry["path"]
     if min_idle is not None:
         idle = worktree_idle_seconds(path)
@@ -742,6 +743,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
         if idle < min_idle:
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    _restore_cut_short(path)
     decision = decide_worktree(where, entry, attended=True)
     if decision["action"] != "reap":
         return decision
@@ -2184,17 +2186,71 @@ def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):
         )
 
 
+REMOVAL_MARKER = "claude-removal-started"  # in the tree's admin dir; a finished remove deletes that dir
+
+
+def _admin_dir(path: str):
+    """The absolute git admin dir of worktree PATH (`.git/worktrees/<name>`), or None. The same read
+    as `worktree_idle_seconds`, kept apart so the sweep-fast lane's edits there do not collide."""
+    answer = guard._git(path, "rev-parse", "--absolute-git-dir")
+    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+        return None
+    return answer.stdout.strip()
+
+
+def _restore_cut_short(path: str):
+    """Owner ruling 2026-10-15, review point 4: `guard._git` stops `git worktree remove` at 10 s, which
+    can leave a tree half deleted. `remove_worktree` writes REMOVAL_MARKER before each remove. When
+    the marker is there and every dirty line is a deleted tracked file, this writes the missing
+    files back from the index (`checkout-index` without -f never overwrites a file that exists), so
+    `decide_worktree` sees a clean tree and the next remove finishes the job. No --force anywhere.
+    LIMIT: when the cut-short remove already deleted the tree's `.git` file, git cannot read the
+    tree, so it is kept as unreadable and needs a person."""
+    admin = _admin_dir(path)
+    if not admin or not os.path.isfile(os.path.join(admin, REMOVAL_MARKER)):
+        return
+    dirty = guard.porcelain(path)
+    if dirty and all(line.startswith(" D ") for line in dirty):
+        guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
+
+
+def _lock_reason_now(root: str, path: str):
+    """PATH's lock reason as `parse_worktree_list` reads it right now; None when unlocked or unread."""
+    own = os.path.normcase(os.path.realpath(path))
+    for entry in parse_worktree_list(root) or []:
+        if os.path.normcase(os.path.realpath(entry["path"])) == own:
+            return entry["locked_reason"]
+    return None
+
+
 def remove_worktree(root: str, path: str, decision: dict):
     if decision.get("unlock"):  # a stale agent lock; never --force
+        # Review point 3: the lock was read earlier, in decide_worktree. Another session may have
+        # taken a live lock since. Read it again and unlock only the lock that was judged stale.
+        # LIMIT: git has no compare-and-unlock, so a lock taken between this read and the unlock
+        # below is still cleared.
+        now = _lock_reason_now(root, path)
+        if now != decision.get("lock_reason"):
+            decision.update(action="keep", reason="locked: lock changed since the read: %s" % now)
+            return
         unlocked = guard._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
             decision["error"] = "unlock failed: %s" % (
                 unlocked.stderr.strip() if unlocked is not None else "git gave no answer")
             return
+    admin = _admin_dir(path)
+    if admin:
+        try:
+            with open(os.path.join(admin, REMOVAL_MARKER), "w", encoding="utf-8") as handle:
+                handle.write("%d\n" % int(time.time()))
+        except OSError:
+            pass  # no marker: a cut-short remove is kept as dirty, as before
     answer = guard._git(root, "worktree", "remove", path)
     if answer is None or answer.returncode != 0:
         decision["error"] = "remove failed: %s" % (
-            answer.stderr.strip() if answer is not None else "git gave no answer"
+            answer.stderr.strip() if answer is not None else
+            "git gave no answer (cut short at its time limit, or git did not start); a later "
+            "agent end finishes a cut-short remove"
         )
         if decision.get("unlock"):
             # The lock came off for this removal only. Put it back, so the worktree is no
