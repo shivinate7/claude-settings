@@ -214,7 +214,7 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, nested_script, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_move_into, is_worktree, log_path_and_text, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
         )
@@ -2018,6 +2018,10 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
+    elif os.name == "nt":
+        # A Git Bash `/c/Users/...` cwd is read in the form the home record is written in. Off
+        # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`.
+        cwd = _expanded(cwd, "")
 
     # 0. Each subagent stays inside its own worktree. `status` is "none" for the orchestrator
     # (no `agent_id`) and for tools this rule does not judge; "unknown" when the record could
@@ -2029,8 +2033,10 @@ def judge(payload) -> None:
     if home_status == "home":
         if tool in SHELL_TOOLS:
             if path_is_inside(cwd, home) is False:
-                refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                       "shell cwd outside recorded agent home")
+                # The one allowed call is a lone `cd` back into the home (a recovery step).
+                if not is_move_into(tool, str(tool_input.get("command", "")), cwd, home):
+                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
+                           "shell cwd outside recorded agent home")
         elif tool in WRITE_TOOLS:
             for write_target in (write_targets(tool_input) if home_primary else ()):
                 # A relative `file_path` resolves against the CALLER's cwd, the payload's own

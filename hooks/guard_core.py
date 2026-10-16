@@ -1767,6 +1767,33 @@ def path_is_inside(path: str, root: str):
     return (p + os.sep).startswith(r + os.sep)
 
 
+# A directory change that is the WHOLE call, as a recovery step: an agent whose shell cwd has left
+# its home must still be able to `cd` back, or it is stuck (the PowerShell tool keeps its cwd
+# between calls). Rule verification-recovery-not-gated-on-own-state. Any other word, any chained
+# step, or a target not plainly inside `home` is no recovery, and stays refused.
+_MOVE_WORDS = {"cd", "chdir", "set-location", "sl"}
+_MOVE_FLAGS = {"-path", "-literalpath"}
+_MOVE_TARGET_UNSAFE = re.compile(r"[$`()&<>|*?{}]")
+
+
+def is_move_into(tool: str, command: str, cwd: str, home: str) -> bool:
+    """True when `command` is one `cd` or `Set-Location` whose target is inside `home`."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    segments = [s for s in split_segments(command) if s.strip()]
+    if len(segments) != 1:
+        return False
+    try:   # a backslash is a Windows path separator here, never an escape
+        tokens = shlex.split(segments[0].replace("\\", "\\\\"), posix=True)
+    except ValueError:
+        return False
+    if len(tokens) == 3 and tokens[1].lower() in _MOVE_FLAGS:
+        del tokens[1]
+    if len(tokens) != 2 or tokens[0].lower() not in _MOVE_WORDS \
+            or _MOVE_TARGET_UNSAFE.search(tokens[1]):
+        return False
+    return path_is_inside(_expanded(tokens[1], cwd), home) is True
+
+
 # A shell that runs its `-c` argument as a script. The script is judged by this same rule.
 # MEASURED 2026-09-26 on Windows (PR #144): `sh -c 'cmd &'` was allowed, and the server outlived
 # its call. The `&` sat inside one quoted token, where no per-segment read above can see it.
