@@ -156,6 +156,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
+| `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
@@ -261,6 +262,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cap-write-by-python-unseen` | A Python command that writes `CLAUDE_CODE_SUBAGENT_MODEL` into a settings file is allowed with no ask. | [`debts/cap-write-by-python-unseen.md`](../debts/cap-write-by-python-unseen.md) |
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
 | `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
+| `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs once. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
+| `ci-wake-read-no-retry` | One failed status read ends a CI-wake wait as unknown, with no retry. | [`debts/ci-wake-read-no-retry.md`](../debts/ci-wake-read-no-retry.md) |
 | `cite-by-id-skips-merge-subject` | The cite-by-id rule does not read a `gh pr merge` subject. | [`debts/cite-by-id-skips-merge-subject.md`](../debts/cite-by-id-skips-merge-subject.md) |
 | `cites-lack-gloss-unchecked` | Some cites of record ids, in decisions and debts, carry no gloss. | [`debts/cites-lack-gloss-unchecked.md`](../debts/cites-lack-gloss-unchecked.md) |
 | `cmd-c-quote-count-bash-reader` | cmd reads `\` as a plain character, and each `"` toggles its quote state. | [`debts/cmd-c-quote-count-bash-reader.md`](../debts/cmd-c-quote-count-bash-reader.md) |

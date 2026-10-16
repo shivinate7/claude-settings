@@ -36,6 +36,7 @@ if HERE not in sys.path:
 # ends in an unknown line, never a traceback and exit 1.
 
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
+STATUS_PAUSE = 30         # seconds between two status reads of one run
 NO_RUN_PAUSE = 20         # seconds; the one pause when the head has no run yet
 READ_TIMEOUT = 60         # seconds for each gh read
 PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
@@ -97,22 +98,18 @@ def gh_json(args, cwd):
 
 
 def watch_run(run_id, cwd, deadline):
-    """Block on `gh run watch` until the run ends or the deadline passes. Output goes nowhere
-    (no pipes to wait on after a kill). The run's own state is read from `run view`."""
-    exe = shutil.which("gh")
-    if exe is None:
-        raise Unknown("gh is not on PATH")
-    left = deadline - time.monotonic()
-    if left <= 0:
-        return
-    try:
-        p = subprocess.Popen([exe, "run", "watch", str(run_id)], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
-        p.wait(timeout=left)
-    except subprocess.TimeoutExpired:
-        p.kill()
-    except OSError as e:
-        raise Unknown("gh run watch failed: " + type(e).__name__)
+    """Read `gh run view <id> --json status` until the status is `completed` or the deadline
+    passes. Reads are at least STATUS_PAUSE seconds apart, and the last pause ends at the
+    deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
+    raises Unknown."""
+    while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
+        if gh_json(["run", "view", str(run_id), "--json", "status"], cwd).get("status") == "completed":
+            return
+        left = deadline - time.monotonic()
+        if left <= STATUS_PAUSE:  # the last pause is clamped to the deadline, and the wait ends there
+            time.sleep(max(0, left))
+            return
+        time.sleep(STATUS_PAUSE)
 
 
 def ready_call(rest):
