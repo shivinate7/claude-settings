@@ -58,9 +58,9 @@ non-isolated agent. Nothing changes for it: allow.
   the `/c/...` form is read as `C:\...` for this rule only.
   One exception: a lone move back into the home is allowed. The move is
   `cd` in Bash, or `cd`, `Set-Location`, `sl`, `chdir` or `pushd` in
-  PowerShell, with the home path as its only argument and no separator
-  in the command (owner question 2026-10-15: why agents stuck outside
-  their tree cannot use PowerShell).
+  PowerShell. The home path is its only argument, and the command has no
+  separator. (Owner question 2026-10-15: why agents stuck outside their
+  tree cannot use PowerShell.)
 - Write / Edit / MultiEdit / NotebookEdit: the target sits inside the
   same clone, under the primary checkout, but outside the recorded home.
   A target outside the clone, such as a scratchpad file, is allowed. This
@@ -107,3 +107,6 @@ only to allow. Any doubt in that read refuses, as main did.
   `.claude/worktrees/`.
 - A confirmed case on Windows or in a Write/Edit payload that disagrees
   with the shapes recorded here.
+
+Kind: build
+Plan: decisions/an-agent-outside-its-home-tree-must-stop.md#the-rule (all)
