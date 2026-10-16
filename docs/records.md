@@ -479,6 +479,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
 | `reload-missing-file-unpinned` | Lane merge-guard-b removed `_damage_missing` and its two reload cases: a missing `guard_pointer.py` that comes back during the wait is allowed, and one that stays missing is refused. | [`debts/reload-missing-file-unpinned.md`](../debts/reload-missing-file-unpinned.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
+| `rule-flag-not-enforced` | `bin/merge` prints a line for each changed rule file. | [`debts/rule-flag-not-enforced.md`](../debts/rule-flag-not-enforced.md) |
 | `ruling-home-isabs-unproven` | `value_resolves` refuses each absolute `home:` value. | [`debts/ruling-home-isabs-unproven.md`](../debts/ruling-home-isabs-unproven.md) |
 | `ruling-kind-dir-equals-open` | `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name. | [`debts/ruling-kind-dir-equals-open.md`](../debts/ruling-kind-dir-equals-open.md) |
 | `safety-hole-test-is-judgment` | No check measures a change's net safety value against main. | [`debts/safety-hole-test-is-judgment.md`](../debts/safety-hole-test-is-judgment.md) |
