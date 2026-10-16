@@ -155,6 +155,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
+| `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
