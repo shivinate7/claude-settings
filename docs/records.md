@@ -104,7 +104,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 
 | Slug | Gist | Link |
 |---|---|---|
-| `agent-end-reap-stops-what-a-finished-agent-left` | This record is step 2 of the plan in `which-start-shapes-outlive-the-agent-on-windows` (start shapes that outlive a subagent on Windows; PR #144). | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agent-end-reap-stops-what-a-finished-agent-left` | Kind: process Home: janitor/agent_end_reap.py | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `ask-steps-run-alone` | Owner ruling, 2026-10-14. | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
 | `background-needs-end-note` | Owner ruling, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
 | `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
@@ -147,6 +147,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `subagent-model-cap` | CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry records how the worker-model rule is mechanized after `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
 | `test-strategy-reset` | Owner ruling, 2026-10-14 17:14 CDT. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
+| `the-janitor-is-one-machine-wide-sweep` | Kind: process Home: janitor/sweep.py | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `unattended-sweep-stops-proven-orphans` | PR #132 added an orphaned-listener check to `janitor/sweep.py`. | [`decisions/unattended-sweep-stops-proven-orphans.md`](../decisions/unattended-sweep-stops-proven-orphans.md) |
 | `wsl-allow-list` | Owner ruling, 2026-10-13 15:20: "fixed test list is fine; surf the web for a consensus first". | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
 
@@ -228,7 +229,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-lint-gloss-collapse` | `lint/ste_lint.py`'s `STE001` counts words per sentence. | [`decisions/ste-lint-gloss-collapse.md`](../decisions/ste-lint-gloss-collapse.md) |
 | `stop-guardrail-became-a-command-hook` | The `type: agent` Stop hook in `settings.json` judged every turn for a silent change to a decision, gate, build-order, CLAUDE.md rule, or setting. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
 | `tests-are-claims-not-law` | Tests are claims, not law | [`decisions/tests-are-claims-not-law.md`](../decisions/tests-are-claims-not-law.md) |
-| `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch when that branch holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `the-orchestrator-builds-by-verdict-not-by-line-count` | Supersedes README Decision 13, "the orchestrator and product code: judge the act, not the file". | [`decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md`](../decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md) |
 | `the-stop-guardrail-is-disarmed-until-the-command-hook-lands` | The `Stop` hook entry of `type: "agent"` is removed from `settings.json`. | [`decisions/the-stop-guardrail-is-disarmed-until-the-command-hook-lands.md`](../decisions/the-stop-guardrail-is-disarmed-until-the-command-hook-lands.md) |
 | `ux-house-rules` | Owner ruling, 2026-10-11: "build a ux folder". | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
@@ -294,6 +294,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `fb-done-unclosed-fence` | The close rule reads only the last line of a message. | [`debts/fb-done-unclosed-fence.md`](../debts/fb-done-unclosed-fence.md) |
 | `fb-inbox-append-race` | On Windows, two processes that append with `open(..., "ab")` at the same time lost 406 of 8000 lines in a stress test. | [`debts/fb-inbox-append-race.md`](../debts/fb-inbox-append-race.md) |
 | `fb-judge-marker-race` | The judge child checks that its message is still the last one, then removes the capture marker. | [`debts/fb-judge-marker-race.md`](../debts/fb-judge-marker-race.md) |
+| `finished-agent-lock-holds-tree` | A finished agent's worktree can hold the lock `claude agent agent-<id> (pid N)`, with no start time. | [`debts/finished-agent-lock-holds-tree.md`](../debts/finished-agent-lock-holds-tree.md) |
+| `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `frozen-path-ansi-c-quote` | Main allows `echo ok > $'<frozen path>'` at top level, and inside `bash -c`, `sh -c` and `eval`. | [`debts/frozen-path-ansi-c-quote.md`](../debts/frozen-path-ansi-c-quote.md) |
 | `gate-exit-7-unprobed` | With `onFailure: block`, a timeout refused the call (measured in the 2026-10-12 incident). | [`debts/gate-exit-7-unprobed.md`](../debts/gate-exit-7-unprobed.md) |
 | `gate-own-errors-fail-open` | Errors a gate catches itself fail open. | [`debts/gate-own-errors-fail-open.md`](../debts/gate-own-errors-fail-open.md) |
@@ -394,6 +396,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lock-delete-retry-window` | When `GhLock.acquire` finds an expired lock, it deletes it. | [`debts/lock-delete-retry-window.md`](../debts/lock-delete-retry-window.md) |
 | `lock-read-error-never-expires` | When `GhLock.read` cannot read the lock commit for a reason that is not a network or rate error, it returns an expiry of infinity. | [`debts/lock-read-error-never-expires.md`](../debts/lock-read-error-never-expires.md) |
 | `lock-ttl-rate-wait` | Every `GhLock` call retries a rate limit up to 3 times with a 60 s wait, so one call can wait 180 s. | [`debts/lock-ttl-rate-wait.md`](../debts/lock-ttl-rate-wait.md) |
+| `marker-writeback-loses-deletion` | A failed remove leaves `claude-removal-started` in the tree's admin dir, on an intact tree. | [`debts/marker-writeback-loses-deletion.md`](../debts/marker-writeback-loses-deletion.md) |
 | `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
 | `merge-head-any-check-licenses` | Any passing check licenses a skipped required job, not only `scope`. | [`debts/merge-head-any-check-licenses.md`](../debts/merge-head-any-check-licenses.md) |
 | `merge-head-empty-reads-green` | With no required names, zero checks and zero runs, the wait reads green after its 30 s settle. | [`debts/merge-head-empty-reads-green.md`](../debts/merge-head-empty-reads-green.md) |
@@ -424,9 +427,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-tests-glob-too-narrow` | The glob reaches only root-level `mods/<name>/*.test.mjs`. | [`debts/mods-tests-glob-too-narrow.md`](../debts/mods-tests-glob-too-narrow.md) |
 | `mutant-crash-audit-missing` | The fix colocates `guard.py` for `watch` mutants only. | [`debts/mutant-crash-audit-missing.md`](../debts/mutant-crash-audit-missing.md) |
 | `net-error-colon-http-refusal` | `NET_ERROR` matches `: HTTP 5xx (url)` at a line end. | [`debts/net-error-colon-http-refusal.md`](../debts/net-error-colon-http-refusal.md) |
+| `no-start-lock-has-no-pid-check` | The lock `claude agent agent-<id> (pid N)`, with no start time, has no pid-reuse check. | [`debts/no-start-lock-has-no-pid-check.md`](../debts/no-start-lock-has-no-pid-check.md) |
 | `node-file-server-unchecked` | `node <file>` under `run_in_background` is not refused without an `until:` note. | [`debts/node-file-server-unchecked.md`](../debts/node-file-server-unchecked.md) |
 | `off-line-fork-reads-pre-cut` | A branch can be cut from a PR branch that merged later. | [`debts/off-line-fork-reads-pre-cut.md`](../debts/off-line-fork-reads-pre-cut.md) |
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
+| `own-tree-reason-names-remover` | The hook's row for the ending agent's own tree says "left for the delayed remover", and comments name lane wt-reap-delay. | [`debts/own-tree-reason-names-remover.md`](../debts/own-tree-reason-names-remover.md) |
 | `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, a standalone run of the check has no generator, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
 | `plain-diff-4mib-unconfirmed` | Output over the host's limit is cut, and the header says "Diff truncated". | [`debts/plain-diff-4mib-unconfirmed.md`](../debts/plain-diff-4mib-unconfirmed.md) |
 | `plain-diff-desktop-untested` | The pane draw, and the turn-text match against a real `$.session.messages()`, are untested in the desktop app. | [`debts/plain-diff-desktop-untested.md`](../debts/plain-diff-desktop-untested.md) |
@@ -550,7 +555,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-rewrite-unchecked-lands` | The STE fixer rewrites the text, then the lint cannot run. | [`debts/ste-rewrite-unchecked-lands.md`](../debts/ste-rewrite-unchecked-lands.md) |
 | `subagent-workflow-model-unasked` | The guard asks on a write of `CLAUDE_CODE_SUBAGENT_MODEL` or its `_FORCE` form only. | [`debts/subagent-workflow-model-unasked.md`](../debts/subagent-workflow-model-unasked.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
-| `sweep-no-deadline-many-trees` | The sweep checks each worktree in turn, with eight or more git calls per tree. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
+| `sweep-no-deadline-many-trees` | The SessionEnd run starts no phase and no tree read at or past its deadline, `JUDGE_BUDGET_SECONDS` (12 s) after it starts. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
 | `sweep-test-symlink-privilege` | On a Windows host with no symlink right, two tests in `janitor/test_sweep.py` stop with WinError 1314. | [`debts/sweep-test-symlink-privilege.md`](../debts/sweep-test-symlink-privilege.md) |
 | `sweep-tests-sleep-bounds` | `_peak_concurrency` sleeps 0.2 s inside each wrapped call to widen a race. | [`debts/sweep-tests-sleep-bounds.md`](../debts/sweep-tests-sleep-bounds.md) |
 | `symrun-link-gap-unmeasured` | The symrun case wants at least one mixed-id window during run 2. | [`debts/symrun-link-gap-unmeasured.md`](../debts/symrun-link-gap-unmeasured.md) |

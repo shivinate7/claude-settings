@@ -19,6 +19,7 @@ fixtures.
 """
 import concurrent.futures
 import contextlib
+import gc
 import hashlib
 import io
 import json
@@ -3295,12 +3296,6 @@ class AgentEndReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.target_worktree(
                 {"hook_event_name": "SubagentStop", "agent_id": agent_id, "cwd": self.repo}))
 
-    def test_only_subagent_stop_names_a_target(self):
-        # Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired and names nothing.
-        self.assertIsNone(self.reap.target_worktree(
-            {"hook_event_name": "WorktreeRemove", "worktree_path": self.wts["reapA"]}))
-        self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.repo}))
-
     def test_the_primary_checkout_is_never_a_target(self):
         self.assertEqual(self.reap.decide(self.repo)[0], "primary-checkout")
 
@@ -3385,6 +3380,648 @@ class AgentEndReapTests(unittest.TestCase):
                 raws = [json.loads(line)["raw"] for line in handle.read().splitlines()]
         self.assertEqual(len(denied), 1, "the injected PermissionError was never reached")
         self.assertIn("payload 3", raws)
+
+
+class _AgentEndFixture(unittest.TestCase):
+    """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
+    worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="agent_end_wt_")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
+        self.primary = os.path.join(self.root, "repo")
+        make_repo(self.primary, {"f.txt": "base\n", ".gitignore": ".claude/\n"})
+        give_remote(self.primary)
+        import agent_end_reap
+        self.reap = agent_end_reap
+
+    def add(self, name):
+        """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
+        on origin/main, so it is pushed until a case commits there."""
+        path = os.path.join(self.primary, ".claude", "worktrees", "agent-" + name)
+        require(run_vcs(self.primary, "worktree", "add", "-q", path, "-b", "lane-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        return path
+
+    def add_other_lane(self, name):
+        """A clean, pushed worktree under `.claude/worktrees/` that is NOT an agent worktree."""
+        path = os.path.join(self.primary, ".claude", "worktrees", name)
+        require(run_vcs(self.primary, "worktree", "add", "-q", path, "-b", "other-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        return path
+
+    def fire(self, agent, path, cwd=None):
+        """Run the SubagentStop hook for AGENT with payload cwd PATH, from working directory CWD (default:
+        the test root). The hook must exit 0."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": path, "session_id": "agent-end-wt-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        answer = subprocess.run([sys.executable, os.path.join(HERE, "agent_end_reap.py")],
+                                input=payload, capture_output=True, text=True, env=env,
+                                cwd=cwd or self.root, timeout=120)
+        self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+
+    def listed(self):
+        out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
+        return {_norm_path(line[len("worktree "):]) for line in out.splitlines() if line.startswith("worktree ")}
+
+    def assertRemoved(self, path):
+        """Gone from disk AND from `git worktree list`, so a leftover prunable entry also fails."""
+        self.assertFalse(os.path.exists(path), "%s was not removed" % path)
+        self.assertNotIn(_norm_path(path), self.listed(), "%s is still a git worktree" % path)
+
+    def assertKept(self, path):
+        self.assertTrue(os.path.isdir(path), "%s was removed" % path)
+        self.assertIn(_norm_path(path), self.listed(), "%s is no longer a git worktree" % path)
+
+    def live_lock_reason(self, name):
+        """The reason the Agent tool writes, naming THIS test process, with its real start time."""
+        start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
+        return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
+
+    def host_lock(self, name):
+        """The lock text `git worktree list --porcelain` shows now, MEASURED 2026-10-15 on six agent
+        trees: `claude agent agent-<id> (pid N)`, N the claude host, with no start time. N is this
+        test process, the host that fire_under_host names."""
+        return "claude agent agent-%s (pid %d)" % (name, os.getpid())
+
+    def fire_under_host(self, agent, path, cwd=None, check=True):
+        """Run the SubagentStop hook one process below an intermediate python, itself run by this test
+        process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
+        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell).
+        CWD (default: the test root) is the working directory of the relay, and so of the hook. CHECK
+        False returns the answer without asserting its exit code."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": path, "session_id": "agent-end-wt-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
+        relay = ("import subprocess, sys; sys.exit(subprocess.run([sys.executable, sys.argv[1]], "
+                 "input=sys.stdin.read(), text=True).returncode)")
+        answer = subprocess.run([sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
+                                input=payload, capture_output=True, text=True, env=env,
+                                cwd=cwd or self.root, timeout=120)
+        if check:
+            self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+        return answer
+
+    def last_row(self):
+        """The last row of the payload log: the decision record of the last hook run."""
+        with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
+            return json.loads(handle.readlines()[-1])
+
+    def row_for_tree(self, path):
+        """The decision row the last hook run wrote for the worktree at PATH, or None."""
+        last = self.last_row()
+        for row in last.get("worktrees") or []:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(path):
+                return row
+        return None
+
+    def assert_own_left(self, path):
+        """The hook kept the ending agent's own tree at PATH, and its row names the delayed remover
+        (owner ruling 2026-10-15 23:01 CDT). The tree is still a git worktree on disk."""
+        row = self.row_for_tree(path)
+        self.assertIsNotNone(row, "the hook wrote no decision row for the own tree")
+        self.assertEqual(row.get("action"), "keep", "the own tree was not kept: %s" % row.get("reason"))
+        self.assertIn("left for the delayed remover", str(row.get("reason")))
+        self.assertKept(path)
+
+    def control_tree(self, name):
+        """Another finished agent's clean, pushed tree. The hook must remove it in the same run. Call
+        age_control() on it right before the hook runs, because git calls before the run reset its idle."""
+        return self.add(name)
+
+    def age_control(self, path):
+        _age_admin_files(path, 31 * 60)
+        require(sweep.worktree_idle_seconds(path) >= 31 * 60 - 60, "control tree %s is not 31 min idle" % path)
+
+    def lock(self, path, reason):
+        require(run_vcs(self.primary, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                "lock of %s failed" % path)
+
+    @staticmethod
+    def dirty(path):
+        write(os.path.join(path, "f.txt"), "changed in place\n")
+
+    @staticmethod
+    def untracked(path):
+        write(os.path.join(path, "scratch.txt"), "not tracked\n")
+
+    def unpushed(self, path):
+        write(os.path.join(path, "lane.txt"), "only in this worktree\n")
+        run_vcs(path, "add", "lane.txt")
+        commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
+        require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
+
+    @staticmethod
+    def stop(proc):
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+class AgentEndOwnWorktreeTests(_AgentEndFixture):
+    """Owner ruling 2026-10-15 23:01 CDT: when an agent ends (SubagentStop), janitor/agent_end_reap.py
+    KEEPS the ending agent's OWN worktree under `.claude/worktrees/agent-*`, whatever its state. Its
+    row names the delayed remover (lane wt-reap-delay). The hook never stops a process whose parent is
+    live: the agent's own shells, the hook's wrapper and any host-started process survive. An orphan
+    (dead parent) inside the own tree keeps main's stop, and that is covered in AgentEndReapTests. The
+    removal of OTHER finished agents' trees idle 30 minutes or more is unchanged, and is covered in
+    AgentEndOtherWorktreeTests.
+
+    Each keep arm is checked by the own row's reason, not only by the tree still existing. Each keep arm
+    runs beside another agent's clean, pushed tree idle 31 minutes that the same run must remove, so a
+    keep arm cannot pass on a hook that deletes nothing."""
+
+    def keep_case(self, name, damage, proof):
+        """PROOF reads the damage back, so a keep arm cannot pass on a fixture that never took."""
+        control, subject = self.control_tree(name + "ctl"), self.add(name)
+        damage(subject)
+        proof(subject)
+        self.age_control(control)
+        self.fire(name, subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm=name):
+            self.assert_own_left(subject)
+
+    def test_subagent_stop_keeps_its_own_clean_pushed_worktree(self):
+        # Red on 8209120: the hook removes the own tree at agent end. Stop and WorktreeRemove name no
+        # worktree to end.
+        self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.primary}))
+        own = self.add("trigger")
+        self.assertIsNone(self.reap.target_worktree(
+            {"hook_event_name": "WorktreeRemove", "worktree_path": own}))
+        self.fire("trigger", own)
+        self.assert_own_left(own)
+
+    def test_a_stale_lock_does_not_change_the_own_worktree_keep(self):
+        # Red on 8209120: the stale lock lets the hook remove the own tree.
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead_pid = gone.pid
+        # Windows reads an exited pid as live while this process still holds its handle, so drop it.
+        del gone
+        gc.collect()
+        own = self.add("stalelock")
+        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime())
+        reason = "claude agent agent-stalelock (pid %d start %s)" % (dead_pid, stamp)
+        self.assertTrue(sweep.stale_agent_lock_verdict(reason), "the fixture lock is not stale: %r" % reason)
+        self.lock(own, reason)
+        self.fire("stalelock", own)
+        self.assert_own_left(own)
+
+    def test_a_dirty_own_worktree_is_kept(self):
+        self.keep_case("dirty", self.dirty, lambda p: self.assertTrue(guard.porcelain(p), "no dirty edit"))
+
+    def test_an_untracked_file_keeps_the_own_worktree(self):
+        self.keep_case("untracked", self.untracked, lambda p: self.assertTrue(guard.porcelain(p), "no file"))
+
+    def test_an_unpushed_commit_keeps_the_own_worktree(self):
+        self.keep_case("unpushed", self.unpushed, lambda p: self.assertEqual(
+            run_vcs(p, "branch", "-r", "--contains", "HEAD").stdout.strip(), "", "HEAD is pushed"))
+
+    def test_own_tree_locked_by_its_host_pid_is_kept(self):
+        # Red on 8209120: the host lock is lifted and the own tree removed. Nothing is asserted about the
+        # host lock itself: whether the hook leaves it is an open question (Input Needed).
+        own = self.add("hostlock")
+        self.lock(own, self.host_lock("hostlock"))
+        self.assertTrue(guard.worktree_locked(self.primary, own), "the fixture lock did not take")
+        self.fire_under_host("hostlock", own)
+        self.assert_own_left(own)
+
+    def test_own_tree_locked_by_a_dead_pid_in_the_measured_form_is_kept(self):
+        # Red on 8209120: the dead-pid lock is lifted and the own tree removed.
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        dead_pid = gone.pid
+        # Windows reads an exited pid as live while this process still holds its handle, so drop it.
+        del gone
+        gc.collect()
+        own = self.add("deadlock")
+        self.lock(own, "claude agent agent-deadlock (pid %d)" % dead_pid)
+        self.fire_under_host("deadlock", own)
+        self.assert_own_left(own)
+
+    def test_own_tree_locked_by_a_different_live_pid_is_kept_and_stays_locked(self):
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.root,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, other)
+        control, subject = self.control_tree("othertwin"), self.add("otherpid")
+        self.lock(subject, "claude agent agent-otherpid (pid %d)" % other.pid)
+        self.age_control(control)
+        self.fire_under_host("otherpid", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="another live process holds the lock"):
+            self.assert_own_left(subject)
+            self.assertTrue(guard.worktree_locked(self.primary, subject), "the other pid's lock was lifted")
+            self.assertIsNone(other.poll(), "the fixture process exited")
+
+    def test_own_tree_locked_by_its_host_pid_but_dirty_is_kept(self):
+        control, subject = self.control_tree("dirtyctl"), self.add("dirtyhost")
+        self.lock(subject, self.host_lock("dirtyhost"))
+        self.dirty(subject)
+        self.assertTrue(guard.porcelain(subject), "no dirty edit")
+        self.age_control(control)
+        self.fire_under_host("dirtyhost", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="dirty, locked by its host pid"):
+            self.assert_own_left(subject)
+
+    def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
+        # Guard, green on 2104e94: the exemption must cover the ending agent's own tree only. Every
+        # agent tree of one session carries the same host pid.
+        own, sibling = self.add("ownsib"), self.add("sibhost")
+        control = self.control_tree("sibctl")
+        self.lock(sibling, self.host_lock("sibhost"))
+        _age_admin_files(sibling, 31 * 60)
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
+                                "the sibling is not 31 min idle")
+        self.age_control(control)
+        self.fire_under_host("ownsib", own)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="own tree is kept for the delayed remover"):
+            self.assert_own_left(own)
+        with self.subTest(arm="sibling locked by the same host pid, idle 31 min"):
+            self.assertKept(sibling)
+            self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
+
+    def test_a_host_started_process_inside_the_own_worktree_is_not_stopped(self):
+        # Owner ruling 2026-10-15 19:43 CDT, point 1, as narrowed by the 23:01 ruling: a live parent is
+        # never stopped, and the host is a live parent. Red on 8209120: the host-started shell is
+        # stopped, then the own tree removed.
+        control, subject = self.control_tree("proctwin"), self.add("proc")
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=subject,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        inside, _unreadable = sweep.processes_in(subject)
+        self.assertIn(proc.pid, inside or [], "the fixture process is not inside the worktree")
+        self.age_control(control)
+        self.fire_under_host("proc", subject)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="host-started process inside the own tree"):
+            self.assertIsNone(proc.poll(), "the host-started process inside the own worktree was stopped")
+            self.assert_own_left(subject)
+
+    def test_a_fake_hook_process_and_a_fake_agent_shell_with_a_live_parent_survive(self):
+        # Coordinator correction 2026-10-15: the hook never stops a process with a live parent. Both
+        # fakes sit inside the own tree and are children of this test process (the host, alive). The
+        # wrapper's command line names the hook script, so it reads as the hook's own wrapper.
+        own = self.add("survive")
+        fake_hook_dir = os.path.join(self.root, "fake-hook")
+        os.makedirs(fake_hook_dir)
+        fake_hook = os.path.join(fake_hook_dir, "agent_end_reap.py")
+        write(fake_hook, "import time\ntime.sleep(120)\n")
+        shell = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=own,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, shell)
+        wrapper = subprocess.Popen([sys.executable, fake_hook], cwd=own,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, wrapper)
+        inside, _unreadable = sweep.processes_in(own)
+        with self.subTest(precondition="both fakes are inside the own tree"):
+            self.assertIn(shell.pid, inside or [], "the fake agent shell is not inside the own tree")
+            self.assertIn(wrapper.pid, inside or [], "the fake hook process is not inside the own tree")
+        self.fire_under_host("survive", own)
+        with self.subTest(arm="fake agent shell with a live parent survives"):
+            self.assertIsNone(shell.poll(), "the fake agent shell was stopped")
+        with self.subTest(arm="fake hook process with a live parent survives"):
+            self.assertIsNone(wrapper.poll(), "the fake hook process was stopped")
+        with self.subTest(arm="neither fake is reaped or signalled"):
+            fakes = (shell.pid, wrapper.pid)
+            signalled = [d for d in (self.last_row().get("decisions") or [])
+                         if d.get("pid") in fakes and (d.get("action") == "reap" or "signalled" in d)]
+            self.assertEqual(signalled, [], "the hook reaped or signalled a fake: %r" % signalled)
+        self.assert_own_left(own)
+
+    def test_hook_run_from_inside_its_own_tree_keeps_it(self):
+        # Red on 8209120: the hook removes the own tree. The hook runs with its cwd inside the tree, as
+        # the harness runs it, and it must still exit 0 and keep the tree.
+        own = self.add("inside")
+        self.fire("inside", own, cwd=own)
+        self.assert_own_left(own)
+
+    def test_hook_never_signals_its_own_wrapper_chain(self):
+        # Red on 149921d: the wrapper has its cwd inside the own tree and its parent is CLAUDE_PID,
+        # the host. tree_root_orphaned reads that parent as a host start, so the wrapper is reaped
+        # and signalled while the hook is still its child. No removal is asserted here: a wrapper
+        # with its cwd inside the tree blocks the delete on Windows, and the hook cannot move it.
+        own = self.add("wrapper")
+        answer = self.fire_under_host("wrapper", own, cwd=own, check=False)
+        reaped = [d for d in (self.last_row().get("decisions") or []) if d.get("action") == "reap"]
+        with self.subTest(arm="the wrapper exits 0"):
+            self.assertEqual(answer.returncode, 0,
+                             "the wrapper exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+        with self.subTest(arm="no decision reaps the wrapper chain"):
+            self.assertEqual(reaped, [], "the hook reaped its own wrapper chain: %r" % reaped)
+
+    def test_stale_removal_marker_on_an_intact_tree_does_not_restore_an_unstaged_deletion(self):
+        # Review finding 2, red on 149921d: _restore_cut_short writes a deleted tracked file back from
+        # the index before the lock, session and process checks. Here the lock keeps the tree, so the
+        # user's unstaged deletion is undone on a tree that is kept. The marker is stale: a failed
+        # earlier remove left it on a tree that is otherwise intact.
+        subject = os.path.join(self.primary, ".claude", "worktrees", "agent-staledel")
+
+        def damage(path):
+            admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+            write(os.path.join(admin, sweep.REMOVAL_MARKER), "1\n")
+            os.remove(os.path.join(path, "f.txt"))
+            self.lock(path, "held by a test")
+
+        def proof(path):
+            lines = guard.porcelain(path) or []
+            require(lines and all(line.startswith(" D ") for line in lines),
+                    "not only an unstaged deletion: %r" % lines)
+            require(guard.worktree_locked(self.primary, path), "the lock did not take")
+
+        self.keep_case("staledel", damage, proof)
+        with self.subTest(arm="the unstaged deletion is still there"):
+            self.assertFalse(os.path.exists(os.path.join(subject, "f.txt")),
+                             "the unstaged deletion was written back into a kept tree")
+
+
+class AgentEndOtherWorktreeTests(_AgentEndFixture):
+    """Owner ruling 2026-10-15: the same SubagentStop run also removes ANOTHER finished agent's tree
+    under `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
+    ref, holds no live lock, and has been idle 30 minutes or more. A tree idle less than 30 minutes
+    stays. So does a worktree outside `agent-*`. Each tree is aged last, right before the hook runs,
+    so a git call earlier in the run cannot reset its idle time."""
+
+    def test_an_other_agent_tree_idle_31_minutes_is_removed_and_29_minutes_is_kept(self):
+        ending = self.add("endnow")
+        old = self.add("oldidle")
+        recent = self.add("recentidle")
+        dirty = self.add("dirtyidle")
+        self.dirty(dirty)
+        locked = self.add("lockedidle")
+        self.lock(locked, self.live_lock_reason("lockedidle"))
+        lane = self.add_other_lane("lane-free")
+        for path, minutes in ((old, 31), (recent, 29), (dirty, 31), (locked, 31), (lane, 31)):
+            _age_admin_files(path, minutes * 60)
+        # Control: the aging landed on the reads the hook makes, on both sides of the 30 minute line.
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(old), 31 * 60 - 60, "old tree is not 31 min idle")
+        self.assertLess(sweep.worktree_idle_seconds(recent), 30 * 60, "recent tree is not under 30 min idle")
+        self.fire("endnow", ending)
+        with self.subTest(case="clean, pushed, idle 31 min"):
+            self.assertRemoved(old)
+        with self.subTest(case="clean, pushed, idle 29 min"):
+            self.assertKept(recent)
+        with self.subTest(case="dirty, idle 31 min"):
+            self.assertKept(dirty)
+        with self.subTest(case="live lock, idle 31 min"):
+            self.assertKept(locked)
+        with self.subTest(case="outside agent-*, idle 31 min"):
+            self.assertKept(lane)
+
+
+class AgentEndRulingTests(_AgentEndFixture):
+    """Owner rulings 2026-10-15 19:43 CDT and 23:01 CDT, from review round 1 of the agent-end stage. Each
+    case names its review point. Most cases run the hook in a subprocess (`fire`, `fire_under_host`). A
+    fault that must land inside the stage (a faked cwd read, a lock taken mid-stage, a killed git call)
+    runs `handle()` in this process instead: the same entry the hook's main calls. Real git and real
+    processes everywhere else. The own tree is always kept (23:01): a case about the removal race or the
+    unreadable-pid gate runs on ANOTHER finished agent's idle tree, where that stage still removes.
+    Review point 5 (ruling point 2) is a pin: green on abf5f8e, must stay green."""
+
+    def run_in_process(self, agent, path):
+        """`handle()` on a SubagentStop payload for AGENT, in this process. CLAUDE_PID names this test
+        process, so its children are host-started, as fire_under_host sets them."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent, "cwd": path,
+                              "session_id": "agent-end-wt-cases"})
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg, "CLAUDE_PID": str(os.getpid())}):
+            return self.reap.handle(payload)
+
+    def row_for(self, record, path):
+        for row in record.get("worktrees") or []:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(path):
+                return row
+        return None
+
+    def lock_reason(self, path):
+        """The text after `locked` for PATH in `git worktree list --porcelain`, or None when unlocked."""
+        out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
+        for block in out.split("\n\n"):
+            lines = block.splitlines()
+            if not lines or not lines[0].startswith("worktree "):
+                continue
+            if _norm_path(lines[0][len("worktree "):]) != _norm_path(path):
+                continue
+            for line in lines[1:]:
+                if line == "locked" or line.startswith("locked "):
+                    return line[len("locked"):].strip()
+        return None
+
+    @staticmethod
+    def dead_pid():
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        pid = gone.pid
+        del gone  # Windows reads an exited pid as live while this process still holds its handle
+        gc.collect()
+        return pid
+
+    def sleeper(self, cwd):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        return proc
+
+    def test_a_process_inside_a_sibling_tree_is_never_stopped(self):
+        """Review point 1, guard: green on abf5f8e. The stop covers the ending agent's own tree only. The
+        sibling is aged 31 minutes, so only the process inside it can keep it."""
+        own, sibling = self.add("sibown"), self.add("sibproc")
+        proc = self.sleeper(sibling)
+        inside, _unreadable = sweep.processes_in(sibling)
+        self.assertIn(proc.pid, inside or [], "the fixture process is not inside the sibling")
+        control = self.control_tree("sibctl")
+        _age_admin_files(sibling, 31 * 60)
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
+                                "the sibling is not 31 min idle")
+        self.age_control(control)
+        self.fire_under_host("sibown", own)
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(control="own tree with no process inside is kept for the delayed remover"):
+            self.assert_own_left(own)
+        with self.subTest(arm="process inside a sibling tree"):
+            self.assertIsNone(proc.poll(), "a process inside a sibling tree was stopped")
+            self.assertKept(sibling)
+
+    def test_a_process_the_host_did_not_start_is_not_stopped_inside_the_own_tree(self):
+        """Review point 1, guard: green on abf5f8e. This reads ruling point 1 as "the host's processes
+        only". A grandchild of a live sponsor outside the host chain keeps the tree and runs on. To
+        confirm with the owner."""
+        own = self.add("spon")
+        pidfile = os.path.join(self.root, "grand.pid")
+        sponsor_code = ("import subprocess, sys, time\n"
+                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
+                        " cwd=sys.argv[1])\n"
+                        "with open(sys.argv[2], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n"
+                        "time.sleep(120)\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, own, pidfile], cwd=self.root,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, sponsor)
+        grand = int(_read_when_ready(pidfile))
+        self.addCleanup(sweep.send_signal, grand)  # the fixture's own grandchild outlives its sponsor
+        inside, _unreadable = sweep.processes_in(own)
+        self.assertIn(grand, inside or [], "the fixture grandchild is not inside the own worktree")
+        self.fire_under_host("spon", own)
+        with self.subTest(arm="grandchild of a sponsor the host did not start"):
+            self.assertTrue(sweep.pid_alive(grand), "a process the host did not start was stopped")
+            self.assertKept(own)
+
+    def test_an_unreadable_pid_outside_the_host_is_out_of_scope(self):
+        """Review point 2, guard, re-pointed 2026-10-15 23:01 CDT. An unreadable pid that does not descend
+        from the host is out of scope at agent end, as WorktreeProcessPreCheckTests states for the pre-check.
+        The own tree is always kept now, so the unreadable-host-descendant case that sat beside this one is
+        removed (its gate only ever kept the own tree). This case runs on ANOTHER finished agent's idle tree,
+        which the stage still removes. The pid's parent is a sponsor that has exited, so no host sits on its
+        chain. Windows reads an exited parent as no parent. POSIX reparents such an orphan to init, which
+        host_pids() holds as an ancestor of the hook, so this arm runs on Windows only."""
+        if sys.platform != "win32":
+            self.skipTest("POSIX reparents an orphan to init, which host_pids() holds as an ancestor")
+        ending, subject = self.add("unrend"), self.control_tree("unrout")
+        pidfile = os.path.join(self.root, "unrout.pid")
+        sponsor_code = ("import subprocess, sys\n"
+                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
+                        " cwd=sys.argv[2])\n"
+                        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, self.root],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        sponsor.wait(timeout=30)  # the sponsor exits; its child is now an orphan
+        orphan = int(_read_when_ready(pidfile))
+        self.addCleanup(sweep.send_signal, orphan)  # the fixture's own process
+        real = sweep.process_cwd
+
+        def hidden(pid):
+            return None if pid == orphan else real(pid)
+
+        self.age_control(subject)
+        with mock.patch.object(sweep, "process_cwd", new=hidden):
+            record = self.run_in_process("unrend", ending)
+        with self.subTest(arm="own tree is kept for the delayed remover"):
+            row = self.row_for(record, ending)
+            self.assertIsNotNone(row, "the stage wrote no row for the own tree")
+            self.assertIn("left for the delayed remover", str(row.get("reason")))
+        with self.subTest(arm="unreadable pid outside the host does not keep another idle tree"):
+            self.assertRemoved(subject)
+
+    def test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock(self):
+        """Review point 3, re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree. The own
+        tree is always kept now, so no own-tree removal reaches its unlock. decide_agent_end_worktree reads
+        idle first, decide_worktree reads a stale lock early (sweep.py ~666), and remove_worktree unlocks by
+        name later (~2189). A live lock taken in between must keep the tree and survive. The injection runs
+        inside processes_in: after the lock read, before the unlock. The lock names a separate child, never a
+        host pid. Red on abf5f8e: the unlock clears the live lock by name. The control twin has the same
+        dead-pid lock with no injection, and must be removed, so the case reaches the unlock path."""
+        ending = self.add("relend")
+        control, subject = self.control_tree("reltwin"), self.control_tree("relock")
+        dead = self.dead_pid()
+        self.lock(control, "claude agent agent-reltwin (pid %d)" % dead)
+        self.lock(subject, "claude agent agent-relock (pid %d)" % dead)
+        holder = self.sleeper(self.root)
+        live = "claude agent agent-relock (pid %d)" % holder.pid
+        real_processes_in = sweep.processes_in
+        injected = []
+
+        def take_live_lock(path):
+            found = real_processes_in(path)
+            if _norm_path(path) == _norm_path(subject):
+                injected.append(path)
+                # The other session's act, between the lock read and the unlock.
+                require(run_vcs(self.primary, "worktree", "unlock", subject).returncode == 0,
+                        "unlock in the window failed")
+                self.lock(subject, live)
+            return found
+
+        self.age_control(control)
+        self.age_control(subject)
+        with mock.patch.object(sweep, "processes_in", new=take_live_lock):
+            self.run_in_process("relend", ending)
+        with self.subTest(control="dead-pid lock, no injection, is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="live lock taken between the lock read and the unlock"):
+            self.assertTrue(injected, "the fault never landed: processes_in was not read for the subject")
+            self.assertKept(subject)
+            self.assertEqual(self.lock_reason(subject), live, "the live lock was cleared or replaced")
+
+    def test_a_worktree_remove_cut_short_by_its_timeout_is_not_left_half_removed(self):
+        """Review point 4. guard._git kills `git worktree remove` at 10 s (hooks/guard_core.py
+        ~800) and returns None, so a removal cut short can leave a half-removed tree. Red on abf5f8e:
+        the row says "remove failed" and the tree stays, with nothing that says it was cut short.
+        The fault is SIMULATED, not measured: the first worktree remove with a finite timeout deletes
+        one tracked file and raises TimeoutExpired. Git calls without a timeout run for real, so a
+        builder who drops the timeout, or moves the removal into a detached child, is not faulted.
+        Re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept
+        now, so the first finite-timeout remove the fault targets is the other tree's, matched by name."""
+        ending = self.add("cutend")
+        subject = self.control_tree("cutshort")
+        name = os.path.basename(subject)
+        real_run = subprocess.run
+        injected = []
+
+        def cut_short(argv, *args, **kwargs):
+            timeout = kwargs.get("timeout")
+            if (not injected and isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
+                    and timeout is not None and any(name in str(part) for part in argv)):
+                injected.append(argv)
+                os.remove(os.path.join(subject, "f.txt"))
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return real_run(argv, *args, **kwargs)
+
+        self.age_control(subject)
+        with mock.patch.object(subprocess, "run", new=cut_short):
+            first = self.run_in_process("cutend", ending)
+        self.assertTrue(injected, "the fault never landed: no finite-timeout worktree remove ran for the subject")
+        if os.path.exists(subject):
+            with self.subTest(arm="tree left behind by the cut-short remove"):
+                row = self.row_for(first, subject) or {}
+                self.assertRegex(json.dumps(row), r"cut[- ]short",
+                                 "a cut-short removal left the tree and did not say so")
+            with self.subTest(arm="the next run finishes the removal"):
+                # A fresh ending tree: on 8209120 the first run already removed `ending`, so the next run has
+                # no target. The subject is aged again, since the first run's git calls reset its idle time.
+                finisher = self.add("cutnext")
+                self.age_control(subject)
+                self.run_in_process("cutnext", finisher)
+                self.assertRemoved(subject)
+        else:
+            self.assertRemoved(subject)
+
+    def test_a_clean_pushed_tree_holding_git_ignored_files_is_removed(self):
+        """Review point 5 (ruling point 2), a pin: green on abf5f8e, must stay green. A clean, pushed
+        tree goes even when it holds git-ignored files (build output, .env.local). Re-pointed 2026-10-15
+        23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept now. The proof reads
+        show the files are ignored and not untracked, so the case tests the ruling and not a fixture that
+        never took. Both trees are aged last, after every git read."""
+        with open(os.path.join(self.primary, ".git", "info", "exclude"), "a", encoding="utf-8") as handle:
+            handle.write(".env.local\nbuild/\n")
+        ending = self.add("igned")
+        control, subject = self.control_tree("igntwin"), self.control_tree("ign")
+        write(os.path.join(subject, ".env.local"), "API_TOKEN=test-only\n")
+        write(os.path.join(subject, "build", "out.bin"), "built\n")
+        self.assertEqual(guard.porcelain(subject), [], "the fixture tree is not clean")
+        self.assertTrue(any(line.startswith("!! ") for line in guard.porcelain(subject, ignored=True)),
+                        "the fixture files are not git-ignored")
+        self.age_control(control)
+        self.age_control(subject)
+        self.fire("igned", ending)
+        with self.subTest(control="clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="clean, pushed, holding ignored files, idle 31 min"):
+            self.assertRemoved(subject)
 
 
 BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
@@ -5226,6 +5863,545 @@ class SimulatorTierActTests(unittest.TestCase):
                          sorted((d["udid"], d["action"]) for d in act),
                          "a preview predicted a different verdict than the act")
         self.assertEqual(world.shutdowns(), [SIM_U1])
+
+
+# --------------------------------------------------------------------------- the sweep finishes
+#
+# Owner ruling 2026-10-15 15:08 CDT ("make the janitor sweep finish"). Measured: `decide_worktree`
+# costs about 7.5 s per tree, and SessionEnd gives the whole sweep 25 s. Owner ruling 2026-10-15
+# 12:40 (decision test-strategy-reset): no case times a run on a local device. These cases count
+# calls and drive an injected clock.
+#
+# The contract the builder must honour. The seams are set with `create=True`, so they exist only
+# inside these cases:
+#   sweep._now                  zero-argument callable, seconds. `main` reads it once when the pass
+#                               starts. The deadline is that reading plus the budget.
+#   sweep.JUDGE_BUDGET_SECONDS  the budget for the WHOLE pass: the idle sort, the judging, the
+#                               removals, the branch loop, the folder scans and reaps, and the
+#                               process reaps. Not the judging alone.
+# A deadline comes only from an explicit `--deadline-seconds N`, the time left that
+# session_end_sweep.py passes. The budget is N minus a tail, never more than JUDGE_BUDGET_SECONDS
+# (12 s in the product). A run with no `--deadline-seconds` has no deadline and judges every tree
+# and every phase, however late the clock is: the scheduled `--confirm`, a person's bare
+# `--confirm`, `--attended`, or a plain preview (owner ruling 2026-10-15 15:08 CDT: only the
+# SessionEnd run has a deadline).
+# In the SessionEnd run, one deadline covers every phase in TIMED_PHASES. Each phase checks the
+# clock before it starts, and none starts at or past the deadline. No git read whose `-C` folder is
+# a tree starts at or past the deadline, the per-tree primary-checkout read included. Each tree's
+# idle time is read once per pass: the oldest-first sort and the decision share that one read. A
+# tree the pass did not judge gets a decision in the result: action "keep", reason starting "not
+# judged". Its folder stays on disk. A stale agent lock is re-read just before the tree is unlocked,
+# so a live lock taken after the listing keeps the tree.
+#
+# Each case reads `self.events`: the (phase, clock) pair at every timed phase start. A violation
+# names the phase that started late. `self.git_reads` holds (clock, git argv) for every git call.
+
+TREE_IDLE_HOURS = (("wt-a", 2), ("wt-b", 3), ("wt-c", 4), ("wt-d", 5), ("wt-e", 6))
+BUDGET = 15.0  # seconds: the deadline is BUDGET past the clock's reading when the pass starts
+
+# (sweep function, phase name, runs for real). A listener reap signals a process, so its wrapper
+# records the start and never calls through: no case here signals a process.
+TIMED_PHASES = (
+    ("worktree_idle_seconds", "idle read", True),
+    ("remove_worktree", "removal", True),
+    ("decide_branch", "branch decision", True),
+    ("reap_branch", "branch reap", True),
+    ("find_husks", "husk scan", True),
+    ("find_trash", "trash scan", True),
+    ("reap_trash", "trash reap", True),
+    ("find_swept_listeners", "listener read", True),
+    ("reap_listener", "process reap", False),
+    ("find_dead_rooted", "dead-rooted read", True),
+    ("find_loose_processes", "loose-process read", True),
+    ("sim_tier", "simulator tier", True),
+)
+
+
+@contextlib.contextmanager
+def _no_deadline():
+    """A pass whose clock never reaches its deadline."""
+    with mock.patch.object(sweep, "_now", lambda: 0.0, create=True), \
+            mock.patch.object(sweep, "JUDGE_BUDGET_SECONDS", 1e9, create=True):
+        yield
+
+
+@contextlib.contextmanager
+def _clock_and_budget(clock, budget):
+    """The seams read CLOCK[0], a mutable list the test advances."""
+    with mock.patch.object(sweep, "_now", lambda: clock[0], create=True), \
+            mock.patch.object(sweep, "JUDGE_BUDGET_SECONDS", budget, create=True):
+        yield
+
+
+@contextlib.contextmanager
+def _clock_only(clock):
+    """The clock seam alone: the product's own JUDGE_BUDGET_SECONDS stays in force."""
+    with mock.patch.object(sweep, "_now", lambda: clock[0], create=True):
+        yield
+
+
+def _recording(events, now, phase, real, runs, clock, idle_tick):
+    """A stand-in for one TIMED_PHASES function. Appends (phase, now()) at its start, then runs the
+    real one (a process reap runs nothing). An idle read adds IDLE_TICK seconds to CLOCK."""
+    def wrapped(*args, **kwargs):
+        events.append((phase, now()))
+        if not runs:
+            return None
+        answer = real(*args, **kwargs)
+        if phase == "idle read" and clock is not None:
+            clock[0] += idle_tick
+        return answer
+    return wrapped
+
+
+@contextlib.contextmanager
+def _timed_phases(events, clock, idle_tick):
+    now = (lambda: clock[0]) if clock is not None else (lambda: 0.0)
+    with contextlib.ExitStack() as stack:
+        for func, phase, runs in TIMED_PHASES:
+            stack.enter_context(mock.patch.object(
+                sweep, func, _recording(events, now, phase, getattr(sweep, func), runs, clock,
+                                        idle_tick)))
+        yield
+
+
+@contextlib.contextmanager
+def _timed_git(log, clock):
+    """Append (clock, argv) for every `git` call, the clock as it stood when the call started. It
+    wraps whatever `subprocess.run` is current, so enter it after `_watch_git`."""
+    real = subprocess.run
+    now = (lambda: clock[0]) if clock is not None else (lambda: 0.0)
+
+    def run(args, *a, **k):
+        if isinstance(args, (list, tuple)) and args and str(args[0]) == "git":
+            log.append((now(), [str(x) for x in args]))
+        return real(args, *a, **k)
+
+    with mock.patch("subprocess.run", run):
+        yield
+
+
+def _starts_at_or_after(events, phases, deadline):
+    """The (phase, clock) starts in EVENTS that name one of PHASES and begin at or past DEADLINE."""
+    return ["%s at %gs" % (phase, t) for phase, t in events if phase in phases and t >= deadline]
+
+
+def _is_worktree_list(argv):
+    return any(argv[i:i + 2] == ["worktree", "list"] for i in range(len(argv) - 1))
+
+
+def _is_pushed_check(argv):
+    """The pushed check in any shape a builder may pick: one `rev-list --stdin` over the remote
+    heads, or a `--contains` ref walk (`branch -r --contains`, `for-each-ref --contains`)."""
+    return ("rev-list" in argv and "--stdin" in argv) or "--contains" in argv
+
+
+class SweepFinishesTests(unittest.TestCase):
+    """A sweep pass over one repository with TREE_IDLE_HOURS linked trees. Each tree is detached at
+    main's tip, pushed (main is on the bare remote), clean, and idle for its hours, so the strict
+    rule reaps it. The pass runs through `sweep.main`, the path SessionEnd takes."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="finish-", dir=ROOT)  # short: Windows path length
+        self.repo = os.path.join(self.base, "r")
+        make_repo(self.repo, {"f.txt": "base\n"})
+        give_remote(self.repo)
+        self.restore_log = os.path.join(self.base, "restore.log")
+        self.trees = {}  # name -> folder
+        for name, hours in TREE_IDLE_HOURS:
+            path = os.path.join(self.base, name)
+            made = run_vcs(self.repo, "worktree", "add", "-q", "--detach", path, "main")
+            require(made.returncode == 0, "worktree add %r failed: %s" % (path, made.stderr.strip()))
+            _age_admin_files(path, hours * 3600)
+            self.trees[name] = path
+        self.oldest_first = [name for name, _ in sorted(TREE_IDLE_HOURS, key=lambda t: -t[1])]
+
+    def run_pass(self, argv, clock=None, budget=None, tick=10.0, idle_tick=0.0, extra=None):
+        """One `sweep.main` pass. Returns (git argv calls, result dicts, tree names in the order the
+        pass judged them). CLOCK, when given, is a mutable [seconds]; each judged tree adds TICK
+        seconds and each idle read adds IDLE_TICK, so the clock passes the deadline after a fixed
+        count of phases, however often the builder reads it. EXTRA is one context manager, entered
+        after the machine-wide stubs, for a case that sets one of their results. self.events holds
+        the (phase, clock) pair at each TIMED_PHASES start in this pass."""
+        calls, results, judged = [], [], []
+        self.events = []
+        self.git_reads = []
+        real_decide = sweep.decide_worktree
+
+        def judging(where, entry, *args, **kwargs):
+            judged.append(os.path.basename(entry["path"]))
+            decision = real_decide(where, entry, *args, **kwargs)
+            if clock is not None:
+                clock[0] += tick
+            return decision
+
+        def capture(found, confirm, out=None):
+            results.extend(found)
+
+        if clock is None:
+            seams = _no_deadline()
+        elif budget is None:
+            seams = _clock_only(clock)
+        else:
+            seams = _clock_and_budget(clock, budget)
+        with _watch_git(calls), _timed_git(self.git_reads, clock), _process_table({}), \
+                _machine_quiet(), seams, \
+                (extra or contextlib.nullcontext()), \
+                _timed_phases(self.events, clock, idle_tick), \
+                mock.patch.object(sweep, "decide_worktree", judging), \
+                mock.patch.object(sweep, "print_sweep_report", side_effect=capture), \
+                mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": os.path.join(self.base, "runs.jsonl")}):
+            try:
+                sweep.main([self.repo, *argv, "--restore-log", self.restore_log])
+            except SystemExit as exc:  # argparse refused an argument
+                if "--deadline-seconds" not in argv:
+                    raise
+                self.fail("sweep.py rejects --deadline-seconds (exit %r): the SessionEnd time "
+                          "left cannot reach the sweep" % (exc.code,))
+        return calls, results, judged
+
+    def assert_one_root(self, results):
+        self.assertEqual(len(results), 1, "the pass reported %d roots, not 1" % len(results))
+
+    def assert_unjudged_trees_kept(self, results, judged):
+        self.assert_one_root(results)
+        decisions = {os.path.basename(d["path"]): d for d in results[0]["worktrees"]}
+        for name, path in self.trees.items():
+            self.assertIn(name, decisions, "no decision for %s" % name)
+            if name in judged:
+                continue
+            self.assertEqual(decisions[name]["action"], "keep", decisions[name])
+            self.assertTrue(decisions[name]["reason"].startswith("not judged"), decisions[name])
+            self.assertTrue(os.path.isdir(path), "%s was removed though the pass did not judge it"
+                            % name)
+
+    def assert_each_git_fact_read_once(self, calls, mode):
+        counts = {"worktree list": sum(_is_worktree_list(c) for c in calls),
+                  "ls-remote": sum("ls-remote" in c for c in calls),
+                  "pushed check": sum(_is_pushed_check(c) for c in calls)}
+        over = {k: v for k, v in counts.items() if v > 1}
+        self.assertEqual(over, {}, "a %s pass over %d trees ran these more than once: %r (all: %r)"
+                         % (mode, len(self.trees), over, counts))
+
+    def test_a_preview_pass_reads_each_git_fact_once_not_once_per_tree(self):
+        calls, _results, _judged = self.run_pass([])
+        self.assert_each_git_fact_read_once(calls, "preview")
+
+    def test_a_confirm_pass_reads_each_git_fact_once_not_once_per_tree(self):
+        calls, _results, _judged = self.run_pass(["--confirm"])
+        self.assert_each_git_fact_read_once(calls, "confirm")
+
+    def test_a_pass_past_its_deadline_stops_judging_and_reports_the_rest_not_judged(self):
+        # Budget 15 s, 10 s a judged tree: the clock reads 0, then 10, then 20. The pass judges two.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=15.0, tick=10.0)
+        self.assertEqual(len(results), 1, "the pass reported %d roots, not 1" % len(results))
+        self.assertEqual(len(judged), 2, "a 15 s budget at 10 s a tree judges 2 trees; the pass "
+                                         "judged %r" % judged)
+        decisions = {os.path.basename(d["path"]): d for d in results[0]["worktrees"]}
+        for name in self.trees:
+            if name in judged:
+                continue
+            decision = decisions.get(name)
+            self.assertIsNotNone(decision, "no decision for %s, which the pass did not judge" % name)
+            self.assertEqual(decision["action"], "keep", decision)
+            self.assertTrue(decision["reason"].startswith("not judged"), decision)
+            self.assertTrue(os.path.isdir(self.trees[name]),
+                            "%s was removed though the pass did not judge it" % name)
+        removed = [n for n, d in decisions.items() if d["action"] == "reap" and not d.get("error")]
+        self.assertLessEqual(len(removed), len(judged),
+                             "the pass removed %r, more than the %r it judged" % (removed, judged))
+
+    def test_the_oldest_idle_tree_is_judged_first(self):
+        listed = [os.path.basename(e["path"]) for e in sweep.parse_worktree_list(self.repo) or []
+                  if os.path.basename(e["path"]) in self.trees]
+        self.assertNotEqual(listed, self.oldest_first, "the listing is already oldest-first, so this "
+                            "case cannot tell the order apart")
+        _calls, _results, judged = self.run_pass(["--confirm"])
+        self.assertEqual(judged, self.oldest_first, "judged %r; the oldest idle tree must go first, "
+                                                    "not the listing order %r" % (judged, listed))
+
+    def test_idle_reads_count_against_the_one_deadline(self):
+        # The oldest-first sort reads idle for every tree before the first judge. Here each idle
+        # read costs 10 s of the 15 s budget, so the second read ends the budget. No idle read may
+        # start at or past the deadline. The rest of the pass is "not judged"; every folder stays.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=0.0,
+                                                idle_tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        self.assertTrue(any(phase == "idle read" for phase, _t in self.events),
+                        "no idle read ran, so this case proved nothing")
+        late = _starts_at_or_after(self.events, ("idle read",), BUDGET)
+        self.assertEqual(late, [], "idle was read at or past the %g s deadline" % BUDGET)
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def test_a_live_lock_taken_after_the_listing_keeps_the_tree(self):
+        # wt-c is listed under a dead agent's lock, so the pass judges it removable and unlocks it.
+        # A live agent then takes the lock, after that judgment and before the removal. The tree
+        # must stay.
+        path = self.trees["wt-c"]
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        # The dead stamp is a fixed 2015 date, as the reused-pid case in StaleAgentLockTests uses.
+        # A stamp near now can match the child's own start (Windows still reads an exited pid that
+        # this process holds open), and then the lock is not stale.
+        dead = "claude agent agent-dead (pid %d start Thu Jan 01 00:00:00 2015)" % gone.pid
+        own = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
+        live = "claude agent agent-live (pid %d start %s)" % (os.getpid(), own)
+        require(run_vcs(self.repo, "worktree", "lock", "--reason", dead, path).returncode == 0,
+                "locking wt-c failed")
+        real_decide = sweep.decide_worktree
+        relocked, seen = [], []
+
+        def live_agent_takes_the_lock(where, entry, *args, **kwargs):
+            decision = real_decide(where, entry, *args, **kwargs)
+            if _norm_path(entry["path"]) == _norm_path(path):
+                seen.append(decision)
+                if decision.get("unlock") and not relocked:
+                    relocked.append(decision)
+                    require(run_vcs(self.repo, "worktree", "unlock", path).returncode == 0,
+                            "unlock of wt-c failed")
+                    took = run_vcs(self.repo, "worktree", "lock", "--reason", live, path)
+                    require(took.returncode == 0, "the live lock on wt-c failed")
+            return decision
+
+        with mock.patch.object(sweep, "decide_worktree", live_agent_takes_the_lock):
+            _calls, results, _judged = self.run_pass(["--confirm"])
+        self.assertEqual(len(relocked), 1, "wt-c was never judged removable under its stale lock, "
+                                           "so this case proved nothing; judged %r" % seen)
+        self.assertTrue(os.path.isdir(path), "wt-c was removed after a live agent took its lock")
+        held = [e for e in sweep.parse_worktree_list(self.repo)
+                if _norm_path(e["path"]) == _norm_path(path)]
+        self.assertEqual(held[0]["locked_reason"], live, "the live lock on wt-c did not survive")
+        self.assert_one_root(results)
+        decision = [d for d in results[0]["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
+        self.assertTrue(decision, "no decision for wt-c")
+        self.assertFalse(decision[0]["action"] == "reap" and not decision[0].get("error"),
+                         decision[0])
+
+    def test_no_branch_or_process_phase_starts_past_the_deadline(self):
+        # One branch merged into main and checked out nowhere, so the branch loop has work to do.
+        # The machine-wide read reports one dead-rooted server, so the process reap has work too.
+        run_vcs(self.repo, "branch", "lane-done", "main")
+        dead_rooted = {"pid": 987654, "command": "node /gone/app.js", "missing": "/gone/app.js",
+                       "home": "/gone", "action": "reap", "reason": "dead-rooted-server"}
+        extra = mock.patch.multiple(sweep, find_dead_rooted=mock.Mock(return_value=[dead_rooted]),
+                                    print_grace_period_report=mock.Mock())
+        clock = [0.0]
+        _calls, results, _judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET,
+                                                 tick=10.0, extra=extra)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        phases = ("branch decision", "branch reap", "listener read", "dead-rooted read",
+                  "loose-process read", "simulator tier", "process reap")
+        late = _starts_at_or_after(self.events, phases, BUDGET)
+        self.assertEqual(late, [], "phases started at or past the %g s deadline" % BUDGET)
+        self.assert_one_root(results)
+        named = {os.path.basename(d["path"]) for d in results[0]["worktrees"]}
+        self.assertEqual(sorted(set(self.trees) - named), [], "trees with no decision")
+
+    def test_no_removal_starts_past_the_deadline(self):
+        # Budget 15 s, 10 s a judged tree: the first removal starts at 10 s, the second at 20 s.
+        clock = [0.0]
+        _calls, results, _judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET,
+                                                 tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = _starts_at_or_after(self.events, ("removal",), BUDGET)
+        self.assertEqual(late, [], "removals started at or past the %g s deadline" % BUDGET)
+        self.assert_one_root(results)
+
+    def tree_reads_at_or_after(self, deadline):
+        """Each git read in the pass whose `-C` folder is one of the trees and that started at or
+        past DEADLINE, as text for a failure message."""
+        trees = {_norm_path(p) for p in self.trees.values()}
+        late = []
+        for started, argv in self.git_reads:
+            if started < deadline or "-C" not in argv:
+                continue
+            folder = argv[argv.index("-C") + 1]
+            if _norm_path(folder) in trees:
+                late.append("%s at %gs" % (" ".join(argv[argv.index("-C"):]), started))
+        return late
+
+    def counted_idle_reads(self):
+        """(counts, patch). COUNTS maps each folder to the worktree_idle_seconds calls made on it;
+        PATCH is an `extra` for run_pass that counts them. A preview reads on threads: a lock."""
+        counts, lock = {}, threading.Lock()
+        real_idle = sweep.worktree_idle_seconds
+
+        def counting(path, *args, **kwargs):
+            with lock:
+                key = _norm_path(path)
+                counts[key] = counts.get(key, 0) + 1
+            return real_idle(path, *args, **kwargs)
+
+        return counts, mock.patch.object(sweep, "worktree_idle_seconds", counting)
+
+    def assert_each_tree_idle_read_once(self, argv):
+        counts, patch = self.counted_idle_reads()
+        self.run_pass(argv, extra=patch)
+        self.assertTrue(counts, "no idle read ran, so this case proved nothing")
+        for name, path in self.trees.items():
+            n = counts.get(_norm_path(path), 0)
+            self.assertEqual(n, 1, "%s: worktree_idle_seconds ran %d times in one %r pass; want 1 "
+                                   "(the oldest-first sort and the decision share one read)"
+                             % (name, n, argv))
+
+    def test_each_tree_idle_is_read_once_in_a_confirm_pass(self):
+        self.assert_each_tree_idle_read_once(["--confirm"])
+
+    def test_each_tree_idle_is_read_once_in_a_preview_pass(self):
+        self.assert_each_tree_idle_read_once([])
+
+    def test_no_git_read_in_a_tree_folder_starts_past_the_deadline(self):
+        # Trees 3 to 5 are reached only after two judged trees tick the clock past the deadline.
+        clock = [0.0]
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = self.tree_reads_at_or_after(BUDGET)
+        self.assertEqual(late, [], "git reads in a tree folder started at or past the %g s "
+                                   "deadline: %r" % (BUDGET, late))
+
+    def test_no_husk_or_trash_scan_starts_past_the_deadline(self):
+        clock = [0.0]
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = _starts_at_or_after(self.events, ("husk scan", "trash scan"), BUDGET)
+        self.assertEqual(late, [], "folder scans started at or past the %g s deadline" % BUDGET)
+
+    def test_no_trash_reap_starts_past_the_deadline(self):
+        # A linked tree under the repository's own .claude/worktrees holds a trash folder that a
+        # reap would delete. Each idle read costs 20 s, so the clock passes the deadline inside the
+        # sort, before any folder scan starts.
+        tree = os.path.join(self.repo, ".claude", "worktrees", "agent-trash")
+        made = run_vcs(self.repo, "worktree", "add", "-q", "--detach", tree, "main")
+        require(made.returncode == 0, "worktree add %r failed: %s" % (tree, made.stderr.strip()))
+        folder = sweep.trash_name(os.path.join(tree, "build"))
+        os.makedirs(folder)
+        verdict = sweep.trash_verdict(folder)
+        require(verdict[0] is True, "the trash folder is not reapable on this machine: %r"
+                % (verdict,))
+        clock = [0.0]
+        self.run_pass(["--confirm", "--deadline-seconds", "1000"], clock=clock, budget=BUDGET, tick=0.0, idle_tick=20.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        late = _starts_at_or_after(self.events, ("trash reap",), BUDGET)
+        self.assertEqual(late, [], "trash reaps started at or past the %g s deadline" % BUDGET)
+        self.assertTrue(os.path.isdir(folder), "a trash folder was reaped past the deadline")
+
+    def assert_a_person_run_has_no_deadline(self, argv):
+        # One branch merged into main and checked out nowhere, so the branch loop has work to do.
+        run_vcs(self.repo, "branch", "lane-done", "main")
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(argv, clock=clock, budget=BUDGET, tick=10.0)
+        self.assertGreaterEqual(clock[0], BUDGET, "the pass never reached its deadline, so this "
+                                                  "case proved nothing")
+        self.assert_one_root(results)
+        reasons = [d["reason"] for d in results[0]["worktrees"] + results[0]["branches"]]
+        late = [r for r in reasons if "deadline" in r]
+        self.assertEqual(late, [], "a %r run has no deadline, yet these decisions cite one: %r"
+                         % (argv, late))
+        self.assertIsNotNone(results[0]["listeners"],
+                             "the listener read was skipped in a %r run" % (argv,))
+        ran = {phase for phase, _t in self.events}
+        for phase in ("branch decision", "listener read", "dead-rooted read"):
+            self.assertIn(phase, ran, "%s never ran in a %r run past the deadline" % (phase, argv))
+        self.assertEqual(sorted(set(self.trees) - set(judged)), [],
+                         "trees the %r run did not judge" % (argv,))
+
+    def test_a_preview_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline([])
+
+    def test_an_attended_preview_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline(["--attended"])
+
+    def test_an_attended_confirm_run_has_no_deadline(self):
+        self.assert_a_person_run_has_no_deadline(["--attended", "--confirm"])
+
+    def test_a_bare_confirm_run_has_no_deadline(self):
+        # The scheduled job and a person's bare `--confirm` send this argv. Only a run that passes
+        # --deadline-seconds (the SessionEnd run) has a deadline (owner ruling 2026-10-15 15:08 CDT).
+        self.assert_a_person_run_has_no_deadline(["--confirm"])
+
+    def test_a_session_end_budget_is_capped_at_12_seconds(self):
+        # N is far above the cap, so the 12 s cap is the only bound. The product's own budget
+        # constant stays in force (clock seam only). A read at 12 s or later must not start.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "1000"],
+                                                clock=clock, tick=10.0)
+        self.assertGreaterEqual(clock[0], 12.0, "the pass never reached 12 s, so this case "
+                                                "proved nothing")
+        late = self.tree_reads_at_or_after(12.0)
+        self.assertEqual(late, [], "a 1000 s budget read a tree at or past the 12 s cap: %r"
+                         % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def test_a_session_end_budget_is_its_value_minus_a_tail(self):
+        # N is 10 s and the second tree read starts at 9.99 s. A budget of exactly N would let that
+        # read start (9.99 < 10), so refusing it pins a tail of at least 0.01 s.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "10"],
+                                                clock=clock, tick=9.99)
+        self.assertGreaterEqual(clock[0], 9.99, "the pass never reached 9.99 s, so this case "
+                                                "proved nothing")
+        late = self.tree_reads_at_or_after(9.99)
+        self.assertEqual(late, [], "a 10 s budget read a tree at or past 9.99 s, so its budget "
+                                   "is not N minus a tail: %r" % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def test_a_two_second_budget_starts_no_tree_or_idle_read_at_or_past_two_seconds(self):
+        # Idle reads cost 1.5 s each, so a third idle read would start at 3 s. Neither a tree read
+        # nor an idle read may start at or past 2 s. Every tree keeps a decision either way.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "2"],
+                                                clock=clock, tick=10.0, idle_tick=1.5)
+        late = self.tree_reads_at_or_after(2.0)
+        self.assertEqual(late, [], "git reads in a tree folder started at or past 2 s: %r"
+                         % (late,))
+        late_idle = _starts_at_or_after(self.events, ("idle read",), 2.0)
+        self.assertEqual(late_idle, [], "idle reads started at or past 2 s: %r" % (late_idle,))
+        self.assert_unjudged_trees_kept(results, judged)
+
+    def assert_no_tree_judged(self, value):
+        """A `--deadline-seconds VALUE` pass with no time left judges no tree. Each tree is kept as
+        "not judged", and no git read starts in a tree folder."""
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", value],
+                                                clock=clock, tick=10.0)
+        self.assertEqual(judged, [], "a %s budget judged %r; it has no time left" % (value, judged))
+        self.assert_unjudged_trees_kept(results, judged)
+        self.assertEqual(self.tree_reads_at_or_after(0.0), [],
+                         "a %s budget read a tree folder" % (value,))
+
+    def test_a_nan_deadline_has_no_time_left_and_judges_no_tree(self):
+        # `nan - 7.5` is nan, and min(12, nan) is 12, so only the NaN branch makes the budget 0.
+        # A NaN is no time left, never no deadline.
+        self.assert_no_tree_judged("nan")
+
+    def test_a_negative_deadline_has_no_time_left_and_judges_no_tree(self):
+        self.assert_no_tree_judged("-5")
+
+    def test_a_7_5_second_deadline_is_all_tail_so_its_budget_is_zero(self):
+        self.assert_no_tree_judged("7.5")
+
+    def test_a_25_second_deadline_gives_a_12_second_budget(self):
+        # 25 minus the 7.5 s tail is 17.5 s, so the 12 s cap is the bound. A 6 s tick puts the tree
+        # reads at 0, 6, 12 and 18 s: 0 and 6 start, 12 is refused. A 17.5 s budget would start the
+        # read at 12 s, and a 10 s tick cannot tell 12 s from 17.5 s.
+        clock = [0.0]
+        _calls, results, judged = self.run_pass(["--confirm", "--deadline-seconds", "25"],
+                                                clock=clock, tick=6.0)
+        self.assertGreaterEqual(clock[0], 12.0, "the pass never reached 12 s, so this case "
+                                                "proved nothing")
+        self.assertEqual(len(judged), 2, "a 25 s deadline judged %r; its budget is 12 s, so 2 "
+                                         "trees start before 12 s" % (judged,))
+        late = self.tree_reads_at_or_after(12.0)
+        self.assertEqual(late, [], "a 25 s deadline read a tree at or past 12 s: %r" % (late,))
+        self.assert_unjudged_trees_kept(results, judged)
 
 
 if __name__ == "__main__":
