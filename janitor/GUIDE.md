@@ -19,10 +19,9 @@ kinds. The first is an orphaned TCP listener inside a repository or worktree thi
 sweep covers. The second is an orphaned dead-rooted server. The third is an iOS
 simulator that a session booted. The first two must be owned by the account
 running the sweep. See "Orphaned TCP listeners" and "Dead-rooted servers" below.
-A simulator is machine-wide. The sweep stops one only under the rules of decisions
-record sweep-shuts-down-idle-simulators (the shutdown tier). Those rules allow it
-to stop only a device that a session booted, that is idle, and that the owner did
-not boot.
+A simulator is machine-wide. The sweep stops only a device that a session booted,
+that is idle, and that the owner did not boot (decision
+`sweep-shuts-down-idle-simulators`, the sweep stops idle simulators).
 
 The sweep never runs code that your repository supplies. It reads one file
 from your repository, and it reads that file as data.
@@ -34,11 +33,10 @@ The sweep deletes no branch that holds the only copy of its work.
 The sweep reads the state of each subject. It matches no list of names.
 
 A branch is reapable when the default branch already contains it, OR when
-`git cherry` finds every patch on the default branch. `git cherry` compares
-patch ids, so it sees through a rebase, where a commit id no longer matches.
-
-The sweep keeps a branch, and names it as the only copy, when a patch survives
-that test and no remote ref carries the branch.
+`git cherry` finds every patch on the default branch. The sweep keeps a branch,
+and names it as the only copy, when a patch survives that test and no remote ref
+carries the branch. See decision `a-branch-is-redundant-by-patch-not-by-ancestry`
+(a branch is redundant by patch).
 
 The sweep resolves your default branch in this order: `origin/HEAD`, then
 `origin/main`, `origin/master`, local `main`, local `master`. If none of the
@@ -107,14 +105,10 @@ The sweep keeps a worktree that holds uncommitted or untracked work.
 
 The sweep keeps a worktree that a live session stands in.
 
-The sweep keeps a worktree that holds a lock, and it names the holder. One
-lock is not kept: a Claude agent lock, `claude agent agent-<id> (pid N start
-<date>)`, whose host process is gone. The pid is the host Claude process, not
-the agent. Two agents of one session share one pid. So an agent worktree stays
-until its host session ends. The date is UTC. The lock is stale when the pid is
-dead, or alive with a different start time (the pid was reused). A lock that is
-not in this form, a host process that still runs, or a date or process read that
-fails keeps the worktree.
+The sweep keeps a worktree that holds a lock, and it names the holder. A stale
+Claude agent lock does not keep the worktree. The lock forms and the stale test
+are in decision `the-janitor-is-one-machine-wide-sweep` (the janitor is one
+machine-wide sweep), "A stale agent lock does not keep a worktree".
 
 A stale agent lock frees the worktree for the other checks. `--confirm` then
 unlocks and runs `git worktree remove`, never with `--force`. If the removal
@@ -126,17 +120,18 @@ The sweep keeps a worktree with a commit that is on no remote branch, and the
 reason is `unpushed`. This holds for every worktree, locked or not. A detached
 HEAD counts. A repository with no remote keeps every worktree.
 
-Every `--confirm` run adds two more keeps. It removes a worktree only when
-the worktree is merged and idle 1 hour. Merged means that HEAD holds no
-commit the default branch lacks, by ancestry or by patch. A tree that is
-only pushed is kept, and the reason is `unmerged`. Idle means that the
-newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD` under
-`.git/worktrees/<name>` is 60 minutes old. A younger tree is kept, and the
-reason is `recently-active`. A time that cannot be read keeps the tree
-(`unreadable-subject`). Strict is the default, so a job that an older
-installer wrote is strict with no reinstall. A person passes `--attended`
-for the old rules. See
-`decisions/unattended-sweep-stops-proven-orphans.md`.
+Every `--confirm` run adds two more keeps. A tree that is not merged is kept
+until it has been idle long enough, and the reason is `unmerged`. A tree with
+git activity inside the idle limit is kept, and the reason is `recently-active`.
+A time that cannot be read keeps the tree (`unreadable-subject`). The limits,
+and what idle means, are in decision `unattended-sweep-stops-proven-orphans`
+(an unattended sweep removes only proven orphans). Strict is the default, so a
+job that an older installer wrote is strict with no reinstall. A person passes
+`--attended` for the old rules.
+
+An agent worktree is removed at agent end, and by the session-end sweep, under
+its own limits. See decision `agent-end-reap-stops-what-a-finished-agent-left`
+(stops what a finished agent left).
 
 The sweep keeps a worktree that any process sits inside, not only a
 listener. It names the pids. This check runs right before the removal
@@ -198,14 +193,9 @@ A hook records each simulator that a session call booted, in
 It judges each recorded device that is `Booted`. A device the record does not
 name is never judged, so a simulator you booted yourself stays up.
 
-A device is stopped only when all of these hold. Any read that fails means keep.
-
-- Its newest record line is 1 hour or more old.
-- Its live `launchd_sim` has the pid and start time that the record names. If not,
-  someone booted the device again by hand, and the sweep keeps it.
-- No process outside the device's own `launchd_sim` tree names its UDID, its
-  name, or `booted`.
-- Simulator.app and Xcode.app are not running.
+A device is stopped only when every stop condition holds. Any read that fails
+means keep. The conditions are in decision `sweep-shuts-down-idle-simulators`
+(the sweep stops idle simulators), ruling 2.
 
 The preview lists each device with `WOULD STOP` or `KEEP` and a reason code.
 `--confirm` runs one `xcrun simctl shutdown <UDID>` per device, at most 4 per
@@ -214,8 +204,7 @@ run. The rest wait for the next run. There is no `all`, and no erase. With no
 machine-wide, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 
 The guard reuses the same idle test (`sim_keep_code` in `sweep.py`) to refuse a
-boot when an idle twin exists. See decisions record
-sweep-shuts-down-idle-simulators.
+boot when an idle twin exists (same decision).
 
 ## Loose processes
 
@@ -257,15 +246,12 @@ The preview lists each one as `husk WOULD`. A folder with a live session or any
 process inside is listed as `husk KEEP`, with the reason. An unreadable folder
 or check is KEEP.
 
-`--confirm` deletes each proven husk. Right before the delete, the sweep
-proves it again: still unregistered, still only `huskNames` entries, still no
-process inside. A folder that changed since the preview is kept. The sweep
-never follows a link: a folder that became a link is refused, and a link inside
-a husk is removed as a link. An error keeps the folder and is reported. The
-sweep walks only the repository's own `.claude/worktrees`. When that folder is a
-link out of the repository, it finds nothing. A process counts as inside by its
-current directory alone. A process outside the folder that holds a file inside
-is not seen. If the process table is empty or unreadable, the husk is kept.
+`--confirm` deletes each proven husk, after it proves the case again right
+before the delete. A folder that changed since the preview is kept. A folder
+that became a link is refused, and a link inside a husk is removed as a link.
+An error keeps the folder and is reported. The proof rules are in decision
+`the-janitor-is-one-machine-wide-sweep` (the janitor is one machine-wide
+sweep), "Leftover folders are deleted only when proven twice".
 
 This tier runs per repository, so `sweep: false` opts it out.
 
@@ -279,11 +265,10 @@ detached child then deletes the trash. The folders are `native/build`,
 one path under the worktree root. A bare name matches at any depth. `buildDirs`
 adds names and never removes a default.
 
-Four cases keep a folder. A live session or any process has its current
-directory inside it. It is a link. The worktree is a primary checkout. A read
-cannot tell. A `buildDirs` value that is not a list of strings refuses
-all build-folder deletes, defaults included. A later reap and the daily sweep
-delete trash names a child left, under the same process checks. Windows deletes build folders, husks and trash the same way, with `is_link` as the gate.
+A folder that fails a gate is kept. A `buildDirs` value that is not a list of
+strings refuses all build-folder deletes, defaults included. A later reap and
+the daily sweep delete trash names a child left. The gates are in decision
+`build-dirs-reaped-at-agent-end` (build folders are reaped at agent end).
 
 ## How you opt out
 
