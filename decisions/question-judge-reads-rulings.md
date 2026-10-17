@@ -38,4 +38,4 @@ Home: hooks/question_outcome.py
 
 ## Holes, named
 
-Debts: `judge-cap-drops-old-rulings` (the 60,000-char cap leaves out the oldest rulings). `judge-cuts-long-ruling` (a ruling over 800 chars is cut, so a late point may be missed). `judge-uncommitted-order` (an uncommitted record sorts after the listed ones). `judge-skips-other-headings` (rulings under another heading are not read). `judge-title-stem-collision` (a decisions/ and a deferred/ record with one stem collide in titles). `judge-heading-false-match` (the heading pattern matches "Ruling out" headings).
+Debts: `judge-cap-drops-old-rulings` (the 60,000-char cap leaves out the oldest rulings). `judge-cuts-long-ruling` (a ruling over 800 chars is cut, so a late point may be missed). `judge-uncommitted-order` (an uncommitted record sorts after the listed ones). `judge-skips-other-headings` (rulings under another heading are not read). `judge-heading-false-match` (the heading pattern matches "Ruling out" headings).
