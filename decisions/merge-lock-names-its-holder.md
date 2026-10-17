@@ -31,6 +31,14 @@ Home: merge/merge.py
 Incident: q_max, 2026-10-06. A live `merge 445` held an anonymous lock. An `--unlock` broke
 it, #451 merged in the gap, and #445 hit a conflict.
 
+## Holes, named
+
+- The expired-lock delete can remove a live lock. The API cannot delete a ref only if it still
+  holds a given value. Debt `expired-lock-delete-race` (two runs can hold the lock).
+- Debts that sit on the same lock path: `lock-delete-retry-window` (the delete retries through
+  rate waits and ignores its result), `lock-ttl-rate-wait` (rate waits can outlast the lock
+  expiry), `lock-read-error-never-expires` (a failed lock read gives a lock that never expires).
+
 ## Related
 
 - Decision merge-follows-the-prs-base (the lock is per base, and `--unlock` takes a branch).

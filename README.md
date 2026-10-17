@@ -23,7 +23,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `ux/` | The house UX rules. |
 | `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
-| `merge/` | The code of the `merge` command, started by `bin/merge`. |
+| `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
 | `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
@@ -32,6 +32,9 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
 | `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
 | `.claude/` | Instructions that load only in sessions on this repo. |
+| `.gitattributes`, `.gitignore` | The line-ending rules, and the files that git leaves out. |
+| `.ste-lint-exclude` | The pathspecs that the STE lint leaves out, such as pinned third-party prose. |
+| `renovate.json` | The Renovate config that updates pinned versions. |
 | `install.sh`, `install.ps1` | The installers. The `install*.test.ps1` files test them. |
 
 ## Quick start
@@ -115,7 +118,7 @@ Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, move the local main, clean up.
+merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Reads no lock state.
 merge --dev ...         run the checkout's own tree, not origin main
@@ -138,10 +141,17 @@ merge --dev ...         run the checkout's own tree, not origin main
   says if the holder is alive, dead, or unknown. `--unlock` is for a dead holder only.
   A rerun on a branch that already holds its own claim resumes at the wait.
 * **Where the rest is written.** The flow is `confirm` in `merge/merge.py`. The rulings are
-  in decisions merge-config-defaults (merge needs no config file), merge-follows-the-prs-base
-  (the PR's own base drives every step), merge-waits-on-every-check (check first, then claim;
-  never merge on a running or failing check), merge-lock-names-its-holder (the lock is a ref
-  on origin), merge-needs-a-proven-head, ci-wait-reads-run-status and merge-net-retry.
+  in these decisions:
+  * merge-runs-from-the-clone (no install; the run updates itself)
+  * merge-config-defaults (merge needs no config file)
+  * merge-follows-the-prs-base (the PR's own base drives every step)
+  * merge-waits-on-every-check (check first, then claim; never merge on a running or failing check)
+  * merge-lock-names-its-holder (the lock is a ref on origin and names its holder)
+  * merge-needs-a-proven-head (a head with only skipped checks is unproven)
+  * ci-wait-reads-run-status (the wait reads status, never `gh run watch`)
+  * merge-net-retry (retry a network error or a rate limit, then stop)
+  * records-index-at-merge (the merge rebuilds the records page)
+  * deleted-record-keeps-its-number (a deleted record keeps its number; the claim reads the history)
 
 Exit codes:
 

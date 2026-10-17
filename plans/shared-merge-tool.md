@@ -12,12 +12,8 @@ lanes and what Banchi still has to do.
 - **Behaviour:** the code. `confirm` in `merge/merge.py` is the flow. `merge/launch.py` is the
   fresh-code guard. `bin/merge` finds the checkout and starts `merge/launch.py`.
   `bin/merge.cmd` starts `bin/merge` on Windows.
-- **Rulings:** decisions merge-config-defaults (merge needs no config file),
-  merge-follows-the-prs-base (the PR's own base drives every step), merge-waits-on-every-check
-  (check first, then claim; never merge on a running or failing check), merge-lock-names-its-holder
-  (the lock is a ref on origin and names its holder), merge-needs-a-proven-head,
-  ci-wait-reads-run-status, merge-net-retry and records-index-at-merge.
-- **Usage and exit codes:** the claude-settings README, "The `merge` command".
+- **Rulings, usage and exit codes:** the claude-settings README, "The `merge` command". It
+  lists each decision with a gloss.
 - **What an adopting repo does:** `actions/stamp/README.md`, "The merge tool contract".
 
 ## Why

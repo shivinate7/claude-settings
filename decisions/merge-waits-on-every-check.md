@@ -30,6 +30,12 @@ Home: merge/merge.py
 - Banchi #604: the merge ran while a non-required check was pending, and the check went red
   after the merge. Ruling 2 follows.
 
+## Holes, named
+
+- One window stays: a workflow that GitHub has not created yet still reads as green. The runs
+  read and the settle read close most of it. Debt `late-workflow-reads-green` (a workflow
+  created after the settle read is not seen).
+
 ## Related
 
 - Decision merge-needs-a-proven-head (a head with only skipped checks is unproven).
