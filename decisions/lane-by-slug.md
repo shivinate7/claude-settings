@@ -16,9 +16,5 @@ Why: same class as CLAUDE.md `git-slug-then-claim-number`. A session number is h
 
 Protected by the `lane-by-slug` block in `hooks/test_guard.py`.
 
-## Holes, named
-
-Limits: old history is not checked, only new acts. Reopen when a session number reaches main through an act the guard does not read: widen the scan and name the new limit here.
-
 Kind: process
 Home: hooks/guard.py

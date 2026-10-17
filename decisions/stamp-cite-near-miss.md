@@ -18,8 +18,3 @@ code block, so it gives no protection.
 
 Kind: process
 Home: actions/stamp/stamp.mjs
-
-## Holes, named
-
-Debt `stamp-scan-frontmatter-links` is
-low harm. None is a regression against main.

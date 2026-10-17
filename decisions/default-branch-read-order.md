@@ -17,9 +17,5 @@ Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard 
 
 Why: a dangling `origin/HEAD` hid the default branch, and a repository with `origin/main` may still hold `master`.
 
-## Holes, named
-
-A verify that cannot run after an earlier "no" has no test; the code fails safe.
-
 Kind: process
 Home: hooks/guard_core.py

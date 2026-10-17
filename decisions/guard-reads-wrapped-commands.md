@@ -11,10 +11,6 @@ The guards judge the command a wrapper runs, not the raw text. Rule `guard-guard
 
 Why: the delete guard denied a quoted `rm -rf /` in an `echo` and missed `rm -rf ~/`. The kill guard missed `kill $(lsof -ti:PORT)`. The stream guard denied a quoted `tail -f` in a commit message.
 
-## Holes, named
-
-Debts: `git-rm-cached-false-alarm` (an index-only `git rm -rf --cached` denies).
-
 Kind: build
 Plan: decisions/guard-reads-wrapped-commands.md#the-ruling (all)
 Home: hooks/guard_core.py

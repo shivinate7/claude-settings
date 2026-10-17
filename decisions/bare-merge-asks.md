@@ -12,12 +12,6 @@ Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. Guard 
 
 Why ask and not deny: a broken merge tool leaves a bare merge as the only way to merge. A refusal would block the recovery on the day it is needed (`verification-recovery-not-gated-on-own-state`). An ask keeps the path open and still stops a bare merge made by habit. Why a rule at all: bare merges left the local main four commits behind origin.
 
-## Holes, named
-
-- The hook reads the stamp from the working tree, not from the base branch. A lane that edits `.github/stamp.json` changes the ask for its own session.
-- A confirmed ask merges bare. That is the recovery path by design.
-- A bare merge chained after a step that is not harmless (`ls && gh pr merge 12`) is denied as ask-alone, not asked. That is stricter than main. The remedy is to split the command and run the merge alone.
-
 Kind: build
 Plan: decisions/bare-merge-asks.md#the-ruling (all)
 Home: hooks/guard_merge.py
