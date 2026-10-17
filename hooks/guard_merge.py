@@ -233,9 +233,11 @@ def undrafted_pr_create(segment: str) -> bool:
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
 # command word is `hook_catalog.py`, or a python interpreter whose script is `hook_catalog.py`, rewrites
 # the page unless it has `--check` or `--print`. A later commit that reaches the page is then refused
-# with no page id compared, while the base has a page. Any read that fails is no hit. Limits: a
+# with no page id compared, while the base has a page. The rule acts only when the base tip's page
+# opens with the generated header, so a hand-written page is no hit. Any read that fails is no hit. Limits: a
 # `sh -c` script and `python -m` are not read, and `commit --include` is judged as `commit <paths>`.
 RECORDS_PAGE = "docs/records.md"
+RECORDS_HEADER = "# Records index\n"   # the first line of RECORDS_INTRO in lint/hook_catalog.py
 RECORDS_PAGE_REASON = (
     "Rule (Git): this commit changes docs/records.md. The page is rebuilt only at merge, by the "
     "merge tool, and a lane never commits a change to it. A merge of the base into the lane "
@@ -398,6 +400,9 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             continue
         head_id, base_id, origin_id = _page_ids(top, base)
         if head_id is None or not base_id:   # a failed read, or a base with no page (first adoption): no hit
+            continue
+        opens = _git(top, "cat-file", "-p", base_id)   # a hand-written page is no generated page: no hit
+        if opens is None or opens.returncode != 0 or not opens.stdout.startswith(RECORDS_HEADER):
             continue
         if generated and working:
             return "git commit " + RECORDS_PAGE
