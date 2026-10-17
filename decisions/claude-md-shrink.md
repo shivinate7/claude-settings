@@ -52,11 +52,11 @@ The interview lane, MEASURED on branch `claude-md-shrink-2` against main (93a416
 - Three rows move to `unmechanized`: `roles-sonnet-is-the-default`, `verification-recovery-not-gated-on-own-state` and `reports-no-report-when-nothing-landed`. `UNMECHANIZED_EXPECTED` is 57. `RULE_FLOOR` is 98.
 - `CLAUDE.md` falls from 16292 to 15636 bytes.
 
-## Why only 6 of 30
+## Why not all 30
 
-On main, 30 rules in the root `CLAUDE.md` name a guard or gate. 6 are deleted, 1 shrinks, and 23 stay.
+On main, 30 rules in the root `CLAUDE.md` named a guard or gate. After both lanes, 9 are deleted, 3 shrink, and 18 stay.
 `CLAUDE.md` loads in every repo. A gate that is only a test or a CI step in this repo enforces nothing in another repo.
-Several guards cover only part of their sentence. Those 23 rules went to the owner for a ruling on each. See the interview ruling.
+Several guards cover only part of their sentence. The first lane sent 23 rules to the owner for a ruling on each. See the interview ruling.
 `RULE_FLOOR` in `lint/rule_audit.py` is the anchor count: 101 after the first lane, 98 after the interview. Its own comment says to update it when a rule is removed on purpose.
 
 ## The outcome, and what protects it now
@@ -69,9 +69,9 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 - No waiter loop: the `waiter` guard rule.
 - Memory never the only home: `hooks/ruling_home.py`.
 - Unlisted agents run Sonnet: the setting `env.CLAUDE_CODE_SUBAGENT_MODEL` in `settings.json`.
-- Workers never spawn: the setting `MAX_SPAWN_DEPTH` (`env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`) in `settings.json`. See hole 7.
-- Wait for required checks: the `merge-checks` guard rule.
-- Open every PR as a draft: the `draft-pr` guard rule.
+- Workers never spawn: the setting `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` in `settings.json`. No check now reads that the setting is present. See hole 11.
+- Wait for required checks: the `merge-checks` guard rule refuses a merge while a check is pending or red. Nothing makes a session wait after a push before it reports.
+- Open every PR as a draft: the `draft-pr` guard rule, for the create command only. See hole 12.
 
 ## Holes, named
 
@@ -84,7 +84,9 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 7. A repo that raises spawn depth gets no prompt to record the risk. Debt: `nesting-risk-unrecorded`, no prompt to record the risk.
 8. `report_gate` checks only `D<n>`-style ids, so a slug id passes with no gloss check. Debt: `slug-cite-gloss-unchecked`, slug cites have no gloss check.
 9. `report_gate` returns early when nothing landed, so it cannot see a report on that turn. Debt: `report-on-empty-turn-unchecked`, no check sees a report on an empty turn.
-10. `output-write-in-ste` waits for its own lane.
+10. `output-write-in-ste` waits for its own lane, the plain-prose lint. Debt: `ste-rule-awaits-prose-lint`, the STE rule waits for its lane.
+11. No check reads that `settings.json` still sets `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`. The deleted gate row was its only reader. Debt: `spawn-depth-setting-unread`, no check reads the depth setting.
+12. Marking a PR ready has no guard, so "mark only the integration PR ready, and only after review" has no check and no text. Debt: `pr-ready-unguarded`, nothing guards marking a PR ready.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
