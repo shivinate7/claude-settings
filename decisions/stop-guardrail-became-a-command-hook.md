@@ -6,6 +6,12 @@ change to a decision, gate, build-order, CLAUDE.md rule, or setting. It read
 calls pass through it like any other. Its entry is out of `settings.json`. The owner approved
 this disarm directly, on 2026-09-22.
 
+Across 1,500 session transcripts the hook blocked 80 times. 55 of those 80, 69 percent, were the
+hook reporting it could not check anything at all, because the sandbox denied it `Read` and
+`Bash`. Each cost a turn and resolved nothing. The worst run held six consecutive blocks in one
+turn, none resolvable, because the sandbox condition does not change between tries. When the
+hook could read the transcript, a separate audit found 8 true catches against 3 false positives.
+
 ## The measurement
 
 Every session transcript on this machine since 2026-09-15 gave 34 real flags
