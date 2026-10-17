@@ -222,6 +222,47 @@ fits the evidence. It names the reason before the choice, to an audience whose v
 One gate stays: guard rule `subagent-model-cap` asks on a write that changes the fallback. A
 write is a standing change, not a dispatch, so the ask stalls nothing mid-fan-out.
 
+## The outcome evidence
+
+Gathered 2026-09-22. It points one way on tiering and the other way on pinning.
+
+For tiering down. The floor now limits Haiku to the named roles. Anthropic's multi-agent research reports a 90.2 percent gain over
+a single-agent Opus run, by distributing work to Sonnet subagents with isolated context. The
+Opus 4.5 system card shows an Opus orchestrator with Sonnet 4.5 subagents at 85.4 percent.
+Subagent choice moves end-to-end results. Routing guides report a 5 to 10 times cost reduction
+with Haiku subagents on retrieval and pattern work. No public benchmark covers the tasks Haiku
+is recommended for, so the SWE-bench gap probably overstates the difference on those tasks.
+
+Against any static pin. The metric is cost per solved task. A cheaper model that fails more
+often costs more once retries count. A retry re-sends the full context, so two retries can
+triple a session's cost. A June 2026 preprint catalogued 63 budget-overrun incidents across 21
+orchestration frameworks, with retry loops as a named failure class. Static routing breaks when
+task complexity varies inside one role.
+
+In this repository, the same day, lanes varied. Two lanes were mechanical. Two needed real
+diagnosis, and both caught errors their brief did not anticipate. A lane runs 25 to 60 minutes
+of wall-clock time. A rework cycle costs far more than over-provisioning one lane by 2.5 times
+the tokens.
+
+The error costs are asymmetric. Under-provisioning costs a rework cycle. Over-provisioning
+costs 2.5 times the tokens of one lane. The cheap error is the one the pin was built to prevent.
+
+## What the orchestrator owes at dispatch time
+
+The one line before dispatch (`roles-opus-shaped-say-so`) is the right shape and the right
+order. The reason comes before the choice, to an audience whose view is unknown. Lerner and
+Tetlock found that condition to work. The justification gate, since deleted, failed it. Keep
+the line.
+
+It is not enough, for two reasons.
+
+- It names only the up direction. No departure below Sonnet exists, so the line is owed for a
+  departure up. The line asks; the owner's word decides.
+- Nothing after the fact can read which tier ran. The report names every dispatch, but not the
+  model. A Done line for a lane should name the tier when the tier was not Sonnet. That is a
+  report-format change. `lint/report_gate.py` cannot check it, because nothing tells the gate
+  what model a lane actually ran.
+
 ## The grant
 
 An Opus worker is enabled for one repository, on the owner's word in chat. The orchestrator
@@ -275,8 +316,9 @@ it outlives the turn that wrote it. Two parts guard it. Both key on the model va
   changes only. The spend it lets through is one lane at 2.5 times cost. This entry accepts that.
 - Under-provisioning is caught by nothing before the rework cycle, except the step-up and the
   floor.
-- No check reads which tier a lane ran, so a report need not name it. `lint/report_gate.py`
-  cannot see the model.
+- No check reads which tier a lane ran, so nothing checks that a Done line names a tier above
+  Sonnet (see "What the orchestrator owes at dispatch time"). `lint/report_gate.py` cannot see
+  the model.
 - Removing the override file before its expiry has no check (debt `override-removal-unreminded`).
 
 ## Where this lives

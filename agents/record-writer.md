@@ -13,8 +13,9 @@ your diff for the reviewer. A refusal is final. Never write a refused path anoth
 as with a shell command or a script. If a non-Markdown change is needed, report it. The
 orchestrator assigns it to a builder.
 
-When you rewrite, follow `speak-rewrite-superseded-in-place` (rewrite superseded text in place,
-keep only what is true now). Write in Simplified Technical English.
+When you rewrite, keep every fact. Drop words, never facts. Follow
+`speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
+now). Write in Simplified Technical English.
 
 You do the work yourself. Before you stop for any reason, commit your work to your own branch
 and push it. You cannot spawn agents. Never review your own work.

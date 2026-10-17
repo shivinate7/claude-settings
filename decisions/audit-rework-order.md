@@ -21,21 +21,12 @@ The ruling does not define three terms. A lane reads them this way:
   passes or fails on the outcome the count stood for.
 - Central home: the CLAUDE.md rule, or the one decision, that owns the question.
 
-## Standing word
-
-Owner, 2026-10-17 02:20 CDT, relayed by the orchestrator. The owner stated no scope. This entry
-applies it to audit lanes, by the orchestrator's call.
-
-- Fix a stale decision, unless the fix lets through an act that main refuses or asks about.
-  Do not wait for the owner's word. `outcomes-stale-decision-protocol` in CLAUDE.md still says
-  to wait: the text is unchanged.
-- Settle a fork by the safer outcome first, the smaller diff second. Record each as
-  "orchestrator's call".
-
 ## Where it lives
 
-The order has no check. The two rules below carry steps 1 to 3 and the central-home clause in
-their own words. Step 4 comes last by this ruling only. The Home choice is the orchestrator's call.
+The order has no check. In CLAUDE.md, `building-one-home-per-capability` backs step 1 only
+(delete copies). Nothing in CLAUDE.md backs steps 2 to 4, the order, or the central-home
+clause. `outcomes-judge-by-outcome` is the nearest general rule and states no step. Both Home
+choices are the orchestrator's call.
 
 Kind: process
 Home: rule:building-one-home-per-capability

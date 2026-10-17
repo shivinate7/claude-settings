@@ -3,7 +3,8 @@
 The `type: agent` Stop hook in `settings.json` judged every turn for a silent
 change to a decision, gate, build-order, CLAUDE.md rule, or setting. It read
 `transcript_path` through the permission system. An agent hook's own tool
-calls pass through it like any other.
+calls pass through it like any other. Its entry is out of `settings.json`. The owner approved
+this disarm directly, on 2026-09-22.
 
 ## The measurement
 
