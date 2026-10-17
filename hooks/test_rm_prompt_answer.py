@@ -5,8 +5,8 @@ Run it from the repository root:
 
     python3 hooks/test_rm_prompt_answer.py
 
-Contract, from deferred item rm-prompt-answer-hook and decision rm-on-a-variable-needs-a-guard
-(owner rulings, 2026-10-11). The hook answers allow ONLY when all of these hold:
+Contract, from decision rm-on-a-variable-needs-a-guard (rm on a variable path needs a `:?` guard)
+(owner ruling, 2026-10-11). The hook answers allow ONLY when all of these hold:
 - the hook input has `permission_mode` == "bypassPermissions";
 - each `rm` target is a `${NAME:?}` expansion followed only by plain folder names (`/a/b`): no
   `..`, no glob, no braces, no `~`, no `$HOME`, no `$PWD`, no command substitution, no second

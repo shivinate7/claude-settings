@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for the STE auto-fix in lint/ste_gate.py (plan section C).
+"""Tests for the STE auto-fix in lint/ste_gate.py (decision ste-gate-fixes-not-nags, the gate fixes first).
 
 The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
 PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
 Owner ruling 2026-10-17 (turn the STE lint into a plain-prose lint): the fixer keeps only the
 fixed bloat phrases of STE011, minus eight rows. The orchestrator's calls of the same day: the three
-the debt ste-fix-changes-meaning names (in between, in terms of, it would appear that) leave the
+the decision plain-prose-lint names (in between, in terms of, it would appear that) leave the
 table entirely, and five borderline rows (in a timely manner, along the lines of, close down, of major
 importance, except when) stay errors with no fix. Every Latin (STE007), contraction (STE008) and
 nominalization (STE003) fix is gone, and no fix changes the case of the text it swaps. The sentence budget is one
@@ -139,7 +139,7 @@ for _gid, _before, _after in GOLDEN:
 
 
 # ------------------------------------------------------------------ 2. fixes removed by the ruling
-# Owner ruling 2026-10-17, point 2: remove every autofix the debt ste-fix-changes-meaning lists, and
+# Owner ruling 2026-10-17, point 2: remove every autofix the decision plain-prose-lint lists, and
 # any other fix that rewrites more than whitespace or a fixed bloat phrase. The fixer has no
 # whitespace fix. A fixed bloat phrase is a row of the STE011 table. So every STE007, STE008 and
 # STE003 fix goes, and so do the three STE011 rows the debt names.
