@@ -204,13 +204,22 @@ INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
 STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
 STAMP_CR="$(printf '\r')"
 INSTALL_FAILED=0
+# mv_retry SRC DEST: mv -f, retried 25 times at 0.1 s (the budget of Move-OverFile in install.ps1), because
+# Windows refuses a rename over a file a running reader holds open. The last try's stderr is printed.
+mv_retry() {
+  n=1
+  until mv_err=$(mv -f "$1" "$2" 2>&1); do
+    if [ "$n" -ge 25 ]; then printf '%s\n' "$mv_err" >&2; return 1; fi
+    n=$((n + 1)); sleep 0.1
+  done
+}
 put_file() {
   t="$2.cs-new"
   case "$1" in
     */guard.py|*/guard_*.py)
       sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
     *) cp "$1" "$t" ;;
-  esac && mv -f "$t" "$2" && return 0
+  esac && mv_retry "$t" "$2" && return 0
   rm -f "$t"
   log "could not replace $2; left as it was"
   INSTALL_FAILED=1
