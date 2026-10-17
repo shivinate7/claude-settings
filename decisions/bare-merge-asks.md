@@ -39,8 +39,8 @@ hole on a merge tool that will not load.
 ## The trigger check
 
 The deferred item came back when two things held on main. Both hold. `install.sh` puts
-`~/.claude/bin` on PATH (lines 584-586), and the coordinator counted six other `stamp.json`
-files with a `merge` block, 2026-10-17 (not re-measured in this lane).
+`~/.claude/bin` on PATH (lines 584-586). Review round 2 found a top-level `merge` key in the
+`stamp.json` of four other repos under `~/Developer` on 2026-10-17: banchi, degen, ios-adblock and q_max.
 
 ## Holes, named
 
@@ -58,3 +58,5 @@ files with a `merge` block, 2026-10-17 (not re-measured in this lane).
 - A bare merge chained after a step that is not harmless (`ls && gh pr merge 12`) is denied as
   ask-alone, not asked. That is stricter than main, which allows the chain. The remedy is to
   split the command and run the merge alone.
+- The repo-root walk is lexical. A symlink outside the repo that points into it reads as no
+  repo, so the merge is allowed with no ask. Main allows it too. Debt `bare-merge-symlink-cwd`.
