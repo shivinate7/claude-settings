@@ -414,11 +414,12 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
 
 
-# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step runs one glob, so a
-# new mods/<name>/ joins with no edit here. It carries the exit code of every file: a failing first or
-# last file fails the step. The real-file checks are red until the step exists. The checker's own
-# self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is seen.
-MOD_GLOB = "mods/*/*.test.mjs"
+# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step finds every
+# *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/ joins with no
+# edit here. It carries the exit code of every file: a failing first or last file fails the step. The
+# checker's own self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each
+# defect is seen. MOD_GLOB is the name pattern that marks the step, in a glob or in a find -name.
+MOD_GLOB = "*.test.mjs"
 MOD_FLAG = "mods"
 GATES_JOB = "gates"
 STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
@@ -546,6 +547,11 @@ class ModTestStep(unittest.TestCase):
             ("all pass", {"mods/a/a.test.mjs": True, "mods/b/b.test.mjs": True}, True),
             ("first file fails", {"mods/a/first.test.mjs": False, "mods/b/b.test.mjs": True}, False),
             ("last file fails, in a new mod", {"mods/a/a.test.mjs": True, "mods/zz-new/last.test.mjs": False}, False),
+            # Debt mods-tests-glob-too-narrow: these two shapes never ran.
+            ("nested tests/ file fails", {"mods/a/a.test.mjs": True, "mods/a/tests/b.test.mjs": False}, False),
+            ("*.test.js file fails", {"mods/a/a.test.mjs": True, "mods/a/c.test.js": False}, False),
+            # Control, green now: a dependency's own test under node_modules is not ours to run.
+            ("node_modules test fails", {"mods/a/a.test.mjs": True, "mods/a/node_modules/dep/d.test.js": False}, True),
         ]
         for label, files, ok in cases:
             with self.subTest(case=label):
