@@ -258,9 +258,8 @@ WAITER_REASON = (
 
 # ------------------------------------------------------------------ a background end condition
 #
-# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A server or watcher that runs in the
-# background has no end of its own (incident: a file server on port 3202 ran 27 h unnoticed). The
-# call must say when it ends: an `until: <condition>` note in the tool's `description`. The note
+# A server or watcher that runs in the background has no end of its own. The call must say when it
+# ends: an `until: <condition>` note in the tool's `description`. The note
 # belongs to the call, not the command text. stall_watch.py --stop shows the note per quiet job, and
 # reads it through `until_note` below, the one parser.
 #
@@ -427,7 +426,7 @@ PATTERN_POLLER_REASON = (
 # self-contained so it merges cleanly beside other edits to this file.
 
 # `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
-# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# so a call meant as a GET silently becomes a write.
 # A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
 # is a POST by design and takes no method.
 GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
@@ -483,8 +482,8 @@ GH_API_METHOD_REASON = (
 
 
 # `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
-# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
-# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0.
+# A real directory always
 # descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
 # the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
 # fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing

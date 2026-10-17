@@ -73,8 +73,7 @@ MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", 
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The
 # shared deadline bounds a hung `gh` to about 15 s for the whole read (pinned in test_guard.py),
 # so a merge with a dead `gh` is denied fast instead of waiting out each call. Measured on
-# Windows under load: `pr view` 3.0-3.8 s, `pr checks` 3.6-3.9 s, the runs read 1.3-1.4 s
-# (incident 2026-10-03, worst-case sum 9.1 s). 14 s leaves headroom over that sum.
+# Windows under load: `pr view` 3.0-3.8 s, `pr checks` 3.6-3.9 s, the runs read 1.3-1.4 s: sum 9.1 s, so 14 s has headroom.
 MERGE_READ_TIMEOUT = 14
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
@@ -254,8 +253,7 @@ def undrafted_pr_create(segment: str) -> bool:
     return not draft
 
 
-# ---- a lane commit of the generated records page (decision records-index-at-merge, ruling of
-# 2026-10-16: "Also add a guard"; incident 2026-10-16, three batches conflicted on the page)
+# ---- a lane commit of the generated records page (decision records-index-at-merge)
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings

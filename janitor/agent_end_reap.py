@@ -3,8 +3,7 @@
 
 Design: decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
 
-MEASURED 2026-09-26 on Windows (decisions/which-start-shapes-outlive-the-agent-on-windows.md,
-PR #144): `cmd &` then another line, in one foreground Bash call, outlives the agent. Its
+MEASURED on Windows: `cmd &` then another line, in one foreground Bash call, outlives the agent. Its
 parent is a live MSYS bash stub, and the tool shell above the stub is dead. `sweep.is_orphan`
 reads the live stub and keeps the server forever.
 
