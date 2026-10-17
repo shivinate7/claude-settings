@@ -2,8 +2,13 @@
 
 CLAUDE.md says: "A guard that goes red when nothing is wrong is spent,
 because the reader learns to scroll past it." This entry names why
-`ste_lint.py`'s new comment-and-docstring mode stays off by default. It also
+`ste_lint.py`'s comment-and-docstring mode stays off by default. It also
 names what turning the mode on will cost.
+
+STE006 is not in the linter now, and STE001 reads one budget of 30 words
+(`every-lint-rule-blocks-or-does-not-exist`, a lint rule blocks, or it does
+not exist). Every count below was taken before both changes. No rerun exists,
+so the count under today's rules is unmeasured.
 
 ## The measurement
 
@@ -56,7 +61,7 @@ value. An existing caller sees no change.
 Comments and docstrings only, across this repository's tracked `.py`
 files, held 275 errors by the count that ordered this work.
 
-A rerun today, against the finished checker, counts 564 errors. 486 are
+A rerun against the finished checker counted 564 errors. 486 are
 STE001. 72 are STE006. 4 are STE007. 2 are STE008. The two counts disagree,
 and this entry does not smooth that over.
 
@@ -74,7 +79,10 @@ first run teaches its own reader to stop reading it.
 
 ## What turning it on will cost
 
-Someone must clear 275 to 564 real sentences and semicolons first. The
-exact number depends on which count a maintainer trusts. That cleanup is a
-separate job from this one. Mixing it with the gate would bury the gate in
-noise on the day it ships.
+Someone must clear 275 to 564 real sentences and semicolons first, by the
+counts above. The exact number depends on which count a maintainer trusts.
+That cleanup is a separate job from this one. Mixing it with the gate would
+bury the gate in noise on the day it ships.
+
+Kind: process
+Home: lint/ste_lint.py
