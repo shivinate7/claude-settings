@@ -43,7 +43,7 @@ MEASURED on branch `prose-lint` (9d577ab) against 68f244f, the base before this 
   - `actions/ste-lint` reports an advisory finding as a `::warning`. It never fails the step.
 - The `NOTE` string of both gates names what blocks: a sentence over 30 words, bloat, double negative.
 - `CLAUDE.md` rule `output-write-in-ste` has the owner's wording. Its row in `lint/rule_mechanisms.json` points at `test_ste011_bloat_blocks`.
-- Tests: `OneSentenceBudgetTests`, `AdvisoryCodesTests` and `KeptErrorCodesTests` in `lint/test_gates.py`. `RemovedFixesTests`, `KeptFixesTests`, `BorderlineBloatTests` and `DroppedBloatTests` in `lint/test_ste_autofix.py`. They ran red on 68f244f: 52 fails in `lint/test_gates.py`, 145 in `lint/test_ste_autofix.py`, and 3 checks in `actions/ste-lint/test_action.py`.
+- Tests: `OneSentenceBudgetTests`, `AdvisoryCodesTests` and `KeptErrorCodesTests` in `lint/test_gates.py`. `RemovedFixesTests`, `KeptFixesTests`, `BorderlineBloatTests` and `DroppedBloatTests` in `lint/test_ste_autofix.py`. By the test commit messages, they ran red on 68f244f: 52 fails in `lint/test_gates.py`, 145 in `lint/test_ste_autofix.py`, and 3 checks in `actions/ste-lint/test_action.py`.
 - Debts closed: `ste-fix-changes-meaning` (every example now stays as written) and `ste-eg-line-end-rewrite` (no `e.g.` rewrite remains). Both files are deleted.
 
 ## The outcome, and what protects it now
