@@ -26,7 +26,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the advisor, and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Only on my word, write the repo's `.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to `opus`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-workers-never-spawn` | Workers never spawn: nested reports misroute (Sept 2026). | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -38,13 +37,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `parallelism-no-mid-task-talk` | Never let lanes talk mid-task. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the claim. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
-| `shared-trees-no-machine-wide-kill` | A stash entry belongs to no branch. | [`CLAUDE.md`](../CLAUDE.md) |
+| `shared-trees-no-machine-wide-kill` | Never kill a process you did not start. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-one-checkout-per-agent` | Give one checkout to each concurrent agent. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-own-ports-data` | A branch switch is a whole-tree act. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-confirm-before-write` | Confirm which checkout and branch you stand in before any git write or merge. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-wait-for-required-checks` | Wait for required checks after every push. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Never discard a command's output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -53,7 +51,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-record-own-file-per-kind` | Give each record its own file, one folder per kind. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-one-entry-per-question` | One entry per question. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-integration-branch-merge` | Batch lane PRs that pass their local checks into one integration branch. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-draft-until-reviewed` | Open every PR as a draft. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-screens-verdict` | If the repo has screens, check each screen at every size and theme it ships in. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-browser-login-only-needed` | Prefer a headless or isolated browser over my own, and use my login only when needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-announce-own-screen` | Before a window or a screen capture lands on my screen, say so in one line. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -142,6 +139,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stall-watch` | A background command can stop making progress. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
 | `stall-watch-stop-check` | A background shell can stay open after a turn ends. | [`decisions/stall-watch-stop-check.md`](../decisions/stall-watch-stop-check.md) |
 | `stamp-cite-near-miss` | Where does the check for a wrongly wrapped cite live, and how does an agent learn the right form? | [`decisions/stamp-cite-near-miss.md`](../decisions/stamp-cite-near-miss.md) |
+| `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
 | `stash-push-is-clone-wide` | CLAUDE.md says: "Set work aside with a commit on your own branch, never a stash." It also says: "A stash entry belongs to no branch. | [`decisions/stash-push-is-clone-wide.md`](../decisions/stash-push-is-clone-wide.md) |
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `subagent-model-cap` | CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry records how the worker-model rule is mechanized after `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
@@ -223,7 +221,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `session-end-sweep-is-disarmed-until-liveness-is-proven` | The `SessionEnd` hook in `settings.json` runs `janitor/session_end_sweep.py`. | [`decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`](../decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md) |
 | `source-prose-lint-ships-dark` | CLAUDE.md says: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." This entry names why `ste_lint.py`'s new comment-and-docstring mode stays off by default. | [`decisions/source-prose-lint-ships-dark.md`](../decisions/source-prose-lint-ships-dark.md) |
 | `stale-safe-force-push` | CLAUDE.md says: "Judge every rule, check, and design by the outcome for the person the software serves." The outcome here: the owner gets no prompt for a safe push, and no push overwrites newer remote work with a stale copy. | [`decisions/stale-safe-force-push.md`](../decisions/stale-safe-force-push.md) |
-| `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
 | `ste-lint-gloss-collapse` | `lint/ste_lint.py`'s `STE001` counts words per sentence. | [`decisions/ste-lint-gloss-collapse.md`](../decisions/ste-lint-gloss-collapse.md) |
 | `stop-guardrail-became-a-command-hook` | The `type: agent` Stop hook in `settings.json` judged every turn for a silent change to a decision, gate, build-order, CLAUDE.md rule, or setting. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
 | `tests-are-claims-not-law` | Tests are claims, not law | [`decisions/tests-are-claims-not-law.md`](../decisions/tests-are-claims-not-law.md) |
@@ -339,6 +336,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-substitution-in-token` | A command inside a token is not read as a command: `$(...)` glued after other text, backticks, and `x=$(...)`. | [`debts/guard-substitution-in-token.md`](../debts/guard-substitution-in-token.md) |
 | `guard-timeout-fails-open` | If the PreToolUse guard times out or crashes, Claude Code lets the call run. | [`debts/guard-timeout-fails-open.md`](../debts/guard-timeout-fails-open.md) |
 | `guard-timing-case-flaky` | The rm-var cases now bound a ratio to a baseline run in the same process (bound 3, eighth-size baseline), so a uniformly slow runner does not fail it. | [`debts/guard-timing-case-flaky.md`](../debts/guard-timing-case-flaky.md) |
+| `guard-untied-from-rule-map` | The rows that tied the `merge-checks`, `draft-pr` and `pointer-head` guard rules to a rule left with their rules. | [`debts/guard-untied-from-rule-map.md`](../debts/guard-untied-from-rule-map.md) |
 | `guard-wrapper-lists-closed` | The guard skips only the wrappers in `COMMAND_WRAPPERS` and the value flags in `WRAPPER_VALUE_FLAGS`. | [`debts/guard-wrapper-lists-closed.md`](../debts/guard-wrapper-lists-closed.md) |
 | `haiku-counter-files-not-purged` | No code purges `state/`. | [`debts/haiku-counter-files-not-purged.md`](../debts/haiku-counter-files-not-purged.md) |
 | `haiku-counter-lost-updates` | Heavy parallel calls of one session lose counter updates. | [`debts/haiku-counter-lost-updates.md`](../debts/haiku-counter-lost-updates.md) |
@@ -437,6 +435,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-step-order-unpinned` | No test pins that the mod test step is last. | [`debts/mods-step-order-unpinned.md`](../debts/mods-step-order-unpinned.md) |
 | `mods-tests-glob-too-narrow` | The glob reaches only root-level `mods/<name>/*.test.mjs`. | [`debts/mods-tests-glob-too-narrow.md`](../debts/mods-tests-glob-too-narrow.md) |
 | `mutant-crash-audit-missing` | The fix colocates `guard.py` for `watch` mutants only. | [`debts/mutant-crash-audit-missing.md`](../debts/mutant-crash-audit-missing.md) |
+| `nesting-risk-unrecorded` | The rule `roles-workers-never-spawn` said a repo that needs nesting raises depth in its settings and records the risk. | [`debts/nesting-risk-unrecorded.md`](../debts/nesting-risk-unrecorded.md) |
 | `net-error-colon-http-refusal` | `NET_ERROR` matches `: HTTP 5xx (url)` at a line end. | [`debts/net-error-colon-http-refusal.md`](../debts/net-error-colon-http-refusal.md) |
 | `no-start-lock-has-no-pid-check` | The lock `claude agent agent-<id> (pid N)`, with no start time, has no pid-reuse check. | [`debts/no-start-lock-has-no-pid-check.md`](../debts/no-start-lock-has-no-pid-check.md) |
 | `node-file-server-unchecked` | `node <file>` under `run_in_background` is not refused without an `until:` note. | [`debts/node-file-server-unchecked.md`](../debts/node-file-server-unchecked.md) |
@@ -457,6 +456,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-secret-file-names` | Some secret file names are not caught by name. | [`debts/plain-diff-secret-file-names.md`](../debts/plain-diff-secret-file-names.md) |
 | `plain-diff-trimnote-regex` | The table-row regex in `trimNote` was quadratic only on absurd input. | [`debts/plain-diff-trimnote-regex.md`](../debts/plain-diff-trimnote-regex.md) |
 | `pr-checks-watch-unmeasured` | The guard still allows `gh pr checks --watch` in the background. | [`debts/pr-checks-watch-unmeasured.md`](../debts/pr-checks-watch-unmeasured.md) |
+| `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
 | `printf-quote-walk-bandaid` | `discards_output` cuts each `$( )` out of the segment, reads the rest again, and fails closed when the cut is too deep. | [`debts/printf-quote-walk-bandaid.md`](../debts/printf-quote-walk-bandaid.md) |
 | `process-record-dead-plan-line` | The record mods-tests-run-in-gates is `Kind: process`, but it also holds a `Plan:` line. | [`debts/process-record-dead-plan-line.md`](../debts/process-record-dead-plan-line.md) |
 | `prompt-hooks-fail-open` | Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can deny, but the docs give them no `onFailure`. | [`debts/prompt-hooks-fail-open.md`](../debts/prompt-hooks-fail-open.md) |
@@ -472,6 +472,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `purge-snapshot-race` | The set of unexpired rows is read once, at purge start. | [`debts/purge-snapshot-race.md`](../debts/purge-snapshot-race.md) |
 | `purge-update-ref-mutant-missing` | The harness has no mutant that drops only the commit argument of `update-ref -d`. | [`debts/purge-update-ref-mutant-missing.md`](../debts/purge-update-ref-mutant-missing.md) |
 | `push-head-tag-misread` | `symbolic-ref --short HEAD` prints `heads/<name>` when a tag has the branch's name, so a lease push of `HEAD` allows. | [`debts/push-head-tag-misread.md`](../debts/push-head-tag-misread.md) |
+| `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
 | `pwsh-cmd-script-gaps` | These shapes are allowed on main and on this branch. | [`debts/pwsh-cmd-script-gaps.md`](../debts/pwsh-cmd-script-gaps.md) |
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
@@ -487,6 +488,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `records-page-handwritten-header` | The guard `records-page` acts only when the base page opens with `# Records index`. | [`debts/records-page-handwritten-header.md`](../debts/records-page-handwritten-header.md) |
 | `records-page-reader-gaps` | The guard `records-page` reads `git add` and `git commit` calls only. | [`debts/records-page-reader-gaps.md`](../debts/records-page-reader-gaps.md) |
 | `reload-missing-file-unpinned` | Lane merge-guard-b removed `_damage_missing` and its two reload cases: a missing `guard_pointer.py` that comes back during the wait is allowed, and one that stays missing is refused. | [`debts/reload-missing-file-unpinned.md`](../debts/reload-missing-file-unpinned.md) |
+| `report-on-empty-turn-unchecked` | The report gate returns early when nothing landed, so it cannot see a report written on such a turn. | [`debts/report-on-empty-turn-unchecked.md`](../debts/report-on-empty-turn-unchecked.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
 | `rule-flag-not-enforced` | `bin/merge` prints a line for each changed rule file. | [`debts/rule-flag-not-enforced.md`](../debts/rule-flag-not-enforced.md) |
 | `ruling-home-isabs-unproven` | `value_resolves` refuses each absolute `home:` value. | [`debts/ruling-home-isabs-unproven.md`](../debts/ruling-home-isabs-unproven.md) |
@@ -522,7 +524,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-write-miss-sort-output` | `sort -o P` writes P, but `sort` is not in `MUTATING_COMMAND` and `-o` is not a redirect, so the write is not seen. | [`debts/shell-write-miss-sort-output.md`](../debts/shell-write-miss-sort-output.md) |
 | `shell-write-miss-spaced-target` | `cat > "dir with space/.claude/settings.json"` writes the settings file, but the reader splits the quoted path on its space, and no fragment of it follows the `>`. | [`debts/shell-write-miss-spaced-target.md`](../debts/shell-write-miss-spaced-target.md) |
 | `shell-write-miss-subshell` | A write inside a subshell, `( ... > P)`, is not seen: the closing parenthesis stays glued to the path word, so the path never matches. | [`debts/shell-write-miss-subshell.md`](../debts/shell-write-miss-subshell.md) |
-| `shrink-unsure-rules-unruled` | Their prose stays in CLAUDE.md. | [`debts/shrink-unsure-rules-unruled.md`](../debts/shrink-unsure-rules-unruled.md) |
+| `shrink-stale-code-comments` | A case comment in `hooks/test_guard.py` names `git-wait-for-required-checks`. | [`debts/shrink-stale-code-comments.md`](../debts/shrink-stale-code-comments.md) |
 | `silent-undo-oracle-hides-cause` | When the records page generator fails, is missing, or reports a problem, the silent-undo check reports only "hunk reversed" for `docs/records.md` and discards the generator's stderr. | [`debts/silent-undo-oracle-hides-cause.md`](../debts/silent-undo-oracle-hides-cause.md) |
 | `sim-boot-check-xcodebuild` | The ruling 5 boot check runs only after `simctl boot` and MCP `launch`. | [`debts/sim-boot-check-xcodebuild.md`](../debts/sim-boot-check-xcodebuild.md) |
 | `skill-rows-dir-named-skill-md` | A directory named `SKILL.md` counts as a skill. | [`debts/skill-rows-dir-named-skill-md.md`](../debts/skill-rows-dir-named-skill-md.md) |
@@ -531,6 +533,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `skill-rows-posix-only-test` | The unreadable-folder exit 2 test runs only on POSIX. | [`debts/skill-rows-posix-only-test.md`](../debts/skill-rows-posix-only-test.md) |
 | `skill-rows-test-gaps` | No test covers a tilde line inside a backtick fence. | [`debts/skill-rows-test-gaps.md`](../debts/skill-rows-test-gaps.md) |
 | `skill-rows-unclosed-fence-silent` | An unclosed fence or comment hides every later row. | [`debts/skill-rows-unclosed-fence-silent.md`](../debts/skill-rows-unclosed-fence-silent.md) |
+| `slug-cite-gloss-unchecked` | The report gate checks only `D<n>`-style ids for a short gloss. | [`debts/slug-cite-gloss-unchecked.md`](../debts/slug-cite-gloss-unchecked.md) |
 | `slug-lint-skips-abs-and-md` | `lint/check_record_slugs.py` and `lint/check_ruling_kind.py` do not judge an absolute file argument or a name ending in `.MD`. | [`debts/slug-lint-skips-abs-and-md.md`](../debts/slug-lint-skips-abs-and-md.md) |
 | `smstate-answer-timeout-unrun` | The answer cases run with no reader timeout, so no case uses the shipped value. | [`debts/smstate-answer-timeout-unrun.md`](../debts/smstate-answer-timeout-unrun.md) |
 | `smstate-hold-deadlock-skips` | When the hold case hits the harness cap, it prints SKIP and a warning. | [`debts/smstate-hold-deadlock-skips.md`](../debts/smstate-hold-deadlock-skips.md) |
@@ -576,6 +579,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-hook-timeout-fails-open` | The fixer limit (5 s) plus the lint timeout (15 s) equals the hook timeout (20 s). | [`debts/ste-hook-timeout-fails-open.md`](../debts/ste-hook-timeout-fails-open.md) |
 | `ste-macos-child-route-unverified` | The child-process route for the STE autofix is not verified on macOS. | [`debts/ste-macos-child-route-unverified.md`](../debts/ste-macos-child-route-unverified.md) |
 | `ste-rewrite-unchecked-lands` | The STE fixer rewrites the text, then the lint cannot run. | [`debts/ste-rewrite-unchecked-lands.md`](../debts/ste-rewrite-unchecked-lands.md) |
+| `ste-rule-awaits-prose-lint` | Its gate judges only writes of .md and UI files. | [`debts/ste-rule-awaits-prose-lint.md`](../debts/ste-rule-awaits-prose-lint.md) |
 | `subagent-workflow-model-unasked` | The guard asks on a write of `CLAUDE_CODE_SUBAGENT_MODEL` or its `_FORCE` form only. | [`debts/subagent-workflow-model-unasked.md`](../debts/subagent-workflow-model-unasked.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
 | `sweep-no-deadline-many-trees` | The SessionEnd run starts no phase and no tree read at or past its deadline, `JUDGE_BUDGET_SECONDS` (12 s) after it starts. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
