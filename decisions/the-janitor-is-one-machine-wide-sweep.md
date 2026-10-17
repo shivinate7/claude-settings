@@ -6,8 +6,7 @@ The sweep deletes a local branch when that branch holds no unique work. It also 
 
 **The subject is the machine.** The liveness oracle reads `~/.claude/sessions`, which is machine-wide.
 Worktrees sit under many repositories at the same time. Five copies of one sweep are five things that can
-each be wrong about the same machine, so one copy lives here, in `janitor/`. A stale copy of a sibling
-repository's sweep at `~/.claude/bin/janitor.py` is the outcome to prevent.
+each be wrong about the same machine, so one copy lives here, in `janitor/`.
 
 **What the parent ships.** Branches and worktrees are pure git plus that oracle. They transfer to any
 repository. The directory joins `landed-dirs.txt` and `CONFIG_FROZEN_DIRS` in `hooks/guard.py` in the
@@ -35,8 +34,7 @@ the agent. The outcome to protect is a lane's unpushed work. The sweep frees a w
 only when the host pid is dead, or alive with another start time. The worktree must also pass every other
 check. Any other lock reason, and any unreadable fact, keeps it. The lock may also read
 `claude agent agent-<id> (pid N)`, with no start time. The sweep frees that form only when pid N is dead.
-It has no pid-reuse check, so a live process that holds a reused pid keeps the tree. The lock format is
-measured from the live lanes of this repository only.
+It has no pid-reuse check, so a live process that holds a reused pid keeps the tree.
 
 **What counts as safe work.** Remove only a folder that is clean, and whose work is safe. Work is safe in
 two cases:
@@ -90,15 +88,13 @@ tool can do everything that tool can do.
 **The sweep is automatic, and a repository opts out.** The sweep visits every repository that carries no
 opt-out file. A repository with long-lived local branches loses them at the first sweep, unless somebody
 adds the file first. The tombstone makes that loss recoverable. The opt-out file is `.claude/janitor.json`,
-inside the repository. Three constraints pick this place and this format: the file travels with a clone,
-so it does not sit in `.git/`. The sweep reads it as data and never runs it. It carries more than a yes or
-a no, so a bare marker file cannot do the job. The repository that pays the cost holds its own consent. An
-absent file means swept. The keys are in the janitor guide.
+inside the repository. It travels with a clone, so it does not sit in `.git/`. It carries more than a yes
+or a no, so a bare marker file cannot do the job. The repository that pays the cost holds its own consent.
+An absent file means swept. The keys are in the janitor guide.
 
 **The default branch.** The sweep judges each repository against its own default branch. It reads that
 branch in the order of `default-branch-read-order`: `origin/HEAD`, `origin/main`, `origin/master`, local
-`main`, local `master`. The janitor guide repeats the order. If none answers, the sweep refuses the
-repository out loud and reaps nothing there.
+`main`, local `master`. If none answers, the sweep refuses the repository out loud and reaps nothing there.
 
 **Two triggers.** A `SessionEnd` hook sweeps only the repository whose session ended. A daily scheduled
 job sweeps every repository. The hook fails open, because a hook that can refuse the end of a session is
@@ -107,21 +103,19 @@ Each installer refuses to run from a linked worktree.
 
 **A reaped branch leaves a tombstone.** Before the delete, the sweep writes `refs/janitor/reaped/<branch>`
 at the tip. It appends one line to a restore log: repository, branch, commit id, time. The commits stay
-reachable, so `git gc` cannot take them. The purge drops a tombstone after 90 days. Git keeps a reachable
-reflog entry for 90 days, so the machine already uses the number. A tombstone under 30 days buys nothing,
-because git expires an unreachable reflog entry after 30 days. The purge reads the age from the restore
-log's own timestamp, never from the mtime of the ref. The restore point that the purge keeps is in
+reachable, so `git gc` cannot take them. The purge drops a tombstone after 90 days, aged by the restore
+log's own timestamp, never by the mtime of the ref. A tombstone under 30 days buys nothing, because git
+expires an unreachable reflog entry after 30 days. The restore point that the purge keeps is in
 `purge-keeps-younger-restore-ref`.
 
 **Liveness.** Liveness comes from `~/.claude/sessions/*.json`. A record counts as live only when the id is
 alive and the recorded start time still matches. A recycled id then cannot inherit a dead session's claim.
-The oracle compares the start time as epoch milliseconds. A rendered clock time carries a timezone, and
-that form of the test fails.
+The oracle compares the start time as epoch milliseconds, because a rendered clock time carries a timezone.
 
 **How the sweep is proven.**
 
 - Each refusal gets a test arm that violates it. No refusal can weaken unseen.
-- Every arm asserts that its subject set is not empty before it asserts a verdict. An arm that passes over an empty set proves nothing.
+- Every arm asserts that its subject set is not empty before it asserts a verdict.
 - The anchor arm is the rebase ghost. It must go red against a keep rule that tests ancestry alone (`a-branch-is-redundant-by-patch-not-by-ancestry`).
 - The liveness arm holds a record whose stored start time does not match the live id. That arm must read the session as dead.
 - Each assertion is mutated to show that it fails.
