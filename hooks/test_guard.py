@@ -4539,6 +4539,26 @@ sh("wsl: wrapped by verdict, node",
 sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 
+# Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
+# flag (CI runs the mod tests this way). Its path is the NODE_TEST pattern, the same as after --test.
+# The first two are red on main, which needs --test. The rest pin the edge: plain node on any other
+# script, and on a test name with a suffix, an eval flag, a climbing path or an absolute path, stays
+# refused.
+sh("wsl: a plain node test file, no --test flag",
+   "wsl -e node mods/x/x.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a glob in a plain node test path",
+   "wsl -e node mods/*/*.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a plain node script that is not a test",
+   "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node file whose name only starts like a test",
+   "wsl -e node x.test.mjs.evil", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: plain node with an eval flag",
+   'wsl -e node -e "console.log(1)"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that climbs",
+   "wsl -e node ../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that is absolute",
+   "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder subagent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
