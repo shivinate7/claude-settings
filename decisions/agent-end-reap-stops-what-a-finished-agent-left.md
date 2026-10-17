@@ -100,7 +100,7 @@ Rule. At each SubagentStop, the reaper removes each finished agent's worktree th
 30 min or more. The ending agent's own worktree is not removed at its own end. It waits
 30 idle minutes like the others. A later agent end, or the session-end sweep, removes it.
 
-Idle is read as the sweep reads it (see "The sweep removes a finished agent worktree").
+Idle is defined once, in `unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
 
 Why 30 min for the own tree too. A follow-up message to a finished agent resumes it in its
 own worktree. A removed worktree makes the agent stop (decision
@@ -206,14 +206,13 @@ in `guard-trims-from-the-audit`). The hook always exits 0.
 
 Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`)
 removes a finished agent's worktree in every repo. It ADDS to the removals of
-`unattended-sweep-stops-proven-orphans` (merged and idle 1 hour, or pushed and idle 24
-hours). It never narrows them. It removes a tree only when all of these hold:
+`unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
+It never narrows them. It removes a tree only when all of these hold:
 
 - Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
 - It is clean: no uncommitted and no untracked file.
 - It is unlocked, no live session and no process has a cwd inside it.
-- It is idle 4 hours. Idle is the newest mtime of the tree's `index`, `HEAD` and
-  `logs/HEAD`.
+- It is idle 4 hours.
 - Its tip is on GitHub. Two reads must both pass: `git ls-remote --heads` read now lists a
   head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local
   `origin/*` ref alone), and `git branch -r --contains HEAD` is not empty.

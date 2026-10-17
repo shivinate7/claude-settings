@@ -114,15 +114,21 @@ included, needs both of these to remove a worktree:
   Incident, 2026-10-09: q_max held 138 worktrees, each with a live Neon branch.
   73 were detached checkouts whose commits were on a remote, kept only for
   `unmerged`.
-- Idle 1 hour. Read the newest mtime of the worktree's own `index`, `HEAD`
-  and `logs/HEAD`, under `.git/worktrees/<name>`. It must be 60 minutes old.
+- Idle 1 hour. Idle is the newest mtime of the worktree's own `index`, `HEAD`
+  and `logs/HEAD`, under `.git/worktrees/<name>`. Every idle limit of the
+  sweep and of the agent rules reads it this way. It must be 60 minutes old.
   The sweep reads it before any `git status`, which can rewrite the index. A
   younger tree is kept, and the reason is `recently-active`. A time that
   cannot be read keeps the tree, and the reason is `unreadable-subject`.
 
-Two other routes remove a tree under `.claude/worktrees/agent-*` without both: the agent
-rule, and the repo's own `reap:worktrees` script. Both are in
-`agent-end-reap-stops-what-a-finished-agent-left`.
+Three other routes remove a tree under `.claude/worktrees/agent-*` without both:
+
+- The agent rule.
+- The repo's own `reap:worktrees` script.
+- The removal at agent end.
+
+All three are in `agent-end-reap-stops-what-a-finished-agent-left` (stops what a finished
+agent left).
 
 The old conditions stay. The worktree must be clean and fully pushed. No live
 session and no process may be inside. The lock must be gone, or its host
@@ -132,7 +138,7 @@ Strict is the default. A job that an older installer wrote passes no flag, so
 it is strict at once, with no reinstall. A stale installed job fails safe. A
 person who wants the old rules passes `--attended`. The launchd plist, the
 Task Scheduler task and the SessionEnd hook never pass it. The agent-end reap
-stops processes and removes no worktree, so it needs no flag.
+takes no flag.
 
 Why: the 03:17 daily run on 2026-10-01 removed q_max's live wave 15
 integration worktree (`w15-port`). It was clean and pushed, but not merged,

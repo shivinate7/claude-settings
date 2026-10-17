@@ -72,8 +72,8 @@ read matches any past commit on the default branch. If a lane's patch landed
 and was later reverted, an unpushed sole copy still reads as merged and can be
 removed. The owner chose the patch check over a check of the lines on main
 today. This covers every worktree reap,
-locked or not. Every `--confirm` run also needs the worktree merged and idle 1
-hour (`unattended-sweep-stops-proven-orphans.md`).
+locked or not. Every `--confirm` run also applies the merged, pushed and idle limits of
+`unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
 `--confirm` unlocks, then removes, never with `--force`. If the removal fails,
 the sweep restores the lock.
 
@@ -97,8 +97,8 @@ Owner rulings, 2026-10-08:
   free disk.
 - The sweep lists entries under `<root>/.claude/worktrees/` that git does not
   register, as strays. It never deletes them.
-- The rule keeps git's admin-file idle time (1 hour), not folder mtime. It removes
-  a worktree with git. It never calls a repository's WorktreeRemove hook.
+- The rule reads git's admin-file idle time, not folder mtime (idle as in
+  `unattended-sweep-stops-proven-orphans`). It removes a worktree with git. It never calls a repository's WorktreeRemove hook.
 
 ## A branch leaves "checked out" with its worktree, in the same run
 
