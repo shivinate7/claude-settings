@@ -25,6 +25,10 @@ Owner answers, 2026-10-17 12:53 CDT:
 - (b) Delete the decision on the Bash tool's PATH snapshot. The owner gave no reason. The file held a measured claim about a tool this repo cannot change.
 - (c) A delete-only change opens no hole unless it removes a guard, gate or check, which round 1 must judge (`hold-unsafe-after-round-3`). The owner gave no other reason.
 
+Owner answer, 2026-10-17 16:04 CDT:
+
+- Open findings no longer go under a "Holes, named" section. Each becomes a debt, or one line in `debts/notes.md`, pointing to its decision (`roles-holes-are-debts`).
+
 ## Why
 
 The tree carries more records than a session can read. A cull keeps the rulings in force and drops the rest. The protected outcome: a session finds the current ruling fast, and no stale text misleads it.
