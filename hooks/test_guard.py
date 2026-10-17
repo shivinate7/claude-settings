@@ -6894,8 +6894,11 @@ FAMILY = "records-page"
 RECORDS_RULE = "records-page"
 RECORDS_SAYS = ("docs/records.md", "merge", ("drop", "Drop"))   # the rule named plainly, and the remedy
 RECORDS_NEVER = (VCS + " restore", VCS + " reset", VCS + " stash", VCS + " checkout")
-REC_V0, REC_V1 = "records page v0, as the lane was cut\n", "records page v1, rebuilt on main\n"
-REC_LANE = "records page v2, rebuilt by the lane\n"
+# The rule acts only when the base page opens with the generated header (RECORDS_HEADER of guard_merge),
+# so each fixture page starts with it.
+REC_V0 = "# Records index\nrecords page v0, as the lane was cut\n"
+REC_V1 = "# Records index\nrecords page v1, rebuilt on main\n"
+REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
 RECROOT = os.path.join(ROOT, "recpage")
 RECMAIN = os.path.join(RECROOT, "main")
 # One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
@@ -7006,6 +7009,9 @@ REC_NEW_LANE = os.path.join(RECMORE, "new-lane")
 # The base has no page at all: a lane that creates it is the first adoption.
 REC_ADOPT = os.path.join(RECMORE, "adopt")
 REC_ADOPT_LANE = os.path.join(RECMORE, "adopt-lane")
+# The base page is hand-written: it does not open with the generated header, so the rule is no hit.
+REC_PLAIN = os.path.join(RECMORE, "plain")
+REC_PLAIN_LANES = {name: os.path.join(RECMORE, "plain-" + name) for name in ("staged", "product")}
 
 
 def _build_records_more():
@@ -7061,9 +7067,22 @@ def _build_records_more():
          and run(REC_ADOPT_LANE, "diff", "--cached", "--name-only") == "docs/records.md",
          "the adopt lane is not 'base has no page, page staged as new'")
 
+    make_repo(REC_PLAIN, {"docs/records.md": "hand-written page v0\n", "src/app.py": "x = 1\n"})
+    advance(REC_PLAIN, {"docs/records.md": "hand-written page v1\n"}, "refs/remotes/origin/main")
+    for name, where in REC_PLAIN_LANES.items():
+        run(REC_PLAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+    write(page(REC_PLAIN_LANES["staged"]), "hand-written page v2\n")    # a staged edit of the page
+    run(REC_PLAIN_LANES["staged"], "add", "docs/records.md")
+    write(os.path.join(REC_PLAIN_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    run(REC_PLAIN_LANES["product"], "add", "src/app.py")
+    need(not run(REC_PLAIN, "show", "origin/main:docs/records.md").startswith("# Records index")
+         and run(REC_PLAIN_LANES["staged"], "diff", "--cached", "--name-only") == "docs/records.md"
+         and run(REC_PLAIN_LANES["product"], "diff", "--cached", "--name-only") == "src/app.py",
+         "the plain lanes are not 'base page has no header; page staged / product file staged'")
 
-lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, *REC_DANGLE_LANES.values(), REC_NEW_LANE, REC_ADOPT_LANE],
-             _build_records_more)
+
+lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
+              REC_ADOPT_LANE, *REC_PLAIN_LANES.values()], _build_records_more)
 
 
 def records_deny(name, command, lane, **kw):
@@ -7219,6 +7238,31 @@ records_deny("a commit by path that names the page, with the page staged earlier
 # First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
 # page as no hit). A limit, named in the decision's holes.
 records_allow("a lane that creates the page where the base has none", COMMIT_X, REC_ADOPT_LANE)
+records_allow("a chain that runs the generator, then add -A and commit, where the base has no page",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_ADOPT_LANE)
+
+# The generator is read by its command word (or the script of a python interpreter), never by a token that
+# only names it. A reader, a linter, a log and a `--print` run write no page. A tool that runs it as its
+# command word, by a path or through `env`, does.
+records_allow("a chain that lints the generator, then add -A and commit",
+              "ruff check lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that reads the generator with cat, then add -A and commit",
+              "cat lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that logs the generator's history, then add -A and commit",
+              VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --print, then add -A and commit",
+              GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_deny("a chain that runs the generator as its own command word, then add -A and commit",
+             "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator through env, then add -A and commit",
+             "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+
+# The rule acts only when the base page opens with the generated header. A hand-written base page is no
+# hit: a staged edit of it, and a generator chain over it, pass.
+records_allow("a commit of a staged page edit where the base page is hand-written", COMMIT_X,
+              REC_PLAIN_LANES["staged"])
+records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
