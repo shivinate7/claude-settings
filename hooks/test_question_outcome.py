@@ -903,7 +903,7 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     check(name + ": no question text echoed", "ECHO-QUESTION-SENTINEL" not in out, out[:200])
 
 
-# --------------------------------------------------------------------------- round 3
+# ---------------------------------------------------------------------------
 # R1 a deny state that cannot be removed; R2 deny-state age; R3 UTF-8 stdin read as cp1252;
 # R4 the Goal: deny reason is sanitized.
 
@@ -1007,9 +1007,9 @@ def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
     check(name + ": no model call", stub.prompts == [], len(stub.prompts))
 
 
-# --------------------------------------------------------------------------- round 4
+# ---------------------------------------------------------------------------
 # R8 a stale deny state whose remove fails is ignored: the ask is judged, no did-not-run note.
-# Pin: a fresh deny state whose remove fails gives the did-not-run note and no deny.
+# A fresh deny state whose remove fails gives the did-not-run note and no deny.
 
 def case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged():
     name = "caseR8 deny-state 2 hours old, remove fails: ignored, the ask is judged once"
@@ -1504,7 +1504,7 @@ def case_g5_prompt_reads_the_style_file_not_a_copy():
           "DECOY-FIX found")
 
 
-# --------------------------------------------------------------------------- goal format, review round 1
+# --------------------------------------------------------------------------- goal format
 # No order between the Problem and Goal lines; the literals tied to the style file by module
 # constants; one stderr line when the style file or a rule anchor is missing.
 ORDER_WORD = re.compile(
@@ -2555,8 +2555,8 @@ def case_d3_an_option_with_no_description_renders_its_label_alone():
 
 
 # --------------------------------------------------------------------------- option text: size, fences, separator, preview; question text; options shape
-# Red cases for review round 1. Each names the defect in its case name. The cap value is the
-# builder's: these cases assert only that the judge runs and that the first owner message stays whole.
+# Each case names its defect in its case name. The cap value is the builder's: these cases
+# assert only that the judge runs and that the first owner message stays whole.
 
 FIRST_OWNER_CHARS = 8000  # the first owner message: enough to be cut once a huge option leaves little room
 
@@ -2710,7 +2710,7 @@ def case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash():
 
 
 # --------------------------------------------------------------------------- option cut: whole text, and the mark that names it
-# Red cases for review round 2. Real option descriptions run to 375 chars at p99 (max 605). The Loss
+# Real option descriptions run to 375 chars at p99 (max 605). The Loss
 # text sits at the end, so a cut at 300 chars can hide the reason the judge needs.
 
 LOSS_TAIL = "Loss: D11-LOSS-TAIL drops the review step for one day."

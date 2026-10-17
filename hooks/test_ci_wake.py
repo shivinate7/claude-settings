@@ -369,7 +369,7 @@ BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=
 QUEUED_913 = run(913, "gates", "success", [job("unit", "success")], in_progress_reads=2,
                  early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
-# skipped (the form that read red on main). DRAFT_DONE lists skipped (the form main already drops).
+# skipped. DRAFT_DONE lists skipped from the first list.
 DRAFT_LIVE = run(920, "gates", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
 DRAFT_DONE = run(921, "gates", "skipped", [job("unit", "skipped")])
 
@@ -697,7 +697,7 @@ def case_draft_run_then_real_run():
     expect_watch("draft run listed skipped beside a real run (control)", res, ["901"])
     res = run_hook(ready, fixture(READY, [DRAFT_LIVE, INPROG_906]), **fast)
     expect_verdict("draft run running at the list, real run listed with it (control)", res, "green")
-    # The incident: the first list shows only the draft run, still running. The real run lists second.
+    # The first list shows only the draft run, still running. The real run lists second.
     label = "draft run running at the first list, real run listed second"
     res = run_hook(ready, fixture(READY, [DRAFT_LIVE, late(922, 2)]), **fast)
     expect_verdict(label, res, "green")
