@@ -8,7 +8,7 @@ HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
              gates_windows_rest, gates_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep (the suite flags the steps inside a job read)
+  STEP_FLAGS code, guard, sweep, mods (the suite flags the steps inside a job read)
 
 Run with:  python3 lint/test_harness_scope.py -v
 """
@@ -21,8 +21,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
-STEP_FLAGS = ["code", "guard", "sweep"]
-ALL = JOB_FLAGS + STEP_FLAGS + ["mods"]  # the shell's ALL also holds mods (harness-scope.sh line 11)
+STEP_FLAGS = ["code", "guard", "sweep", "mods"]
+ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
 
 

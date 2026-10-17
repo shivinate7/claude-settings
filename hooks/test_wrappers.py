@@ -31,6 +31,9 @@ Contract, from decision gate-hooks-fail-closed:
   the reinstall step named (audit-high, decision gate-hooks-fail-closed), and one fallback line naming
   guard_core goes to guard.log. Every name other
   files reach through `guard` still resolves.
+- The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
+  line equal to the placeholder that install.sh and install.ps1 stamp. A line that drifted would install
+  unstamped, and the guard would then deny every call.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
@@ -484,6 +487,36 @@ def guard_sentinel_case():
     return True, "the sentinel name raises AttributeError"
 
 
+def stamp_lines_case():
+    """The stampers (install.sh, install.ps1) swap one whole placeholder line in guard.py and each guard_*.py for the
+    install id. A file whose line drifts installs unstamped: the installer exits 0 and the guard then denies every call.
+    The placeholder is read from install.sh and install.ps1, never copied here. Each hooks/guard*.py holds exactly one."""
+    root = os.path.dirname(HERE)
+    found = {}
+    for name, pattern in (("install.sh", r"^STAMP_PLACEHOLDER='([^'\n]*)'\r?$"),
+                          ("install.ps1", r"^\$StampPlaceholder = '([^'\n]*)'\r?$")):
+        with open(os.path.join(root, name), encoding="utf-8") as f:
+            m = re.search(pattern, f.read(), re.M)
+        if not m or not m.group(1):
+            return False, "%s names no placeholder text" % name
+        found[name] = m.group(1)
+    if len(set(found.values())) != 1:
+        return False, "the stampers disagree: %r" % found
+    want = found["install.sh"]
+    files = sorted(n for n in os.listdir(HERE) if re.fullmatch(r"guard(_\w+)?\.py", n))
+    if "guard.py" not in files or "guard_core.py" not in files:
+        return False, "the guard files were not found in %s" % HERE
+    bad = []
+    for name in files:
+        with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
+            hits = sum(1 for line in f.read().split("\n") if line.rstrip("\r") == want)
+        if hits != 1:
+            bad.append("%s has %d placeholder lines" % (name, hits))
+    if bad:
+        return False, "%s; want exactly one line equal to %r" % ("; ".join(bad), want)
+    return True, "%d guard files each hold one placeholder line" % len(files)
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -528,6 +561,8 @@ def build_cases():
                   guard_names_case))
     cases.append(("guard split: a name no guard module defines raises AttributeError through guard",
                   guard_sentinel_case))
+    cases.append(("install stamp: each hooks/guard*.py holds exactly one placeholder line, as the stampers write it",
+                  stamp_lines_case))
     return cases
 
 

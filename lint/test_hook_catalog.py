@@ -1464,6 +1464,19 @@ class Helpers(unittest.TestCase):
     def test_u7_line_of_counts_from_one(self):
         self.assertEqual(line_of("a\n\nb\nb\n", "b"), 3)
 
+    def test_the_guards_records_header_opens_the_generated_intro(self):
+        """hooks/guard_merge.py copies the first line of RECORDS_INTRO as RECORDS_HEADER. If the intro title changes
+        and the copy does not, the guard stops matching the page and lets each lane commit of it pass."""
+        hooks = os.path.join(ROOT, "hooks")
+        sys.path.insert(0, hooks)
+        try:
+            from guard_merge import RECORDS_HEADER
+        finally:
+            sys.path.remove(hooks)
+        from hook_catalog import RECORDS_INTRO
+        self.assertTrue(RECORDS_HEADER.strip(), "RECORDS_HEADER is empty")
+        self.assertTrue(RECORDS_INTRO.startswith(RECORDS_HEADER), (RECORDS_HEADER, RECORDS_INTRO[:40]))
+
 
 if __name__ == "__main__":
     unittest.main()
