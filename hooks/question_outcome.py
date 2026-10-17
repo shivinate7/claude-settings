@@ -452,7 +452,7 @@ def _rulings(cwd):
             continue
         if not ruling:
             continue
-        rid = path.split("/")[1][:-3]
+        rid = path[:-3]  # "<dir>/<stem>": a decisions/ and a deferred/ record with one stem stay apart
         block = _block("Ruling of record %s (%s)" % (rid, title or "untitled"), _cap_ruling(ruling))
         if left_out or len(block) + SEP > room:
             left_out += 1
