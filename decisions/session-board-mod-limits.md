@@ -24,6 +24,9 @@ Update-ready holds only when all five conditions hold:
 - No unpushed commits.
 - A clean tree.
 
+Running servers and background tasks are not part of update-ready. The five conditions are the owner's
+definition.
+
 Unknown is never ready. Git counts are unknown in four cases:
 
 - The reading is older than 60 s.
@@ -35,10 +38,9 @@ Timing:
 
 - Each session writes its entry on a 30 s heartbeat.
 - The board hides an entry older than 2 minutes, and one stamped more than 30 s ahead of now.
-- The board reads the 200 newest entries and shows 40 rows.
 - Git runs from an argv array, with no shell, `core.fsmonitor=false`, `--no-optional-locks`, and a 5 s
-  cap. It runs at turn end and on the idle heartbeat. One read runs at a time.
-- A read that takes 5 s or more doubles the idle wait, up to 300 s. A quick read resets it to 30 s.
+  cap. It runs at turn end and on the idle heartbeat. One read runs at a time. A slow read doubles the
+  idle wait, up to 300 s.
 - The one-day sweep deletes records a day past their last beat. It skips a session that `claude agents`
   lists as live. It deletes records only when that list is a valid JSON array. A valid empty list counts
   as real. An unreadable check is not a death (`liveness-read-is-platform-specific-and-unreadable-is-not-death`).
@@ -70,7 +72,6 @@ Stop:
 Safety of the session:
 
 - Every host call sits in a try. A failure logs one line to the debug log, prefixed "session-board:".
-  Some handlers stay silent.
 - Five points wait at most 100 ms for their work: session start, turn start, turn end, a permission ask,
   and the end of a tool call. The work finishes on its own.
 - An ask clears when its tool call returns. A git read that began before a turn start is dropped.
@@ -81,13 +82,3 @@ Reason: each record is small. It holds names and counts, no prompt and no file c
 Kind: build
 Plan: decisions/session-board-mod-limits.md#the-ruling (all)
 Home: mods/session-board/hooks/lib.mjs
-
-## Named limits
-
-- Running servers and background tasks are not part of update-ready. The five conditions are the owner's definition.
-- The per-turn cost of the git read is unmeasured. So is the cost of `claude agents --json` on a very large session list.
-- The cases use a fake host, not the desktop app.
-
-## Holes, named
-
-Debts: `sb-pane-untested`, `sb-auto-approve-unseen`, `sb-store-not-shared`, `sb-process-desktop-unknown`, `sb-command-turn-unknown`.
