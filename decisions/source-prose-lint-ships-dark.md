@@ -5,11 +5,13 @@ because the reader learns to scroll past it." This entry names why
 `ste_lint.py`'s comment-and-docstring mode stays off by default. It also
 names what turning the mode on will cost.
 
-Three later changes touch these counts (`every-lint-rule-blocks-or-does-not-exist`,
-a lint rule blocks, or it does not exist). STE006 is not in the linter. STE007
-and STE008 read `warning` and never block. STE001 reads one budget of 30 words.
-Every count below was taken before all three. No rerun exists, so the count
-under today's rules is unmeasured.
+Three later changes touch these counts. STE006 is not in the linter
+(`every-lint-rule-blocks-or-does-not-exist`, a lint rule blocks, or it does
+not exist). STE007 and STE008 read `warning` and never block (`plain-prose-lint`,
+the STE lint becomes a plain-prose lint). STE001 reads one budget of 30 words
+(`plain-prose-lint`, one budget with no split by mode). Every count below was
+taken before all three. No rerun exists, so the count under today's rules is
+unmeasured.
 
 ## The measurement
 
@@ -82,8 +84,9 @@ first run teaches its own reader to stop reading it.
 
 Someone must clear the real sentences first. By the counts above, that is 275
 to 564 errors, which include semicolons and warnings that no longer block.
-Only the STE001 share still applies. It is unmeasured under the 30-word
-budget. The exact number depends on which count a maintainer trusts. That
+The STE001 share still applies, and it is unmeasured under the 30-word
+budget. `check_source` also runs STE011 and STE013, and both read `error`. The
+564 count lists no STE011 or STE013 error, so their share is unmeasured too. The exact number depends on which count a maintainer trusts. That
 cleanup is a separate job from this one. Mixing it with the gate would
 bury the gate in noise on the day it ships.
 
