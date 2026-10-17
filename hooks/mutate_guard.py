@@ -568,7 +568,8 @@ MUTATIONS = [
      'waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed'),
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
-     "    for pattern in ():\n        found = pattern.search(cmd)", "guard", 'delete: the root'),
+     "    for pattern in ():\n        found = pattern.search(cmd)", "guard",
+     'delete: Remove-Item at a drive root'),
     # Added 2026-09-24 with the cmd.exe verbs (`rd`/`rmdir`/`del`/`erase` and their `/s` flag),
     # the Windows twin of the mutant just above. Drops the new forms back to the gap they fixed:
     # `rd /s /q C:\` denied nothing before this rule existed.
@@ -576,6 +577,13 @@ MUTATIONS = [
      'CMD_EXE_DELETE_WORDS = {"rd", "rmdir", "del", "erase"}',
      "CMD_EXE_DELETE_WORDS = set()", "guard",
      'delete: rd /s /q at a drive root, Bash'),
+    # Added 2026-10-17 (guard-audit-fixes-234), the token reader of POSIX `rm -rf`. The patterns
+    # above never match a `-rf` cluster, so `rm_delete_hit` is the only reader of `rm -rf ~/`.
+    # Dropping it leaves the cmd.exe reader alone and every POSIX wide delete allowed.
+    ("destructive-delete: drop the token reader of rm -rf, the POSIX form",
+     "        matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)",
+     "        matched = cmd_exe_delete_hit(segment)", "guard",
+     'delete: the home directory with a trailing slash'),
     ("git-call parsing: drop the redirect strip before tokenizing",
      '    text = REDIRECTION.sub(" ", segment)',
      '    text = segment', "guard", 'checkout: a start point survives a merged-output redirect'),

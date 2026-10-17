@@ -120,7 +120,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gate-hooks-fail-closed` | Owner, 2026-10-12: a gate whose script or python is missing refuses the call. | [`decisions/gate-hooks-fail-closed.md`](../decisions/gate-hooks-fail-closed.md) |
 | `guard-audit-high` | Which guard refusals are false alarms or gaps? | [`decisions/guard-audit-high.md`](../decisions/guard-audit-high.md) |
 | `guard-command-position` | One resolver finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
-| `guard-guards-mistakes-only` | Owner ruling, 2026-10-15 15:47 CDT. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
+| `guard-guards-mistakes-only` | Owner ruling, 2026-10-17 09:07 CDT. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
 | `guard-log-read-weekly` | `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry records the missing half, and the two false alarms that made the half worth writing down. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
 | `guard-trims-from-the-audit` | The owner approved these trims from an audit of `~/.claude/guard.log`: 2,713 lines, 2026-09-16 to 2026-10-02. | [`decisions/guard-trims-from-the-audit.md`](../decisions/guard-trims-from-the-audit.md) |
@@ -175,6 +175,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `claude-md-change-is-flagged` | Owner, 2026-10-16 03:27 CDT: "Report only." (Feedback item fb-claude-md-flag: "how can i confirm an agent does not just edit claude.md without asking me first".) | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
 | `deleted-record-keeps-its-number` | Settled by the owner. | [`decisions/deleted-record-keeps-its-number.md`](../decisions/deleted-record-keeps-its-number.md) |
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
+| `guard-reads-wrapped-commands` | Kind: build Plan: decisions/guard-reads-wrapped-commands.md#the-change (all) Home: hooks/guard_core.py | [`decisions/guard-reads-wrapped-commands.md`](../decisions/guard-reads-wrapped-commands.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
 | `install-hooks-whole` | The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
@@ -260,6 +261,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bare-merge-reads-folder-not-repo` | `gh pr merge -R other/repo` in a merge-tool folder asks, and in a plain folder it allows silently, whatever the named repo uses. | [`debts/bare-merge-reads-folder-not-repo.md`](../debts/bare-merge-reads-folder-not-repo.md) |
 | `bare-merge-skips-host-merge-tool` | `mcp__github__merge_pull_request` merges bare in a merge-tool repo, and the bare-merge rule says nothing. | [`debts/bare-merge-skips-host-merge-tool.md`](../debts/bare-merge-skips-host-merge-tool.md) |
 | `bare-merge-tool-unloadable` | When `merge/merge.py` cannot load, the head read is unknown and merge-checks denies a bare `gh pr merge` before the bare-merge ask runs. | [`debts/bare-merge-tool-unloadable.md`](../debts/bare-merge-tool-unloadable.md) |
+| `bare-words-shares-env-list` | The search-tool exemption in `bare_words` uses `ENV_PATTERN_COMMANDS`, which the env-file rule also uses. | [`debts/bare-words-shares-env-list.md`](../debts/bare-words-shares-env-list.md) |
 | `base-read-midway-untested` | If a later verify cannot run, `read_default_base` returns unknown. | [`debts/base-read-midway-untested.md`](../debts/base-read-midway-untested.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
@@ -286,14 +288,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `drops-whole-token-no-mutant` | No mutant removes the whole-token match. | [`debts/drops-whole-token-no-mutant.md`](../debts/drops-whole-token-no-mutant.md) |
 | `dw-bare-stop-row-blind` | Case M5c was cut. | [`debts/dw-bare-stop-row-blind.md`](../debts/dw-bare-stop-row-blind.md) |
 | `dw-busy-stop-skipped` | A Stop that lands while a judge runs is skipped (`SKIP busy`). | [`debts/dw-busy-stop-skipped.md`](../debts/dw-busy-stop-skipped.md) |
-| `dw-ffff-regex-literal` | The `asciiJson` regex holds a literal U+FFFF character. | [`debts/dw-ffff-regex-literal.md`](../debts/dw-ffff-regex-literal.md) |
 | `dw-log-keeps-model-text` | The log keeps the FLAG `why` up to 2000 characters. | [`debts/dw-log-keeps-model-text.md`](../debts/dw-log-keeps-model-text.md) |
 | `dw-log-write-failures-silent` | The log is the only output for an ALLOW. | [`debts/dw-log-write-failures-silent.md`](../debts/dw-log-write-failures-silent.md) |
 | `dw-notice-lead-space-lost` | The mod's log folds whitespace, so whitespace at the very start of a notice is lost in the log. | [`debts/dw-notice-lead-space-lost.md`](../debts/dw-notice-lead-space-lost.md) |
 | `dw-slash-cache-hit-reads-clean` | On a cache hit `/dw` prints `nothing to say (no protected change, no model call)`, so a second `/dw` after a FLAG reads like a clean turn. | [`debts/dw-slash-cache-hit-reads-clean.md`](../debts/dw-slash-cache-hit-reads-clean.md) |
 | `dw-slot-timers-unmeasured` | Each step that holds the slot has a mod timer: each python finder 6 s (two per run), each python run 31 s (a 30 s host limit, unmeasured against a real run), the model call 50 s, each toast 5 s (a verdict and up to three notices), each log write 2 s (up to six). | [`debts/dw-slot-timers-unmeasured.md`](../debts/dw-slot-timers-unmeasured.md) |
 | `dw-stop-row-unproven` | The Stop row is removed. | [`debts/dw-stop-row-unproven.md`](../debts/dw-stop-row-unproven.md) |
-| `dw-text-of-drops-reason` | `textOf` drops `r.reason`, so an aborted call reads `no text`. | [`debts/dw-text-of-drops-reason.md`](../debts/dw-text-of-drops-reason.md) |
 | `dw-where-exe-both-phases` | `pickPython` runs `where.exe` in both phases. | [`debts/dw-where-exe-both-phases.md`](../debts/dw-where-exe-both-phases.md) |
 | `env-file-rule-false-alarms` | `ag -f` and `ack -f` refuse now, though `-f` is a boolean in those tools. | [`debts/env-file-rule-false-alarms.md`](../debts/env-file-rule-false-alarms.md) |
 | `env-flat-crash-allows` | A runtime crash in `_env_flat` allows the call. | [`debts/env-flat-crash-allows.md`](../debts/env-flat-crash-allows.md) |
@@ -320,6 +320,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-indirect-forms` | The guard reads literal set forms only. | [`debts/git-env-set-indirect-forms.md`](../debts/git-env-set-indirect-forms.md) |
 | `git-env-set-untested-forms` | No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in a heredoc body. | [`debts/git-env-set-untested-forms.md`](../debts/git-env-set-untested-forms.md) |
 | `git-env-warn-session-start` | The warning runs at session start only, so damage done mid-session shows at the next start. | [`debts/git-env-warn-session-start.md`](../debts/git-env-warn-session-start.md) |
+| `git-rm-cached-false-alarm` | `git rm -rf --cached .` denies. | [`debts/git-rm-cached-false-alarm.md`](../debts/git-rm-cached-false-alarm.md) |
+| `glued-subshell-unread` | `(rm -rf .)` and `x=$(tail -f y)` pass, because the closing parenthesis is glued to the last word. | [`debts/glued-subshell-unread.md`](../debts/glued-subshell-unread.md) |
 | `guard-abtests-test-path` | The test-path rule reads `native/ABTests/` as a test folder, so a builder cannot edit product code there. | [`debts/guard-abtests-test-path.md`](../debts/guard-abtests-test-path.md) |
 | `guard-audit-subagent-stop-open` | On SubagentStop, a missing guard module still fails open, and one log line records it. | [`debts/guard-audit-subagent-stop-open.md`](../debts/guard-audit-subagent-stop-open.md) |
 | `guard-bash-c-silent-write` | A silent git write inside `bash -c '...'` is allowed. | [`debts/guard-bash-c-silent-write.md`](../debts/guard-bash-c-silent-write.md) |
@@ -403,6 +405,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `judge-uncommitted-order` | A record git does not list (new and not committed) is ordered by file mtime, after the listed ones. | [`debts/judge-uncommitted-order.md`](../debts/judge-uncommitted-order.md) |
 | `judgment-exits-debt-count` | An `unmechanized` rule waits for a check. | [`debts/judgment-exits-debt-count.md`](../debts/judgment-exits-debt-count.md) |
 | `kept-bloat-rows-unaudited` | The lane read five `BLOAT` rows for meaning and removed their fix. | [`debts/kept-bloat-rows-unaudited.md`](../debts/kept-bloat-rows-unaudited.md) |
+| `kill-guard-word-only` | `kill_hit` reads only the command word. | [`debts/kill-guard-word-only.md`](../debts/kill-guard-word-only.md) |
 | `lane-slug-gh-m-flag-passes` | In gh, `-m` is a milestone or merge flag, never a message. | [`debts/lane-slug-gh-m-flag-passes.md`](../debts/lane-slug-gh-m-flag-passes.md) |
 | `lane-slug-header-count-shift` | An unquoted `<<word` in an interpreter-fed heredoc body, such as `x = 1 << y`, or a `case` `)` inside `$(`, shifts the header count. | [`debts/lane-slug-header-count-shift.md`](../debts/lane-slug-header-count-shift.md) |
 | `lane-slug-heredoc-untested` | No test pins a `#` inside a string, a lone apostrophe in a comment, or multi-line quoted text before a header. | [`debts/lane-slug-heredoc-untested.md`](../debts/lane-slug-heredoc-untested.md) |
@@ -441,7 +444,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-refresh-cadence-unmeasured` | How often the app refreshes a marketplace is unmeasured. | [`debts/mods-refresh-cadence-unmeasured.md`](../debts/mods-refresh-cadence-unmeasured.md) |
 | `mods-session-board-timer-margins` | `mods/session-board/session-board.test.mjs` has two real-timer margins, about lines 709-718 and 928-940. | [`debts/mods-session-board-timer-margins.md`](../debts/mods-session-board-timer-margins.md) |
 | `mods-step-order-unpinned` | No test pins that the mod test step is last. | [`debts/mods-step-order-unpinned.md`](../debts/mods-step-order-unpinned.md) |
-| `mods-tests-glob-too-narrow` | The glob reaches only root-level `mods/<name>/*.test.mjs`. | [`debts/mods-tests-glob-too-narrow.md`](../debts/mods-tests-glob-too-narrow.md) |
 | `moved-kind-path-forgets-numbers` | After a kind's folder or file is moved, the claim does not see the numbers that records used under the old path. | [`debts/moved-kind-path-forgets-numbers.md`](../debts/moved-kind-path-forgets-numbers.md) |
 | `mutant-crash-audit-missing` | The fix colocates `guard.py` for `watch` mutants only. | [`debts/mutant-crash-audit-missing.md`](../debts/mutant-crash-audit-missing.md) |
 | `nesting-risk-unrecorded` | The rule `roles-workers-never-spawn` said a repo that needs nesting raises depth in its settings and records the risk. | [`debts/nesting-risk-unrecorded.md`](../debts/nesting-risk-unrecorded.md) |
@@ -452,7 +454,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
 | `one-term-per-meaning-unchecked` | Rule `output-write-in-ste` says "one term per meaning". | [`debts/one-term-per-meaning-unchecked.md`](../debts/one-term-per-meaning-unchecked.md) |
 | `override-removal-unreminded` | The watch reverts a raised subagent cap only when `_subagentCapUntil` passes. | [`debts/override-removal-unreminded.md`](../debts/override-removal-unreminded.md) |
-| `own-tree-reason-names-remover` | The hook's row for the ending agent's own tree says "left for the delayed remover", and comments name lane wt-reap-delay. | [`debts/own-tree-reason-names-remover.md`](../debts/own-tree-reason-names-remover.md) |
 | `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, a standalone run of the check has no generator, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
 | `pin-switch-in-place-mix` | A host can have no symlink rights. | [`debts/pin-switch-in-place-mix.md`](../debts/pin-switch-in-place-mix.md) |
 | `plain-diff-4mib-unconfirmed` | Output over the host's limit is cut, and the header says "Diff truncated". | [`debts/plain-diff-4mib-unconfirmed.md`](../debts/plain-diff-4mib-unconfirmed.md) |
@@ -478,7 +479,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `purge-bad-row-key-raises` | A log row with a list or dict `branch` or `commit`, and a live `time_ms`, raises TypeError. | [`debts/purge-bad-row-key-raises.md`](../debts/purge-bad-row-key-raises.md) |
 | `purge-confirm-total-wrong` | The "purge: N" total in the confirm report counts rows whose ref was kept. | [`debts/purge-confirm-total-wrong.md`](../debts/purge-confirm-total-wrong.md) |
 | `purge-git-trace-missing-ref` | With `GIT_TRACE=1` or `GIT_TRACE2=1` set, git writes to stderr on a missing ref. | [`debts/purge-git-trace-missing-ref.md`](../debts/purge-git-trace-missing-ref.md) |
-| `purge-key-case-folds` | Branch names compare with exact case, but NTFS ref names fold case. | [`debts/purge-key-case-folds.md`](../debts/purge-key-case-folds.md) |
 | `purge-orphan-ref-kept` | The purge keeps a ref when no log entry names its commit. | [`debts/purge-orphan-ref-kept.md`](../debts/purge-orphan-ref-kept.md) |
 | `purge-realpath-per-row` | `realpath` runs once per unexpired row, in preview too. | [`debts/purge-realpath-per-row.md`](../debts/purge-realpath-per-row.md) |
 | `purge-snapshot-race` | The set of unexpired rows is read once, at purge start. | [`debts/purge-snapshot-race.md`](../debts/purge-snapshot-race.md) |
@@ -488,6 +488,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
 | `question-problem-line-forms` | `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as Problem lines. | [`debts/question-problem-line-forms.md`](../debts/question-problem-line-forms.md) |
+| `quoted-script-unnamed-runner` | A wide `rm -rf` or a `tail -f` inside a quoted script for a runner the guard does not name passes, such as `docker run img sh -c 'rm -rf /'`. | [`debts/quoted-script-unnamed-runner.md`](../debts/quoted-script-unnamed-runner.md) |
 | `rate-wait-outside-ttl-budget` | A rate wait moves the lock's expiry to now + wait + 300 s, and only when that is later than the expiry. | [`debts/rate-wait-outside-ttl-budget.md`](../debts/rate-wait-outside-ttl-budget.md) |
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
@@ -584,6 +585,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-hook-timeout-fails-open` | The fixer limit (5 s) plus the lint timeout (15 s) equals the hook timeout (20 s). | [`debts/ste-hook-timeout-fails-open.md`](../debts/ste-hook-timeout-fails-open.md) |
 | `ste-macos-child-route-unverified` | The child-process route for the STE autofix is not verified on macOS. | [`debts/ste-macos-child-route-unverified.md`](../debts/ste-macos-child-route-unverified.md) |
 | `ste-rewrite-unchecked-lands` | The STE fixer rewrites the text, then the lint cannot run. | [`debts/ste-rewrite-unchecked-lands.md`](../debts/ste-rewrite-unchecked-lands.md) |
+| `stream-guard-quadratic` | The stream guard slices the word list once per bare word. | [`debts/stream-guard-quadratic.md`](../debts/stream-guard-quadratic.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
 | `sweep-no-deadline-many-trees` | The SessionEnd run starts no phase and no tree read at or past its deadline, `JUDGE_BUDGET_SECONDS` (12 s) after it starts. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
 | `sweep-note-delivery-unmeasured` | When a turn has advisory findings and no errors, `md_sweep` prints a `systemMessage` and nothing else. | [`debts/sweep-note-delivery-unmeasured.md`](../debts/sweep-note-delivery-unmeasured.md) |

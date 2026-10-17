@@ -68,13 +68,26 @@ def kill_hit(tokens) -> str:
         for arg in rest:
             if arg.startswith("-") and not arg.startswith("--") and "t" in arg:
                 return word + " " + arg
+    # By port, the same act as `lsof -t | xargs kill`: `fuser -k` (alone or in a cluster, `-kn`) and
+    # `kill-port`, run directly or through a package runner.
+    if tool == "fuser" and any(
+            arg == "--kill" or (arg.startswith("-") and not arg.startswith("--") and "k" in arg)
+            for arg in rest):
+        return word
+    if tool == "kill-port" or (
+            (tool in ("npx", "pnpx", "bunx") or (tool in ("npm", "pnpm", "yarn")
+                                                 and ("exec" in rest or "dlx" in rest)))
+            and any(arg.split("@")[0] == "kill-port" for arg in rest)):
+        return word + " kill-port"
     return ""
 
 
 KILL_PID_RE = re.compile(r"^-?[0-9]+$")
 ROOT_PID_RE = re.compile(r"[0-9]+")
 PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
-PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
+# `lsof` counts only with a `-t` flag, which makes it a pid list; `lsof -i :3000` lists and no more.
+PID_SUBSTITUTION_RE = re.compile(
+    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof|lsof(?=[^)`]*\s-[A-Za-z]*t))\b")
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
@@ -183,14 +196,17 @@ def foreign_pid_kill(tokens, transcript: str = "") -> str:
     if any(arg == "-l" or arg == "-L" for arg in rest):
         return ""
     root = None
-    skip = after_dashes = False
+    skip = after_dashes = signal_given = False
     for arg in rest:
         if skip:
             skip = False
             continue
-        if not after_dashes and arg.startswith("-") and arg != "-":
+        # A flag after the signal that reads `-1` is pid -1 (every process): `kill -9 -1`.
+        if not after_dashes and arg.startswith("-") and arg != "-" and not (
+                signal_given and arg == "-1"):
             after_dashes = arg == "--"
             skip = arg in KILL_SIGNAL_ARG_FLAGS
+            signal_given = signal_given or not after_dashes
             continue
         if not KILL_PID_RE.match(arg):
             continue

@@ -2388,7 +2388,8 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
         repo = e.get("repo")
         if not isinstance(repo, str) or not repo:
             return None
-        return (os.path.normcase(os.path.realpath(repo)), e.get("branch"), e.get("commit"))
+        branch = e.get("branch")
+        return (os.path.normcase(os.path.realpath(repo)), branch.lower() if isinstance(branch, str) else branch, e.get("commit"))
 
     unexpired = {row_key(e) for e in entries
                  if isinstance(e.get("time_ms"), (int, float)) and not isinstance(e.get("time_ms"), bool)

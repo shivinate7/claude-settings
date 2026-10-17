@@ -116,7 +116,7 @@ async function pickPython($) {
 }
 
 // ASCII-only JSON: python -I may read stdin in a legacy code page, so escape every non-ASCII character.
-const asciiJson = (v) => JSON.stringify(v).replace(/[\u0080-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+const asciiJson = (v) => JSON.stringify(v).replace(/[\u0080-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
 // The background judge and /dw each get their own state folder, so neither mutes the other's
 // "already judged" cache.
@@ -168,7 +168,7 @@ async function judge($, stop, who) {
     // gets --model-error, and the one-judge slot frees. A late reply is dropped.
     const reply = await deadline($.model.complete({ model: out.model, prompt: out.prompt, maxTokens: 512, timeoutMs: MODEL_MS }), MODEL_MS);
     const text = textOf(reply);
-    if (text === "") throw new Error("the model reply carried no text");
+    if (text === "") throw new Error(`the model reply carried no text${reply && reply.reason ? ` (${reply.reason})` : ""}`);
     trace.push(`model call: OK ${Date.now() - t0} ms, reply ${text.length} chars`);
     args = ["--model-text", text.slice(0, 4000)];
   } catch (err) {
