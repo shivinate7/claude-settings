@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
 (banchi, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
 """
-import contextlib, io, os, subprocess, sys, tempfile, unittest, unittest.mock
+import contextlib, io, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1287,7 +1287,7 @@ class DropsLinesHint(unittest.TestCase):
         return sha
 
     def parsed(self, sha):
-        return self.r.sh("log", "-1", "--format=%(trailers:key=Drops-lines,valueonly)", sha).strip()
+        return self.r.sh("log", "-1", "--no-show-signature", "--format=%(trailers:key=Drops-lines,valueonly)", sha).strip()
 
     def said(self):
         """-> (problems, every line check() says: problems and notes)."""
@@ -1454,6 +1454,32 @@ class DropsLinesHint(unittest.TestCase):
         self.r.sh("config", "grep.patternType", "fixed")
         self.land_pr()
         sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_a_signed_commit_with_log_show_signature_gets_the_right_sha_in_the_hint(self):
+        """log.showSignature=true makes `git log` print a signature block before a signed commit's record. A read that
+        lets it in shifts the sha, trailers and body fields of that commit, so the hint names a wrong sha. The culprit is
+        ssh-signed here with a key made offline in the temp dir. Without ssh-keygen the case cannot be built: it skips."""
+        ssh_keygen = shutil.which("ssh-keygen")
+        if not ssh_keygen:
+            self.skipTest("ssh-keygen is absent: a signed commit cannot be built")
+        key = os.path.join(self.r.tmp.name, "k")
+        subprocess.run([ssh_keygen, "-q", "-t", "ed25519", "-N", "", "-C", "t@t", "-f", key],
+                       check=True, capture_output=True)
+        with open(key + ".pub", encoding="utf-8") as f:
+            kind, blob = f.read().split()[:2]
+        signers = os.path.join(self.r.tmp.name, "signers")
+        with open(signers, "w", encoding="utf-8") as f:
+            f.write('t@t namespaces="git" %s %s\n' % (kind, blob))
+        self.land_pr()
+        for k, v in (("gpg.format", "ssh"), ("user.signingkey", key), ("gpg.ssh.allowedSignersFile", signers),
+                     ("commit.gpgsign", "true"), ("log.showSignature", "true")):
+            self.r.sh("config", k, v)
+        sha = self.revert_with(self.ABOVE)
+        self.assertEqual(self.r.sh("log", "-1", "--no-show-signature", "--format=%G?", sha), "G",
+                         "fixture: the commit must carry a good signature")
+        self.assertIn("Good", self.r.sh("log", "-1", "--no-patch", sha), "fixture: log.showSignature must print the block")
         got, text = self.said()
         self.assertRefusedWithHint(sha, got, text)
 

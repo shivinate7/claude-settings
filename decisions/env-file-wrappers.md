@@ -70,13 +70,13 @@ Debts: `env-grep-long-abbrev-unpinned` (grep --regex= style abbreviations are no
 
 ## Incident
 
-Measured in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11 (decision
+Counted in guard.log (a lower bound, one machine), this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11 (decision
 guard-log-read-weekly, the weekly table). 296 of 766 env-file denies named `timeout` (160),
 `verdict` (78) or a word glued to `(` (58) as the command. The log holds the command word, not
 its arguments, so the 160 `timeout` denies include any timeout form. The rule's own remedy told
 the agent to use the form it then refused.
 
-Measured in the 2026-10-13 audit (guard-audit-high, the oversight session): about 690
+Measured by the oversight session's audit, 2026-10-13 (guard-audit-high): about 690
 env-file denies a week. Since 2026-10-12, 25 were for `grep '.*'` and 7 for `do`. Rule 1 covers
 these shapes.
 
@@ -99,7 +99,7 @@ Two more defects, found in review of the guard trims (decision guard-trims-from-
 
 ## What reopens it
 
-A wrapper shape this ruling does not name, with a measured deny count in the weekly table.
+A wrapper shape this ruling does not name, with a counted number of denies in the weekly table.
 
 Kind: process
 Home: hooks/guard_env.py

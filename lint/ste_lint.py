@@ -442,6 +442,9 @@ def load_config(start: str) -> dict:
                 data = tomllib.load(handle)
         data = data.get("ste", data) if isinstance(data, dict) else {}
         cfg.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
+        for key in ("max_words_procedural", "max_words_descriptive"):  # removed keys: say so, never drop them silently
+            if key in data:
+                sys.stderr.write("ste-lint: %s sets %s, which is removed and ignored. The budget is max_words.\n" % (found, key))
     except (OSError, ValueError) as exc:
         sys.stderr.write("ste-lint: cannot read %s: %s\n" % (found, exc))
     cfg["_path"] = found

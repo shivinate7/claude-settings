@@ -34,7 +34,7 @@ only quoted text.
 Commit a5af6d6 (2026-09-16) denied Monitor because "it errors often", and a background command
 with a completion notice "does the same job". Nothing measured it after that day.
 
-MEASURED in this Windows machine's `~/.claude/guard.log`, 2026-09-16 to 2026-10-11: 464
+Counted in guard.log (a lower bound, one machine), this Windows machine's `~/.claude/guard.log`, 2026-09-16 to 2026-10-11: 464
 `waiter` denies, every one `sleep` or `Start-Sleep`. The Bash tool's own text tells an agent to
 use Monitor for a wait. An agent that followed that text was refused. An agent that reached for
 `sleep` was refused. Each deny is one turn thrown away, then a retry.

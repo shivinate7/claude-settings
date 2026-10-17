@@ -3,7 +3,8 @@
 The owner approved these trims from an audit of `~/.claude/guard.log`: 2,713 lines, 2026-09-16
 to 2026-10-02. The log holds refusals and noted allows. CLAUDE.md `building-guard-needs-incident`
 says a guard rule needs a named incident or a measured risk. A rule that never fires, or only
-logs, has neither. The counts below come from that log, unless marked otherwise.
+logs, has neither. 0 fires in the log is a lower bound, not proof of no risk. The counts below
+come from that log (a lower bound, one machine), unless marked otherwise.
 
 ## Cut
 
@@ -28,8 +29,8 @@ redirect or `cp` onto the paths the rule freezes. It does not.
   `lint/**`, `agents/**`, `janitor/**` and `state/**`. It does not cover a Bash write.
 
 So a `cp`, `mv` or redirect onto `~/.claude/hooks/guard.py` has no other check. The rule stays. To
-cut it, first add a watch of those paths. The 0 fires show that nothing tried the act. They do not
-show that the act is safe. The owner ruled that `frozen-path` stays, with no new watch.
+cut it, first add a watch of those paths. The 0 fires are a lower bound: the log can miss lines.
+They do not show that nothing tried the act, and they do not show that the act is safe. The owner ruled that `frozen-path` stays, with no new watch.
 
 ## Fixed
 

@@ -79,7 +79,7 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 
 1. The watch reverts the cap override only at expiry. No text now tells an agent to remove the file before then. Debt: `override-removal-unreminded`, no early-removal reminder.
 2. An agent now meets the `_subagentCapUntil` field only in the revoke message of `hooks/config_watch.py`, after a bad write. Debt: `cap-until-field-taught-late`, the field is taught late.
-3. The `unmechanized` line in the `lint/rule_audit.py` docstring still says "genuinely cannot be checked by a machine". That overlaps `judgment`. Debt: `unmech-doc-overlaps-judgment`, the docstring overlaps the new kind.
+3. Closed: the `unmechanized` line in the `lint/rule_audit.py` docstring no longer overlaps `judgment`.
 4. These 14 rules stay as prose, unchanged by the interview: `outcomes-mechanize-rules`, `roles-opus-override-guarded`, `roles-third-try-steps-up`, `git-never-discard-output`, `git-remedy-never-names-target`, `git-slug-then-claim-number`, `git-cite-by-id`, `verification-trust-guard-after-red`, `verification-cry-wolf-guard-is-spent`, `verification-report-unknown-reads`, `building-allow-list-is-the-constant`, `building-scanner-respects-strings`, `reports-order-of-labels`, `reports-done-format`.
 5. A move from `unmechanized` to `judgment` takes a rule off the list of rules that still wait for a check. Only the 8-word reason floor and the two pins in one commit stand in the way. Debt: `judgment-exits-debt-count`, a re-kind leaves the waiting list.
 6. A measured time table (deferred item measured-time-table) may let a check judge `style-no-unmeasured-estimate`. Debt: `estimate-rule-may-be-checkable`, the time table may give it a check.
@@ -91,7 +91,6 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 12. No guard reads a command that marks a PR ready. The kept rule `git-integration-branch-merge` still says only the integration PR goes ready. The clause "only after review" has no text. Debt: `pr-ready-unguarded`, nothing guards marking a PR ready.
 13. Nothing makes a session wait for checks after a push before it reports. `hooks/ci_wake.py` starts no wait on a push. Debt: `push-report-before-checks`, no wait after a push.
 14. The map no longer ties the `merge-checks`, `draft-pr` and `pointer-head` guard rules to a rule. A guard deleted together with its tests now passes `lint/rule_audit.py`. Debt: `guard-untied-from-rule-map`, three guards have no row.
-15. Two comments still cite deleted text: a case comment in `hooks/test_guard.py` names `git-wait-for-required-checks`, and `hooks/guard_kill.py` quotes the dropped `pkill -f` sentence. Debt: `shrink-stale-code-comments`, two comments cite deleted rules.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules

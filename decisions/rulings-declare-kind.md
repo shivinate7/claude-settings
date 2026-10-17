@@ -94,8 +94,8 @@ the lint cannot tell the two apart.
 - `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/`. It has no `--dir`.
   The guard reads the same `DIRS`, so a message that cites a `debts/` record by path is refused
   by cite-by-id (`git-cite-by-id`). That is intended.
-- `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name, and
-  then checks nothing (review round 3 of lane record-slugs-dir). Debt: `ruling-kind-dir-equals-open`.
+- `lint/check_ruling_kind.py` reads `--dir=x` as `--dir x` and fails on any other unknown option
+  (closed after review round 3 of lane record-slugs-dir).
 - Both slug lints skip an absolute file argument and a `.MD` name. CI cannot reach either. Debt:
   `slug-lint-skips-abs-and-md`.
 

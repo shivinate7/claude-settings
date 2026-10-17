@@ -42,10 +42,12 @@ def opens_comment(s, inside):
     return False
 
 
-def live_lines(text):
-    """Yield the lines outside fenced blocks and multi-line HTML comments."""
+def live_lines(text, problems=None):
+    """Yield the lines outside fenced blocks and multi-line HTML comments. A fence or comment still open at
+    the end hides every later line: when `problems` is a list, it gets one line naming the open one."""
     fence, comment = None, False
-    for line in text.splitlines():
+    fence_at = comment_at = 0
+    for number, line in enumerate(text.splitlines(), 1):
         s = line.strip()
         if fence:
             # A fence closes only on the same character, at least as long, with nothing after it.
@@ -55,21 +57,32 @@ def live_lines(text):
         if not comment:
             opener = FENCE.match(s)
             if opener:
-                fence = opener.group(1)
+                fence, fence_at = opener.group(1), number
                 continue
             yield line
+        was = comment
         comment = opens_comment(s, comment)
+        if comment and (not was or "-->" in s):
+            comment_at = number
+    if problems is not None:
+        if fence:
+            problems.append("unclosed fence opened on line %d: the lines after it are not read" % fence_at)
+        if comment:
+            problems.append("unclosed comment opened on line %d: the lines after it are not read" % comment_at)
 
 
 def skill_names(skills=SKILLS):
     """Folders directly under skills/ that hold a file named exactly SKILL.md.
     `skills` is the folder to list. lint/hook_catalog.py passes its own root's skills/."""
     names = []
+    if not os.path.isdir(skills):
+        return names  # main() fails a missing skills/ itself; a settings root with no skills/ has none
     for name in os.listdir(skills):
         folder = os.path.join(skills, name)
         if name.startswith(".") or name == "__pycache__" or not os.path.isdir(folder):
             continue
-        if "SKILL.md" in os.listdir(folder):  # listdir gives the real case on every platform
+        # listdir gives the real case on every platform; the entry must also be a file
+        if "SKILL.md" in os.listdir(folder) and os.path.isfile(os.path.join(folder, "SKILL.md")):
             names.append(name)
     return sorted(names)
 
@@ -78,19 +91,21 @@ def main():
     try:
         with open(RECORD, encoding="utf-8-sig") as handle:
             text = handle.read()
+        if not os.path.isdir(SKILLS):
+            raise NotADirectoryError("%s is not a folder" % SKILLS)
         names = skill_names()
     except (OSError, UnicodeDecodeError) as err:
         print("check_skill_model_rows: cannot read input: %s" % err)
         return 2
     rows = {}
     problems = []
-    for line in live_lines(text):
+    for line in live_lines(text, problems):
         found = ROW.match(line.strip())
         if not found:
             continue
         name = found.group(1)
         rows[name] = rows.get(name, 0) + 1
-        if not all(p in line for p in PHRASES):
+        if not all(p in line.strip().split("|")[2] for p in PHRASES):  # the second cell only
             problems.append("skill `%s`: row must say \"%s\" and \"%s\"" % ((name,) + PHRASES))
     for name in names:
         if name not in rows:

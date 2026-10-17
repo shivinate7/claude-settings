@@ -28,6 +28,7 @@ Each case names the defect it pins in its docstring or comment. Red cases are ma
 """
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,7 @@ FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
 from test_windows_split import all_jobs  # noqa: E402  one home for the gates.yml step parser
+from check_skill_model_rows import skill_names  # noqa: E402
 
 PHRASE = "no model pin; runs on the caller's model"
 HEAD = "| Point | Model | Effort |\n|---|---|---|\n"
@@ -184,6 +186,20 @@ class Coverage(unittest.TestCase):
                 self.assertEqual(code, 1, out)
                 self.assertIn("alpha", out)
 
+    def test_phrases_outside_the_second_cell_do_not_satisfy_a_row(self):
+        # Red: the check matches the phrases anywhere on the row line. They count in the second cell only.
+        cases = {
+            "both phrases in the third cell": "| skill `alpha` | runs on Sonnet | %s |" % PHRASE,
+            "one phrase per cell": "| skill `alpha` | no model pin | runs on the caller's model |",
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                files = skills("alpha")
+                files[RECORD] = record([line])
+                code, out = run(files)
+                self.assertEqual(code, 1, out)
+                self.assertIn("alpha", out)
+
     def test_phrases_in_prose_do_not_satisfy_a_row(self):
         files = skills("alpha")
         files[RECORD] = record([row("alpha", "runs on Sonnet")], prose=PHRASE + "\n\n")
@@ -297,12 +313,72 @@ class Fences(unittest.TestCase):
             code, out = run(files)
             self.assertEqual(code, 0, out)
 
+class OpenFences(unittest.TestCase):
+    """An unclosed fence or comment hides every later line. The check fails visibly, and names the open one
+    and the line it starts on, so a reader does not hunt for the cause (subagent-model-cap)."""
+
+    def said(self, opener, closer, hidden):
+        """-> (exit code, output, start line, record). `hidden` is the skills whose rows sit after the opener."""
+        files = skills("alpha", *hidden)
+        rows = [row("alpha")]
+        text = record(rows, extra="%s\n%s\n" % (opener, "\n".join(row(n) for n in hidden)) + closer)
+        files[RECORD] = text
+        start = text.splitlines().index(opener) + 1
+        code, out = run(files)
+        return code, out, start
+
+    def assertNamed(self, out, word, start):
+        self.assertTrue(any(word in line.lower() and re.search(r"\b%d\b" % start, line) for line in out.splitlines()),
+                        "no line names the open %s and line %d:\n%s" % (word, start, out))
+
+    def test_unclosed_fence_with_every_row_present_still_fails_and_is_named(self):
+        # Red: all rows precede the fence, so nothing is hidden and the check exits 0 on a broken record.
+        for opener in ("```text", "~~~text"):
+            with self.subTest(opener=opener):
+                code, out, start = self.said(opener, "", [])
+                self.assertEqual(code, 1, out)
+                self.assertNamed(out, "fence", start)
+
+    def test_unclosed_fence_that_hides_a_row_names_the_fence(self):
+        # Red: the output says "no row" for the hidden skill and never says why.
+        code, out, start = self.said("```text", "", ["beta"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("beta", out)
+        self.assertNamed(out, "fence", start)
+
+    def test_unclosed_comment_names_the_comment(self):
+        # Red: "intro <!--" never closes. The line it opens on is the start line.
+        files = skills("alpha")
+        text = record([row("alpha")], extra="intro <!--\n%s\n" % row("beta"))
+        files[RECORD] = text
+        start = text.splitlines().index("intro <!--") + 1
+        code, out = run(files)
+        self.assertEqual(code, 1, out)
+        self.assertNamed(out, "comment", start)
+
+    def test_closed_fence_and_closed_comment_say_nothing(self):
+        # Control, green today: a closed fence and a closed comment get no problem line.
+        files = skills("alpha")
+        files[RECORD] = record([row("alpha")], extra="```text\nx\n```\n<!--\ny\n-->\n")
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out, "")
+
+
 class Folders(unittest.TestCase):
     """Items 3, 4 and 6 of the 2026-10-13 review: exact SKILL.md, dot folders, unreadable folders."""
 
     def test_skill_md_name_is_exact_case(self):
         # Red on Windows, where NTFS matches skill.md to SKILL.md. Green on a case-sensitive FS.
         files = {"skills/lc/skill.md": "lowercase name, not a skill\n"}
+        files[RECORD] = record([])
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out, "")
+
+    def test_a_directory_named_skill_md_is_not_a_skill_file(self):
+        # Red: a directory named SKILL.md passes the name test, so its folder counts as a skill and needs a row.
+        files = {"skills/alpha/SKILL.md/note.txt": "a folder, not the skill file\n"}
         files[RECORD] = record([])
         code, out = run(files)
         self.assertEqual(code, 0, out)
@@ -328,6 +404,34 @@ class Folders(unittest.TestCase):
         code, out = run(files, locked=("skills/locked",))
         self.assertEqual(code, 2, out)
         self.assertIn("locked", out)
+
+
+class SkillNames(unittest.TestCase):
+    """skill_names is also called by lint/hook_catalog.py, on a settings root of its own."""
+
+    def test_a_root_with_no_skills_folder_lists_no_skills(self):
+        # Red: os.listdir raises FileNotFoundError, a traceback in the catalog render of a root with hooks/ only.
+        # main() still exits 2 for a missing skills/ (test_unreadable_input_fails_with_a_message): that check stays in main.
+        tree = tempfile.mkdtemp(prefix="skill_names_")
+        self.addCleanup(shutil.rmtree, tree, True)
+        os.makedirs(os.path.join(tree, "hooks"))
+        self.assertEqual(skill_names(os.path.join(tree, "skills")), [])
+
+    def test_a_skills_path_that_is_a_file_lists_no_skills(self):
+        tree = tempfile.mkdtemp(prefix="skill_names_")
+        self.addCleanup(shutil.rmtree, tree, True)
+        with open(os.path.join(tree, "skills"), "w", encoding="utf-8") as handle:
+            handle.write("not a folder\n")
+        self.assertEqual(skill_names(os.path.join(tree, "skills")), [])
+
+    def test_a_root_with_skills_still_lists_them(self):
+        # Control, green today.
+        tree = tempfile.mkdtemp(prefix="skill_names_")
+        self.addCleanup(shutil.rmtree, tree, True)
+        os.makedirs(os.path.join(tree, "skills", "alpha"))
+        with open(os.path.join(tree, "skills", "alpha", "SKILL.md"), "w", encoding="utf-8") as handle:
+            handle.write("---\nname: alpha\n---\n")
+        self.assertEqual(skill_names(os.path.join(tree, "skills")), ["alpha"])
 
 
 class CiWiring(unittest.TestCase):

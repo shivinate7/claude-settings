@@ -74,7 +74,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
   subagent-model-cap   ask. A write to a settings file that sets or changes
-                       `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
+                       `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -774,9 +774,9 @@ SETTINGS_BASENAMES = ("settings.json", "settings.local.json", "managed-settings.
 # `_FORCE` GREEDILY, so `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` reads as its own key and never as the
 # shorter key followed by stray text. One value pattern covers a JSON pair (`"KEY": "value"`) and a
 # shell assignment (`KEY=value`), because a heredoc body carries either.
-SUBAGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_SUBAGENT_MODEL(?:_FORCE)?")
+SUBAGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?")
 SUBAGENT_CAP_ASSIGN = re.compile(
-    r"(CLAUDE_CODE_SUBAGENT_MODEL(?:_FORCE)?)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9][A-Za-z0-9._\-]*)"
+    r"(CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9][A-Za-z0-9._\-]*)"
 )
 
 # The fields a write tool carries its content in. `old_string` stands before `new_string`, so that

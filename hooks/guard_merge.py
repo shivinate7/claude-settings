@@ -183,11 +183,9 @@ def merge_gate_reason(verdict: str, detail: str) -> str:
     return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
-def uses_merge_tool(where: str) -> bool:
-    """True when the repo root's `.github/stamp.json` parses as a JSON object with a `merge` key.
-    The root is the nearest folder at or above `where` that holds `.git` (a folder or a file). No
-    root, or a missing, unreadable, invalid or non-object file, is False: nothing to ask."""
-    root = os.path.abspath(where)
+def _merge_config_at(root: str) -> bool:
+    """True when the nearest folder at or above `root` that holds `.git` has a `.github/stamp.json`
+    JSON object with a `merge` key. Any other outcome is False."""
     while not os.path.exists(os.path.join(root, ".git")):
         if os.path.dirname(root) == root:
             return False
@@ -198,6 +196,15 @@ def uses_merge_tool(where: str) -> bool:
     except (OSError, ValueError):
         return False
     return isinstance(config, dict) and "merge" in config
+
+
+def uses_merge_tool(where: str) -> bool:
+    """True when the repo the cwd sits in uses the merge tool (see `_merge_config_at`). The path is
+    walked as written AND with symlinks resolved: a cwd that is a symlink into a repo finds its
+    `.git` only on the real path, and a symlink out of one only on the written path. No root, or a
+    missing, unreadable, invalid or non-object file, is False: nothing to ask."""
+    return any(_merge_config_at(root) for root in dict.fromkeys(
+        (os.path.abspath(where), os.path.realpath(where))))
 
 
 BARE_MERGE_REASON = (
