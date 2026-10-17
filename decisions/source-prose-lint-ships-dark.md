@@ -1,94 +1,28 @@
 # The new source-prose mode ships dark
 
-CLAUDE.md says: "A guard that goes red when nothing is wrong is spent,
-because the reader learns to scroll past it." This entry names why
-`ste_lint.py`'s comment-and-docstring mode stays off by default. It also
-names what turning the mode on will cost.
+## The ruling
 
-Three later changes touch these counts. STE006 is not in the linter
-(`every-lint-rule-blocks-or-does-not-exist`, a lint rule blocks, or it does
-not exist). STE007 and STE008 read `warning` and never block (`plain-prose-lint`,
-the STE lint becomes a plain-prose lint). STE001 reads one budget of 30 words
-(`plain-prose-lint`, one budget with no split by mode). Every count below was
-taken before all three. No rerun exists, so the count under today's rules is
-unmeasured.
+The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and
+`check_source`). Neither runs unless a caller asks. Every existing caller keeps its Markdown-only
+behavior, byte for byte. Reason: the mode would fail on work nobody wrote this week, and a guard that is
+red from its first run teaches its reader to stop reading it.
 
-## The measurement
+- Python comments come from `tokenize`'s COMMENT tokens. Docstrings come from `ast`, at module, class and
+  function scope. Neither looks inside a string literal, so a semicolon in a string never reaches the lint.
+- Shell comments come from a small scanner that tracks quote state, one line at a time. It does not follow
+  a quoted string across a line break. That limit is named, and accepted, in place of a full shell parser.
+- A sentence that wraps across several comment or docstring lines joins into one sentence before the word
+  count. `hooks/guard.py` alone holds docstring sentences of 37, 41, 36 and 72 words.
+- Line numbers stay real. A finding on a docstring line points at that line in the source file.
+- `actions/ste-lint/action.yml` has a `changed_paths` input, in the same style as `paths`. A caller can
+  point the changed-scope diff at source files instead of Markdown. Its default, `*.md`, matches the old
+  hardcoded value.
+- `check_source` also runs STE011 and STE013, and both read `error`.
 
-A naive Markdown-style lint of every tracked `.py` and `.sh` file reports
-1222 errors. 718 are STE001, the sentence-length rule. 486 are STE006, the
-semicolon rule, since deleted. 18 are other rules.
-
-Most of that count comes from the linter reading code as prose. It is not a
-real writing problem.
-
-## Two false-positive shapes
-
-First shape: a semicolon inside a string literal.
-
-```
-cmd[index - 1] in " \t\n;|&("
-```
-
-This line sits in `hooks/guard.py`. A naive lint reported STE006 on it, when
-that rule existed. The semicolon never reaches a reader. It sits inside code.
-
-Second shape: a comment block stitched to the code line beside it. A naive
-lint reads both as one sentence. It then reports a count near 70 words, for
-a run that holds no sentence that long.
-
-## What ships
-
-`ste_lint.py` gains a `--source-prose` flag and a `check_source` method.
-Neither runs unless a caller asks for it. Every existing caller keeps
-today's Markdown-only behavior, byte for byte.
-
-Python comments come from `tokenize`'s COMMENT tokens. Docstrings come from
-`ast`, at module, class, and function scope. Neither one ever looks inside a
-string literal. The first false-positive shape cannot happen here.
-
-Shell comments come from a small scanner that tracks quote state, one line
-at a time. It does not follow a quoted string across a line break. That
-limit is named, and accepted, in place of a full shell parser.
-
-Line numbers stay real. A finding on a docstring line points at that line
-in the source file. It never points at an offset inside extracted text.
-
-`actions/ste-lint/action.yml` gains a `changed_paths` input, in the same
-style as `paths`. A caller can now point the changed-scope diff at source
-files instead of Markdown. Its default, `*.md`, matches today's hardcoded
-value. An existing caller sees no change.
-
-## The real debt
-
-Comments and docstrings only, across this repository's tracked `.py`
-files, held 275 errors by the count that ordered this work.
-
-A rerun against the finished checker counted 564 errors. 486 are
-STE001. 72 are STE006. 4 are STE007. 2 are STE008. The two counts disagree,
-and this entry does not smooth that over.
-
-A likely cause: a sentence often wraps across several comment or docstring
-lines. Those lines must join into one sentence first. Only then does a word
-count mean anything, the same way a Markdown paragraph joins wrapped lines.
-A count that treats each physical line as its own sentence would miss most
-of the long ones this repository carries. `hooks/guard.py` alone holds
-sentences of 37, 41, 36, and 72 words, each inside one docstring.
-
-Either count leaves real, large debt behind. Turning `--source-prose` on as
-a gate today would fail on work nobody wrote this week. The outcome
-CLAUDE.md warns against would follow at once. A guard that is red from its
-first run teaches its own reader to stop reading it.
-
-## What turning it on will cost
-
-Someone must clear the real sentences first. By the counts above, that is 275
-to 564 errors, which include semicolons and warnings that no longer block.
-The STE001 share still applies, and it is unmeasured under the 30-word
-budget. `check_source` also runs STE011 and STE013, and both read `error`. The
-564 count lists no STE011 or STE013 error, so their share is unmeasured too. The exact number depends on which count a maintainer trusts. That
-cleanup is a separate job from this one. Mixing it with the gate would
-bury the gate in noise on the day it ships.
+Turning the mode on needs a cleanup first, as a separate job from the gate. Mixing the two would bury the
+gate in noise on the day it ships. The count of real errors in comments and docstrings under today's rules
+(STE006 deleted, STE007 and STE008 advisory, one 30-word STE001 budget) is unmeasured. The two counts taken
+before those changes disagree, at 275 and 564.
 
 Kind: process
 Home: lint/ste_lint.py
