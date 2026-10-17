@@ -15,6 +15,9 @@ Interface the generator must meet. The builder builds to this.
 - `--check`: exit 0 and print nothing when docs/catalog.md equals the render (CRLF normalized).
   Exit 1: one line per problem, naming the offender (stale page, empty source, missing row).
   Exit 2: the path of an input it cannot read (settings.json, the model table, a file it names).
+- A description cell (What it does) longer than CELL_CAP characters is cut to at most CELL_CAP
+  characters and ends in an ellipsis (U+2026). CELL_CAP is a named constant in lint/hook_catalog.py.
+  A cut never splits a backtick span, and every row keeps its cells.
 - Sources, read from the root:
   - settings.json `hooks`: one row per registration (event, matcher, `if`, command or prompt).
   - A command names its script as `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`. Source: a .py
@@ -1476,6 +1479,134 @@ class Helpers(unittest.TestCase):
         from hook_catalog import RECORDS_INTRO
         self.assertTrue(RECORDS_HEADER.strip(), "RECORDS_HEADER is empty")
         self.assertTrue(RECORDS_INTRO.startswith(RECORDS_HEADER), (RECORDS_HEADER, RECORDS_INTRO[:40]))
+
+
+# ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
+# Owner ruling 2026-10-17 11:45 CDT. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
+# are never edited. The cap is one named constant in lint/hook_catalog.py, CELL_CAP. The cases import it,
+# so a new value moves every case with it. No case copies the number.
+
+ELLIPSIS = "…"
+PROSE = "alpha beta gamma delta "
+FILLER = "Check each question and option against the brief it cites. " * 18  # a judge body, over 1000 chars
+JUDGE_KEY = "Judge this AskUserQuestion call: $ARGUMENTS"
+JUDGE_PROMPT = JUDGE_KEY + "\n" + FILLER + "Block only on a clear breach of the brief."
+SPAN_TEXT = "ab `" + "c" * 350 + " | " + "d" * 350 + "` " + PROSE * 20  # one code span with a pipe, open at any cap under 700
+
+
+def cell_cap():
+    """CELL_CAP from the generator. A missing name fails the case by its name."""
+    try:
+        from hook_catalog import CELL_CAP
+    except ImportError as err:
+        raise AssertionError("lint/hook_catalog.py has no CELL_CAP, the one named cap on a description cell: %s" % err)
+    return CELL_CAP
+
+
+def prose(n):
+    """Plain prose of exactly n characters that ends in a letter, so flattening it keeps its length."""
+    text = (PROSE * (n // len(PROSE) + 2))[:n]
+    return text[:-1] + "e" if text.endswith(" ") else text
+
+
+def what_of(out, key):
+    """The What it does cell of the row keyed key in a rendered page, pipes unescaped."""
+    return row_for(page_rows(out), key)["What it does"]
+
+
+class CellCap(Tree):
+    """A description cell longer than CELL_CAP is cut to at most CELL_CAP characters and ends in an ellipsis.
+    The cut keeps the start of the source, never splits a backtick span, and leaves every row its cells."""
+
+    def render(self, tree_files):
+        code, out, err = generator(self.tree(tree_files), "--print")
+        self.assertEqual(code, 0, out + err)
+        return out
+
+    def render_skill(self, text):
+        return self.render(files(extra={"skills/alpha/SKILL.md": skill_md("description: " + text)}))
+
+    def assert_cut(self, cell, source):
+        self.assertTrue(cell.endswith(ELLIPSIS), "not cut: %d chars, and no ellipsis at the end" % len(cell))
+        self.assertTrue(" ".join(source.split()).startswith(cell[:-1]), "the cut rewords the source: %r" % cell)
+        cap = cell_cap()
+        self.assertLessEqual(len(cell), cap, "%d chars, over the cap of %d" % (len(cell), cap))
+        self.assertGreater(len(cell), cap // 2, "the cut keeps too little: %d chars at a cap of %d" % (len(cell), cap))
+
+    def test_e1_the_cap_is_one_named_positive_integer_in_the_generator(self):
+        cap = cell_cap()
+        self.assertIsInstance(cap, int)
+        self.assertGreater(cap, 0)
+
+    def test_e2_a_908_char_skill_description_is_cut_and_ends_in_an_ellipsis(self):
+        self.assert_cut(what_of(self.render_skill(prose(908)), "skills/alpha"), prose(908))
+
+    def test_e3_a_426_char_mod_description_is_cut(self):
+        out = self.render(files(plugins={"tw@claude-settings": True}, extra={
+            "mods/tw/.claude-plugin/plugin.json": json.dumps({"description": prose(426)}),
+            "mods/tw/SOURCE.md": "repo and commit go here\n",
+        }))
+        self.assert_cut(what_of(out, "mods/tw"), prose(426))
+
+    def test_e4_a_long_judge_prompt_is_cut(self):
+        out = self.render(files(hooks={"PreToolUse": [{"matcher": "AskUserQuestion",
+                                                       "hooks": [judge(prompt=JUDGE_PROMPT)]}]}))
+        self.assert_cut(what_of(out, JUDGE_KEY), FILLER)
+
+    def test_e5_a_short_description_renders_unchanged(self):
+        # Green on main on purpose: it pins that a short cell is never touched. A regression pin, not a red case.
+        self.assertEqual(what_of(self.render(files()), "skills/alpha"), "Use when testing alpha.")
+
+    def test_e6_a_description_of_exactly_the_cap_is_unchanged_and_one_more_character_is_cut(self):
+        cap = cell_cap()
+        self.assertEqual(what_of(self.render_skill(prose(cap)), "skills/alpha"), prose(cap))
+        cell = what_of(self.render_skill(prose(cap + 1)), "skills/alpha")
+        self.assertTrue(cell.endswith(ELLIPSIS), "%d chars at the cap plus one: no ellipsis" % len(cell))
+        self.assertLessEqual(len(cell), cap)
+
+    def test_e7_a_cut_never_splits_a_backtick_span_and_every_row_keeps_its_cells(self):
+        out = self.render_skill(SPAN_TEXT)
+        cell = what_of(out, "skills/alpha")
+        self.assert_cut(cell, SPAN_TEXT)
+        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
+        rows = [line for line in out.split("\n") if line.startswith("| `skills/alpha`")]
+        self.assertEqual(len(rows), 1, out)
+        self.assertEqual(len(split_cells(rows[0])), len(COLUMNS), "the cut leaves an unbalanced pipe: " + rows[0])
+
+
+    def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):
+        # Scanner rule (building-scanner-respects-strings): #, // and /* inside a code span are text.
+        text = "ab `" + "x" * 150 + " // # /* opener " + "y" * 150 + "` " + PROSE * 20
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md('description: "%s"' % text)}))
+        cell = what_of(out, "skills/alpha")
+        self.assert_cut(cell, text)
+        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
+
+    def test_e10_a_lone_backtick_in_plain_text_does_not_stop_the_cut(self):
+        text = "Use when a lone ` sits early in plain text, then " + prose(1000)
+        cell = what_of(self.render_skill(text), "skills/alpha")
+        self.assert_cut(cell, text)
+        self.assertIn("a lone ` sits early", cell)
+
+    def test_e11_a_code_span_that_a_folded_line_break_splits_is_one_span(self):
+        # Scanner rule, the multi-line case: a folded frontmatter joins its two lines, so the span is one span.
+        folded = "description: >\n  ab `" + "c" * 150 + "\n  " + "d" * 150 + "` " + PROSE * 20
+        source = "ab `" + "c" * 150 + " " + "d" * 150 + "` " + PROSE * 20
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md(folded)}))
+        cell = what_of(out, "skills/alpha")
+        self.assert_cut(cell, source)
+        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
+
+
+class RealCellCap(unittest.TestCase):
+    def test_e8_every_description_cell_of_the_committed_page_is_at_or_under_the_cap(self):
+        if not os.path.exists(PAGE):
+            self.fail("docs/catalog.md does not exist yet: the generator writes it")
+        rows = page_rows(read(PAGE))
+        self.assertTrue(rows, "no catalog rows, so the scan proves nothing")
+        cap = cell_cap()
+        over = ["%s %d chars" % (r["Key"], len(r["What it does"])) for r in rows if len(r["What it does"]) > cap]
+        self.assertFalse(over, "over the cap of %d: %s" % (cap, "; ".join(over)))
 
 
 if __name__ == "__main__":
