@@ -81,7 +81,10 @@ def ended_state(state):
 
 
 def job_tree(pid):
-    """Return [pid, state, elapsed, command] for the job and its descendants."""
+    """Return [pid, state, elapsed, command] for the job and its descendants. The job's pid is
+    the one `&` gave the shell. A `{ }` group in sh or bash runs in a forked copy of the shell,
+    which has its parent's command line. Step down through each such copy that has one child,
+    to the process that runs the job."""
     rows = {}
     for line in _run(["ps", "-axo", "pid=,ppid=,stat=,etime=,command="]).splitlines():
         p = line.split(None, 4)
@@ -90,7 +93,11 @@ def job_tree(pid):
     kids = {}
     for p in rows.values():
         kids.setdefault(p[1], []).append(p[0])
-    found, stack = [], [str(pid)]
+    cur = str(pid)
+    while (cur in rows and len(kids.get(cur, [])) == 1 and rows[cur][1] in rows
+           and rows[cur][4:] == rows[rows[cur][1]][4:]):
+        cur = kids[cur][0]
+    found, stack = [], [cur]
     while stack:
         cur = stack.pop()
         if cur in rows:
@@ -102,6 +109,7 @@ def job_tree(pid):
 
 def report(pid, quiet, log):
     rows = job_tree(pid)
+    pid = int(rows[0][0]) if rows else pid
     pids = ",".join(r[0] for r in rows) or str(pid)
     lines = ["STALL: no output for %ss; pid=%d is still running" % (quiet, pid),
              "The job was not stopped, and the session cannot stop it: the job is not its child.",

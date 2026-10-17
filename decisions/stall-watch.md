@@ -19,7 +19,8 @@ stuck command keeps running.
 - The rewritten command runs in the harness shell, not in `bash -c`. The original command stays
   as unquoted top-level shell code inside `{ ... }`. A settings deny rule still sees it, and
   the shell parses it as it would without the hook. Output goes to a log file in the system
-  temp directory. The shell starts the watcher with the job's pid.
+  temp directory. The shell starts the watcher with the pid of `&`. In sh and bash a `{ }` group runs in a forked
+  copy of the shell, so the STALL report steps down through that copy and names the job's own pid.
 - Watcher (`--watch-pid`): it streams the log to stdout. Any new byte, also a bare `\r`
   progress byte, resets the timer. After 300 quiet seconds, it prints a STALL report and exits
   3. The job keeps running, and its output keeps going to the log. If the job ends first, the
