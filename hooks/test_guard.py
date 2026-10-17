@@ -1749,9 +1749,8 @@ sh("stash pathspec pin: an explicit stash push -- still denies over real uncommi
    VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # STASH HELP FLAGS (owner ruling 2026-10-17, debt stash-help-flag-refused-as-push). `stash -h` and
 # `stash --help` allow over a dirty shared tree when the flag comes first after `stash`: the flag
-# prints usage and reads no stack and no tree. RED TODAY: the two allow cases, because a flag is
-# skipped as an option and the call reads as a push. Every other shape stays a push. `push -h`
-# stays denied because the ruling names the first flag only. Git's own output for `push -h` is
+# prints usage and reads no stack and no tree. Every other shape stays a push. `push -h` stays
+# denied because the ruling names the first flag only. Git's own output for `push -h` is
 # unmeasured here, and the verdict does not depend on it.
 sh("stash help: -h over real uncommitted work allows", VCS + " stash -h", "allow", cwd=SUBJDIRTY)
 sh("stash help: --help over real uncommitted work allows", VCS + " stash --help", "allow",
