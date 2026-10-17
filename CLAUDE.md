@@ -20,8 +20,7 @@ reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
-agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table. An
-unlisted agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
+agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
 the ceiling, except Plan, the advisor, and a builder's third try
 (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
@@ -29,8 +28,7 @@ autonomous work), say so in one line before you dispatch, name why, and offer th
 wait for my word.<!-- rule:roles-opus-shaped-say-so --> Only on my word, write the repo's
 `.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to
 `opus`. The raise moves the default. It does not pin every spawn to it. The guard asks before
-that write lands.<!-- rule:roles-opus-override-guarded --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, governing rulings, failure classes from
+that write lands.<!-- rule:roles-opus-override-guarded --> A brief carries the task, the files, governing rulings, failure classes from
 `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
 specifies a report cap in lines sized to the decision it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
@@ -47,21 +45,19 @@ Give an isolated workstream its own lane and orchestrator, briefed once.<!-- rul
 talk mid-task. Message a peer only when a branch must hear something that changes its
 work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism -->
 
-**Shared trees.** No destructive git.<!-- rule:shared-trees-no-destructive-git --> A stash entry belongs to
-no branch. It outlives no session that holds its tag. Never kill a
-process you did not start. Never restart another person's server. Treat `pkill -f` and
-`lsof -t` as machine-wide.<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
+**Shared trees.** No destructive git.<!-- rule:shared-trees-no-destructive-git --> Never kill a
+process you did not start. Never restart another person's server.<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout
 and branch you stand in before any git write or merge.<!-- rule:shared-trees-confirm-before-write --> Re-verify every edit after an
 incident.<!-- rule:shared-trees-reverify-after-incident -->
 
 **Git, if this repo uses pull requests.** Move main only by pull request, merged only
-when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wait for required checks after every push.<!-- rule:git-wait-for-required-checks -->
+when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr -->
 Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a command's output.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
 Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
 own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One entry per question. When its ruling changes, rewrite the entry in place. Open an entry only for a new question.<!-- rule:git-one-entry-per-question --> Batch lane PRs that pass their local checks into one integration branch. Keep
-each lane's own commit. A lane joins the batch after the review the roles rules require. Only the integration PR goes ready, and its run is the only CI run for the batch. Each lane PR stays a draft until the integration PR merges. Then each lane PR closes as replaced. A lone lane is its own integration PR. A red integration run: read the failing job. Find the lane whose files it touches. Drop that lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane (`roles-review-cap-three`) is the exception: it is dropped and parked, and gets no fix lane until the owner decides. Never fix inside the integration branch. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's word.<!-- rule:git-integration-branch-merge --> Open every PR as a draft. A draft runs no CI. Every job, including the required check, skips while the PR is a draft. Mark only the integration PR ready, and only after review.<!-- rule:git-draft-until-reviewed -->
+each lane's own commit. A lane joins the batch after the review the roles rules require. Only the integration PR goes ready, and its run is the only CI run for the batch. Each lane PR stays a draft until the integration PR merges. Then each lane PR closes as replaced. A lone lane is its own integration PR. A red integration run: read the failing job. Find the lane whose files it touches. Drop that lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane (`roles-review-cap-three`) is the exception: it is dropped and parked, and gets no fix lane until the owner decides. Never fix inside the integration branch. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's word.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->

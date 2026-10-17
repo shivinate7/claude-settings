@@ -44,7 +44,7 @@ Protected outcome: no merge leaves main worse on net. No open gap stays out of s
 - No check measures net safety value. The call is the round-3 reviewer's judgment. Debt: `safety-hole-test-is-judgment`.
 - No check makes the orchestrator read the round-3 line `Net safety value:` before a merge. Debt: `safety-line-unread-at-merge`.
 - No check reads the trigger judgment, whether a change changes a guard, gate or check. Debt: `trigger-call-unchecked`.
-- The trigger omits the `settings.json` env caps `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and the `model:` and `effort:` lines in `agents/*.md`. They enforce `roles-sonnet-is-the-ceiling` (Sonnet is the agent ceiling) and `roles-workers-never-spawn` (workers never spawn). Debt: `trigger-omits-agent-caps`.
+- The trigger omits the `settings.json` env caps `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, and the `model:` and `effort:` lines in `agents/*.md`. They enforce `roles-sonnet-is-the-ceiling` (Sonnet is the agent ceiling) and the spawn-depth setting `MAX_SPAWN_DEPTH` (workers never spawn). Debt: `trigger-omits-agent-caps`.
 - Some cites lacked a gloss. No check requires one. Debt: `cites-lack-gloss-unchecked`.
 
 Debts:
