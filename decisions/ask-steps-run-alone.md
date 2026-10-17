@@ -19,7 +19,3 @@ Why: a chained `git worktree prune` made the whole command wait on the owner for
 
 Kind: process
 Home: hooks/guard.py
-
-## Holes, named
-
-Debts: `split-reader-misses-cd-forms` (`cd ~-`, `Set-Location -` and `Set-Location +` count as harmless leads with an unknown target, so a shared-tree deny can become an ask).

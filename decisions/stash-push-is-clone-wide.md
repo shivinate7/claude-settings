@@ -22,7 +22,3 @@ is in `agent-worktree-discard-is-noted`.
 
 Kind: process
 Home: hooks/guard_shared_tree.py
-
-## Holes, named
-
-Debts: `stash-reminder-text-outside-repo`.

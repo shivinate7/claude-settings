@@ -21,10 +21,6 @@ Kind: build
 Plan: decisions/merge-lock-names-its-holder.md#the-ruling (all)
 Home: merge/merge.py
 
-## Holes, named
-
-- The expired-lock delete can remove a live lock (two runs can hold the lock).
-
 ## Related
 
 - merge-follows-the-prs-base (the lock is per base, and `--unlock` takes a branch).

@@ -19,10 +19,6 @@ Kind: build
 Plan: decisions/merge-waits-on-every-check.md#the-ruling (all)
 Home: merge/merge.py
 
-## Holes, named
-
-- A workflow that GitHub has not created yet still reads as green.
-
 ## Related
 
 - merge-needs-a-proven-head (a head with only skipped checks is unproven).

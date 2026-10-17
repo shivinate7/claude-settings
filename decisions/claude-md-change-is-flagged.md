@@ -12,9 +12,5 @@ Owner, 2026-10-16: report only, no hold. A green PR that changes a rule file mer
 
 Why: the clone's `CLAUDE.md` is the install source. It reaches main only by a PR, and under the standing grant nothing told the owner a merged PR changed it.
 
-## Holes, named
-
-The bold flag is not enforced. A crash between the merge and the print loses the flag. A merge made with `gh pr merge` or the web page is not flagged.
-
 Kind: build
 Plan: decisions/claude-md-change-is-flagged.md#the-ruling (all)

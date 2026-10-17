@@ -25,8 +25,3 @@ the purge ref rule.
 
 Kind: process
 Home: janitor/sweep.py
-
-## Holes, named
-
-Unverified: `realpath` on mapped or `subst` drives; stderr text on other git versions; older Python
-versions, for `realpath` errors.

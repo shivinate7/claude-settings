@@ -20,8 +20,3 @@ Reason: a PR into a non-default base claimed a record number against main's, so 
 Kind: build
 Plan: decisions/merge-follows-the-prs-base.md#the-ruling (all)
 Home: merge/merge.py
-
-## Holes, named
-
-- A base that changes after the last pass of the wait and before `gh pr merge` is not caught.
-  Deferred item `merge-retarget-before-merge`.

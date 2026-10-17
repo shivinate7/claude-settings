@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-13 14:40, rule 1 of `guard-audit-high`. The `env-file` rule allows `--env-file` only when the command word is a runner (`ENV_LOADER_COMMANDS`).
+Owner, 2026-10-13 14:40. The `env-file` rule allows `--env-file` only when the command word is a runner (`ENV_LOADER_COMMANDS`).
 
 - It looks through `verdict`, `timeout`, `time` and `do` to the real command.
 - It looks through `python`, `python3` and `py` only when the next word is a `verdict` path. Launcher flags such as `-3` or `-u` may come first.
@@ -17,14 +17,6 @@ Owner, 2026-10-13 14:40, rule 1 of `guard-audit-high`. The `env-file` rule allow
 Why: the rule's own remedy told the agent to use forms it then refused (`timeout`, `verdict`, a word glued to `(`), and about 690 env-file denies a week were false alarms. A wrapper flag's value must not pose as the command word while the real command runs.
 
 Protected by the env-family cases in `hooks/test_guard.py`. Unpinned: the bare flags `--preserve-status` and `--foreground`, `python3 bin/verdict`, and a runner behind `env`, `sudo`, `command` or `xargs`.
-
-## Holes, named
-
-Debts: `env-file-rule-false-alarms` (ag -f, ack -f, grep --exclude and rg -t are false refusals).
-
-Limit: an `awk -v` value holding a glob is cleared as a search pattern. `hooks/test_guard.py` pins it as an allow.
-
-Reopen on a wrapper shape this ruling does not name, with a counted number of denies in the weekly table (`guard-log-read-weekly`).
 
 Kind: process
 Home: hooks/guard_env.py
