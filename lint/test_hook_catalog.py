@@ -1411,9 +1411,10 @@ class RealRecords(unittest.TestCase):
                    ("deferred", ("Deferred",)), ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            # notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            # Compared by path: a decisions/notes.md is still a record and needs its row.
             names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
-                           if f.endswith(".md") and f not in ("README.md", "notes.md"))
+                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
