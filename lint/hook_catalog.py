@@ -480,6 +480,7 @@ def render():
 
 RECORDS_PAGE = "docs/records.md"
 RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")
+NOTES_FILE = "debts/notes.md"  # the notes tier: one line per unlikely finding, not a record
 SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -685,7 +686,7 @@ def collect_records():
             raise Unreadable(folder) from err
         for name in names:
             rel = "%s/%s" % (folder, name)
-            if not name.endswith(".md") or name == "README.md" or not has_file(rel):
+            if not name.endswith(".md") or name == "README.md" or rel == NOTES_FILE or not has_file(rel):
                 continue
             text = read(rel)
             problems += history_problems(rel, text)
