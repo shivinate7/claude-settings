@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture suite for merge/merge.py, the git and GitHub halves (plan lanes 3b, 4).
+"""Fixture suite for merge/merge.py, the git and GitHub halves.
 
 Run: python3 merge/test_merge.py
 No network, no real repo. Every run uses a local bare origin in a temp dir, the real
