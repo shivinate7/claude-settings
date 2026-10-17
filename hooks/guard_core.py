@@ -2169,6 +2169,26 @@ def nested_script(tokens) -> str:
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
 
 
+# The ssh options that take a value: `-p 22`, `-i key`, `-o X=y`. The value is never the host.
+SSH_VALUE_LETTERS = "BbcDEeFIiJLlmOopQRSWw"
+
+
+def ssh_remote_script(tokens) -> str:
+    """The command `ssh [options] host COMMAND...` runs on the far side, else ''. Not part of
+    `nested_script`: that one also feeds the step count of an ask, which this must not move."""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ssh":
+        return ""
+    index = at + 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        flag, index = tokens[index], index + 1
+        for pos, letter in enumerate(flag[1:], 1):
+            if letter in SSH_VALUE_LETTERS:
+                index += pos == len(flag) - 1   # the value is the next word, else glued on
+                break
+    return " ".join(tokens[index + 1:])   # tokens[index] is the host
+
+
 def _command_starts(tokens):
     """The token indexes where a command may start: 0, and each unquoted `(` or `$(`."""
     quoted = getattr(tokens, "quoted", ())

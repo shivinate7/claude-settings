@@ -256,7 +256,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
-            push_target, push_text, push_verdict,
+            push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -2021,7 +2021,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
     for segment in split_segments(cmd):
-        matched = cmd_exe_delete_hit(segment)
+        matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     for segment in split_segments(stripped):

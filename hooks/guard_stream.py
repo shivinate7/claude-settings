@@ -9,16 +9,17 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    inline_script, resolve_command, segment_tokens, split_segments,
+    command_indexes, inline_script, resolve_command, segment_tokens, split_segments,
+    ssh_remote_script,
 )
 
 
 # ------------------------------------------------------------------ a stream that never ends
 #
-# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag turns `tail` or
-# `Get-Content` into a command that never exits on its own, so it outlives the turn and the
-# agent that started it. The COMMAND WORD is checked first, so an unrelated `-f` on another
-# program never matches.
+# Guard rule live-stream. A follow flag turns `tail` or `Get-Content` into a command that never
+# exits on its own, so it outlives the turn and the agent that started it. Only the COMMAND WORD is
+# read, wrappers skipped: a commit message, an `echo` or `grep -rn tail -F` that merely names `tail`
+# never matches. The command `ssh` runs on the far side is read as a nested command.
 #
 # The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
 # `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
@@ -27,23 +28,35 @@ LIVE_STREAM_TAIL_TOOL = "tail"
 LIVE_STREAM_GETCONTENT_TOOLS = ("get-content", "gc")
 
 
-def live_stream_hit(segment: str) -> str:
-    """Return the matched text when one segment follows a stream and never ends, else ''."""
-    tokens = segment.split()
-    for index, token in enumerate(tokens):
-        tool = basename(token)
+def _follow_hit(token: str, args) -> str:
+    """The matched text when the command `token` with arguments `args` follows a stream, else ''."""
+    tool = basename(token)
+    for arg in args:
         if tool == LIVE_STREAM_TAIL_TOOL:
-            for arg in tokens[index + 1:]:
-                if arg == "--follow" or arg.startswith("--follow="):
-                    return token + " " + arg
-                if arg.startswith("-") and not arg.startswith("--") and (
-                        "f" in arg or "F" in arg):
-                    return token + " " + arg
-        elif tool in LIVE_STREAM_GETCONTENT_TOOLS:
-            for arg in tokens[index + 1:]:
-                if arg.lower() == "-wait":
-                    return token + " " + arg
+            if arg == "--follow" or arg.startswith("--follow="):
+                return token + " " + arg
+            if arg.startswith("-") and not arg.startswith("--") and ("f" in arg or "F" in arg):
+                return token + " " + arg
+        elif tool in LIVE_STREAM_GETCONTENT_TOOLS and arg.lower() == "-wait":
+            return token + " " + arg
     return ""
+
+
+def live_stream_hit(segment: str) -> str:
+    """Return the matched text when one segment follows a stream and never ends, else ''.
+
+    A segment shlex cannot parse is read word by word, every word as a command word, so an
+    unmatched quote elsewhere in the line does not hide a follow."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        words = segment.split()
+        return next((h for i, w in enumerate(words) if (h := _follow_hit(w, words[i + 1:]))), "")
+    for start in command_indexes(tokens):
+        hit = _follow_hit(tokens[start], tokens[start + 1:])
+        if hit:
+            return hit
+    remote = ssh_remote_script(tokens)
+    return next((h for part in split_segments(remote) if (h := live_stream_hit(part))), "") if remote else ""
 
 
 LIVE_STREAM_REASON = (

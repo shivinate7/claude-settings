@@ -9,8 +9,8 @@ import re
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
-    _strip_heredoc_bodies_unconditionally, basename, resolve_command, segment_tokens,
-    split_segments,
+    _strip_heredoc_bodies_unconditionally, basename, command_indexes, nested_script,
+    resolve_command, segment_tokens, split_segments, ssh_remote_script,
 )
 
 
@@ -213,11 +213,14 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
 WIDE_TARGET = (
     r"(?:/|~|\.|\*|\$HOME|%USERPROFILE%|\$env:USERPROFILE|[A-Za-z]:/?\*?)"
 )
+# The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
+# in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
+# parse, so an unmatched quote elsewhere in the line does not hide a delete.
+RM_RAW = re.compile(
+    r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+['\"]?"
+    + WIDE_TARGET + r"['\"]?(?:\s|$)"
+)
 DESTRUCTIVE_DELETE = (
-    re.compile(
-        r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+['\"]?"
-        + WIDE_TARGET + r"['\"]?(?:\s|$)"
-    ),
     re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
@@ -225,6 +228,54 @@ DESTRUCTIVE_DELETE = (
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
     ),
 )
+# A target `rm -rf` must not take: a root, a home, the working directory or a glob of one, with an
+# optional trailing slash and `*`. `.*` and `..` are not here: they were allowed before.
+RM_WIDE_TARGET = re.compile(
+    r"/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?"
+)
+
+
+def _rm_args_wide(args) -> str:
+    """The first wide target of `rm`'s arguments when they hold a recursive AND a force flag, else
+    ''. Long flags count, `--` ends the flags, and one letter cluster may hold R, r and f."""
+    recursive = force = after_dashes = False
+    targets = []
+    for arg in args:
+        if after_dashes or not arg.startswith("-") or arg == "-":
+            targets.append(arg)
+        elif arg == "--":
+            after_dashes = True
+        elif arg.startswith("--"):
+            recursive = recursive or arg == "--recursive"
+            force = force or arg == "--force"
+        else:
+            recursive = recursive or "r" in arg or "R" in arg
+            force = force or "f" in arg
+    if recursive and force:
+        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t)), "")
+    return ""
+
+
+def rm_delete_hit(segment: str) -> str:
+    """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
+    directory or a glob, else ''. Read by tokens: the command word is `rm`, behind its wrappers
+    or a subshell, or inside the script a shell, `eval` or `ssh` hands on. A segment shlex cannot
+    parse is read as raw text."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        found = RM_RAW.search(segment)
+        return found.group(0) if found else ""
+    for start in command_indexes(tokens):
+        if basename(tokens[start]) == "rm":
+            target = _rm_args_wide(tokens[start + 1:])
+            if target:
+                return "rm -rf " + target
+    for script in (nested_script(tokens), ssh_remote_script(tokens)):
+        for inner in split_segments(script) if script else ():
+            found = rm_delete_hit(inner)
+            if found:
+                return found
+    return ""
 
 DELETE_REASON = (
     "Rule (shared trees): this deletes a whole root, a home directory or everything a "
