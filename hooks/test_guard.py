@@ -393,6 +393,9 @@ BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
 PUSHFEAT = os.path.join(ROOT, "pushfeat")
 PUSHMAIN = os.path.join(ROOT, "pushmain")
 PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
+# PUSHTRUNKLOCAL is PUSHTRUNK plus a LOCAL branch named origin/trunk. There `git symbolic-ref --short`
+# prints the ambiguous `remotes/origin/trunk`, which once blanked the default branch's name.
+PUSHTRUNKLOCAL = os.path.join(ROOT, "pushtrunklocal")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
 PUSHDANGLING = os.path.join(ROOT, "pushdangling")
@@ -1261,8 +1264,8 @@ def _build_push():
     materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
-                                (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
-                                (PUSHDETACHED, "main", None)):
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None)):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1275,6 +1278,13 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
+    if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
+            or run_vcs(PUSHTRUNKLOCAL, "symbolic-ref", "-q", "--short",
+                       "refs/remotes/origin/HEAD").stdout.strip() == "origin/trunk"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHTRUNKLOCAL needs a local branch "
+                 "origin/trunk that makes `symbolic-ref --short` print an ambiguous name")
 
     # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
     # order gives main as the default branch.
@@ -1495,7 +1505,7 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -5368,6 +5378,12 @@ for form, tail in (
 push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
 push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
+# A local branch named origin/trunk must not hide the name origin/HEAD holds: the second case is the
+# same push where that branch is absent.
+push_case("forced to the default branch named by origin/HEAD asks", "--force origin trunk", "ask",
+          cwd=PUSHTRUNK)
+push_case("forced to the default branch asks when a local branch is named origin/trunk",
+          "--force origin trunk", "ask", cwd=PUSHTRUNKLOCAL)
 push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
           "ask", cwd=PUSHNOHEAD)
 push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
