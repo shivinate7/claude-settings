@@ -83,10 +83,6 @@ the tool. They do not touch q_max's, sharables', or job-cost-reporting's own tre
 Each repo's own Claude session writes its own config later. Each switches its own
 workflow over, on its own schedule.
 
-Kind: build
-Plan: decisions/one-shared-record-stamp.md#the-choice (all)
-Home: actions/stamp/stamp.mjs
-
 ## Formats built, and left out
 
 `actions/stamp/stamp.mjs` covers three shapes:
