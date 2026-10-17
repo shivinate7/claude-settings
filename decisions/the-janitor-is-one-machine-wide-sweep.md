@@ -167,8 +167,10 @@ are in the janitor guide.
 
 ## The default branch
 
-The sweep judges each repository against its own default branch. The janitor guide gives the
-resolve order. If none answers, the sweep refuses the repository out loud and reaps nothing
+The sweep judges each repository against its own default branch. It reads that branch in the
+order of decision `default-branch-read-order` (the default-branch read order): `origin/HEAD`,
+`origin/main`, `origin/master`, local `main`, local `master`. The janitor guide repeats the
+order. If none answers, the sweep refuses the repository out loud and reaps nothing
 there. On 2026-09-20 the repository `sillage` had an unset `origin/HEAD` with an `origin`
 remote present, so the fallback ran on day one.
 

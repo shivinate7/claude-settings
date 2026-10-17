@@ -41,6 +41,7 @@ carries the branch. See decision `a-branch-is-redundant-by-patch-not-by-ancestry
 The sweep resolves your default branch in this order: `origin/HEAD`, then
 `origin/main`, `origin/master`, local `main`, local `master`. If none of the
 five answers, the sweep refuses your whole repository and reaps nothing in it.
+See decision `default-branch-read-order` (the default-branch read order).
 
 ## How it picks repositories
 
