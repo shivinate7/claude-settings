@@ -12,7 +12,7 @@ The guard allows a WSL command only when every condition holds:
 
 - It uses `wsl -e` or `wsl --exec`. Nothing follows the wsl part.
 - It runs one of three forms:
-  - `node --test <file>.test.mjs ...`
+  - `node --test <file>.test.mjs ...` or `node <file>.test.mjs` (one literal path, no glob)
   - `pwsh -NoProfile -File <file>.test.ps1`
   - `python3 <dir>/test_<name>.py`
 - Its test path is relative. It has no `..`, no dot-led glob and no absolute path.
@@ -52,7 +52,10 @@ file run any code. A native test run has the same limit.
 Basis of the three forms: each is how the `gates` CI workflow runs one of this repo's own suites,
 `python3 hooks/test_guard.py`, `pwsh -NoProfile -File install.test.ps1` and
 `node --test testing/skip-locally-fail-in-ci.test.mjs`. The mod tests run as plain
-`node <file>`, which the list does not allow.
+`node <file>`, which CI also runs. Owner ruling, 2026-10-17 11:40 CDT: allow plain
+`node <file>.test.mjs`, on the same path pattern as `--test`, with no second pattern. Plain
+node takes one literal path, because node runs only its first file argument and more would give a
+false green. Any other plain node script, or an eval flag, stays refused.
 
 Research basis (2026-10-13): pin `-e`. Sources:
 
