@@ -58,6 +58,9 @@ MEASURED 2026-10-17: a copy of the shim with no `hooks/` beside it printed the w
 - The marker search reads the real `rm`'s first line byte by byte. MEASURED 2026-10-17: 4.4 ms under
   `sh`, 7.0 ms under `dash`. A 20 MB `rm` on PATH with no newline costs 1.6 s under `sh` and 5.7 s under
   `dash`. Debt `rm-shim-call-cost`.
+- `rm -r link` is refused when `link` is a symlink to home, the cwd or a parent of the cwd. The real
+  `rm` removes only the link. A false alarm that costs one retry. Debt `rm-shim-link-refused` (a
+  recursive rm of a symlink is judged by its target).
 
 Kind: build
 Plan: decisions/rm-path-wrapper.md#the-ruling (macos)
