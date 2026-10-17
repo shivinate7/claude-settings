@@ -53,7 +53,5 @@ Debts: `dw-slash-cache-hit-reads-clean` (a /dw cache hit reads like a clean turn
 
 `guard_core._force_utf8_streams` should also reconfigure stdin. Without it, the script reads raw non-ASCII stdin wrongly on Windows, and the mod's escape would then be redundant. This belongs to the guard lane. No lane owns it yet.
 
-Enabling: the plugin key for this mod is not set. Four other mods are on (owner 2026-10-12 12:22 CDT). The owner has not yet ruled on this one.
-
 Kind: process
 Home: mods/decision-watch/hooks/register.mjs
