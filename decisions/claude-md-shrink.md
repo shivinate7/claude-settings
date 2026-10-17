@@ -86,7 +86,7 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 7. A repo that raises spawn depth gets no prompt to record the risk. Debt: `nesting-risk-unrecorded`, no prompt to record the risk.
 8. `report_gate` checks only `D<n>`-style ids, so a slug id passes with no gloss check. Debt: `slug-cite-gloss-unchecked`, slug cites have no gloss check.
 9. `report_gate` returns early when nothing landed, so it cannot see a report on that turn. Debt: `report-on-empty-turn-unchecked`, no check sees a report on an empty turn.
-10. `output-write-in-ste` waits for its own lane, the plain-prose lint. Debt: `ste-rule-awaits-prose-lint`, the STE rule waits for its lane.
+10. `output-write-in-ste` is now the plain-prose rule (decision plain-prose-lint, the STE lint turned plain-prose lint). Its gate still judges file writes only. Debt: `plain-prose-writes-only`, replies and briefs are unchecked.
 11. The two deleted rules took their gate rows, which checked the agent model and spawn depth in `settings.json`. Two cases in `hooks/test_wrappers.py` now check that the model is "sonnet" and the depth is "1", so no check is lost.
 12. No guard reads a command that marks a PR ready. The kept rule `git-integration-branch-merge` still says only the integration PR goes ready. The clause "only after review" has no text. Debt: `pr-ready-unguarded`, nothing guards marking a PR ready.
 13. Nothing makes a session wait for checks after a push before it reports. `hooks/ci_wake.py` starts no wait on a push. Debt: `push-report-before-checks`, no wait after a push.

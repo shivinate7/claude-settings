@@ -48,8 +48,8 @@ THE PREDICATE.
    this filter drops them.
 4. Outside a git tree, mtime alone decides, from a plain filesystem walk. Inside one, a
    failed git call returns nothing at all, never mtime alone: see `collect_markdown_targets`.
-5. Lint the survivors from disk with ste_lint.py at error severity, exactly as before. Block
-   once, naming every file and its findings.
+5. Lint the survivors from disk with ste_lint.py. Block once on errors, naming every file and
+   its findings. Advisory findings go in a note and never block.
 
 HOLES IN THE NEW PREDICATE, NAMED HONESTLY.
 
