@@ -1160,14 +1160,14 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
-    name = "caseRL2 settled question: refused, reason cites the record's id and title, no path"
+    name = "caseRL2 settled question: refused, reason cites the record's folder/stem id and title, no absolute path"
     if not need_module(name):
         return
     for kind, rel, text, rid, title in (
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
-             "rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "rl-beta", "Beta waits for the owner")):
+             "decisions/rl-alpha", "Retries wait between tries"),
+            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "deferred/rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1180,7 +1180,64 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
         reason = reason or ""
         check(sub + ": reason cites the record id " + rid, rid in reason, reason)
         check(sub + ": reason gives the record title as its gloss", title in reason, reason)
-        check(sub + ": reason names no path or file", not re.search(r"decisions|deferred|\.md", reason), reason)
+        # Owner ruling 2026-10-17: a relative folder/stem id is fine; an absolute path or a .md file is not.
+        check(sub + ": reason names no absolute path and no .md file", repo not in reason and ".md" not in reason,
+              reason)
+
+
+# Owner ruling 2026-10-17: the judge labels each ruling `<folder>/<stem>`. One stem in two folders must keep
+# two distinct ids, so the cite cannot pick the wrong record's title.
+DUP_FILES = {
+    "decisions/rl-dup.md": decision_text("Decision dup record", [("The ruling", "RL8-DEC-BODY: retries never wait.")]),
+    "deferred/rl-dup.md": "\n".join(["# Deferred dup record", "",
+                                     "**Why it waits.** Owner, 2026-10-06: RL8-DEF-BODY waits for the owner.", ""]),
+}
+
+
+def case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title():
+    name = "caseRL2b same stem in decisions/ and deferred/: two folder/stem ids, each FLAG cites its own title"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl8", DUP_FILES)
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the decision is labeled decisions/rl-dup with its own title",
+          "Ruling of record decisions/rl-dup (Decision dup record)" in prompt, "")
+    check(name + ": the deferred record is labeled deferred/rl-dup with its own title",
+          "Ruling of record deferred/rl-dup (Deferred dup record)" in prompt, "")
+    check(name + ": both rulings' text reaches the judge", "RL8-DEC-BODY" in prompt and "RL8-DEF-BODY" in prompt, "")
+    for rid, title, other in (("deferred/rl-dup", "Deferred dup record", "Decision dup record"),
+                              ("decisions/rl-dup", "Decision dup record", "Deferred dup record")):
+        sub = "%s (FLAG %s)" % (name, rid)
+        with model_stub(({"verdict": "FLAG", "record": rid, "why": WHY}, None)):
+            _code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                                            default_transcript(), repo))
+        reason = deny_reason(out)
+        check(sub + ": denied", reason is not None, out)
+        reason = reason or ""
+        check(sub + ": reason cites the id " + rid, rid in reason, reason)
+        check(sub + ": reason cites its own title, " + title, title in reason, reason)
+        check(sub + ": reason does not cite the other record's title, " + other, other not in reason, reason)
+
+
+def case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records():
+    name = "caseRL2c bare stem reply, same stem in two records: no title is cited"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl9", DUP_FILES)
+    with model_stub(({"verdict": "FLAG", "record": "rl-dup", "why": WHY}, None)) as stub:
+        _code, out, _ = run_guarded(name, ruling_payload(fresh_session("rl9"), [question(GOOD_Q, LABELS)],
+                                                         default_transcript(), repo))
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    reason = deny_reason(out)
+    check(name + ": the FLAG is still denied", reason is not None, out)
+    reason = reason or ""
+    check(name + ": the bare id is not cited: no title of either record",
+          "Decision dup record" not in reason and "Deferred dup record" not in reason, reason)
+    check(name + ": the deny keeps the judge's why", WHY in reason, reason)
 
 
 def case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed():
@@ -2776,7 +2833,9 @@ def main():
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
-                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark):
+                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
+                 case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title,
+                 case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records):
         case()
     if LOAD_ERROR is None:
         check("no real claude process started", _claude_calls() == 0, _claude_calls())
