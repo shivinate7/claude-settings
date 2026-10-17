@@ -6606,8 +6606,8 @@ STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not a
 def _build_stamp_repos():
     stamp = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["gates"], "deadlineMinutes": 30, "deleteBranch": True}}
-    make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n"})
-    make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n"})
+    make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
     make_repo(STAMPDIR, {".github/stamp.json/keep": "x\n"})
@@ -6626,6 +6626,12 @@ sh("bare-merge: a URL for the pull request asks",
 sh("bare-merge: a cd into the repo names the repo that is read",
    "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
    cwd=NOGIT, **_BARE_GATE)
+# The stamp is the repo's, not the folder's: a call from a subfolder, or a cd into one, reads the same repo.
+sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
+   "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
+   **_BARE_GATE)
+sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
+   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
 # building-scanner-respects-strings: text in the call's own arguments hides no merge.
 sh("bare-merge: comment openers inside a quoted argument hide no merge",
    'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
@@ -6648,6 +6654,8 @@ for _name, _where in (
 ):
     sh("bare-merge: %s allows" % _name, "gh pr merge 12 --squash", "allow", silent=True,
        cwd=_where, **_BARE_GATE)
+sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
+   silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GATE)
 sh("bare-merge: reading a pull request in a repo with a merge block allows",
    "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: the merge tool in a repo with a merge block allows",
