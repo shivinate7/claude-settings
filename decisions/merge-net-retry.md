@@ -53,10 +53,6 @@ Code: `merge/merge.py`.
 
 Reason: a 429 on the lock commit failed merge tries; a retried, bounded wait keeps a healthy merge from stopping.
 
-## Holes, named
-
-Debt: `dead-run-extended-lock-blocks`.
-
 ## Platforms
 
 - Windows: `bin/merge.cmd` is the launcher.

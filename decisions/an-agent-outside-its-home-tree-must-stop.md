@@ -16,9 +16,5 @@ Why: an agent resumed after the harness removed its worktree (folder and branch)
 - **Unreadable is not a hit.** No git, no common directory, or an unreadable record file returns "unknown", which allows (`liveness-read-is-platform-specific-and-unreadable-is-not-death`). A guard that denied on every unreadable state would cry wolf.
 - **The predicate is the act** (`predicate-is-the-act`). The rule reads `agent_id`, `cwd` and the write target. The lone-move exception reads the command text only to allow. Any doubt in that read refuses.
 
-## Holes, named
-
-Reopen when the harness payload stops carrying `agent_id`, or carries a `cwd` this rule cannot resolve. Reopen when the worktree naming scheme is not `agent-<agent_id>`. Reopen on a confirmed case on Windows, or in a Write or Edit payload, that disagrees. Unmeasured: Windows, and the Write and Edit payload shape on this machine (covered by fixture in `hooks/test_guard.py`).
-
 Kind: build
 Plan: decisions/an-agent-outside-its-home-tree-must-stop.md#the-ruling (all)

@@ -35,7 +35,3 @@ a `cd` inside a quoted `-c` argument or inside a comment does not move the subje
 Kind: build
 Plan: decisions/split-segments-comment-rule.md#the-ruling (all)
 Home: hooks/guard.py
-
-## Holes, named
-
-Debts: `split-reader-misses-cd-forms` (the token reader misses some cd forms).

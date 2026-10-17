@@ -196,10 +196,6 @@ Home: lint/check_agent_models.py
 Home: lint/check_skill_model_rows.py
 Home: settings.json
 
-## Holes, named
-
-Debts: `sendmessage-judge-blind-recvs`.
-
 ## What stays uncovered, on purpose
 
 - A fork runs the main conversation's model, and so does a skill run in a subagent with `model: inherit`. Only the prose rule guards them.

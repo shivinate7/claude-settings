@@ -12,22 +12,14 @@ by `lint/hook_catalog.py`. PR CI already accepts a stale page (`lint/hook_catalo
 on a PR run). The guard `records-page` refuses a lane commit whose staged `docs/records.md` differs from
 the page on the lane's base. A merge of the base into the lane brings the base's page, so it is allowed.
 
+The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
+mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
+paths have tests. `RECORDS_HEADER` in `hooks/guard_merge.py` copies the first line of `RECORDS_INTRO` in
+`lint/hook_catalog.py`, and a pin test compares them.
+
 Reason: a hand-kept index goes stale at the first merge that forgets it, so the tool owns it. Lanes that
 each rebuilt the page conflicted on it in three batches.
 
 Kind: build
 Plan: decisions/records-index-at-merge.md#ruling (all)
 Home: lint/hook_catalog.py
-
-## Holes, named
-
-The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
-mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
-paths have tests. `RECORDS_HEADER` in `hooks/guard_merge.py` copies the first line of `RECORDS_INTRO` in
-`lint/hook_catalog.py`, and a pin test compares them.
-
-Debt: `silent-undo-oracle-hides-cause`.
-
-Debts on the guard `records-page`:
-
-- `records-page-gen-false-alarm`: a generator run, then a commit that holds the page in the same call, is denied with no compare of the page.

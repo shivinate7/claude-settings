@@ -29,7 +29,3 @@ conversation.
 
 Kind: process
 Home: hooks/question_outcome.py
-
-## Holes, named
-
-Debts: `judge-cap-drops-old-rulings`.
