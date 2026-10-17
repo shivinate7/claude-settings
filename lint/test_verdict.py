@@ -2,9 +2,11 @@
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
 import os, re, shlex, subprocess, sys, tempfile, time, unittest
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
+# The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
+CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict.cmd")]
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code, log=None, extra=None, timeout=None):
+def run(code, log=None, extra=None, timeout=None, launcher=None):
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
@@ -13,7 +15,7 @@ def run(code, log=None, extra=None, timeout=None):
     with tempfile.TemporaryDirectory() as d:
         script = os.path.join(d, "fx.py")
         open(script, "w").write(code)
-        return subprocess.run([sys.executable, V, sys.executable, script], capture_output=True, text=True, env=env, timeout=timeout)
+        return subprocess.run((launcher or [sys.executable, V]) + [sys.executable, script], capture_output=True, text=True, env=env, timeout=timeout)
 
 def heartbeats(out):
     return [l for l in out.splitlines() if l.startswith("verdict: still running")]
@@ -286,6 +288,27 @@ class T(unittest.TestCase):
         self.assertTrue(out.startswith("FAIL ") and " rc=7 " in out.splitlines()[0], out[:300])
         self.assertIn("caf", out)
         self.assertNotIn("Traceback", err)
+
+    # These run bin/verdict.cmd. Only the gates-windows-rest CI job proves them.
+    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (gates-windows-rest)")
+    def test_cmd_launcher_pass(self):
+        r = run("print('noisy')", launcher=CMD, timeout=60)
+        self.assertEqual(r.returncode, 0, (r.stdout[:300], r.stderr[-300:]))
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+        self.assertNotIn("noisy", r.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (gates-windows-rest)")
+    def test_cmd_launcher_fail_keeps_rc_and_log(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            r = run("print('FAIL boom')\nraise SystemExit(7)", log, launcher=CMD, timeout=60)
+            self.assertEqual(r.returncode, 7, (r.stdout[:300], r.stderr[-300:]))
+            first = r.stdout.splitlines()[0]
+            self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first, first)
+            m = re.search(r"log=(.+)$", first)
+            self.assertTrue(m and os.path.exists(m.group(1)), first)
+            self.assertEqual(os.path.normcase(m.group(1)), os.path.normcase(log))
+            self.assertIn("FAIL boom", open(log).read())
 
 if __name__ == "__main__":
     unittest.main()
