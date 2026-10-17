@@ -577,6 +577,13 @@ MUTATIONS = [
      'CMD_EXE_DELETE_WORDS = {"rd", "rmdir", "del", "erase"}',
      "CMD_EXE_DELETE_WORDS = set()", "guard",
      'delete: rd /s /q at a drive root, Bash'),
+    # Added 2026-10-17 (guard-audit-fixes-234), the token reader of POSIX `rm -rf`. The patterns
+    # above never match a `-rf` cluster, so `rm_delete_hit` is the only reader of `rm -rf ~/`.
+    # Dropping it leaves the cmd.exe reader alone and every POSIX wide delete allowed.
+    ("destructive-delete: drop the token reader of rm -rf, the POSIX form",
+     "        matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)",
+     "        matched = cmd_exe_delete_hit(segment)", "guard",
+     'delete: the home directory with a trailing slash'),
     ("git-call parsing: drop the redirect strip before tokenizing",
      '    text = REDIRECTION.sub(" ", segment)',
      '    text = segment', "guard", 'checkout: a start point survives a merged-output redirect'),

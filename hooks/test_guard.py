@@ -2879,6 +2879,9 @@ sh("kill: every process behind a signal number, with the root unknown", "kill -9
 sh("kill: fuser without -k only lists the holders", "fuser -v 3000/tcp", "allow", cwd=NOGIT)
 sh("kill: grep for kill-port in a file is no kill", 'grep -n "kill-port" package.json', "allow",
    cwd=NOGIT)
+# Review round 1 (guard-audit-fixes-234), green today: a pid list read from a file the session wrote
+# is no pattern kill, so the new `$(lsof -t ...)` match must not widen to every substitution.
+sh("kill: a pid list read from a file is no pattern kill", "kill $(cat f)", "allow", cwd=NOGIT)
 sh("kill: a commit message that names fuser -k and kill-port is no kill",
    VCS + ' commit -m "docs: refuse fuser -k and kill-port"', "allow", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
@@ -3902,6 +3905,54 @@ for _name, _command in (
     ("as the second step", "cd logs && tail -f app.log"),
 ):
     sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
+
+# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these, because it scans
+# every token; reading the command word alone lets them through. Each is a program Claude runs a
+# follow through: a container or pod exec, find -exec, a remote or nested shell, and the wrappers
+# that start the real command (stdbuf, unbuffer, caffeinate, flock). RED on 106f785.
+for _name, _command in (
+    ("behind docker exec", "docker exec c tail -f x"),
+    ("behind podman exec", "podman exec c tail -f x"),
+    ("behind kubectl exec and --", "kubectl exec p -- tail -f x"),
+    ("behind find -exec", "find . -exec tail -f {} \\;"),
+    ("behind ssh and docker exec", "ssh host docker exec c tail -f x"),
+    ("behind sh -c around ssh", "sh -c 'ssh host tail -f x'"),
+    ("behind stdbuf", "stdbuf -oL tail -f x"),
+    ("behind unbuffer", "unbuffer tail -f x"),
+    ("behind caffeinate", "caffeinate tail -f x"),
+    ("behind flock", "flock F tail -f x"),
+):
+    sh("stream: tail -f " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# PIN, green today: a quoted pattern that names the follow is a search, not a follow.
+sh("stream: grep for the text tail -f in a file is no follow", "grep 'tail -f' notes.txt", "allow",
+   cwd=NOGIT)
+
+# SCANNER PINS (rule building-scanner-respects-strings) for the fallback that reads a segment shlex
+# cannot parse, word by word (guard_stream.py, live_stream_hit). Three constructs a scanner can
+# get wrong: a comment opener inside quotes, a quoted string over several lines, and a lone
+# apostrophe in plain text (the text of a shell line that is not a quoted string at all).
+# DENY, green today: each construct sits ahead of a real follow, and none may hide it. The `it's`
+# rows leave the segment unparseable, so the fallback reads them.
+for _name, _command in (
+    ("a # inside quotes ahead of it", 'echo "a # b"; tail -f app.log'),
+    ("a # inside quotes and a lone apostrophe ahead of it", 'echo "# x" it\'s; tail -f app.log'),
+    ("a // inside quotes ahead of it", 'echo "a // b"; tail -f app.log'),
+    ("a /* inside quotes ahead of it", 'echo "/* x"; tail -f app.log'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\ntail -f app.log'),
+    ("a multi-line quote and a lone apostrophe ahead of it",
+     'echo "a\nb" it\'s\ntail -f app.log'),
+    ("a lone apostrophe ahead of it", "echo don't; tail -f app.log"),
+    ("a lone apostrophe in a trailing comment", "tail -f app.log # don't"),
+):
+    sh("stream: tail -f behind " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# ALLOW, green today: the same constructs around text that follows nothing.
+for _name, _command in (
+    ("a # inside quotes", 'echo "# tail -f app.log"'),
+    ("a multi-line quote", 'echo "first line\ntail -f app.log\nlast line"'),
+    ("a lone apostrophe in text", "echo it's fine"),
+    ("a lone apostrophe in a trailing comment", "tail -n 5 app.log # don't"),
+):
+    sh("stream: scanner: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
 
 
 # =========================================================================== 2c. shell traps
@@ -5696,6 +5747,57 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+
+# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these four, because it
+# scans the raw text; reading `rm` as the command word alone lets them through. Each is a program
+# that runs the real command: find -exec, su -c, a container exec, and flock. RED on 106f785.
+for _name, _command in (
+    ("behind find -exec", "find . -exec rm -rf / \\;"),
+    ("behind su -c", "su -c 'rm -rf /'"),
+    ("behind docker exec", "docker exec c rm -rf /"),
+    ("behind flock", "flock F rm -rf /"),
+):
+    sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
+       cwd=NOGIT)
+
+# TWO WIDE-TARGET SETS DISAGREE. A segment shlex can parse is read by `_rm_args_wide`, against
+# RM_WIDE_TARGET, which takes a trailing slash and a glob on a root or home. A segment it cannot
+# parse (one lone quote) is read by RM_RAW, against WIDE_TARGET, which takes neither. So `rm -rf ~/`
+# denies and `rm -rf ~/ 'x` allows: the same act, split by an apostrophe. Main allows these too, so
+# they are no regression; they are a hole in the lane's own fallback. RED on 106f785.
+for _name, _command in (
+    ("a trailing slash on the home directory, one lone quote", "rm -rf ~/ 'x"),
+    ("a trailing slash on the home directory, a lone apostrophe in text", "rm -rf ~/ it's"),
+    ("everything under the home directory, a lone apostrophe in text", "rm -rf ~/* it's"),
+    ("everything under the root, a lone apostrophe in text", "rm -rf /* it's"),
+    ("the working directory as ./, a lone apostrophe in text", "rm -rf ./ it's"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+
+# SCANNER PINS (rule building-scanner-respects-strings) for the fallback that reads a segment shlex
+# cannot parse as raw text (guard_push_delete.py, RM_RAW). The same three constructs as the stream
+# family: a comment opener inside quotes, a quoted string over several lines, and a lone apostrophe
+# in plain text. DENY, green today: each construct sits beside a real delete, and none may hide it.
+for _name, _command in (
+    ("a # inside quotes ahead of it", 'echo "a # b"; rm -rf /'),
+    ("a # inside quotes and a lone apostrophe ahead of it", 'echo "# x" it\'s; rm -rf /'),
+    ("a // inside quotes ahead of it", 'echo "a // b"; rm -rf /'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nrm -rf /'),
+    ("a multi-line quote and a lone apostrophe ahead of it", 'echo "a\nb" it\'s\nrm -rf /'),
+    ("a lone apostrophe ahead of it", "echo don't && rm -rf /"),
+    ("a lone apostrophe in a trailing comment", "rm -rf / # don't"),
+):
+    sh("delete: the root form behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# ALLOW, green today: the same constructs around text that deletes nothing wide.
+for _name, _command in (
+    ("a single-quoted echo of the root form", "echo 'rm -rf /'"),
+    ("a # inside quotes", 'echo "# rm -rf /"'),
+    ("a multi-line quote", 'echo "first line\nrm -rf /\nlast line"'),
+    ("a lone apostrophe in text", "echo it's fine"),
+    ("a lone apostrophe in a trailing comment", "rm -rf build # don't"),
+):
+    sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
 
 
 # =========================================================================== 4. environment files
