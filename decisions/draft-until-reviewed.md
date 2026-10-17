@@ -57,4 +57,4 @@ check is required, and a skipped draft run blocks nothing.
 - Unmeasured: the saving in runs.
 
 Kind: process
-Home: rule:git-draft-until-reviewed
+Home: hooks/guard.py
