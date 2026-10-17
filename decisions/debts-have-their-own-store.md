@@ -24,11 +24,11 @@ On origin/main, the "Holes, named" sections in `decisions/` totaled 34: 32 headi
 
 ## What protects it
 
-Prose. The rule has an audit row in `lint/rule_mechanisms.json` (kind `unmechanized`) and counts in the pin `UNMECHANIZED_EXPECTED` in `lint/rule_audit.py`. Both landed in 17402e8. On default Windows the audit crashes before its pin check runs. The debt is `rule-audit-crashes-on-windows` (the audit crash on Windows).
+Prose. The rule has an audit row in `lint/rule_mechanisms.json` (kind `unmechanized`) and counts in the pin `UNMECHANIZED_EXPECTED` in `lint/rule_audit.py`. Both landed in 17402e8.
 
 ## Holes, named
 
-Debts: `debts-no-check-reads-parts` (no check reads the four parts of a debt file). `debt-decision-link-unchecked` (no check confirms that a debt's decision still names its gap). `rule-audit-crashes-on-windows` (`lint/rule_audit.py` crashes on default Windows).
+Debts: `debts-no-check-reads-parts` (no check reads the four parts of a debt file). `debt-decision-link-unchecked` (no check confirms that a debt's decision still names its gap).
 
 Each hole has a debt file in `debts/`.
 

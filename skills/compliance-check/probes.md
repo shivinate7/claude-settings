@@ -33,12 +33,12 @@ session transcripts, not a repo.
 | Shared trees | `git stash list` | no output (0 entries) |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
-| Git | `gh api repos/{owner}/{repo}/branches/main/protection` | the answer is known. A 404 is a known answer: no protection |
+| Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it (decision main-branch-protection, the protection copies the stamp.json list). `"protection"` or no `stamp.json`: no comparison |
 | Git | records folders, slugs lint | one file per record, one folder per kind, slugs of 32 or fewer |
 | Git | `check_silent_undo.py --history` | no lost lines |
 | Verification | `ci-hygiene` skill on `.github/workflows/` | no top finding |
 | Verification | list the screens, if any, and the sizes and themes they ship in | a check per screen |
-| Verification | `grep -rn "sleep" .github/ scripts/` | no waiter loop |
+| Verification | `git grep -n sleep`; read each hit in its file and judge it | no waiter loop. A loop that sleeps to wait on a condition is a waiter. A lone delay is not |
 | Tokens | none: session practice | `n/a (session)` |
 | Building | `git ls-files '*test*'` against product files | each product module has a test |
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
