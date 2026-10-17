@@ -395,13 +395,6 @@ BACKGROUND_END_REASON = (
 
 # ------------------------------------------------------------------ a waiter loop over a pattern
 #
-# Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
-# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
-# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
-# the condition never went false, because `pgrep -f` matches every process whose command line
-# names the pattern, including that very invocation of itself. A second copy of the driver then
-# raced the live one.
-#
 # THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
 # a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
 # token of its segment rather than only the first.

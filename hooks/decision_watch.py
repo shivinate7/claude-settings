@@ -484,12 +484,6 @@ def committed_this_turn(cwd, baseline):
 
 # ------------------------------------------------------------------ the per-incident, per-session cap
 #
-# ADDED 2026-09-22, against the independent audit. 34 raw flags collapsed to 8 real
-# incidents: one unresolved finding got re-flagged at every Stop while the owner had not
-# yet answered, ten times in one case. That is the cry-wolf shape
-# decisions/guard-that-cries-wolf-is-spent.md already names: a guard that fires when
-# nothing NEW is wrong is spent, because the reader learns to scroll past it.
-#
 # An incident's identity is the set of protected paths plus the evidence text built from
 # their diffs. Unchanged evidence next Stop means the same unresolved finding, and stays
 # quiet. Evidence that changed, because the file moved further or a new path joined it,
@@ -620,37 +614,7 @@ JUDGE_INSTRUCTIONS = (
 # disable every plugin, MCP server, hook, skill and custom command for the session, which
 # `--tools` alone does not claim to reach.
 #
-# WHAT COULD AND COULD NOT BE VERIFIED LIVE, 2026-09-22. Asked to confirm this empirically
-# by watching the model's own behavior, not by trusting a flag, this call was run for real
-# against a prompt built to use a tool if it could (`Read` a known file and quote it
-# back). It never reached that question: authentication itself failed first, in this
-# sandbox, with "OAuth session expired and could not be refreshed" -- and the SAME
-# failure, at the SAME stage, came back from a bare `claude -p "Say hello"` with NO
-# restriction flags and the real, un-isolated `CLAUDE_CONFIG_DIR`.
-# `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1` in this environment says the host refreshes
-# the token for calls the host itself makes; a detached `subprocess.run` gets no such
-# refresh. So this sandbox cannot show whether tools are actually blocked at runtime, only
-# that a raw subprocess call cannot authenticate here at all, before tool permission is
-# ever evaluated. That result is UNKNOWN, not PASS, and is recorded as exactly that rather
-# than folded into a claim this fix was verified end to end. `--tools ""` is trusted here
-# because its documentation states the exact behavior needed, not because a live call
-# confirmed it.
-#
-# THE SAME TESTING DID CONFIRM, AND FIX, A REAL DEFECT. The first isolation attempt
-# pointed `CLAUDE_CONFIG_DIR` at an empty directory with nothing in it. Run for real, that
-# failed with "Not logged in", a DIFFERENT and earlier failure than the sandbox's own
-# auth-refresh ceiling above -- proof, not assumption, that wiping the config directory
-# also wipes the credential the subprocess needs to authenticate at all, on any machine,
-# not only this one. `_judge_isolation` now copies only `CREDENTIALS_FILENAME` into the
-# isolated directory, confirmed by the same test to move the failure from "Not logged in"
-# to the sandbox's own "OAuth session expired" ceiling: the credential is read, nothing
-# else about this project is.
-#
-# THE ENVIRONMENT, TIGHTENED AGAINST A SECOND REVIEWER PASS. `_judge_isolation` used to
-# build the child's environment by copying `os.environ` and overriding one key, so every
-# other variable passed through unfiltered: `CLAUDE_CODE_MESSAGING_SOCKET` and
-# `CLAUDE_CODE_MESSAGING_TOKEN` (the host IPC channel), `CLAUDE_CODE_HOST_SESSION_ID`,
-# `CLAUDE_CODE_OAUTH_SCOPES`, and `ANTHROPIC_API_KEY` when set. Copy-then-subtract cannot
+# Copying `os.environ` and subtracting names cannot
 # be complete, the same shape `decisions/predicate-is-the-act.md` already names for a
 # shape list that can only grow. `JUDGE_ENV_ALLOWLIST` inverts it: the child's environment
 # holds only the named variables the runtime genuinely needs to execute and reach the API
@@ -927,10 +891,6 @@ def run(hook, model_call=invoke_model, expect_key=None):
 
 
 # ------------------------------------------------------------------ the config report
-#
-# FOLDED IN FROM `hooks/config_report.py` 2026-10-02 (decisions/guard-trims-from-the-audit.md): two Stop
-# hooks that each read the transcript and each print a systemMessage were one hook's work. This
-# section keeps the old hook's whole job, unchanged, and `main` prints its message after `run`'s.
 #
 # Decision 7 ("Project config edits: allow and report") lets a session edit a project's own
 # `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` without a prompt.
