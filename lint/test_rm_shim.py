@@ -172,6 +172,15 @@ class Shim(unittest.TestCase):
         self.assertIn("armed", r.stdout, "the shell's folder was not removed under it: " + r.stderr)
         self.assertRefusal(r, ["-rf", self.home], [self.home])
 
+    def test_a_file_in_the_cwd_named_like_a_stdlib_module_does_not_open_the_gate(self):
+        # python3 puts the cwd on sys.path for `-c`, so a types.py there shadows the stdlib `types`. The
+        # helper then fails to load, and the shim falls open to the real rm. Claude's cwd is a project
+        # folder that holds files of any name; the shim must refuse HOME all the same.
+        with open(self.path("work", "proj", "types.py"), "w") as f:
+            f.write('raise ImportError("shadow")\n')
+        self.assertRefused(["-rf", self.home], [self.home])
+        self.assertTrue(os.path.isdir(self.home), "the fake HOME was deleted")
+
     # CLAUDECODE=1: these pass and delete.
 
     def test_passes_a_build_folder(self):
