@@ -66,7 +66,6 @@ The writer gets a rewrite only where the rewrite keeps the meaning. Where the li
 7. `ste-eg-in-fence-reported` stays open. The lint still reports `e.g.` in a pre block and a blockquote fence, now as a warning. Its text is rewritten.
 8. Three phrases left `BLOAT` with no note: `in between`, `in terms of` and `it would appear that`. They pass silently. Debt: `dropped-bloat-phrases-silent`, three dropped filler phrases pass with no note.
 9. A denied write shows no advisory note. The writer sees the advisories only after the errors clear. Debt: `ste-gate-fixes-not-nags`, the gate fixes and does not nag.
-10. `lint/test_ste_autofix.py` comments cite the deleted debt `ste-fix-changes-meaning`. The comment-cites lane re-points them. Debt: `stale-comment-cites`, code comments cite deleted records.
 
 Kind: process
 Home: lint/ste_lint.py

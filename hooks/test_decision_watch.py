@@ -658,8 +658,8 @@ def case_invoke_model_timeout_is_error():
     check("timeout: error names the failure", bool(error), error)
 
 
-# The one home for the child's isolation flags. Ruling decisions/haiku-prompt-hooks.md,
-# "decision_watch": haiku, xhigh effort, module timeout.
+# The one home for the child's isolation flags. Ruling haiku-prompt-hooks (Haiku prompt hooks),
+# section "Stop reply judge": haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
     # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
     # machine cannot change the child's env.

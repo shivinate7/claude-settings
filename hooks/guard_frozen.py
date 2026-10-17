@@ -42,8 +42,8 @@ CONFIG_FROZEN_DIRS = (
     os.path.normcase("lint"),
     os.path.normcase("agents"),
     # janitor/sweep.py deletes branches and worktrees. A session must not rewrite a program that
-    # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
-    # janitor-build-plan.md, "The code lands in a new janitor/ directory").
+    # deletes things, same reasoning as hooks/lint/agents, so it lands here too (decision
+    # the-janitor-is-one-machine-wide-sweep, the janitor is one machine-wide sweep).
     os.path.normcase("janitor"),
     # bin/ holds the merge shim that every merge runs. Same reasoning as janitor.
     os.path.normcase("bin"),
