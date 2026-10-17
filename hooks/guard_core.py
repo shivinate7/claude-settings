@@ -1306,11 +1306,14 @@ def read_default_base(where: str, remote: str = "origin"):
     read `origin`.
     """
     candidates = [remote + "/main", remote + "/master", "main", "master"]
-    named = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/" + remote + "/HEAD")
+    # No --short: a local branch or tag named `<remote>/<default>` makes git print the ambiguous
+    # `remotes/<remote>/<default>`. The full ref strips to the name with no such ambiguity.
+    named = _git(where, "symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD")
     if named is None:  # git could not run: unreadable
         return None, None
-    head = named.stdout.strip() if named.returncode == 0 else ""
-    if not head.startswith(remote + "/"):
+    full_head = named.stdout.strip() if named.returncode == 0 else ""
+    head = full_head.removeprefix("refs/remotes/")
+    if head == full_head or not head.startswith(remote + "/"):
         head = ""
     if head:
         candidates.insert(0, head)
