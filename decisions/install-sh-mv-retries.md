@@ -17,9 +17,10 @@ install, so a running guard is the likely holder. Unmeasured: the failure rate a
 Governing record: `install-hooks-whole` (an install never shows a session a half-copied hook). It
 says a rename held up by an open reader is retried briefly.
 
-The test shim `make_swap_bin` now pauses only once. Without that, a failed and retried `mv` at the
-pause point pauses twice, and swap1sh fails. The test-author showed this red with a forced failed
-`mv`, then green.
+The test shim `make_swap_bin` now pauses only once. It matters only for an injected failure: a
+failed and retried `mv` at the pause point would pause twice, and swap1sh would fail. A normal run
+does not change, because the CI failure was at a later file. The test-author showed it red with a
+forced failed `mv`, then green.
 
 ## Holes, named
 
@@ -27,8 +28,7 @@ pause point pauses twice, and swap1sh fails. The test-author showed this red wit
    permission or missing-path failure now takes about 2.4 s per file before it fails. Orchestrator's
    call: a failed install already fails, and sh cannot read the error code. Debt:
    `install-sh-retries-every-error`, the sh retry does not filter by error.
-2. Two other renames have no retry: the first-run backup of a person's own file and the
-   `settings.json` backup. Debt: `install-sh-other-renames-no-retry`, two install renames are tried
-   once.
+2. Five other renames have no retry. The cloud `settings.json` swap is the same class as
+   `put_file`. Debt: `install-sh-renames-no-retry`, five install renames are tried once.
 3. No test drives the retry success path or the exhaustion path. Debt: `install-sh-retry-untested`,
    the mv retry has no test.
