@@ -58,5 +58,5 @@ The deferred item came back when two things held on main. Both hold. `install.sh
 - A bare merge chained after a step that is not harmless (`ls && gh pr merge 12`) is denied as
   ask-alone, not asked. That is stricter than main, which allows the chain. The remedy is to
   split the command and run the merge alone.
-- The repo-root walk is lexical. A symlink outside the repo that points into it reads as no
-  repo, so the merge is allowed with no ask. Main allows it too. Debt `bare-merge-symlink-cwd`.
+- The repo-root walk tries the cwd as written and with symlinks resolved, so a symlink into a
+  repo asks too.

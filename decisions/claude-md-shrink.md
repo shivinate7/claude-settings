@@ -91,7 +91,6 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 12. No guard reads a command that marks a PR ready. The kept rule `git-integration-branch-merge` still says only the integration PR goes ready. The clause "only after review" has no text. Debt: `pr-ready-unguarded`, nothing guards marking a PR ready.
 13. Nothing makes a session wait for checks after a push before it reports. `hooks/ci_wake.py` starts no wait on a push. Debt: `push-report-before-checks`, no wait after a push.
 14. The map no longer ties the `merge-checks`, `draft-pr` and `pointer-head` guard rules to a rule. A guard deleted together with its tests now passes `lint/rule_audit.py`. Debt: `guard-untied-from-rule-map`, three guards have no row.
-15. Two comments still cite deleted text: a case comment in `hooks/test_guard.py` names `git-wait-for-required-checks`, and `hooks/guard_kill.py` quotes the dropped `pkill -f` sentence. Debt: `shrink-stale-code-comments`, two comments cite deleted rules.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules

@@ -61,7 +61,7 @@ The WSL section of the guard tests (section 2c-bis) pins each allowed form and e
 
 ## Holes, named
 
-Debts: `wsl-bare-bash-not-refused` (a bare bash.exe -c is not refused). `wsl-distro-exes-not-refused` (debian.exe and kali.exe are not refused). `guard-substitution-in-token` (a substitution inside a token is not read). `wsl-wslenv-no-equals-unrefused` (a WSLENV set with no equals sign is not refused). `wsl-wslenv-false-alarms` (WSLENV text in the same command raises false alarms). `wsl-env-path-form-untested` (no test pins the env path or quoted-name forms).
+Debts: `wsl-bare-bash-not-refused` (a bare bash.exe -c is not refused). `guard-substitution-in-token` (a substitution inside a token is not read). `wsl-wslenv-no-equals-unrefused` (a WSLENV set with no equals sign is not refused). `wsl-wslenv-false-alarms` (WSLENV text in the same command raises false alarms). `wsl-env-path-form-untested` (no test pins the env path or quoted-name forms).
 
 Kind: process
 Home: hooks/guard_wsl.py
