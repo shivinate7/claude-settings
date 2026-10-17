@@ -273,8 +273,7 @@ def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None,
         carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
-# ASK ALONE (incident 2026-10-14 10:51 CDT: an optional `git worktree prune`, chained with two more
-# steps, sent the whole command to the owner as one permission prompt). A command that holds a step
+# ASK ALONE. A command that holds a step
 # the guard would ASK on, chained with other steps by `&&`, `||`, `;`, `|` or a newline, is DENIED to
 # the agent, and the remedy says to run that step alone or drop it. A lone ask step still asks, and a
 # deny anywhere in the command still wins. Owner ruling 2026-10-15 (decision ask-steps-run-alone): a
@@ -931,9 +930,8 @@ def build_fixtures():
     # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
     # whole shared budget on its own, whichever call absorbs the time.
     make_fake_gh(GHSLOW, "main", delay=20)
-    # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
-    # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
-    # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
+    # 3.5s per call stands in for real gh latency (3.0-3.9s): slower than the 3s MERGE_READ_TIMEOUT,
+    # nowhere near a hang.
     make_fake_gh(GHWARM, "main", delay_s=3.5)
     # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
     # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
@@ -2372,7 +2370,7 @@ sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
    carries="stash stack")
 
 
-# ---- r1-hd (review round 1), shared-tree family. H1: a python body under a backslash, single-quoted or
+# ---- r1-hd, shared-tree family. H1: a python body under a backslash, single-quoted or
 # double-quoted delimiter, closed at EOF, then a stash push. The python body stays in view, so both heads deny.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a stash push, denies" % _label,
@@ -2696,7 +2694,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 2. machine-wide kills
 FAMILY = "kill"
 
-sh("kill: pkill by pattern", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill by pattern denies", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -2869,7 +2867,7 @@ sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | x
    "allow", cwd=NOGIT)
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 3). Four ways to stop a process by port, or every
+# Four ways to stop a process by port, or every
 # process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
 # a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
@@ -2897,7 +2895,7 @@ sh("kill: every process behind a signal number, with the root unknown", "kill -9
 sh("kill: fuser without -k only lists the holders", "fuser -v 3000/tcp", "allow", cwd=NOGIT)
 sh("kill: grep for kill-port in a file is no kill", 'grep -n "kill-port" package.json', "allow",
    cwd=NOGIT)
-# Review round 1 (guard-audit-fixes-234), green today: a pid list read from a file the session wrote
+# A pid list read from a file the session wrote
 # is no pattern kill, so the new `$(lsof -t ...)` match must not widen to every substitution.
 sh("kill: a pid list read from a file is no pattern kill", "kill $(cat f)", "allow", cwd=NOGIT)
 sh("kill: a commit message that names fuser -k and kill-port is no kill",
@@ -3001,9 +2999,7 @@ sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "a
 # item 1). A recursive rm whose target has an unguarded variable, then "/", then a glob, another
 # variable, a slash, a quote, or the end, is refused: Claude Code's prompt shape. A literal after
 # the slash is not refused. The remedy is ${NAME:?} only when every such name is safe (the
-# allow-list), else a literal path that prints no expanded path. INCIDENT 2026-10-10 to 10-11: 7 of
-# 24 Bash prompts were rm on a $var path, 5 of them `S=...; for d in ...; do rm -rf $S/$d`.
-# Cases marked "(b) ruling changed" were re-pointed to the 2026-10-11 ruling.
+# allow-list), else a literal path that prints no expanded path.
 sh("rm-var: a loop deletes under an unguarded variable",
    "S=/tmp/x; for d in a b; do rm -rf $S/$d; done", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("rm -rf ${S:?}/${d:?}",))
@@ -3777,7 +3773,7 @@ sh("heredoc: a machine-wide kill in a python body still denies, in one command",
    "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
 
 
-# ---- r1-hd (review round 1), kill family. H1: a python body under a backslash, single-quoted or
+# ---- r1-hd, kill family. H1: a python body under a backslash, single-quoted or
 # double-quoted delimiter, closed at EOF, then a kill. Both heads deny: the python body stays in view.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a kill, denies" % _label,
@@ -3791,11 +3787,10 @@ for _shell in ("sh", "bash"):
 sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
    "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- r2-hd (review round 2), kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
+# ---- r2-hd, kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
 # backticks, or on a line that feeds eval, source, `.` or xargs, reads as a shell body. Each form names a
 # delimiter main misreads (`'EOF-1'`, `\EOF`, `E-F`), so main keeps the body in view and denies. The lane
 # head reads the delimiter as bash does, drops the body, and allows. RED ON THE LANE HEAD, DENY ON MAIN.
-# Measured on main (4112319): main denies every payload of these three forms.
 R2_FORMS = (
     ("source with <( ), an escaped delimiter", "source <(cat <<\\EOF\nBODY\nEOF\n)"),
     ("a heredoc piped to xargs", "cat <<'EOF-1' | xargs -I{} sh -c '{}'\nBODY\nEOF-1"),
@@ -3901,10 +3896,10 @@ sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", 
 sh("stream: tail -f inside a loop's do-block denies unchanged",
    "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 4). The rule reads every token of a segment, not the
+# The rule reads every token of a segment, not the
 # command word, so a command that only NAMES `tail` or `Get-Content` before a flag is a false alarm:
 # a commit message or a note that names the refused form, and `grep ... tail -F`, where -F is grep's
-# fixed-string flag. Claude writes the first two whenever it works on this rule. RED today.
+# fixed-string flag. Claude writes the first two whenever it works on this rule.
 for _name, _command in (
     ("a commit message that names tail -f", VCS + ' commit -m "Refuse tail -f in the guard"'),
     ("a commit message that names Get-Content -Wait",
@@ -3924,10 +3919,10 @@ for _name, _command in (
 ):
     sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
 
-# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these, because it scans
+# Main denies each of these, because it scans
 # every token; reading the command word alone lets them through. Each is a program Claude runs a
 # follow through: a container or pod exec, find -exec, a remote or nested shell, and the wrappers
-# that start the real command (stdbuf, unbuffer, caffeinate, flock). RED on 106f785.
+# that start the real command (stdbuf, unbuffer, caffeinate, flock).
 for _name, _command in (
     ("behind docker exec", "docker exec c tail -f x"),
     ("behind podman exec", "podman exec c tail -f x"),
@@ -3945,11 +3940,10 @@ for _name, _command in (
 sh("stream: grep for the text tail -f in a file is no follow", "grep 'tail -f' notes.txt", "allow",
    cwd=NOGIT)
 
-# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies each of these, because it
-# scans every token; 914a2e7 allows them. The wrapper has options or a subcommand before the real
+# Main denies each of these, because it
+# scans every token. Reading the command word alone lets them through. The wrapper has options or a subcommand before the real
 # command (`docker run --rm alpine`, `compose -f x.yml exec web`, `--context x exec c`, `kubectl run
 # x --image=a --`), or it is a wrapper with no skip rule at all (gtimeout, watch, uv run).
-# RED on 914a2e7.
 for _name, _command in (
     ("behind docker run with an option", "docker run --rm alpine tail -f /dev/null"),
     ("behind docker-compose exec", "docker-compose exec web tail -f log"),
@@ -4132,7 +4126,7 @@ sh("waiter: a loop inside a heredoc body is allowed",
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 
-# Review round 1 on ca4f96d (FAIL). Each refused shape below waits by repeating or by a long
+# Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
 # A bare `&` job is refused first by detached-launch (rule 2b), so the waiter rule is not reached
 # for these two. They pin the refusal; the rule named is the one that fires.
@@ -4165,7 +4159,7 @@ sh("waiter: gh issue list --label watch is allowed", "gh issue list --label watc
 sh("waiter: gh issue create --title watch is allowed", "gh issue create --title watch", "allow",
    cwd=NOGIT)
 
-# Review round 2 on 3f2b435. `-w` is `--web` for `gh pr checks` (open the browser), and
+# `-w` is `--web` for `gh pr checks` (open the browser), and
 # `--watch` has no short form, so `-w` there is not a watcher. A repo flag (`-R o/r`) sits
 # between the command group and its verb, so the verb is not the token after `gh`.
 sh("waiter: gh pr checks -w, --web, in the foreground is allowed", "gh pr checks 5 -w", "allow",
@@ -4399,7 +4393,7 @@ add("background-end: py -3 -m http.server under run_in_background with no note i
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
-# Lane swn-pwsh-escape, review round 2, item 3: a backslash before ; hides the server in a cmd /c
+# A backslash before ; hides the server in a cmd /c
 # script. RED when guard_stream's cmd /c tail (guard_stream:319) is read as bash text.
 add("background-end: a cmd /c with a backslash before ; hides npm run dev under run_in_background, denies",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
@@ -4542,10 +4536,9 @@ sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 
 # Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
-# flag (CI runs the mod tests this way). Review round 1 (orchestrator call): plain node runs only its
+# flag (CI runs the mod tests this way). Plain node runs only its
 # first file, and the rest become argv. So the plain form takes exactly one literal test path. A glob
-# or a second file gives a false green. `--test` keeps its glob and multi-file form. Red on head
-# 730cb365: the glob and two-file plain calls. Red on main: the one-path allow (main needs --test).
+# or a second file gives a false green. `--test` keeps its glob and multi-file form.
 sh("wsl: a plain node test file, no --test flag",
    "wsl -e node mods/x/x.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: a glob in a plain node test path is refused",
@@ -4767,7 +4760,7 @@ for _name, _command in (
     sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 1 (lane). Each RED case below is a hole on 707f9dd.
+# ---- guard-command-position.
 # A real quote that opens after a letter (`sed -e's/a/b/'`, `cut -d't'`) or closes after one
 # (`x'd'`) is read as a contraction, so the call after it is hidden. A quoted `(wsl` is text, and
 # must allow. A long value flag (`--unset`, `--user`, `--adjustment`, `--max-args`) and the short
@@ -4793,7 +4786,7 @@ for _name, _command in (
     sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 2 (lane). Each RED case below is a hole on 8b6813a.
+# ---- guard-command-position.
 # Item 1 is a regression: main denies these, and 8b6813a allows them. A contraction (`a's b'`) is
 # read as a contraction, so the real quote after it is not seen, and the call after that quote is
 # hidden. `sed -e's;a;b;'` holds a real quote, and the call after it must deny. Item 3: a short flag
@@ -4830,8 +4823,8 @@ for _name, _command in (
        rule=WSL_RULE, cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 3 (lane gcp-quote-fix). Each RED case below is a hole
-# on 335c4a9, and origin/main denies it. is_contraction counted every later `'`, so a later
+# ---- guard-command-position.
+# is_contraction counted every later `'`, so a later
 # apostrophe (`don't`, `"it's"`) paired with the contraction's own `'`, and the contraction read
 # hid the refused call after it. The first two groups must deny. The scanner group holds comment
 # openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
@@ -4938,10 +4931,8 @@ sh("wsl: a sed script with a backslash before & and a trigger word after it, all
 sh("wsl: a find -exec with a backslash before ; is text, allowed",
    r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
 
-# ---- lane swn-pwsh-escape, review round 2, item 3. Each case is RED when the read it names is
-# dropped (the scratch mutants, see the proof): quote_advance:118 for the escaped quote, _split_
-# reading:196 for the backslash-newline, nested_script's cmd /c tail (guard_core:1900). Each DENIES
-# on 2055fd8, so each is green there.
+# Each case is RED when the read it names is dropped: quote_advance for the escaped quote,
+# _split_reading for the backslash-newline, the cmd /c tail of nested_script.
 sh("wsl: a pwsh -c with an escaped quote before ; hides wsl --shutdown, denies",
    r"""pwsh -c 'echo "a\"; wsl --shutdown'""", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a pwsh -c with a backslash before a line break hides wsl --shutdown, denies",
@@ -4953,10 +4944,10 @@ sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell
 sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
    "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, holes F1 to F3 (red until the builder fixes them).
+# ---- PowerShell quoting, holes F1 to F3.
 # F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
 # PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
-# a backtick that the outer string already consumed. Each DENIES on origin/main.
+# a backtick that the outer string already consumed.
 sh("wsl: a PowerShell comment opener mid-word, then wsl --shutdown, denies",
    "echo a<# ; wsl --shutdown #>", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 sh("wsl: a Bash pwsh -c with a comment opener mid-word, then wsl --shutdown, denies",
@@ -4975,7 +4966,7 @@ sh("wsl: a PowerShell unclosed comment at a token start with no call after it, a
 sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
    "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, hole F4: a backtick hides the next `;` before an env read.
+# ---- hole F4: a backtick hides the next `;` before an env read.
 # It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
 FAMILY = "env"
 sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
@@ -5005,7 +4996,7 @@ sh("silent-write: merge's own quiet flag needs no redirect at all, MEASURED 2026
    VCS + " merge --quiet feature/x", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-write: rebase's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
    VCS + " rebase -q main", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
-sh("silent-write: a discarded proof of landing, stdout alone",
+sh("silent-write: discarding a write command output denies, stdout alone",
    VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
@@ -5459,8 +5450,8 @@ sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, 
    "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
-# (f) round 3 hole F5. Owner ruling 2026-10-15: these two were pinned allowed as limits, and are now
-# denies. A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
+# (f) Owner ruling 2026-10-15: these two deny.
+# A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
 # discarded commit or merge in a real checkout.
 sh("silent-write: a quote inside $( ) in a message does not hide a discarded commit, denies",
    VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
@@ -5775,7 +5766,7 @@ sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"',
 sh("delete: a grep pattern naming the cmd.exe form calls nothing",
    'grep "del /s" notes.md', "allow", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 2). The `rm` pattern reads raw text: a target must end
+# The `rm` pattern reads raw text: a target must end
 # at a space or the end, the flags must be one `-rf` cluster, and a quote hides nothing. Three
 # misses and one false alarm, each a form Claude writes.
 #
@@ -5829,9 +5820,9 @@ for _name, _command in (
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
 
-# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these four, because it
+# Main denies each of these four, because it
 # scans the raw text; reading `rm` as the command word alone lets them through. Each is a program
-# that runs the real command: find -exec, su -c, a container exec, and flock. RED on 106f785.
+# that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
     ("behind find -exec", "find . -exec rm -rf / \\;"),
     ("behind su -c", "su -c 'rm -rf /'"),
@@ -5841,9 +5832,9 @@ for _name, _command in (
     sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
        cwd=NOGIT)
 
-# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies both, because it scans the
-# raw text; 914a2e7 allows them. `docker run --rm alpine` and `docker-compose exec web` have options
-# or a hyphenated name ahead of the real command. RED on 914a2e7.
+# Main denies both, because it scans the
+# raw text. Reading `rm` as the command word alone lets them through. `docker run --rm alpine` and `docker-compose exec web` have options
+# or a hyphenated name ahead of the real command.
 for _name, _command in (
     ("behind docker run with an option", "docker run --rm alpine rm -rf /"),
     ("behind docker-compose exec", "docker-compose exec web rm -rf /"),
