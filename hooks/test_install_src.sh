@@ -98,7 +98,8 @@ make_checkout() {
   mkdir -p "$dir"
   cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
   for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
-  ( cd "$dir" && git init -q && git config user.email t@example.com && git config user.name t \
+  # -b master: init.defaultBranch=main (Xcode's git) would start the clone on main, which install.sh pins.
+  ( cd "$dir" && git init -q -b master && git config user.email t@example.com && git config user.name t \
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
   printf '{}\n' > "$dir/settings.json"
