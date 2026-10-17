@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Wake the session when CI ends on a PR it marked ready: after `gh pr ready <N>`, wait on that
-head's runs and print one line with the result. Standard library only. See
-decisions/handoff-hooks-wave-2.md, part 3.
+"""After `gh pr ready <N>`, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs.
 
 PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
 `gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.

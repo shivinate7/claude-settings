@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: markdown sweep (Stop).
+"""At Stop, lints each markdown file this turn changed, whatever tool wrote it. Blocks once when a changed block has an error.
 
 THE DEFECT THIS CLOSES. The PreToolUse STE gate (ste_gate.py) only sees a Write, Edit, or
 MultiEdit call on a *.md path. A markdown file written through Bash never passes through

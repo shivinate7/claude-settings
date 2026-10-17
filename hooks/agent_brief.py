@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SubagentStart hook: give every spawned agent the standing rules, so briefs stop retyping them.
+"""At SubagentStart, gives each spawned agent the standing rules, so a brief need not retype them. The scope line depends on the agent type.
 
 Owner ruling 2026-10-12. Prints `hookSpecificOutput` with `hookEventName` "SubagentStart" and
 `additionalContext` (Claude Code hooks reference). The scope line varies by `agent_type` from

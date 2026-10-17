@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: reply judge (Stop). Judges the final reply against three style rules.
+"""At Stop, a model (Haiku) judges the final reply against three style rules. It runs on every fifth Stop and never blocks. A finding comes back as a note on the next turn.
 
 It replaces the `type: prompt` Stop judge, pulled 2026-10-12 because it ignored its own line
 "if stop_hook_active is true, answer ok" and blocked done replies in a loop. A prompt hook
