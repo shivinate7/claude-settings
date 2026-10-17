@@ -2110,7 +2110,7 @@ def impeccable_command_hit(raw: str) -> str:
     """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
     and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
     backticks it runs. The limits: a Python, Node, Perl or Ruby
-    body is not read, and a body fed to a shell by here-string is allowed."""
+    body is not read, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
