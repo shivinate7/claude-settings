@@ -1,0 +1,51 @@
+# An rm shim on PATH, active only in Claude sessions
+
+## The question
+
+What stops a recursive delete of `/`, the home folder, the working folder or a parent of it, after
+the `rm-var` guard rule and the prompt-answer hook (decision rm-on-a-variable-needs-a-guard, rm on a
+variable needs a `:?` guard)? Those two read the command text. A shim reads the path at run time.
+
+## The ruling
+
+Owner, 2026-10-11 ("Yes, only for Claude sessions"): `bin/rm` sits ahead of the real `rm` on PATH.
+
+- `CLAUDECODE` unset: it runs the real `rm` untouched. MEASURED 2026-10-12: a Claude Code session sets
+  `CLAUDECODE=1` in every Bash tool process.
+- `CLAUDECODE` set and the call is recursive (`-r`, `-R`, `--recursive`, or a short-flag group that holds
+  `r` or `R`): if any operand is `/`, home, the cwd or a parent of the cwd, symlinks resolved, the whole
+  call is refused. Nothing runs. Exit 1, one line on stderr. The line names no delete command.
+- Any other call runs the real `rm`: the next `rm` on PATH that is not this shim, else `/bin/rm`.
+- The reading is `_rm_target_bad` in `hooks/guard_rm_var.py`, the one home. The shim finds `hooks/`
+  from its own real path, so a symlinked install and a copied install both work.
+- `install.sh` needs no new step. `land_dir bin` links `bin/rm` into `~/.claude/bin`, and the existing
+  rc line puts `~/.claude/bin` first on PATH, so it wins over `/bin/rm`.
+
+CI: `lint/test_rm_shim.py` runs in `gates` and `gates-macos`. `harness-scope.sh` maps `bin/rm` and the test.
+
+## Why fail-open
+
+If `guard_rm_var` cannot load, or the judgment raises, the shim prints one warning line and runs the
+real `rm`. The shim sits in front of every `rm` a Claude session runs, so a broken helper that refused
+would stop all deletes, including safe ones. The rule and the hook are the first stops. The shim is the
+last stop, and a missing last stop is a smaller harm than a session that cannot delete a file.
+MEASURED 2026-10-17: a copy of the shim with no `hooks/` beside it printed the warning and deleted.
+
+## Holes, named
+
+- The call must reach the shim. `/bin/rm`, `command rm`, `env -i rm`, a shell with no rc PATH line, and
+  `find -delete` skip it. Debt `rm-shim-bypass-forms` (a full-path rm skips the shim).
+- Windows has no shim. `install.ps1` does not land one, and `bin/rm` is posix only. Debt
+  `rm-shim-windows` (the install.ps1 half).
+- A cloud install adds no PATH line, so the shim is off there. Debt `rm-shim-cloud-path` (cloud
+  sessions do not get the shim).
+- The shell expands globs first. `rm -rf *` in the cwd arrives as a list of children, so it passes.
+  The cwd itself is not an operand.
+- Flags are read anywhere before `--`. On macOS `rm dir -rf` treats `-rf` as a file name, so the shim
+  refuses a call that BSD `rm` would not have run as recursive. A false alarm that costs one retry.
+- Every `rm` pays one Python start. Unmeasured.
+
+Kind: build
+Plan: decisions/rm-path-wrapper.md#the-ruling (macos)
+Plan: decisions/rm-path-wrapper.md#the-ruling (linux)
+Home: bin/rm

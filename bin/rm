@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+# rm shim: sits ahead of the real rm on PATH (install.sh puts ~/.claude/bin first).
+# CLAUDECODE unset: runs the real rm untouched. CLAUDECODE set: a recursive call is refused whole when any
+# operand is /, home, the cwd or a parent of the cwd (symlinks resolved). The reading is _rm_target_bad in
+# hooks/guard_rm_var.py, the one home. If that cannot load or run, the real rm runs and one warning prints
+# (decision rm-path-wrapper). Windows: install.ps1 half is a debt.
+import os, sys
+
+args = sys.argv[1:]
+me = os.path.realpath(__file__)
+
+
+def real_rm():
+    """The next rm on PATH that is not this shim, else /bin/rm."""
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        p = os.path.join(d or ".", "rm")
+        if os.path.isfile(p) and os.access(p, os.X_OK) and os.path.realpath(p) != me:
+            return p
+    return "/bin/rm"
+
+
+def run_real():
+    os.execv(real_rm(), ["rm"] + args)
+
+
+def operands():
+    """(recursive, operands). Flags are read anywhere before `--`: the shim stays strict where BSD rm would not."""
+    rec, ops, flags = False, [], True
+    for a in args:
+        if flags and a == "--":
+            flags = False
+        elif flags and a.startswith("--"):
+            rec = rec or a == "--recursive"
+        elif flags and a.startswith("-") and a != "-":
+            rec = rec or "r" in a or "R" in a
+        else:
+            ops.append(a)
+    return rec, ops
+
+
+if not os.environ.get("CLAUDECODE"):
+    run_real()
+rec, ops = operands()
+if not rec:
+    run_real()
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(me)), "hooks"))
+    from guard_rm_var import _rm_target_bad
+    cwd = os.getcwd()
+    bad = [o for o in ops if _rm_target_bad(o, cwd)]
+except Exception as e:
+    sys.stderr.write("rm shim: cannot judge this call (%s); running the real rm\n" % e)
+    run_real()
+if bad:
+    sys.stderr.write(
+        "rm: refused in a Claude session. Operand %r is /, the home folder, the working folder or a parent "
+        "of it, and no part of the call ran. Name a narrower folder, or ask the owner to do it.\n" % bad[0])
+    sys.exit(1)
+run_real()
