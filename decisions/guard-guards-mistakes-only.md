@@ -15,21 +15,22 @@ Claude's mistakes, never an attacker.
 - Every guard, gate and check protects against Claude's own mistakes. This includes guard hooks,
   other gates, lints, CI checks and bin shims such as `bin/rm`.
 - None of them guards against an act that only a deliberate attacker would write.
-- Never build a check that assumes that a nefarious actor is present.
+- Never build a check that assumes that a nefarious actor is present. The owner's message of
+  2026-10-17 09:05 CDT: "note to never build assuming a nefarious actor only protect against mistakes claude may make".
 - A bypass counts as a hole only if Claude could write it by mistake or from a misread task.
 - A form whose only use is to evade the check is out of scope. It is not a hole.
 
 Trigger: in review round 1 of lane ask-alone-bc, the form `export GIT_SSH_COMMAND='<cmd>' && <ask step>`
-was found to ask where main denies. The owner ruled such crafted forms out of scope, with this exact
-example in front of him.
+was found to ask where main denies. The owner saw this exact example on
+2026-10-15 and ruled such crafted forms out of scope.
 
 ## Why
 
 A check reads Claude's own work. Each extra form it reads costs prompts, refusals and review
 time on normal work. The owner gains fewer prompts and refusals, simpler rules and shorter reviews.
 
-The owner accepts the loss. Hidden instructions could get a harmful act past a guard or other check, with
-at most a prompt. Claude's own training is then the only defence against that.
+The owner accepts the loss. Hidden instructions could get a harmful act past a check. A guard may
+still ask about it. A lint or CI check never asks. Claude's own training is then the only defence against that.
 
 Protected outcome: routine work runs without false stops, and the rules stay short.
 
@@ -60,7 +61,7 @@ Out of scope (not a hole):
 
 This ruling covers every guard, gate and check. For any of them, a safety hole counts
 only when Claude could write the act by mistake or from a misread task. The rule
-`roles-review-cap-three` (a change gets three review rounds) and `hold-unsafe-after-round-3` (net-value hold after round 3) say so.
+`roles-review-cap-three` (a change gets three review rounds) says so.
 
 Kind: process
 Home: rule:roles-review-cap-three
