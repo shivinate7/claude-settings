@@ -35,7 +35,7 @@ Delete in two steps:
 1. The reap renames each proven folder to a sibling trash name inside the same worktree. The rename stays on one volume, so it is one fast step.
 2. The reap starts a detached child that deletes the trash. The hook does not wait for the child.
 
-A later reap or the janitor deletes trash names that a child left. If a trash name matches the trash pattern and the gates above hold for it, the janitor deletes it. The builder sets the pattern.
+A later reap or the janitor deletes trash names that a child left. If a trash name matches the trash pattern and the gates above hold for it, the janitor deletes it. The trash pattern is `<name>.reap-trash-<12 hex digits>`.
 
 Name matching:
 
@@ -46,7 +46,7 @@ A root-only match misses `DegenKit/.build`. By the feed-build session's figures,
 
 Other defaults:
 
-- A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` validates `.claude/janitor.json`. The builder extends it and adds no second reader.
+- A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` is the one reader of `.claude/janitor.json`.
 - A link named as a build folder is kept, not removed.
 
 Builder decisions:
@@ -92,19 +92,11 @@ Arithmetic: the 77 worktrees held about 330 GB in total, and each held up to abo
 - Trash names stay on disk until a later reap or the janitor deletes them.
 - Unmeasured: the rename time on the feed-build machine. The hook does one rename, so the 60 s cap applies to the rename. It does not apply to the delete.
 
-## Proof owed
-
-- A test that goes red on the old reaper. A build folder in `agent-<A>` is renamed to trash and then deleted. The same folder in the primary checkout is kept. A bare `.build` at depth is renamed and deleted. A link named as a build folder is kept. A folder with a process inside is kept. A bad `buildDirs` value deletes nothing.
-- A test that a later reap deletes a leftover trash name, and that the janitor does the same. A trash name outside the pattern is kept. A trash name with a process inside is kept.
-- One mutant per refusal, as the process reap record requires.
-- A timed run. The hook returns after the rename, under 60 s, on a worktree holding about 10 GB of build output.
-
 ## What reopens it
 
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A folder deleted outside the gates, or a link followed.
 - Trash names that a later reap or the janitor does not delete.
 
-## Scope
-
-This record changes no code. The builder extends `janitor/agent_end_reap.py`, `janitor/sweep.py`, and `sweep.read_optout`, which adds no second reader. `janitor/GUIDE.md` documents the `buildDirs` key under "Build folders". Part 2 changes `hooks/guard.py` only after `build-disk-guard` reopens.
+Kind: process
+Home: janitor/agent_end_reap.py

@@ -83,7 +83,7 @@ What the matched text says:
   whether the rule earns it.
 - `test-author-scope`, 375, and `detached-launch`, 206: unjudged.
 - `shared-tree`, 26 asks in 30 days: about one a day. This is the count the per-file discard
-  record (stash-push-is-clone-wide) called unmeasured.
+  record (agent-worktree-discard-is-noted, a discard or remove in a worktree) called unmeasured.
 
 ## Named limits
 
