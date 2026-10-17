@@ -353,8 +353,8 @@ def general_rows_check():
 add("general: %d odd-input rows each get the general scope line" % len(GENERAL_CASES),
     "custom", fn=general_rows_check)
 
-# CASE FOLD: an agent type in other case takes the scope and the line set of its role (debt
-# agent-type-match-case-sensitive). `Builder` gets the builder scope. `explore` is a reader with the
+# CASE FOLD: an agent type in other case takes the scope and the line set of its role (decision
+# agents-get-standing-rules, the scope line varies by agent type). `Builder` gets the builder scope. `explore` is a reader with the
 # Explore scope, so it gets none of the push, trailer and record-path lines.
 add("case: Builder gets the builder scope line", "context", payload("Builder"), scope_check("builder"))
 add("case: explore gets the Explore scope line", "context", payload("explore"), scope_check("Explore"))

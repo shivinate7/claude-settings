@@ -29,7 +29,7 @@ Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook nev
 status` at once, then at most once every 30 s, and returns when the status is `completed` or when
 the deadline passes: its last pause ends at the deadline, never past it. A call made at its deadline
 or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
-STATUS_PAUSE pause (debt ci-wake-read-no-retry). A second failed read raises Unknown, so the wake
+STATUS_PAUSE pause (decision ci-wait-reads-run-status). A second failed read raises Unknown, so the wake
 line is `CI unknown`. A status that is not `completed` (in_progress, queued) means read again.
 
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
@@ -1159,7 +1159,7 @@ def main():
           not res.hung and res.elapsed < 6, "elapsed=%.1f s; the run never ends" % res.elapsed)
 
     # Decision ci-wait-reads-run-status: a failed status read is retried once, then the wait ends as
-    # unknown (debt ci-wake-read-no-retry). FAST_SLEEP_LAUNCHER: the retry pause costs 0.05 s.
+    # unknown (decision ci-wait-reads-run-status). FAST_SLEEP_LAUNCHER: the retry pause costs 0.05 s.
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [BAD_STATUS]), launcher=FAST_SLEEP_LAUNCHER)
     expect_verdict("status read exits 1", res, "unknown")
     check("status read exits 1: two status reads (one retry), no run watch",

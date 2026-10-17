@@ -1062,11 +1062,11 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
 # - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
-# - Each ruling is shown with its record id. A decisions/ and a deferred/ record with one file stem
-#   show two different ids, and a FLAG on either id cites that record's own title (debt
-#   judge-title-stem-collision). The id form is not pinned here.
+# - Each ruling is shown with its record id, `<dir>/<stem>`: the record path minus `.md`. A decisions/
+#   and a deferred/ record with one file stem show two different ids, and a FLAG on either id cites
+#   that record's own title (debt judge-title-stem-collision).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
-#   holds the id and the record's H1 title, and names no path.
+#   holds the id and the record's H1 title, and names no `.md` file.
 
 # The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
 # module at test time. No case here keeps a copy of them.
@@ -1162,14 +1162,14 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
-    name = "caseRL2 settled question: refused, reason cites the record's id and title, no path"
+    name = "caseRL2 settled question: refused, reason cites the record's <dir>/<stem> id and title, no .md file"
     if not need_module(name):
         return
     for kind, rel, text, rid, title in (
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
-             "rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "rl-beta", "Beta waits for the owner")):
+             "decisions/rl-alpha", "Retries wait between tries"),
+            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "deferred/rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1177,12 +1177,14 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
             code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl2"), [question(GOOD_Q, LABELS)],
                                                            default_transcript(), repo))
         check(sub + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+        check(sub + ": the judge input labels the ruling with the id " + rid,
+              "Ruling of record %s (" % rid in judge_prompt(stub), "")
         reason = deny_reason(out)
         check(sub + ": denied", reason is not None, out)
         reason = reason or ""
         check(sub + ": reason cites the record id " + rid, rid in reason, reason)
         check(sub + ": reason gives the record title as its gloss", title in reason, reason)
-        check(sub + ": reason names no path or file", not re.search(r"decisions|deferred|\.md", reason), reason)
+        check(sub + ": reason names no .md file", not re.search(r"\.md\b", reason), reason)
 
 
 def case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed():
