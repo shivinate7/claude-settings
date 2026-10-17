@@ -147,8 +147,9 @@ with it. That list is long: `AMBIGUOUS`, `VAGUE_VERBS`, `THIS_VERBS`, `BE`,
 
 `lint/ste_gate.py` and `lint/md_sweep.py` split the findings by severity.
 An `error` blocks. A `warning` goes in a non-blocking note. Each gate prints
-a `NOTE` string that names only the rules that block: a sentence over 30
-words, bloat, and a double negative.
+a `NOTE` string for Markdown that names only the Markdown rules that block: a
+sentence over 30 words, bloat, and a double negative. For a UI file,
+`lint/ste_gate.py` prints a `UI_NOTE` string that names the 4-word cap.
 
 `lint/test_gates.py`. No case named a code of the eight judgment rules, so
 none needed removal. A `PromotedRuleTests` class holds one fixture per promoted rule. Each
