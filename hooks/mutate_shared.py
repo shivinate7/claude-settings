@@ -136,9 +136,8 @@ def report_verdict(label: str, code, red, required: str) -> str:
     A nonzero exit plus any red line used to count as "killed", even when every red line
     belonged to some OTHER case than the one the mutation's label names. `required` is the case
     name (or a distinctive fragment of it) that must appear among the suite's own FAIL lines
-    before a kill counts as proof; a red suite that misses it is WRONG CAUSE, not KILLED
-    (decisions/branch-delete-wrong-cause-was-a-filename-collision.md). A WRONG CAUSE also prints
-    the red lines it actually saw, bounded by WRONG_CAUSE_LINES_SHOWN, because a bare count says
+    before a kill counts as proof; a red suite that misses it is WRONG CAUSE, not KILLED.
+    A WRONG CAUSE also prints the red lines it actually saw, bounded by WRONG_CAUSE_LINES_SHOWN, because a bare count says
     nothing about which case broke.
     """
     if code == 0 or not red:

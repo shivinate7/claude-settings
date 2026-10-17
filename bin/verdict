@@ -3,7 +3,7 @@
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" every $VERDICT_HEARTBEAT s (default 120).
 # Why: a quiet background verdict over 300 s drew a false STALL (decision stall-watch, "Tools that are quiet by design", 2026-10-11).
-# Exit 0 is FAIL if the output holds a runner marker (decision verdict-reads-runner-markers).
+# Exit 0 is FAIL if the output holds a runner marker.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
 HOT = re.compile(r"FAIL|Error|assert|Traceback")

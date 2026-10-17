@@ -60,7 +60,7 @@ a script file and a path held in a shell variable are all equally visible to a h
 change that the guard did not ask about, this file puts the previous content back and prints a
 systemMessage naming the file, the tool and the command.
 
-THE SHELL ROUTE HAS TWO LAYERS (decisions/guard-trims-from-the-audit.md). The guard asks about
+THE SHELL ROUTE HAS TWO LAYERS. The guard asks about
 the shell shapes that name the value, and this file reverts every shell cap change it did not
 explain, in every shape. This file sees only the watched paths of the current directory, so the
 guard's ask is the layer for a shell write from a subdirectory or another worktree. The guard's

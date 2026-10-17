@@ -896,7 +896,7 @@ def run(hook, model_call=invoke_model, expect_key=None):
 # This section is how the owner still SEES the edit at turn end: it names every such file changed
 # since the last human message, so the reply can name it under Deviations. It also names each
 # merge into main landed this turn (Decision 8), unless the reply's own report block already
-# names it (decisions/merge-notice-checks-the-report.md), and each `noted`/`subject-unread` guard
+# names it, and each `noted`/`subject-unread` guard
 # line from this turn, because the guard allows a subject it could not read and that allow must
 # not be silent. The guard writes a LOCAL time and the transcript a UTC time, so the turn bound is
 # converted to local time, minus one second, because the guard truncates its stamp to whole
