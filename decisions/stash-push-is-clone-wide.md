@@ -64,39 +64,9 @@ WORKING TREE for this arm, so a push over a clean tree still passes: it takes
 nothing. Once the tree is dirty enough to be taken, the call denies. The
 `is_worktree` check no longer runs for this arm.
 
-In a linked worktree, `git checkout <file>` and `git restore <file>` that name only files run
-with no ask. The loss is the lane's own change to the files it named, which is what a lane
-means when it regenerates a fixture. The allow is an allow-list. `git restore` passes only with the flags `--staged`, `--worktree`,
-`-S`, `-W` and `--`. `git checkout` passes with `--` before the paths. Without `--`, it passes
-only with one operand that is an existing file. Any other flag or form, or a command that
-the tokenizer cannot read, keeps the ask. A whole-tree discard keeps the worktree ask: `reset
---hard`, and a `checkout` or `restore` of `.`, a folder, or a glob. A shared checkout still
-denies all of them. Owner ruling, 2026-10-11 ("Allow per-file").
-
-The allow applies only when the whole command acts in one place (`one_place` in
-`hooks/guard.py`). One place is no `cd`, `pushd` or `popd` anywhere in the command, and at
-most one distinct `git -C` target. Every other shape can hide the shared checkout behind the lane, so it keeps the ask,
-and the ask reason names the allowed form: `git -C <lane> restore <file>`. The incident form,
-a `cd` into the worktree and then one file, asks. Five review rounds of folder tracking
-(`segment_roots`) could not tell the two apart; the gate replaced them (2026-10-11 to 12).
-
-MEASURED in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11: 26
-`shared-tree` asks, about one a day (decision guard-log-read-weekly). The ask writes a line
-there; it is the transcript that holds none.
-
-These discard forms join the rule: deny in a shared checkout, ask in a linked worktree.
-
-- `git checkout -f <branch>` and `git checkout --force <branch>`. A forced switch discards local
-  changes.
-- A bare `git checkout <folder>` with no `--`. Git reads it in path mode.
-- `--pathspec-from-file` and each unique prefix that git accepts, such as `--pathspec-from`.
-- Each `-C <dir>` in a git call. They chain as git's own chdir does: a relative `-C` joins the
-  one before it. The result sets the checkout that the rule judges.
-- Every operand of `git restore` counts as a path, before `--` as well as after it.
-- A pathspec that holds `$`, a backtick, a brace or a glob counts as a discard of unknown size.
-  The guard cannot read what it names.
-
-Found by review, 2026-10-11. Owner: "Do this task here".
+The discard side of the shared-tree rule (named files in a linked worktree, the discard
+forms, the worktree remove) is in `agent-worktree-discard-is-noted` (a discard or remove in a
+worktree).
 
 ## The predicate, updated
 
@@ -108,17 +78,7 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 
 ## Holes, named
 
-Debts: `stash-create-false-refusal` (create piped into store is denied over a stack). `stash-reminder-text-outside-repo` (the harness reminder tells a worker to push a tagged entry). `guard-first-c-reads-wrong-tree` (other rules read the first -C target). `guard-shell-wrap-discard-unread` (a discard inside sh -c, eval or substitution). `stash-allow-any-linked-worktree` (any linked worktree passes the allow). `stash-read-to-run-race` (a change after the read is missed).
-
-## Named limits
-
-- A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny. An ask reaches the owner. The cost is one prompt.
-- The gate fails closed on shape. These keep the ask even when every segment is in the lane.
-- Each of these keeps the ask: `cd`, `pushd`, `popd`, `Set-Location`, `sl`, `chdir`, `Push-Location`, `env -C` and `--chdir`.
-- Also: two distinct `-C` targets, one lane spelled two ways, and a bare git call beside a `-C` call.
-- Also: any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`, `GIT_DIR` or `GIT_COMMON_DIR` token.
-- Also: `restore --source`, `-p` or `-f`, a glob or `$(…)` pathspec, and a segment the tokenizer cannot read. The remedy names the `-C` form.
-- Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is denied, not asked. See `git-env-set-denied` (the record that denies setting git env vars).
+Debts: `stash-create-false-refusal` (create piped into store is denied over a stack). `stash-reminder-text-outside-repo` (the harness reminder tells a worker to push a tagged entry). `stash-read-to-run-race` (a change after the read is missed).
 
 Kind: process
 Home: hooks/guard_shared_tree.py
