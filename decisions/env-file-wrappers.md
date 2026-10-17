@@ -76,8 +76,8 @@ guard-log-read-weekly, the weekly table). 296 of 766 env-file denies named `time
 its arguments, so the 160 `timeout` denies include any timeout form. The rule's own remedy told
 the agent to use the form it then refused.
 
-Counted in guard.log (a lower bound, one machine) in the 2026-10-13 audit (guard-audit-high, the
-oversight session): about 690 env-file denies a week. Since 2026-10-12, 25 were for `grep '.*'` and 7 for `do`. Rule 1 covers
+Measured by the oversight session's audit, 2026-10-13 (guard-audit-high): about 690
+env-file denies a week. Since 2026-10-12, 25 were for `grep '.*'` and 7 for `do`. Rule 1 covers
 these shapes.
 
 The first build read the word through the unwrap as it stood. Review proved nine reads of `.env`
@@ -99,7 +99,7 @@ Two more defects, found in review of the guard trims (decision guard-trims-from-
 
 ## What reopens it
 
-A wrapper shape this ruling does not name, with a deny count in the weekly table.
+A wrapper shape this ruling does not name, with a counted number of denies in the weekly table.
 
 Kind: process
 Home: hooks/guard_env.py
