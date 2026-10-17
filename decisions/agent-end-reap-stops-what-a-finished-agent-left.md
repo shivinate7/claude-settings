@@ -98,7 +98,7 @@ Removal fell to the session-end sweep. The sweep costs about 7.5 s per tree. Its
 
 Rule. At each SubagentStop, the reaper removes each finished agent's worktree that is idle
 30 min or more. The ending agent's own worktree is not removed at its own end. It waits
-30 idle minutes like the others. A later agent end, or the session-end sweep, removes it.
+the same idle limit as the others. A later agent end, or the session-end sweep, removes it.
 
 Idle is defined once, in `unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
 
@@ -129,7 +129,7 @@ build output, packages or `.env.local`. (Owner ruling, 2026-10-15 19:43 CDT.)
 
 A worktree is removed only when all of these hold:
 
-- it is idle 30 min or more;
+- it is idle for the Rule's limit;
 - it is clean;
 - it is pushed;
 - it is unlocked;
@@ -147,8 +147,7 @@ Related, same ruling:
 - Sweep speed: one pass of git reads, a time limit, oldest first (lane sweep-fast).
 - Drain today's pile of 610 (plan step 5). The ruling names no method.
 
-Accepted cost: a resume of a finished agent fails once its worktree is gone, after 30 idle
-minutes. A fresh agent gets the old report instead. Removal also deletes the tree's
+Accepted cost: a resume of a finished agent fails once its worktree is gone, after the idle limit. A fresh agent gets the old report instead. Removal also deletes the tree's
 git-ignored files, a copied `.env.local` included. The sweep's Limits note says the same.
 The last agent's tree in a session waits for the session-end sweep or the next session.
 
@@ -299,6 +298,6 @@ Lane `sweep-fast` passed review round 3 with a positive net safety value. Each o
 Lane `wt-reap` passed review round 3 with a positive net safety value. Each open finding is a debt:
 
 - `finished-agent-lock-holds-tree`: a finished agent's worktree can hold `claude agent agent-<id> (pid N)`, with no start time. N is the session's live claude.exe. The lock looks like a running agent's lock. So the tree stays until the host exits. MEASURED 2026-10-15 23:31: 17 of 166 agent trees, later 22, all held by one pid. A fix needs a finished-agent proof that the ruling does not give. Owner decision.
-- `marker-writeback-loses-deletion`: a failed remove leaves `claude-removal-started` on an intact tree. Later, at agent end, that tree is written back and removed. The tree must be idle 30 minutes, unlocked (or hold a stale agent lock), with no live session or process inside. It holds only unstaged deletions of tracked files. The person's uncommitted deletion is lost. Narrow: it needs a prior failed remove.
+- `marker-writeback-loses-deletion`: a failed remove leaves `claude-removal-started` on an intact tree. Later, at agent end, that tree is written back and removed. The tree must be idle to the Rule's limit, unlocked (or hold a stale agent lock), with no live session or process inside. It holds only unstaged deletions of tracked files. The person's uncommitted deletion is lost. Narrow: it needs a prior failed remove.
 - `finished-agent-shells-keep-tree`: a finished agent's own shells, such as a dev server, have the live host as parent. No hook stops them, so they keep the tree until the host exits. The 19:43 CDT ruling to stop them is not built.
 - `no-start-lock-has-no-pid-check`: the lock form with no start time has no pid-reuse check. The sweep frees it only when pid N is dead. A live process that holds a reused pid keeps the tree. That is the safe side. The janitor decision names this form.

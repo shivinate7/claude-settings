@@ -125,7 +125,7 @@ Three other routes remove a tree under `.claude/worktrees/agent-*` without both:
 
 - The sweep's agent rule: a clean, pushed `agent-*` tree idle 4 hours.
 - The repo's own `reap:worktrees` script. The sweep runs it in place of the agent rule.
-- The agent-end removal: the SubagentStop reaper removes an `agent-*` tree idle 30 minutes.
+- The agent-end removal: the SubagentStop reaper removes an `agent-*` tree at its idle limit.
 
 All three are in `agent-end-reap-stops-what-a-finished-agent-left` (stops what a finished
 agent left).
