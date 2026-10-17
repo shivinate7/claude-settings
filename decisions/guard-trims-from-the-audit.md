@@ -29,16 +29,12 @@ redirect or `cp` onto the paths the rule freezes. It does not.
 
 So a `cp`, `mv` or redirect onto `~/.claude/hooks/guard.py` has no other check. The rule stays. To
 cut it, first add a watch of those paths. The 0 fires show that nothing tried the act. They do not
-show that the act is safe.
+show that the act is safe. The owner ruled that `frozen-path` stays, with no new watch.
 
 ## Fixed
 
-- `env-file` read a regex as a path. 65 denies matched `'.*'`, the pattern of a `grep`. The guard now
-  skips the pattern word of a search command (`grep`, `egrep`, `fgrep`, `rg`, `ag`, `ack`). `-e` and
-  `--regexp` mark the pattern. Without them, the first plain word is the pattern, after the values
-  of `-A`, `-B`, `-C` and `-m`. A path word is still judged, so `grep foo .*` and `cat .*` still deny.
-  With `-f`, `--file` or `--file=`, the patterns come from a file, so nothing is skipped and the
-  value is judged as a path: `grep -f .env x` denies.
+- `env-file` read a regex as a path: 65 denies matched the pattern of a `grep`. The fix is in
+  decision env-file-wrappers.
 - `env-file` no longer judges `Read` and `Grep`. The settings deny list blocks `Read(.env)` and
   `Read(.env.*)`. The log holds 0 `env-file` denies for those two tools. `Write`, `Edit`,
   `MultiEdit` and `NotebookEdit` stay denied.
@@ -71,37 +67,13 @@ show that the act is safe.
   Stop. It reads the transcript through `lint/_transcript.py`
   (`hooks-share-the-transcript-reader`).
 
-## Merge with `stop/cheap-turn-end`
-
-That branch (PR 239) edits `hooks/decision_watch.py` (docstring, one import, `incident_key`, `run`),
-`hooks/config_report.py` and `lint/_transcript.py` (it adds `read_turn` and `last_human_epoch`).
-This change adds one section to `decision_watch.py` and edits `main`, so the two do not share a
-hunk there. Two conflicts are certain and small:
-
-1. PR 239 edits `hooks/config_report.py`, and this change deletes it. Delete the file in the
-   merge. Then apply the two edits of PR 239 to `config_report` in `decision_watch.py`. Read
-   `human, after = read_turn(path)` in place of `read_transcript` and `records_after_last_human`,
-   and call `last_human_stamp([human] if human else [])`.
-2. Both change the top of `decisions/hooks-share-the-transcript-reader.md`. Keep both texts.
-
 ## Not covered
 
-`lint/rule_mechanisms.json` and its pin (70 `unmechanized`) do not change, because no row names a cut
+`lint/rule_mechanisms.json` and its `unmechanized` pin do not change, because no row names a cut
 rule. The expiry rows have since left the map (decision claude-md-shrink); `config_watch` enforces the expiry.
 
 Not touched, by instruction: `destructive-delete`, `subagent-model-floor` and `machine-wide-kill`.
 Bypass mode shows no prompt, so they stay.
-
-Fixed after review: 29 `env-file` denies read "only a runner may be handed '.env' with
---env-file, and 'Semwal' is not one". The cause was a quoted assignment value with a space, as in
-`ADMINS='Shivam Semwal' node --env-file=.env server.ts`. The guard split words on spaces, so the tail
-of the value read as the command word. `_assignment_end` now spans the quoted value. The owner ruled
-that `frozen-path` stays, with no new watch.
-
-Also fixed after review: an unquoted heredoc body with no `$(...)` made `env_heredoc_refusal` raise an
-IndexError. The guard failed open, so every rule after the env check was skipped. The body is now
-judged and passes. The top-level crash handler of `guard.py` now logs one `crash` line, so the next
-hidden crash shows in `guard.log`.
 
 Kind: process
 Home: hooks/guard.py

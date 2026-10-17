@@ -54,6 +54,12 @@ and `grep -e foo .env`. File-reading flags, as in `grep -f .env x`, `rg -f .env 
 `grep --file .env x`, `grep --file=.env x`, `sed -f.env x`, `awk -f.env x` and
 `time grep -f .env x`.
 
+The rule skips the pattern word of a search command (`grep`, `egrep`, `fgrep`, `rg`, `ag`, `ack`).
+`-e` and `--regexp` mark the pattern. Without them, the first plain word is the pattern, after the
+values of `-A`, `-B`, `-C` and `-m`. A path word is still judged, so `cat .*` denies. With `-f`,
+`--file` or `--file=`, the patterns come from a file: nothing is skipped, and the value is judged as
+a path.
+
 ## Holes, named
 
 Debts: `env-grep-long-abbrev-unpinned` (grep --regex= style abbreviations are not pinned), `env-file-rule-false-alarms` (ag -f, ack -f, grep --exclude and rg -t are false refusals), `env-flat-crash-allows` (a crash in `_env_flat` allows the call), `env-node-env-file-prints` (node --env-file with -e prints the file through the runner).
@@ -79,6 +85,17 @@ that main refused and the branch allowed. A wrapper flag's value posed as the co
 the real command ran: `env -u ls cat .env`, `sudo -u ls cat .env`,
 `echo x | xargs -I ls cat .env`, `env -u node cat -- --env-file .env`. A quoted glued assignment
 hid the word: `(X='a ls' cat .env)`. Red cases were committed first, then the narrowing.
+
+Two more defects, found in review of the guard trims (decision guard-trims-from-the-audit):
+
+- 29 `env-file` denies read "only a runner may be handed '.env' with --env-file, and 'Semwal' is
+  not one". The cause was a quoted assignment value with a space, as in
+  `ADMINS='Shivam Semwal' node --env-file=.env server.ts`. The guard split words on spaces, so the
+  tail of the value read as the command word. `_assignment_end` now spans the quoted value.
+- An unquoted heredoc body with no `$(...)` made `env_heredoc_refusal` raise an IndexError. The
+  guard failed open, so every rule after the env check was skipped. The body is now judged and
+  passes. The top-level crash handler of `guard.py` now logs one `crash` line, so the next hidden
+  crash shows in `guard.log`.
 
 ## What reopens it
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: at agent end, stop orphans in the agent's worktree and remove other idle agent trees.
+"""At SubagentStop, stops processes the finished agent left running in its worktree, and removes other idle agent worktrees. When a check cannot tell, it keeps.
 
 Design: decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
 

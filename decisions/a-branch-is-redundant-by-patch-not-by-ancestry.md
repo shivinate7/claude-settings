@@ -1,6 +1,6 @@
 # A branch is redundant by patch, not by ancestry
 
-The sweep in `plans/janitor-build-plan.md` keeps or reaps a local branch. This
+The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) keeps or reaps a local branch. This
 entry records the test it uses, and the measurement behind it.
 
 ## The defect in the older rule
@@ -36,8 +36,13 @@ Taken on 2026-09-20, across the five repositories under `~/Developer`. Of 98
 local branches, the ancestry test reaps 46. The patch test reaps 5 more. One of
 those 5 carries 47 commits, and `git cherry` marks every one of them `-`.
 
-Six branches hold the only copy of their work. The sweep keeps all six and
-names them.
+42 of the 98 are genuinely unmerged. Six of those hold the only copy of their work. The
+sweep keeps all six and names them.
+
+These counts cover content only. The sweep applies its refusals in order first. A branch that
+a worktree checks out lands in the checked-out group and never reaches the ancestor group. Of
+the 46 ancestors, 29 sat in a worktree. 46 minus 29 leaves the 17 that the sweep's own preview
+reports. A review re-measured both numbers on 2026-09-20.
 
 ## The gap this entry does not close
 
@@ -54,3 +59,6 @@ the record holds it.
 
 `janitor/test_sweep.py` holds the rebase-ghost fixture. That fixture goes red
 against a sweep that tests ancestry alone.
+
+Kind: process
+Home: janitor/sweep.py

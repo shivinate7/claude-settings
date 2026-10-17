@@ -11,7 +11,7 @@ steps out on 2026-09-25. See `decisions/one-shared-record-stamp.md`, "Left out, 
 
 **What keeps it from being lost.** The engine's `--check` and `--claim` can refuse a tree
 that holds a pending step marker. The repo's own config must have an `unclaimed` entry for it.
-Since 2026-09-28 the parent names no repo (`record-stamp-stays-generic`). So Banchi's own
+Since 2026-09-28 the parent names no repo (`one-shared-record-stamp`, the stamp stays generic). So Banchi's own
 config must carry that entry, with a message that names this file. No adoption brief
 carries that step yet. Until Banchi's config has the entry, a pending step passes in
 silence. With the entry, the tool itself brings this item back on the first day Banchi writes a

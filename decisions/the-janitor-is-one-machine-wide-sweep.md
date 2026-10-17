@@ -12,7 +12,8 @@ records where it lives, and what it leaves to each repository.
 The liveness oracle reads `~/.claude/sessions`, which is machine-wide. Worktrees
 sit under many repositories at the same time. On 2026-09-20 this machine held
 50 registered worktrees, spread over five repositories. 43 of them sat under
-`.claude/worktrees/`.
+`.claude/worktrees/`. 10 were dirty, 8 were locked, and 6 held a live session.
+The machine held no husk folder.
 
 Five copies of one sweep are five things that can each be wrong about the same
 machine. One copy is the coherent shape, and this repository is where a
@@ -38,7 +39,8 @@ Two process tiers are generic, and they live here. `find_loose_processes` is
 report only: its subject is an orphaned process whose argv contains a
 shell-snapshots path. A live session's wrapper is noise, so it is not listed. `find_dead_rooted` stops only a proven orphan that the current user owns.
 Its subject is a process whose script file and its parent directory are gone,
-under a deleted checkout. That names no repository's own files. Each repository's own live servers stay its own.
+under a deleted checkout. That names no repository's own files. Each repository's own live servers stay its own. Banchi keeps its own tier 2 until the owner
+names its removal.
 
 ## Stale registrations are pruned by git's own word
 
@@ -72,8 +74,8 @@ read matches any past commit on the default branch. If a lane's patch landed
 and was later reverted, an unpushed sole copy still reads as merged and can be
 removed. The owner chose the patch check over a check of the lines on main
 today. This covers every worktree reap,
-locked or not. Every `--confirm` run also needs the worktree merged and idle 1
-hour (`unattended-sweep-stops-proven-orphans.md`).
+locked or not. Every `--confirm` run also applies the merged, pushed and idle limits of
+`unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
 `--confirm` unlocks, then removes, never with `--force`. If the removal fails,
 the sweep restores the lock.
 
@@ -97,8 +99,8 @@ Owner rulings, 2026-10-08:
   free disk.
 - The sweep lists entries under `<root>/.claude/worktrees/` that git does not
   register, as strays. It never deletes them.
-- The rule keeps git's admin-file idle time (1 hour), not folder mtime. It removes
-  a worktree with git. It never calls a repository's WorktreeRemove hook.
+- The rule reads git's admin-file idle time, not folder mtime (idle as in
+  `unattended-sweep-stops-proven-orphans`). It removes a worktree with git. It never calls a repository's WorktreeRemove hook.
 
 ## A branch leaves "checked out" with its worktree, in the same run
 
@@ -146,6 +148,73 @@ everything that tool can do.
 repository's sweep. It carries a different checksum from that repository's own
 `main`, and the shim beside it runs the repository instead. That copy is the
 outcome this entry exists to prevent.
+
+## The sweep is automatic, and a repository opts out
+
+The sweep visits every repository that carries no opt-out file. The owner accepted the cost on
+2026-09-20. A repository with long-lived local branches loses them at the first sweep, unless
+somebody adds the file first. The tombstone makes that loss recoverable.
+
+The opt-out file is `.claude/janitor.json`, inside the repository. Three constraints pick this
+place and this format:
+
+- The file travels with a clone, so it does not sit in `.git/`.
+- The sweep reads it as data and never runs it.
+- It carries more than a yes or a no, so a bare marker file cannot do the job.
+
+The repository that pays the cost holds its own consent. An absent file means swept. The keys
+are in the janitor guide.
+
+## The default branch
+
+The sweep judges each repository against its own default branch. It reads that branch in the
+order of decision `default-branch-read-order` (the default-branch read order): `origin/HEAD`,
+`origin/main`, `origin/master`, local `main`, local `master`. The janitor guide repeats the
+order. If none answers, the sweep refuses the repository out loud and reaps nothing
+there. On 2026-09-20 the repository `sillage` had an unset `origin/HEAD` with an `origin`
+remote present, so the fallback ran on day one.
+
+## Two triggers
+
+A `SessionEnd` hook sweeps only the repository whose session ended. A daily scheduled job
+sweeps every repository. The hook fails open, because a hook that can refuse the end of a
+session is worse than a leak. The installers write the job definition outside the repository,
+so nobody commits it. Each installer refuses to run from a linked worktree.
+
+## A reaped branch leaves a tombstone
+
+Before the delete, the sweep writes `refs/janitor/reaped/<branch>` at the tip. It appends one
+line to a restore log: repository, branch, commit id, time. The commits stay reachable, so
+`git gc` cannot take them. The purge drops a tombstone after 90 days.
+
+The 90 comes from git, not from a fresh guess. Git expires an unreachable reflog entry after 30
+days. It prunes a loose object after two weeks. A tombstone under 30 days buys nothing. Git
+keeps a reachable reflog entry for 90 days, so the machine already uses the number. It also
+covers a long absence.
+
+The purge reads the age from the restore log's own timestamp, never from the mtime of the ref.
+An mtime changes for reasons that have nothing to do with the reap. The restore point that the
+purge keeps is in `purge-keeps-younger-restore-ref` (the purge keeps the younger restore ref).
+
+## Liveness
+
+Liveness comes from `~/.claude/sessions/*.json`. A record counts as live only when the id is
+alive and the recorded start time still matches. A recycled id then cannot inherit a dead
+session's claim. The oracle compares the start time as epoch milliseconds. A rendered clock
+time carries a timezone, and that form of the test fails. The first measurement hit this trap:
+a five-hour offset looked like a match.
+
+## How the sweep is proven
+
+- Each refusal gets a test arm that violates it. No refusal can weaken unseen.
+- Every arm asserts that its subject set is not empty before it asserts a verdict. An arm that
+  passes over an empty set proves nothing. That failure happened three times in the Banchi work.
+- The anchor arm is the rebase ghost. It must go red against a keep rule that tests ancestry
+  alone (`a-branch-is-redundant-by-patch-not-by-ancestry`, a branch is redundant by patch).
+- The liveness arm holds a record whose stored start time does not match the live id. That arm
+  must read the session as dead.
+- Each assertion is mutated to show that it fails.
+- Each new rule gets a row in `lint/rule_mechanisms.json`, or an argued `unmechanized` row.
 
 ## The mechanism
 

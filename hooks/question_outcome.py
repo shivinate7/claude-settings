@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for AskUserQuestion: each question passes an outcome check first.
+"""Before an AskUserQuestion with two or more options, denies a question with no `Goal:` line or no `Problem:` line. Then a model judges whether the question serves the owner's goal. A FLAG verdict denies.
 
 Spec: decisions/question-outcome-check.md. Rule: style-question-restates-goal.
 

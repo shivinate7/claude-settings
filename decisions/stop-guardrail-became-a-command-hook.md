@@ -3,7 +3,17 @@
 The `type: agent` Stop hook in `settings.json` judged every turn for a silent
 change to a decision, gate, build-order, CLAUDE.md rule, or setting. It read
 `transcript_path` through the permission system. An agent hook's own tool
-calls pass through it like any other.
+calls pass through it like any other. Its entry is out of `settings.json`. The owner approved
+this disarm directly, on 2026-09-22.
+
+Across 1,500 session transcripts the hook blocked 80 times. 55 of those 80, 69 percent, were the
+hook reporting it could not check anything at all, because the sandbox denied it `Read` and
+`Bash`. Each cost a turn and resolved nothing. The worst run held six consecutive blocks in one
+turn, none resolvable, because the sandbox condition does not change between tries. When the
+hook could read the transcript, a separate audit found 8 true catches in one week, against 3
+false positives. The disarm traded those catches for the removal of 55 dead-end blocks. Until
+the command hook landed, an unapproved change to a decision, gate, build order, CLAUDE.md or
+settings file went unflagged.
 
 ## The measurement
 
@@ -27,6 +37,10 @@ a peer session to delete a rule from a skill file.
 Stop JSON, `transcript_path`, `session_id`, `cwd`, with no permission check
 at all. The `auto`-mode failure above cannot happen to it.
 
+The mod `mods/decision-watch` runs the script on every Stop and makes the
+model call itself (decision `decision-watch-mod-limits`, decision-watch runs
+as a mod). No `settings.json` Stop row runs the script.
+
 It answers the cheap part itself. `git status` against HEAD, scoped to this
 turn by mtime the same way `lint/md_sweep.py` already does, gives the files
 this turn touched. A broad keyword net over each path decides whether a file
@@ -34,9 +48,11 @@ looks protected, plus `guard.is_settings_file` for the one case with a real
 constant to import.
 
 When nothing on disk looks protected, the hook prints nothing and never
-spawns a model. When something does, it runs `claude -p`, isolated. It
-hands that call the diff, or the new file's text, and the chat text
-directly. It asks for the same ALLOW/FLAG judgment the old prompt asked for.
+spawns a model. When something does, the mod asks the model. A direct run of
+the script with no split flag runs `claude -p`, isolated, as the section
+below describes. Either way the judge gets the diff, or the new file's text,
+and the chat text directly. It gives the same ALLOW/FLAG judgment the old
+prompt gave.
 
 ## The judge subprocess, isolated and tightened across three review passes
 
@@ -143,21 +159,17 @@ session, with unchanged evidence, stays quiet at the next Stop. A finding
 whose evidence moved further is a new incident, and is reported once more.
 This cap never applies to an UNKNOWN read, which is always reported again.
 
-## The time budget, proved rather than assumed
+## The time budget, bounded by code
 
-A reviewer also found the timeouts did not fit their own hook entry.
-`settings.json` gave this hook 100 seconds. `GIT_TIMEOUT` (20) ran once for
-`git status` and once per protected file for `git diff`, and `MODEL_TIMEOUT`
-was 90. One protected file alone summed to 130 seconds. A harness kill at
-100 prints nothing at all, which reads exactly like "nothing protected
-changed," the failure this whole rewrite exists to prevent.
-
-`GIT_TIMEOUT` is now 10 and `MODEL_TIMEOUT` is now 60. `MAX_DIFFED_FILES`
-(8) bounds how many `git diff` calls one Stop spends. The sum then cannot
-grow past a fixed number, no matter how many protected paths one turn
-touches: 10 + 8 * 10 + 60 = 150 seconds. `settings.json`'s own entry for
-this hook is now 170. That is twenty seconds of margin over the proved
-sum, not zero.
+A harness kill prints nothing at all, which reads exactly like "nothing
+protected changed," the failure this whole rewrite exists to prevent. So
+code bounds the budget. `GIT_TIMEOUT` caps each git call. `MAX_DIFFED_FILES`
+caps the `git diff` calls one Stop spends. The sum then cannot grow with the
+number of protected paths one turn touches. The mod that runs the script
+(see "What replaced it") caps each python run and its model call with its
+own timers. A timeout reads as UNKNOWN, never ALLOW. The numbers live in the
+script's "THE TIME BUDGET" comment and in `mods/decision-watch/hooks/register.mjs`.
+This entry holds no copy.
 
 ## What stayed the same
 
@@ -188,10 +200,14 @@ the hook's own failure branches.
 A command hook never passes through the permission system. This hook needs
 no `permissions.allow` entry at all to read `transcript_path` or to run
 `git`. A separate `Read(~/.claude/projects/**)` grant, if the owner adds
-one, is not for this hook: see the standalone entry that proposes it.
+one, is not for this hook.
 
 ## The mechanism
 
-`hooks/decision_watch.py`, tested by `hooks/test_decision_watch.py`.
+`hooks/decision_watch.py`, tested by `hooks/test_decision_watch.py`. The mod
+`mods/decision-watch` runs it, tested by `mods/decision-watch/decision-watch.test.mjs`.
 `lint/rule_mechanisms.json`'s `roles-orchestrator-never-builds` entry names
 it in place of the old agent hook.
+
+Kind: process
+Home: hooks/decision_watch.py

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: SessionEnd trigger for janitor/sweep.py.
+"""At SessionEnd, runs janitor/sweep.py on the ending session's repository, to remove finished branches and worktrees. Always exits 0, so it never delays the end of the session.
 
 Reads one JSON object on stdin (the SessionEnd hook payload: `cwd` is the ending session's own
 working directory). Resolves the git repository that `cwd` sits in -- the PRIMARY checkout, not

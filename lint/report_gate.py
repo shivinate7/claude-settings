@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: report-shape gate.
+"""At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error.
 
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.

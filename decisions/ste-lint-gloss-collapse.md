@@ -15,7 +15,9 @@ sentence-length count from 0 to 165 over-long sentences. Every one was pushed ov
 inserted title. None was touched by a person.
 
 This change ran `STE001` over q_max's tracked `*.md` files on `main`, before and after.
-Before, it reported 715 errors. After, with `docs/decisions` present, it reported 254.
+Before, it reported 715 errors. After, with `docs/decisions` present, it reported 254. Both counts
+were measured under the budgets of 20 and 25 words. The count under the one budget of 30 words is
+unmeasured.
 Of the 715, checking every over-long sentence's own text found exactly one that even
 names a decision id. That one names a range, `D-332 to D-334`, not a gloss, so it is
 left alone, correctly. The rest of the drop is citation gloss, collapsed.
@@ -46,21 +48,18 @@ input. The whole existing `lint/test_gates.py` suite also stays green, 121 tests
 passes the value straight through to the script. No existing caller changes its own
 inputs. No existing caller's behavior changes.
 
-## A second path: the section's own word budget
+## A second path: the section's own mode
 
-The word count was not the only place a generated gloss could change a verdict. A
-heading picks its section's word budget, procedural (20 words) or descriptive (25).
-It picks that by scanning the heading's raw text for a trigger word, such as `run`
-or `test`, in `PROCEDURAL_HEADINGS`. That scan ran before the collapse above.
+A generated gloss must not choose the mode of a section. A heading picks its section's
+mode, procedural or descriptive. It picks that by scanning the heading's raw text for a
+trigger word, such as `run` or `test`, in `PROCEDURAL_HEADINGS`. That scan runs before
+the collapse above. q_max's real `D-448` is titled "The operator tiers run themselves".
+A heading that cites it as `(D-448, The operator tiers run themselves)` carries `run`,
+and nobody who wrote the heading chose that word. STE001 holds one budget of 30 words in
+both modes (`plain-prose-lint`, the STE lint becomes a plain-prose lint). The mode
+decides only whether STE015 (condition order, a warning) runs.
 
-q_max's real `D-448` is titled "The operator tiers run themselves". A heading citing
-it as `(D-448, The operator tiers run themselves)` carries `run`. The whole section
-under that heading then measured at 20 words, not 25. Nobody who wrote the heading
-chose that word. Reproduced with one fixed 23-word body, under three otherwise
-identical headings: no citation gives no error. A citation whose gloss carries `run`
-gives one. A citation whose gloss carries no trigger word gives none.
-
-The fix reads `_degloss_for_mode`. It folds a collapsed citation span into one space,
+`_degloss_for_mode` guards the mode. It folds a collapsed citation span into one space,
 wherever a heading's mode gets decided. It changes nothing when no decisions folder
 is set. `_GLOSS_PATTERN` stays `None` then, so the function is a no-op there.
 
@@ -83,3 +82,6 @@ Second, on `main` itself, a finding-by-finding diff against an independent count
 the difference, every one under a heading whose gloss held a trigger word. That is
 exactly the defect fixed above. `main`'s own count is now 254, the independent count,
 exactly.
+
+Kind: process
+Home: lint/ste_lint.py

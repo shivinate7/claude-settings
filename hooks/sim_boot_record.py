@@ -6,7 +6,7 @@ Modes:
   or a simulator MCP launch, saves the state of each simulator.
 - PostToolUse: After such a call, appends each simulator that the call took from Shutdown to
   Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such
-  device (ruling 5).
+  device. A device that fails the check is stopped and booted once more.
 
 PreToolUse saves every device's state. PostToolUse of the same call appends each device that went
 Shutdown -> Booted to <config>/state/sim-boots.jsonl. The boot check runs first, so the record

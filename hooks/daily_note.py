@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook (startup): the once-a-day note. It reads guard.log and prints one line per failed check, and nothing when every check passes. Standard library only.
+"""At the first session start of each US Central day, prints one line for each failed check in the recent guard.log. Prints nothing when every check passes.
 
 Owner ruling 2026-10-13: a once-a-day session-start note, silent unless a check fails. It replaces the
 weekly read of guard.log by hand. See decision guard-log-read-weekly.

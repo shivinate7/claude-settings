@@ -1,6 +1,6 @@
 """Runs the ste-lint step script on a fixture repo. `python3 actions/ste-lint/test_action.py`.
 Asserts the gated finding reaches the job log and the ::error annotation, both exit codes,
-the changed-lines scope, the diff range, the exclude split, and annotation escaping.
+that an advisory finding is a ::warning that never fails the step, the changed-lines scope, the diff range, the exclude split, and annotation escaping.
 Also asserts bin/ste-changed matches the step on the same diff: scope, findings, verdict, exit code.
 Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude` input, never this repo's file.
 Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory."""
@@ -155,6 +155,23 @@ check("changed: ::error annotation", "::error file=a.md,line=5::STE001 " in out,
 check("changed: verdict", "ste-lint: FAIL, 1 error(s)" in out, out)
 rc, out = run("changed", "false")
 check("fail=false: exit 0, PASS verdict, finding logged", rc == 0 and "ste-lint: PASS" in out and "a.md:5: STE001" in out, out)
+
+
+# Owner ruling 2026-10-17: a contraction, a Latin abbreviation, a nominalization, a phrasal verb, a condition
+# after its instruction and an omitted "that" are warnings. They reach the log and the annotation as warnings
+# and never fail the step.
+ADVISORY = "They'd finished the work, e.g. before it runs.\n"
+
+
+def advisory_change(work):
+    write(work, "a.md", "\n" + ADVISORY, "a")
+    git(work, "commit", "-qam", "advisory")
+
+
+rc, out = run("changed", change=advisory_change)
+check("advisory only: exit 0, PASS verdict, no error counted", rc == 0 and "ste-lint: PASS, 0 error(s)" in out, out)
+check("advisory only: the finding is logged and annotated as a warning, never an error",
+      "a.md:5: STE008 " in out and "::warning file=a.md,line=5::STE008 " in out and "::error" not in out, out)
 rc, out = run("all")
 check("all: exit 0, finding logged", rc == 0 and "a.md:5: STE001" in out and "::error file=a.md,line=5::" in out, out)
 
@@ -410,6 +427,7 @@ check("double-star exclude: the command excludes them too, same header, files, f
 for label, change, base, want in [
         ("a finding on a changed line", default_change, BASE_FILES, 1),
         ("a finding only on an unchanged line", touch_elsewhere, {"a.md": "# T\n\n" + LONG + "\n"}, 0),
+        ("advisory findings only", advisory_change, BASE_FILES, 0),
         ("nothing changed", lambda work: None, BASE_FILES, 0)]:
     (s_rc, s_out), (c_rc, c_out) = run_pair(change, base=base)
     check("exit parity, %s: both exit %d" % (label, want),

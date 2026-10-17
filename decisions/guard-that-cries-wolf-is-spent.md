@@ -40,13 +40,17 @@ probe list `'git commit -q -m x' 'git push --quiet'`, written to test a
 fixture. The words sat inside single quotes. They never ran. The gate still
 demanded the closing report, for a turn that landed nothing.
 
+The gate now imports `hooks/guard.py`'s tokenizer and `git_calls`, which walks
+past `sudo` and every value-taking option, `-C` included, to the real
+subcommand. So `git -C /path commit` counts as a landing. A skip past only
+`git`'s own next token does not see it.
+
 Fixture pinning this, in `lint/test_gates.py`:
 
 - `test_58_quoted_git_commit_in_probe_list_passes`
 - `test_59_heredoc_body_naming_git_merge_passes`
 
-Both fail against the pre-fix `report_gate.py`. Both pass against the fix,
-which imports `guard.py`'s tokenizer instead of reading raw text.
+Both fail against the pre-fix `report_gate.py`. Both pass against the fix.
 
 ## What this changes
 
@@ -56,24 +60,13 @@ reading it.
 
 A predicate that matches text is not a predicate on the act. Resolve the act
 instead. `hooks/guard.py` already does this, with `split_segments`,
-`strip_heredoc_bodies`, and `git_calls`, which walks past `sudo` and past
-options like `-C <dir>` to the subcommand a call actually runs. The first
-report-gate fix hand-rolled its own, narrower skip, past only `git`'s own
-next token. That missed `git -C /path commit`, a real landing, unreported.
-The lesson holds twice over: import the resolver, do not re-derive a part of
-it. Or gate on identity before content, the way the fixed `session_start.sh`
+`strip_heredoc_bodies`, and `git_calls`. Import the resolver, do not
+re-derive a part of it. Or gate on identity before content, the way the fixed `session_start.sh`
 now compares `git remote get-url origin` in both trees, before it reads
 either file.
 
-## Ruling: an unforced worktree remove is not noted as unread
+The guard's worktree-remove rulings (the unforced remove, the untracked link) are in
+`agent-worktree-discard-is-noted` (a discard or remove in a worktree).
 
-The owner ruled that the `subject-unread` note must not fire for an unforced worktree remove. The VCS itself refuses a dirty or locked tree without `--force` or `-f`, so the note protects nothing. The note stays for a forced remove and for every other shared-tree command.
-
-## Ruling: an untracked link is not work in a worktree remove
-
-Owner, 2026-10-11: when the guard judges a worktree remove, an untracked entry that is a
-symlink does not count as work. Removing a link deletes only the link. Measured: after
-`git worktree remove --force`, the folder a `node_modules` link pointed to kept its file.
-Incident: feed-build, a worker linked `app/node_modules` to another worktree's packages, and
-the guard refused to remove the scratch tree. Limit: a link whose name git quotes, such as
-one with a space or an accent, still counts as work.
+Kind: process
+Home: rule:verification-cry-wolf-guard-is-spent

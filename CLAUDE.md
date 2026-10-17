@@ -96,9 +96,8 @@ records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never expl
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
 the history.<!-- rule:speak-rewrite-superseded-in-place -->
 
-**Output.** Write in Simplified Technical English by default, to me and between agents,
-unless told otherwise.<!-- rule:output-write-in-ste --> Rules for replies to me, and not to
-agents, live in the `shiv-stylisms` output style.
+**Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-write-in-ste -->
+Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style.
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
