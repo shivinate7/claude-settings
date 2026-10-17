@@ -69,7 +69,7 @@ show that the act is safe. The owner ruled that `frozen-path` stays, with no new
 
 ## Not covered
 
-`lint/rule_mechanisms.json` and its pin (70 `unmechanized`) do not change, because no row names a cut
+`lint/rule_mechanisms.json` and its `unmechanized` pin do not change, because no row names a cut
 rule. The expiry rows have since left the map (decision claude-md-shrink); `config_watch` enforces the expiry.
 
 Not touched, by instruction: `destructive-delete`, `subagent-model-floor` and `machine-wide-kill`.
