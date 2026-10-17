@@ -14,7 +14,8 @@ the hook prints one JSON object on stdout and exits 0:
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer and any other type; never for reviewer, Explore, Plan or
   claude-code-guide, which only read.
-- A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
+- A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
+  case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
   carries the form of every kind, in kind order. A cite.pattern with no cite.form adds no line.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
@@ -331,7 +332,6 @@ for _t in TYPES:
 GENERAL_CASES = [
     ("an unknown agent type gets the general line", payload("Plan")),
     ("an empty agent type gets the general line", payload("")),
-    ("an agent type in other case gets the general line", payload("Builder")),
     ("an agent type with a trailing space gets the general line", payload("builder ")),
     ("a null agent type gets the general line", payload(None)),
     ("a number agent type gets the general line", payload(7)),
@@ -341,7 +341,7 @@ GENERAL_CASES = [
     ("a JSON string on stdin gets the general line", '"builder"'),
 ]
 def general_rows_check():
-    """One case for the ten general-line rows. A failing row names itself in the note."""
+    """One case for the general-line rows. A failing row names itself in the note."""
     check = scope_check("general")
     for name, stdin in GENERAL_CASES:
         note = dispatch({"kind": "context", "stdin": stdin, "check": check})
@@ -352,6 +352,13 @@ def general_rows_check():
 
 add("general: %d odd-input rows each get the general scope line" % len(GENERAL_CASES),
     "custom", fn=general_rows_check)
+
+# CASE FOLD: an agent type in other case takes the scope and the line set of its role (debt
+# agent-type-match-case-sensitive). `Builder` gets the builder scope. `explore` is a reader with the
+# Explore scope, so it gets none of the push, trailer and record-path lines.
+add("case: Builder gets the builder scope line", "context", payload("Builder"), scope_check("builder"))
+add("case: explore gets the Explore scope line", "context", payload("explore"), scope_check("Explore"))
+add("case: explore gets the five-line set", "context", payload("explore"), line_set_check(READER_RULES))
 
 # BUILDER ROUND 2 (F2): the push, trailer and record-path lines are for the write-capable types
 # and the general case, and never for reviewer or Explore.
