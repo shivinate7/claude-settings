@@ -4,7 +4,8 @@ The owner ruled on 2026-10-07 which hooks may call a model. On 2026-10-12 the ow
 on the model for the prompt hooks.
 
 The model and effort of each hook named here are rows of the model table (decision
-`subagent-model-cap`, the model per role). This entry holds no copy.
+`subagent-model-cap`, the model per role). This entry holds no copy. Cost is why
+`hooks/decision_watch.py` left Sonnet.
 
 ## Five prompt hooks
 
@@ -83,7 +84,7 @@ the CLI binary agrees. The owner prefers Haiku at `xhigh`. The gap stays open un
 Then the judges move back to Haiku at `xhigh`, and this record changes in place.
 
 A prompt hook names a full model id. The prompt-hook evaluator has rejected the alias `haiku`
-(`unrecognized_model`) since 2026-10-08, and a judge with a rejected alias fails open.
+(`unrecognized_model`) since 2026-10-08, so every judge failed open until 2026-10-12.
 Measured 2026-10-12, CLI 2.1.296: `claude-sonnet-5-5` returns a verdict in 1.8 to 1.9 seconds
 for the longest judge prompt (the `Agent` hook, 3 runs) and for a trivial prompt. The
 30-second hook timeout stays. When the model retires, change the `model` value in the judge

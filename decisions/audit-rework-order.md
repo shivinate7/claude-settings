@@ -23,11 +23,12 @@ The ruling does not define three terms. A lane reads them this way:
 
 ## Where it lives
 
-The order has no check. In CLAUDE.md, `building-one-home-per-capability` backs step 1 only
-(delete copies). Nothing in CLAUDE.md backs steps 2 to 4, the order, or the central-home
-clause. `outcomes-judge-by-outcome` is the nearest general rule and states no step. Both Home
-choices are the orchestrator's call.
+The order has no check. No CLAUDE.md rule states the four steps or the order.
+`speak-cite-id-plus-gloss` and `git-cite-by-id` back the central-home clause.
+`outcomes-judge-by-outcome` is the nearest general rule and states no step. All Home choices
+are the orchestrator's call.
 
 Kind: process
-Home: rule:building-one-home-per-capability
+Home: rule:speak-cite-id-plus-gloss
+Home: rule:git-cite-by-id
 Home: rule:outcomes-judge-by-outcome

@@ -10,7 +10,10 @@ Across 1,500 session transcripts the hook blocked 80 times. 55 of those 80, 69 p
 hook reporting it could not check anything at all, because the sandbox denied it `Read` and
 `Bash`. Each cost a turn and resolved nothing. The worst run held six consecutive blocks in one
 turn, none resolvable, because the sandbox condition does not change between tries. When the
-hook could read the transcript, a separate audit found 8 true catches against 3 false positives.
+hook could read the transcript, a separate audit found 8 true catches in one week, against 3
+false positives. The disarm traded those catches for the removal of 55 dead-end blocks. Until
+the command hook landed, an unapproved change to a decision, gate, build order, CLAUDE.md or
+settings file went unflagged.
 
 ## The measurement
 

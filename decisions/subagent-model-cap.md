@@ -17,7 +17,7 @@ Where each part lives:
 - The floor: guard rule `subagent-model-floor`.
 - The step-up: guard rule `roles-third-try-steps-up`.
 - A write that sets the fallback: guard rule `subagent-model-cap`, always an ask. Its expiry:
-  `hooks/config_watch.py`.
+  `hooks/config_watch.py`. The expiry exists because a clock protects better than memory.
 - The ceiling: prose only.
 
 ## The model per role, ruled 2026-10-07, 2026-10-10, 2026-10-12 and 2026-10-13
@@ -209,14 +209,18 @@ No per-spawn gate guards the ceiling. Three reasons, in order of weight:
   A gate silent where model freedom is greatest gives false confidence.
   `guard-that-cries-wolf-is-spent` names the opposite failure.
 
-A justification line is the wrong mechanism. The reason is written after the model is chosen, so
-it defends the choice and does not change it. Sources:
+A justification line is the wrong mechanism. The deleted gate, `hooks/model_gate.py`, ran on
+`Agent` and `Workflow` calls. Above Sonnet, it denied a spawn with no `MODEL-JUSTIFICATION:`
+line in the prompt, and asked the owner when the line was there. The reason is written after
+the model is chosen, so it defends the choice and does not change it. Sources:
 
 - Lerner and Tetlock, 1999, Psychological Bulletin 125: 255-275.
-- Hoffmann, Gaissmaier and von Helversen, 2017, Judgment and Decision Making 12: 627-641.
+- Hoffmann, Gaissmaier and von Helversen, 2017, Judgment and Decision Making 12: 627-641. A
+  demand for a justification changed neither accuracy nor strategy.
 
 A gate that reads a model id from a payload it cannot always resolve needs a new shape test for
-each gap. Each test adds a false ask. The one line before dispatch (`roles-opus-shaped-say-so`)
+each gap. Each test adds a false ask. Four commits built `hooks/model_gate.py`. Each closed a
+bypass and opened an edge. The one line before dispatch (`roles-opus-shaped-say-so`)
 fits the evidence. It names the reason before the choice, to an audience whose view is unknown.
 
 One gate stays: guard rule `subagent-model-cap` asks on a write that changes the fallback. A
