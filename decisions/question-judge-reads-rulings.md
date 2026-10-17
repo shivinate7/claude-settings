@@ -21,8 +21,10 @@ change a ruling is allowed.
 - Each ruling is fenced like conversation text and labeled with its record id and H1 title,
   so ruling text cannot forge an owner block.
 - The model replies `{"verdict": "FLAG", "record": "<id>", "why": ...}` for a settled
-  question. The deny reason gives the record id and title, and no path. An id the hook did
-  not show the model is not cited.
+  question. A record id is `<folder>/<stem>` (for example `decisions/bare-merge-asks`), so a
+  decision and a deferred record with one stem do not collide (owner ruling 2026-10-17
+  11:40 CDT). The deny reason gives the id and title, with no absolute path. An id the hook
+  did not show the model is not cited.
 - Each ruling is cut to `RULING_CAP` (800 chars) at a sentence end, and a mark shows the cut.
   The rulings section adds at most `RULINGS_MAX` (60,000 chars) to the prompt. Records come
   newest first from one `git log` call (0.50 s measured); file mtime orders them only when git
@@ -36,4 +38,4 @@ Home: hooks/question_outcome.py
 
 ## Holes, named
 
-Debts: `judge-cap-drops-old-rulings` (the 60,000-char cap leaves out the oldest rulings). `judge-cuts-long-ruling` (a ruling over 800 chars is cut, so a late point may be missed). `judge-uncommitted-order` (an uncommitted record sorts after the listed ones). `judge-skips-other-headings` (rulings under another heading are not read). `judge-title-stem-collision` (a decisions/ and a deferred/ record with one stem collide in titles). `judge-heading-false-match` (the heading pattern matches "Ruling out" headings).
+Debts: `judge-cap-drops-old-rulings` (the 60,000-char cap leaves out the oldest rulings). `judge-cuts-long-ruling` (a ruling over 800 chars is cut, so a late point may be missed). `judge-uncommitted-order` (an uncommitted record sorts after the listed ones). `judge-skips-other-headings` (rulings under another heading are not read). `judge-heading-false-match` (the heading pattern matches "Ruling out" headings).
