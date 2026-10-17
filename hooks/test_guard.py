@@ -7537,6 +7537,24 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
    "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 5): `cp` FROM a frozen path to scratch reads it, the
+# same act as `cat <frozen> > /tmp/x`, which allows today. The guard denies it only because
+# MUTATING_COMMAND lists `cp` whatever side the frozen path sits on (guard_frozen.py, the comment
+# above MUTATING_COMMAND). That comment's reason, a wrong guess on `mv` loses the file, does not
+# hold for `cp`, which never touches its source. This allow LOOSENS the guard (a deny becomes an
+# allow), so it needs the owner's word before a builder acts on it. RED today. The three pins are
+# green today: a copy TO a frozen path, a copy from one frozen path onto another, and `mv` from a
+# frozen path (that one loses the frozen file) all stay denied.
+sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /tmp/guard.bak",
+   "allow", cwd=NOGIT)
+sh("frozen: cp FROM the frozen settings to scratch is a read",
+   "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: cp from a frozen path TO a frozen path still denies",
+   "cp " + CFG_HOOK + " " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM a frozen hook still denies", "mv " + CFG_HOOK + " /tmp/guard.bak", "deny",
+   "frozen-path", cwd=NOGIT)
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
