@@ -184,10 +184,16 @@ def merge_gate_reason(verdict: str, detail: str) -> str:
 
 
 def uses_merge_tool(where: str) -> bool:
-    """True when `where`'s `.github/stamp.json` parses as a JSON object with a `merge` key. A
-    missing, unreadable, invalid or non-object file is False: nothing to read, nothing to ask."""
+    """True when the repo root's `.github/stamp.json` parses as a JSON object with a `merge` key.
+    The root is the nearest folder at or above `where` that holds `.git` (a folder or a file). No
+    root, or a missing, unreadable, invalid or non-object file, is False: nothing to ask."""
+    root = os.path.abspath(where)
+    while not os.path.exists(os.path.join(root, ".git")):
+        if os.path.dirname(root) == root:
+            return False
+        root = os.path.dirname(root)
     try:
-        with open(os.path.join(where, ".github", "stamp.json"), encoding="utf-8") as handle:
+        with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
             config = json.load(handle)
     except (OSError, ValueError):
         return False
