@@ -401,7 +401,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `judge-fence-lookalikes` | `_defang` changes only a run of 3 or more ASCII `<` before `BEGIN` or `END` in upper case. | [`debts/judge-fence-lookalikes.md`](../debts/judge-fence-lookalikes.md) |
 | `judge-heading-false-match` | The ruling-heading pattern also matches a heading such as "Ruling out ...", so a heading that is not a ruling is read as one. | [`debts/judge-heading-false-match.md`](../debts/judge-heading-false-match.md) |
 | `judge-skips-other-headings` | Rulings under another heading are not read. | [`debts/judge-skips-other-headings.md`](../debts/judge-skips-other-headings.md) |
-| `judge-title-stem-collision` | A `decisions/` record and a `deferred/` record with the same file stem collide in the rulings titles, because the title names the stem only. | [`debts/judge-title-stem-collision.md`](../debts/judge-title-stem-collision.md) |
 | `judge-uncommitted-order` | A record git does not list (new and not committed) is ordered by file mtime, after the listed ones. | [`debts/judge-uncommitted-order.md`](../debts/judge-uncommitted-order.md) |
 | `judgment-exits-debt-count` | An `unmechanized` rule waits for a check. | [`debts/judgment-exits-debt-count.md`](../debts/judgment-exits-debt-count.md) |
 | `kept-bloat-rows-unaudited` | The lane read five `BLOAT` rows for meaning and removed their fix. | [`debts/kept-bloat-rows-unaudited.md`](../debts/kept-bloat-rows-unaudited.md) |
