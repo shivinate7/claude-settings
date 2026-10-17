@@ -2851,6 +2851,28 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.assertIn(young, [e["commit"] for e in sweep.read_restore_log(log)],
                       "the purge must not drop the younger entry's line")
 
+    def test_an_expired_entry_keeps_the_ref_when_an_unexpired_entry_differs_only_by_case(self):
+        # NTFS ref names fold case: `Foo` and `foo` are one ref there. Debt purge-key-case-folds.
+        # The ref is written by hand so the case also runs on a case-folding checkout.
+        repo = self.fresh_repo("case-fold")
+        log = self.log_path("case-fold")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        made = run_vcs(repo, "update-ref", sweep.TOMBSTONE_REF_PREFIX + "Foo", commit)
+        self.assertEqual(made.returncode, 0, "fixture: could not write the ref")
+        with open(log, "w", encoding="utf-8") as handle:
+            for name, days in (("Foo", 91), ("foo", 5)):
+                handle.write(json.dumps({"repo": repo, "branch": name, "commit": commit,
+                                         "time_ms": now - days * self.DAY_MS}) + "\n")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertEqual(decisions[1]["action"], "keep")
+        self.assertEqual(self.ref(repo, "Foo"), commit,
+                         "the expired `Foo` row dropped the ref that the unexpired `foo` row needs: "
+                         "the purge key compares branch names with exact case")
+
     def test_an_expired_entry_whose_ref_was_deleted_by_hand_purges_without_error(self):
         repo = self.fresh_repo("gone-ref")
         log = self.log_path("gone-ref")
@@ -3478,12 +3500,12 @@ class _AgentEndFixture(unittest.TestCase):
         return None
 
     def assert_own_left(self, path):
-        """The hook kept the ending agent's own tree at PATH, and its row names the delayed remover
+        """The hook kept the ending agent's own tree at PATH, and its row says it is kept for 30 idle min
         (owner ruling 2026-10-15 23:01 CDT). The tree is still a git worktree on disk."""
         row = self.row_for_tree(path)
         self.assertIsNotNone(row, "the hook wrote no decision row for the own tree")
         self.assertEqual(row.get("action"), "keep", "the own tree was not kept: %s" % row.get("reason"))
-        self.assertIn("left for the delayed remover", str(row.get("reason")))
+        self.assertIn("kept for 30 idle min", str(row.get("reason")))
         self.assertKept(path)
 
     def control_tree(self, name):
@@ -3522,7 +3544,7 @@ class _AgentEndFixture(unittest.TestCase):
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
     """Owner ruling 2026-10-15 23:01 CDT: when an agent ends (SubagentStop), janitor/agent_end_reap.py
     KEEPS the ending agent's OWN worktree under `.claude/worktrees/agent-*`, whatever its state. Its
-    row names the delayed remover (lane wt-reap-delay). The hook never stops a process whose parent is
+    row says it is kept for 30 idle min. The hook never stops a process whose parent is
     live: the agent's own shells, the hook's wrapper and any host-started process survive. An orphan
     (dead parent) inside the own tree keeps main's stop, and that is covered in AgentEndReapTests. The
     removal of OTHER finished agents' trees idle 30 minutes or more is unchanged, and is covered in
@@ -3643,7 +3665,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.fire_under_host("ownsib", own)
         with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
             self.assertRemoved(control)
-        with self.subTest(arm="own tree is kept for the delayed remover"):
+        with self.subTest(arm="own tree is kept for 30 idle min"):
             self.assert_own_left(own)
         with self.subTest(arm="sibling locked by the same host pid, idle 31 min"):
             self.assertKept(sibling)
@@ -3849,7 +3871,7 @@ class AgentEndRulingTests(_AgentEndFixture):
         self.fire_under_host("sibown", own)
         with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
             self.assertRemoved(control)
-        with self.subTest(control="own tree with no process inside is kept for the delayed remover"):
+        with self.subTest(control="own tree with no process inside is kept for 30 idle min"):
             self.assert_own_left(own)
         with self.subTest(arm="process inside a sibling tree"):
             self.assertIsNone(proc.poll(), "a process inside a sibling tree was stopped")
@@ -3911,10 +3933,10 @@ class AgentEndRulingTests(_AgentEndFixture):
         self.age_control(subject)
         with mock.patch.object(sweep, "process_cwd", new=hidden):
             record = self.run_in_process("unrend", ending)
-        with self.subTest(arm="own tree is kept for the delayed remover"):
+        with self.subTest(arm="own tree is kept for 30 idle min"):
             row = self.row_for(record, ending)
             self.assertIsNotNone(row, "the stage wrote no row for the own tree")
-            self.assertIn("left for the delayed remover", str(row.get("reason")))
+            self.assertIn("kept for 30 idle min", str(row.get("reason")))
         with self.subTest(arm="unreadable pid outside the host does not keep another idle tree"):
             self.assertRemoved(subject)
 

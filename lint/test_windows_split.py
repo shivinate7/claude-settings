@@ -414,11 +414,12 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
 
 
-# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step runs one glob, so a
-# new mods/<name>/ joins with no edit here. It carries the exit code of every file: a failing first or
-# last file fails the step. The real-file checks are red until the step exists. The checker's own
-# self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is seen.
-MOD_GLOB = "mods/*/*.test.mjs"
+# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step finds every
+# *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/ joins with no
+# edit here. It carries the exit code of every file: a failing first or last file fails the step. The
+# checker's own self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each
+# defect is seen. MOD_GLOB is the name pattern that marks the step, in a glob or in a find -name.
+MOD_GLOB = "*.test.mjs"
 MOD_FLAG = "mods"
 GATES_JOB = "gates"
 STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
@@ -508,11 +509,23 @@ def mods_problems(text):
     return mods_scope_problems(text) + mods_step_problems(text)
 
 
-def run_mod_body(body, files):
+def run_mod_body(body, files, dirs=(), find_exit=None):
     """Run a step body as `shell: bash` does, in a scratch repo. files maps a path to True (passes) or False (fails).
-    Returns the exit code."""
+    dirs are empty folders to make. find_exit, when set, puts a `find` first on PATH that runs the real find and
+    then exits with that code, as a find does that meets an error after it listed files. Returns the exit code."""
     with tempfile.TemporaryDirectory() as root:
         work = os.path.join(root, "repo")
+        os.makedirs(work, exist_ok=True)
+        for d in dirs:
+            os.makedirs(os.path.join(work, d), exist_ok=True)
+        env = None
+        if find_exit is not None:
+            shim = os.path.join(root, "shim")
+            os.makedirs(shim)
+            with open(os.path.join(shim, "find"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(f'#!/bin/sh\n"{shutil.which("find")}" "$@"\nexit {find_exit}\n')
+            os.chmod(os.path.join(shim, "find"), 0o755)
+            env = dict(os.environ, PATH=shim + os.pathsep + os.environ["PATH"])
         for rel, ok in files.items():
             full = os.path.join(work, rel)
             os.makedirs(os.path.dirname(full), exist_ok=True)
@@ -522,7 +535,7 @@ def run_mod_body(body, files):
         with open(script, "w", encoding="utf-8", newline="\n") as f:
             f.write(body)
         r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", script.replace("\\", "/")],
-                           cwd=work, capture_output=True, text=True, timeout=300)
+                           cwd=work, capture_output=True, text=True, timeout=300, env=env)
         return r.returncode
 
 
@@ -546,11 +559,37 @@ class ModTestStep(unittest.TestCase):
             ("all pass", {"mods/a/a.test.mjs": True, "mods/b/b.test.mjs": True}, True),
             ("first file fails", {"mods/a/first.test.mjs": False, "mods/b/b.test.mjs": True}, False),
             ("last file fails, in a new mod", {"mods/a/a.test.mjs": True, "mods/zz-new/last.test.mjs": False}, False),
+            # Debt mods-tests-glob-too-narrow: these two shapes never ran.
+            ("nested tests/ file fails", {"mods/a/a.test.mjs": True, "mods/a/tests/b.test.mjs": False}, False),
+            ("*.test.js file fails", {"mods/a/a.test.mjs": True, "mods/a/c.test.js": False}, False),
+            # Control, green now: a dependency's own test under node_modules is not ours to run.
+            ("node_modules test fails", {"mods/a/a.test.mjs": True, "mods/a/node_modules/dep/d.test.js": False}, True),
         ]
         for label, files, ok in cases:
             with self.subTest(case=label):
                 rc = run_mod_body(body, files)
                 self.assertEqual(rc == 0, ok, f"{label}: exit {rc}")
+
+    @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
+    def test_the_step_fails_when_it_finds_no_test_or_find_errors(self):
+        """Red on main: `done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
+        steps = mod_steps(self.text)
+        self.assertEqual(len(steps), 1, "no step runs the mod glob, so no mod test runs in CI")
+        body = run_body(steps[0])
+        ok = {"mods/a/a.test.mjs": True}
+        cases = [
+            ("mods/ is missing", {}, (), None),
+            ("mods/ is empty", {}, ("mods",), None),
+            ("mods/ holds no test file", {"mods/a/readme.md": True}, (), None),
+            ("only a node_modules test file", {"mods/a/node_modules/dep/d.test.js": True}, (), None),
+            ("find exits 2 after it listed a passing file", ok, (), 2),
+        ]
+        for label, files, dirs, find_exit in cases:
+            with self.subTest(case=label):
+                rc = run_mod_body(body, files, dirs, find_exit)
+                self.assertNotEqual(rc, 0, f"{label}: the step exited 0")
+        # Control, green now: one passing file and a clean find still pass.
+        self.assertEqual(run_mod_body(body, ok), 0)
 
     def test_gates_stays_a_required_check_and_mods_adds_no_name(self):
         """Control, green now: the mod step rides the required `gates` job, so the list gains no name."""
