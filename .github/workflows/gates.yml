@@ -321,18 +321,17 @@ jobs:
         run: sh merge/test_install_from_main.sh
 
       # Last step, so a red mod test skips none of the steps above, and a red step above does not hide
-      # a mod test (!cancelled() runs it anyway). One glob reaches only root-level mods/<name>/*.test.mjs
-      # files: a test in mods/<name>/tests/ or named *.test.js does not run. A new mods/<name>/ joins
-      # with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
+      # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
+      # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
       # fails the step. No pipe.
       - name: Mod tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: |
           fail=0
-          for f in mods/*/*.test.mjs; do
+          while IFS= read -r f; do
             node "$f" || fail=1
-          done
+          done < <(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print)
           exit "$fail"
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.

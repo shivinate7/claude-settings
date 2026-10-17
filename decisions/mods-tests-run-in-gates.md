@@ -2,7 +2,7 @@
 
 ## The question
 
-Where do the mod tests (`mods/*/*.test.mjs`) run in CI, so that a red mod test blocks a merge?
+Where do the mod tests (`*.test.mjs` and `*.test.js` under `mods/`) run in CI, so that a red mod test blocks a merge?
 
 ## The ruling
 
@@ -12,7 +12,7 @@ The step has these traits:
 
 - It sets `shell: bash`.
 - Its condition is `if: !cancelled() && needs.scope.outputs.mods == 'true'`.
-- It loops over `mods/*/*.test.mjs`. For each file, it runs `node "$f" || fail=1`.
+- It loops over `find mods`, every `*.test.mjs` and `*.test.js` file except under `node_modules`. For each file, it runs `node "$f" || fail=1`.
 - It ends with `exit "$fail"`. Every file runs. Any failure fails the step.
 - It uses the runner's Node. It has no `setup-node` step.
 
@@ -41,7 +41,7 @@ The step is last. A red mod test therefore does not skip the other steps: zizmor
 
 ## Holes, named
 
-Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-tests-glob-too-narrow` (nested and `*.test.js` tests never run), `mods-session-board-timer-margins` (two real-timer margins are unproven on a slow runner), `mods-node-version-unpinned` (the runner's Node version is unknown), `mods-step-order-unpinned` (no test pins that this step is last), `mods-linux-proof-pending` (the first CI run on Linux is the real proof), `harness-scope-mods-flag-missing` (STEP_FLAGS lacks mods). `harness-scope-pipe-regex-quotes` (the pipe regex ignores quotes and comments). `harness-scope-line5-too-long` (a line in the scope script is about 140 characters). `process-record-dead-plan-line` (this record keeps a Plan line that no check reads).
+Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-session-board-timer-margins` (two real-timer margins are unproven on a slow runner), `mods-node-version-unpinned` (the runner's Node version is unknown), `mods-step-order-unpinned` (no test pins that this step is last), `mods-linux-proof-pending` (the first CI run on Linux is the real proof), `harness-scope-mods-flag-missing` (STEP_FLAGS lacks mods). `harness-scope-pipe-regex-quotes` (the pipe regex ignores quotes and comments). `harness-scope-line5-too-long` (a line in the scope script is about 140 characters). `process-record-dead-plan-line` (this record keeps a Plan line that no check reads).
 
 ## Unverified
 

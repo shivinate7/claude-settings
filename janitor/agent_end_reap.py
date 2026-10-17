@@ -30,8 +30,8 @@ the child. A folder with a process cwd inside, a link, or any unreadable read st
 deletes trash names a child left.
 
 Worktrees (owner rulings 2026-10-15, 23:01 CDT): when the gates above hold for the whole worktree,
-the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a delayed
-remover (lane wt-reap-delay) removes it later. It removes every other `.claude/worktrees/agent-*`
+the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
+removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
 prove keeps. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
@@ -295,11 +295,11 @@ WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
 
-OWN_TREE_REASON = "own tree: left for the delayed remover"  # owner ruling 2026-10-15 23:01 CDT
+OWN_TREE_REASON = "own tree: kept for 30 idle min"  # owner ruling 2026-10-15 23:01 CDT; a later agent end removes it
 
 
 def reap_worktrees(target: str, deadline: float):
-    """Keep TARGET (the ending agent's own worktree; lane wt-reap-delay removes it later) and remove
+    """Keep TARGET (the ending agent's own worktree; a later agent end removes it once idle) and remove
     every other finished `.claude/worktrees/agent-*` worktree of its repository, idle 30 minutes or
     more, that `sweep.decide_agent_end_worktree` clears. Returns one row for TARGET, one per other
     tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
