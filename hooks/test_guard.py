@@ -6634,6 +6634,10 @@ sh("bare-merge: a lone quote in an argument hides no merge",
 sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
    'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
    **_BARE_GATE)
+# A deny of 5b still wins: an ask must not turn a refusal of main into an ask (a guard, green on main).
+sh("bare-merge: a pending head in a repo with a merge block still denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 # ALLOW: no merge block to read, or no merge made.
 for _name, _where in (
     ("a repo with no stamp.json", STAMPNONE),
