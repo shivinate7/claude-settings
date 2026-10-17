@@ -948,8 +948,7 @@ class ListenerDecisionTests(unittest.TestCase):
         """No account switch is available to this suite (no admin privilege to run a fixture
         process as a genuinely different user), so this stubs `sweep.is_current_user_process`
         itself -- the same seam `hooks/test_guard.py` already stubs `ctypes.windll` at, for a
-        Windows arm no fixture can drive for real either (decisions/liveness-read-is-platform-
-        specific-and-unreadable-is-not-death.md, "Holes, named"). `self.reap_pid`'s entry is
+        Windows arm no fixture can drive for real either (debts/notes.md). `self.reap_pid`'s entry is
         otherwise the exact reap shape (orphaned, no live session), so a confirmed "not ours"
         answer is the ONLY thing standing between it and a reap here."""
         original = sweep.is_current_user_process
@@ -2852,7 +2851,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                       "the purge must not drop the younger entry's line")
 
     def test_an_expired_entry_keeps_the_ref_when_an_unexpired_entry_differs_only_by_case(self):
-        # NTFS ref names fold case: `Foo` and `foo` are one ref there. Debt purge-key-case-folds.
+        # NTFS ref names fold case: `Foo` and `foo` are one ref there.
         # The ref is written by hand so the case also runs on a case-folding checkout.
         repo = self.fresh_repo("case-fold")
         log = self.log_path("case-fold")

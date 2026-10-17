@@ -1799,7 +1799,7 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
 # ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
 # the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
 # deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
-# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+# bandaid the reset runs in the clean lane and allows.
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -2401,7 +2401,7 @@ sh("work-tree: the spaced form is read the same way",
 # ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
 # or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
 # header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
-# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
+# it. Named holes: debts/notes.md. Each RED case below is a hole. The
 # PINNED cases already deny or allow, and a fix must keep them so.
 for _name, _command in (
     ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
@@ -4694,7 +4694,7 @@ sh("wsl: a test path whose dot-led glob expands to ..",
 # `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
 # `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
 # that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
-# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
+# holes: debts/notes.md. The RED cases are holes. The PINNED cases already
 # refuse or allow, and a fix must keep them so.
 for _name, _command in (
     ("exec", "exec wsl --shutdown"),
@@ -6241,7 +6241,7 @@ sh("env: the accessor search in the other shell",
    tool="PowerShell", cwd=NOGIT)
 
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the loader rule reads a wrapper only in
+# ---- audit-high (owner ruling 2026-10-13): the loader rule reads a wrapper only in
 # its exact shape. `time`, a loop's `do`, a timeout flag written `--flag=value`, and the Windows
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
 # refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
@@ -6319,7 +6319,7 @@ for _cmd in (
     sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
        _cmd, "deny", "env-file", cwd=NOGIT)
 
-# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# ---- audit-high (owner ruling 1): a file-reading flag reads the file it names,
 # so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
 # cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
 # operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
@@ -7315,7 +7315,7 @@ def cite_unread_folders_case():
 # flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
 # quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
 # interpreter-fed body, which shifts the header count so the commit reads another body; and a case
-# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
+# pattern's `)` inside an open `$(`. Named holes: debts/notes.md. The RED
 # cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
 # Wrapper forms: one row per wrapper walk (a bare form, a value flag, a subshell). The deep set of
 # wrappers lives in the wsl section above, so this block keeps one row for each walk.
@@ -9018,8 +9018,8 @@ deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
 # (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
-# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are the
-# open items of the debt `ask-step-hidden-in-script`). W is the cap write with no quote in it, so it
+# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are open
+# items). W is the cap write with no quote in it, so it
 # nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
 # redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
 CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
@@ -9928,7 +9928,7 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the test-author's own scratch writes.
+# ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
 # scratchpad allowance is the one under_session_scratchpad gives, keyed by the session id the payload
@@ -12462,8 +12462,8 @@ def judge_in_process(command, cwd):
 
 
 # Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
-# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
-# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). One
+# wall-clock case stays live. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
 # slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
@@ -12658,7 +12658,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13, guard-audit-high; decision gate-hooks-fail-closed): a guard
+# audit-high (owner ruling 2026-10-13; decision gate-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
