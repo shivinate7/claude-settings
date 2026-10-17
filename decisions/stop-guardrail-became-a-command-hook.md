@@ -38,9 +38,11 @@ looks protected, plus `guard.is_settings_file` for the one case with a real
 constant to import.
 
 When nothing on disk looks protected, the hook prints nothing and never
-spawns a model. When something does, it runs `claude -p`, isolated. It
-hands that call the diff, or the new file's text, and the chat text
-directly. It asks for the same ALLOW/FLAG judgment the old prompt asked for.
+spawns a model. When something does, the mod asks the model. A direct run of
+the script with no split flag runs `claude -p`, isolated, as the section
+below describes. Either way the judge gets the diff, or the new file's text,
+and the chat text directly. It gives the same ALLOW/FLAG judgment the old
+prompt gave.
 
 ## The judge subprocess, isolated and tightened across three review passes
 
