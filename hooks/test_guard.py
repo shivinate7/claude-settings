@@ -388,11 +388,14 @@ BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
 # guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
 # sits on `feat` with origin/HEAD naming trunk (so main is an ordinary branch there), PUSHNOHEAD
 # has no origin/HEAD at all (the main/master fallback), PUSHDETACHED has no current branch.
+# PUSHDANGLING sits on `feat`; its origin/HEAD names origin/gone, a ref that does not exist, and
+# origin/main does exist (owner's read order 2026-10-16: origin/HEAD when it resolves, then origin/main).
 PUSHFEAT = os.path.join(ROOT, "pushfeat")
 PUSHMAIN = os.path.join(ROOT, "pushmain")
 PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+PUSHDANGLING = os.path.join(ROOT, "pushdangling")
 # push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
 # named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
 PUSHUP = os.path.join(ROOT, "pushup")
@@ -1265,6 +1268,21 @@ def _build_push():
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
 
+    # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
+    # order gives main as the default branch.
+    make_repo(PUSHDANGLING, {"base.txt": "base\n"})
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+    run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
+    if (run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/HEAD^{commit}").returncode == 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/main^{commit}").returncode != 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHDANGLING needs a dangling origin/HEAD "
+                 "and a live origin/main")
+
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
         make_repo(where, {"base.txt": "base\n"})
@@ -1435,8 +1453,8 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHUP, PUSHUPSELF, PUSHNOUP,
-              PUSHMATCH], _build_push)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHUP, PUSHUPSELF,
+              PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -5332,6 +5350,14 @@ push_case("a delete refspec at the default branch asks", "origin :main", "ask")
 push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
 push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
 push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+# A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
+# forms below reach main and ask, exactly as they do where origin/HEAD resolves.
+push_case("a dangling origin/HEAD, a forced push to main asks",
+          "--force-with-lease --force-if-includes origin main", "ask", cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, a delete refspec at main asks", "origin :main", "ask",
+          cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, --delete after the remote at main asks", "origin --delete main", "ask",
+          cwd=PUSHDANGLING)
 push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
 push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
 push_case("--no-force-if-includes cancels --force-if-includes",
