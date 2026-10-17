@@ -58,22 +58,22 @@ def _push_bare_destination(cwd: str, overrides=None):
     return None
 
 
-def _push_default_branches(cwd: str):
+def _push_default_branches(cwd: str, remote: str):
     """The default branch names, or None when git cannot be read at all.
 
-    `guard_core.resolve_default_base` answers (owner's ruling 2026-10-16: origin/HEAD when it
-    resolves, then origin/main, origin/master, local main, local master). A remote ref names its
-    branch. A local ref, or no answer, falls back to main and master. No readable repository is
-    unknown, and unknown is never safe.
+    `guard_core.read_default_base` answers for the PUSHED remote (owner's ruling 2026-10-16). Only
+    `<remote>/HEAD` names the branch. Any other answer, or none (a dangling or unset HEAD, a git
+    that did not answer), protects main AND master. No readable repository is unknown, and
+    unknown is never safe.
     """
     if not cwd or not os.path.isdir(cwd):
         return None
     repo = guard_core._git(cwd, "rev-parse", "--git-dir")
     if repo is None or repo.returncode != 0:
         return None
-    base = guard_core.resolve_default_base(cwd)
-    if base is not None and base.startswith("origin/"):
-        return (base[len("origin/"):],)
+    base, from_head = guard_core.read_default_base(cwd, remote)
+    if base is not None and from_head:
+        return (base[len(remote) + 1:],)
     return DEFAULT_BRANCH_FALLBACK
 
 
@@ -175,7 +175,10 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):
         return ""
-    defaults = _push_default_branches(cwd)
+    if not remote:
+        remote = _push_config(
+            cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
+    defaults = _push_default_branches(cwd, remote or "origin")
     reaches = mirror or every or defaults is None
     for spec in plain or [""]:
         source, colon, target = spec.lstrip("+").partition(":")

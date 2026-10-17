@@ -12,22 +12,23 @@ the push guard?
 
 Owner, 2026-10-16: read in this order. The first ref that resolves wins.
 
-1. `origin/HEAD`, when it resolves.
-2. `origin/main`.
-3. `origin/master`.
+1. `<remote>/HEAD`, when it resolves.
+2. `<remote>/main`.
+3. `<remote>/master`.
 4. Local `main`.
 5. Local `master`.
 
-- A dangling `origin/HEAD` falls through to step 2. It never makes a base unreadable.
+- `<remote>` is `origin` for the branch-delete rule and the sweep. The push guard reads the
+  PUSHED remote: the named remote, else the branch's configured remote, else `origin`.
+- A dangling `<remote>/HEAD` falls through to step 2. It never makes a base unreadable.
 - A verify that git could not run is unreadable (None), never "does not exist".
-- One home: `resolve_default_base`. The push guard calls it. It names a branch from a remote
-  ref, and falls back to `main` and `master` for a local ref or no answer.
+- One home: `resolve_default_base`, over `read_default_base`. The push guard calls
+  `read_default_base`. Only a resolved `<remote>/HEAD` names one branch for it. Any other
+  answer, or none (HEAD unset or dangling, an unreadable read), protects both `main` and
+  `master`.
 
 ## Why
 
 A dangling `origin/HEAD` hid the default branch. A push to `main` read as allowed, and a
-squash-merged lane was never freed.
-
-## Limits
-
-The home reads `origin` only. A push to another remote reads the default branch of `origin`.
+squash-merged lane was never freed. A repository that has `origin/main` may still hold
+`master`, so a missing HEAD protects both names.

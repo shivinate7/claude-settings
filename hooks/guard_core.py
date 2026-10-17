@@ -1294,26 +1294,35 @@ def stash_stack(where: str):
 #                  clone elsewhere holds the same commit.
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
-def resolve_default_base(where: str):
-    """Return the short ref name of the repository's default branch, or None when none answers.
+def read_default_base(where: str, remote: str = "origin"):
+    """Return (short ref name, True when `<remote>/HEAD` named it), or (None, False) when none answers.
 
-    Owner's ruling 2026-10-16: `origin/HEAD` when it resolves, then `origin/main`, then
-    `origin/master`, then local `main`, then local `master`. The first that resolves wins; the
-    rest are never tried. A dangling `origin/HEAD` falls through. A verify that git could not run
-    is None: unreadable, never "does not exist". The push guard reads its default branch here too.
+    Owner's ruling 2026-10-16: `<remote>/HEAD` when it resolves, then `<remote>/main`, then
+    `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
+    rest are never tried. A dangling `<remote>/HEAD` falls through. A verify that git could not run
+    is (None, False): unreadable, never "does not exist". The push guard reads the PUSHED remote
+    here; the branch-delete rule and the sweep read `origin`.
     """
-    candidates = ["origin/main", "origin/master", "main", "master"]
-    origin_head = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
-    if origin_head is not None and origin_head.returncode == 0 and origin_head.stdout.strip():
-        candidates.insert(0, origin_head.stdout.strip())
+    candidates = [remote + "/main", remote + "/master", "main", "master"]
+    named = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/" + remote + "/HEAD")
+    if named is None:  # git could not run: unreadable
+        return None, False
+    head = named.stdout.strip() if named.returncode == 0 else ""
+    if head.startswith(remote + "/"):
+        candidates.insert(0, head)
     for name in candidates:
-        full = ("refs/remotes/" if name.startswith("origin/") else "refs/heads/") + name
+        full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
         live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None
+            return None, False
         if live.returncode == 0:
-            return name
-    return None
+            return name, name == head and candidates[0] == head
+    return None, False
+
+
+def resolve_default_base(where: str, remote: str = "origin"):
+    """The short ref name of the default branch, or None when none answers (`read_default_base`)."""
+    return read_default_base(where, remote)[0]
 
 
 def branch_is_ancestor(where: str, base: str, branch: str):
