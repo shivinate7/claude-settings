@@ -303,7 +303,7 @@ def holder_text(b, held, now):
 class Lock:
     """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
     until = holder = began = tree = message = None  # holder: set by confirm before acquire; a dict of pr, branch, session. until: the published expiry, set once the lock is held
-    mine = frozenset()  # the lock commits this run published: the take, then one per extension
+    mine = frozenset()  # the lock commits this run made: the take, then one per extension, added before its push or PATCH
 
     def _take(self, b, sha, tree, message, now):
         """The one place a take is recorded. The expiry is read back from the published text, so `until` and the text cannot differ."""
@@ -316,7 +316,10 @@ class Lock:
         No-op while no lock is held."""
         if self.until is None:
             return
-        need = int(self.now() + wait + LOCK_MARGIN)
+        now = self.now()
+        if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
+            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now. Run again.")
+        need = int(now + wait + LOCK_MARGIN)
         if need <= self.until:
             return
         if need > self.began + LOCK_MAX_HOLD:
@@ -326,7 +329,7 @@ class Lock:
             sha = self.swap(self.base, msg)
         except Stop as e:
             raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire. Run again. {e}") from e
-        self.mine, self.sha, self.message, self.until = self.mine | {sha}, sha, msg, expiry_of(msg)
+        self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
     def release(self, b, token):
         left = f" It expires in {max(0, self.until - self.now()):.0f}s." if self.until else ""
@@ -387,6 +390,7 @@ class GitLock(Lock):
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
         if c:
             raise Stop("cannot make the lock commit: " + sha)
+        self.mine |= {sha}  # this run's before the push: a push that lands with a lost reply still leaves a lock release can delete
         c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{self.sha}", "origin", f"{sha}:{ref}")
         if c:
             raise Stop("the lock ref moved, or the push failed: " + out)
@@ -468,6 +472,7 @@ class GhLock(Lock):
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
         if c:
             raise Stop("cannot make the lock commit: " + sha)
+        self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
         c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
         if c:
             raise Stop("cannot move the lock: " + out)
