@@ -84,8 +84,8 @@ The fix reads a second field the override file carries OUTSIDE its `env` block:
 And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
 into a second cap-change ask the field is not one. MEASURED: `guard._cap_reading('"_subagentCapUntil":
 "2026-09-21T00:00:00Z"')` returns `{}`. The guard's PreToolUse ask never sees this field, and only
-this watch reads it. See `decisions/subagent-model-cap.md` for the rejected spelling this replaced
-and its own measurement.
+this watch reads it. See decision `subagent-model-cap` (the subagent model cap), sections "The grant"
+and "What was measured".
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file

@@ -1691,7 +1691,7 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
 # THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
-# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# stash-stack-is-a-shared-subject, the stash stack is shared). Git may omit `push` before `--`, before a pathspec after `--`, and
 # before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
 # A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
 # These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
@@ -2006,7 +2006,7 @@ sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore
 sh("per-file branch switch: checkout main in a worktree keeps today's answer",
    VCS + " checkout main", "allow", cwd=GITWT)
 
-# THE DISCARD FORMS THAT JOIN THE RULE (decisions/stash-push-is-clone-wide.md, "These discard forms
+# THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
 # named file. The shared checkout denies each one. Each case is tagged "per-file".
 
@@ -2080,7 +2080,7 @@ sh("per-file allow: -C names the shared checkout first and a worktree last, from
    VCS + " -C " + slash(GITMAIN) + " -C " + slash(GITWT) + " checkout -- f.txt", "allow",
    cwd=NOGIT)
 
-# THE LAST THREE BULLETS (decisions/stash-push-is-clone-wide.md, "These discard forms join the
+# THE LAST THREE BULLETS (decision agent-worktree-discard-is-noted, "These discard forms join the
 # rule"): each -C, every operand of restore as a path, and a pathspec the guard cannot read. Each
 # case is tagged "per-file".
 
@@ -2120,7 +2120,7 @@ sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout 
 sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
    "ask", "shared-tree", cwd=GITWT)
 
-# SECOND SET (decisions/stash-push-is-clone-wide.md, "These discard forms join the rule"). The
+# SECOND SET (decision agent-worktree-discard-is-noted, "These discard forms join the rule"). The
 # operand before `--` is a path, and the clean file after `--` must not hide it. keep.txt is clean
 # in every tree; f.txt is dirty in the shared checkout and in the lane.
 sh("per-file deny: restore f.txt -- keep.txt in the shared checkout, operand before --",
@@ -2143,10 +2143,11 @@ sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from
    lacks=(CHAIN_ASK,))
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
-# IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
-# checkout. The lane and the shared checkout both hold f.txt dirty, so a per-file restore is an
-# allow in the lane and a deny in the shared checkout. The segment text repeats, and the segment
-# lookup finds the FIRST copy, so the second call is judged in the lane. These MUST be red today.
+# IDENTICAL SEGMENTS. Decision agent-worktree-discard-is-noted, section "Named files in a linked
+# worktree": each git call is judged in its own checkout. The lane and the shared checkout both
+# hold f.txt dirty, so a per-file restore is an allow in the lane and a deny in the shared
+# checkout. The segment text repeats, and the segment lookup finds the FIRST copy, so the second
+# call is judged in the lane. These MUST be red today.
 sh("per-file deny: cd lane; restore f.txt; cd shared; the same restore f.txt, joined by ;",
    "cd " + slash(GITWT) + "; " + VCS + " restore f.txt; cd " + slash(GITMAIN) + "; "
    + VCS + " restore f.txt", "deny", "shared-tree", cwd=NOGIT)
@@ -2274,7 +2275,7 @@ sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
    VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
 
-# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
+# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
 # not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
 # Near misses must still ask or deny, proven against real git state, not a path guess.
