@@ -58,21 +58,22 @@ def _push_bare_destination(cwd: str, overrides=None):
     return None
 
 
-def _push_default_branches(cwd: str, remote: str):
+def _push_default_branches(cwd: str):
     """The default branch names, or None when git cannot be read at all.
 
-    `refs/remotes/<remote>/HEAD` answers when it exists. A repository with no such ref falls back
-    to main and master. No readable repository is unknown, and unknown is never safe.
+    `guard_core.resolve_default_base` answers (owner's ruling 2026-10-16: origin/HEAD when it
+    resolves, then origin/main, origin/master, local main, local master). A remote ref names its
+    branch. A local ref, or no answer, falls back to main and master. No readable repository is
+    unknown, and unknown is never safe.
     """
     if not cwd or not os.path.isdir(cwd):
         return None
     repo = guard_core._git(cwd, "rev-parse", "--git-dir")
     if repo is None or repo.returncode != 0:
         return None
-    prefix = "refs/remotes/" + remote + "/"
-    head = guard_core._git(cwd, "symbolic-ref", "-q", prefix + "HEAD")
-    if head is not None and head.returncode == 0 and head.stdout.strip().startswith(prefix):
-        return (head.stdout.strip()[len(prefix):],)
+    base = guard_core.resolve_default_base(cwd)
+    if base is not None and base.startswith("origin/"):
+        return (base[len("origin/"):],)
     return DEFAULT_BRANCH_FALLBACK
 
 
@@ -174,10 +175,7 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):
         return ""
-    if not remote:
-        remote = _push_config(
-            cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
-    defaults = _push_default_branches(cwd, remote or "origin")
+    defaults = _push_default_branches(cwd)
     reaches = mirror or every or defaults is None
     for spec in plain or [""]:
         source, colon, target = spec.lstrip("+").partition(":")

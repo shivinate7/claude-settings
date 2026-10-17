@@ -272,7 +272,7 @@ MUTATIONS = [
      '    if repo is None or repo.returncode != 0:\n        return None',
      '    if False:\n        return None', "guard", 'push: forced with a plus where git cannot be read asks'),
     ("force-push: origin/HEAD is ignored for the fallback names",
-     '        return (head.stdout.strip()[len(prefix):],)',
+     '        return (base[len("origin/"):],)',
      '        return DEFAULT_BRANCH_FALLBACK', "guard", 'named by origin/HEAD, not by name'),
     ("force-push: the fallback forgets master",
      '    return DEFAULT_BRANCH_FALLBACK\n\n\n# A quoted',
