@@ -165,7 +165,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 
 * A rule in `CLAUDE.md`: edit the file. Wrap the sentence in a `<!-- rule:<slug> --> ` anchor if
   you want `lint/rule_audit.py` to hold you to naming its enforcement (a guard rule, a gate, a
-  CI step, or `unmechanized` plus a reason) in `lint/rule_mechanisms.json`.
+  CI step, or `unmechanized` or `judgment` plus a reason) in `lint/rule_mechanisms.json`.
   All the guard rules, gates, and their design rationale live as comments and numbered
   decisions inside `hooks/guard.py` and `lint/`. Read there, not here, for the full list.
 * A new role: add `agents/<name>.md`. A project can override it with a project-level

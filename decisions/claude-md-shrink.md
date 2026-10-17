@@ -31,13 +31,14 @@ Precedent: `a-rule-with-no-gate-leaves-claude-md` (a rule the owner took off the
 On main, 30 rules in the root `CLAUDE.md` name a guard or gate. 6 are deleted, 1 shrinks, and 23 stay.
 `CLAUDE.md` loads in every repo. A gate that is only a test or a CI step in this repo enforces nothing in another repo.
 Several guards cover only part of their sentence. Those 23 rules stay until the owner rules on each.
+`RULE_FLOOR` in `lint/rule_audit.py` moves from 98 to 101, the new anchor count. Its own comment says to update it when a rule is removed on purpose.
 
 ## The outcome, and what protects it now
 
 Each deleted rule protected one act. A guard or gate still refuses or checks it:
 
 - Sonnet floor for agents: the `subagent-model-floor` guard rule.
-- Cap override expiry and removal: the `subagent-model-cap` guard rule and the watch in `hooks/config_watch.py`. See hole 1.
+- Cap override expiry: the `subagent-model-cap` guard rule and the watch in `hooks/config_watch.py`. Removal before expiry has no check. See hole 1.
 - Refusal hook installed: `settings.json` wires `hooks/guard.py` under `PreToolUse`.
 - No waiter loop: the `waiter` guard rule.
 - Memory never the only home: `hooks/ruling_home.py`.

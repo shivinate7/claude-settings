@@ -169,3 +169,6 @@ The owner ruled: auto-memory stays on, but only as short-term notes. Each lastin
 ruling goes to a tracked file. When it has a tracked home on main, delete its memory file
 and its `MEMORY.md` line. Do not turn auto-memory off. `rule:building-memory-is-short-term` carries
 this ruling to every repo that loads `CLAUDE.md`.
+
+Kind: process
+Home: hooks/ruling_home.py

@@ -102,3 +102,6 @@ Also fixed after review: an unquoted heredoc body with no `$(...)` made `env_her
 IndexError. The guard failed open, so every rule after the env check was skipped. The body is now
 judged and passes. The top-level crash handler of `guard.py` now logs one `crash` line, so the next
 hidden crash shows in `guard.log`.
+
+Kind: process
+Home: hooks/guard.py

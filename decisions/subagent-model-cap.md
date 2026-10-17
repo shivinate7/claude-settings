@@ -431,8 +431,8 @@ rule 9, `subagent-model-floor`. `hooks/config_watch.py` and
 `CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-sonnet-is-the-ceiling`, as `unmechanized`, with the
 owner's ruling as reason. The entry for `roles-opus-override-guarded` points at guard rule `subagent-model-cap`.
 The floor, the expiry and the file removal left CLAUDE.md (decision claude-md-shrink, guard and
-gate rules leave the prose). Guard rule `subagent-model-floor` and `hooks/config_watch.py`
-enforce them.
+gate rules leave the prose). Guard rule `subagent-model-floor` enforces the floor, and
+`hooks/config_watch.py` enforces the expiry. Removal before expiry has no check.
 
 ## What stays uncovered, on purpose
 
