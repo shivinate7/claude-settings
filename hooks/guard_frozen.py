@@ -74,7 +74,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("impeccable"),
 )
 # THE LIVE PINNED CHECKOUT IS FROZEN (decision merge-reinstalls-from-main, ruling 1: no work runs in
-# the pinned checkout; owner ruling 2026-10-17 11:40 CDT). The links in the config directory load
+# the pinned checkout). The links in the config directory load
 # from it, so a write there changes what every session runs. The pin is `<clone>-live`, and each
 # move leaves a stamped worktree `<clone>-live-<12 hex>`. This suffix is the one copy in Python.
 # merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay equal to it.
@@ -187,8 +187,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 
 # Commands that change a file named in their arguments. `mv` stays on the list even when the frozen
 # path is its source, because guessing wrong on `mv` loses the file. `cp` FROM a frozen path to a
-# path outside the frozen set only reads it, and is allowed (`_copy_reads`, owner ruling 2026-10-17
-# 11:40 CDT). Deliberate over-blocking elsewhere, narrow in scope.
+# path outside the frozen set only reads it, and is allowed (`_copy_reads`). Deliberate over-blocking elsewhere, narrow in scope.
 #
 # MEASURED in q_max on 2026-09-09 with a POSIX-only list: `Set-Content`, `Out-File`, `Add-Content`
 # and `Remove-Item` each wrote a frozen path unrefused. Matching folds case, as PowerShell does.
@@ -220,9 +219,8 @@ def writes_to(path: str, cmd: str) -> bool:
     return False
 
 
-# VARIABLE INDIRECTION. Incident 2026-10-07, q_max session 56ca874f:
-# `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` was allowed, because the parse saw
-# only the word `$D`. One left-to-right pass in `_shell_write_hit` (it feeds the frozen and
+# VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
+# sees only the word `$D`. One left-to-right pass in `_shell_write_hit` (it feeds the frozen and
 # project-config checks) keeps a table of simple assignments (`D=v`, `export A=1 D=v`, `declare`,
 # a PowerShell `$D = v`), and reads each `$D` or `${D}` as the value current at that point: the
 # last assignment wins, `unset D` clears it, a use before the assignment stays as written, and
@@ -264,9 +262,8 @@ def _resolve_vars(cmd: str) -> str:
     return _VAR_TOKEN.sub(step, cmd)
 
 
-# DATA IS NOT A WRITE. Incident 2026-10-14: the guard asked the owner 29 times, in bypass mode,
-# for commands that only named the cap key or a frozen path as text. Owner ruling: fix the guard,
-# and let no real write through. A list of "reader" commands does not converge (git, gh, rg, sort
+# DATA IS NOT A WRITE. A command that only names the cap key or a frozen path as text is not asked
+# about, and no real write passes. A list of "reader" commands does not converge (git, gh, rg, sort
 # and python run text they are given), so quoted text is data in TWO places only (review option A):
 #  (a) the value of a named message flag: `git [-C dir] commit` -m, --message or -F, and
 #      `gh pr|issue create|edit` --title, --body, -t or -b;

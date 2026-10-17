@@ -136,9 +136,8 @@ MODEL_TIMEOUT = 120
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
-# The prompt goes to `claude -p` on stdin, so the Windows command-line cap (about 32,767
-# characters) no longer bounds it. The clip now bounds cost and latency only; the right size
-# is unmeasured. The cut is named in the prompt itself so the judge (and anyone reading its
+# The prompt goes to `claude -p` on stdin, so the clip bounds cost and latency only; the right
+# size is unmeasured. The cut is named in the prompt itself so the judge (and anyone reading its
 # "why") knows evidence was dropped rather than concluding nothing else changed.
 PROMPT_MAX_LEN = 20000
 

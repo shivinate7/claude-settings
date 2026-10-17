@@ -270,12 +270,11 @@ KILL_REASON = (
 
 # ------------------------------------------------------------------ a detached launch
 #
-# MEASURED 2026-09-23 on macOS: a subagent ran a background job inside a subshell,
-# `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at
-# once, pid 1 adopted the server, the harness never tracked it, and no pid was kept. Rule 2
-# above then correctly refused `pkill -f` and `lsof -t`, but its remedy asked for a process id
-# that this session started and gave no way to get one, so the agent left the server running. This rule closes that gap: it denies the LAUNCH, before a session can ever
-# reach a machine-wide kill trying to clean one up.
+# MEASURED on macOS: a background job in a subshell,
+# `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`, exits the subshell at
+# once. Pid 1 adopts the server, the harness never tracks it, and no pid is kept. Rule 2 above
+# refuses `pkill -f` and `lsof -t`, and its remedy needs a pid this session started, so the
+# server stays up. This rule denies the LAUNCH, before a session reaches a machine-wide kill.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
 # every check below reads a segment's OWN tokens, from `segment_tokens`, quote-aware and
@@ -449,11 +448,9 @@ DETACHED_LAUNCH_REASON = (
 )
 
 
-# THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
-# PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
-# The real causes were a stale `__dirlock` left at 16:11 by an install stopped halfway, and an
-# install that hangs while it unpacks under Node 26.11 with Playwright 1.58. The install sat 73
-# minutes, and the workaround hid both causes. See the record playwright-browsers-path.
+# THE PLAYWRIGHT BROWSER CACHE. A scratch PLAYWRIGHT_BROWSERS_PATH hides the real causes of a
+# missing chromium_headless_shell: a stale `__dirlock` from a half-stopped install, and an install
+# that hangs while it unpacks under Node 26.11 with Playwright 1.58. See the record playwright-browsers-path.
 # A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, `cmd /c set VAR=v`, any of these inside
 # `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
@@ -744,10 +741,9 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
     return ""
 
 
-# GIT LOCATION VARIABLES. Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set GIT_DIR and
-# GIT_WORK_TREE in PowerShell, then a test's child `git init` inherited them and wrote
-# core.worktree into the shared .git/config. Every checkout then read the wrong tree. One walk
-# with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
+# GIT LOCATION VARIABLES. A GIT_DIR or GIT_WORK_TREE set in PowerShell reaches a child `git init`,
+# which writes core.worktree into the shared .git/config, so every checkout reads the wrong tree.
+# One walk with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
 # with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
