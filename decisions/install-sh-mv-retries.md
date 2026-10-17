@@ -17,8 +17,8 @@ install, so a running guard is the likely holder. Unmeasured: the failure rate a
 Governing record: `install-hooks-whole` (an install never shows a session a half-copied hook). It
 says a rename held up by an open reader is retried briefly.
 
-The test shim `make_swap_bin` now pauses only once. It matters only for an injected failure: a
-failed and retried `mv` at the pause point would pause twice, and swap1sh would fail. A normal run
+The test shim `make_swap_bin` now pauses only once. It matters only for an injected failure. A
+failed and retried `mv` at the pause point would pause twice. Then swap1sh would fail. A normal run
 does not change, because the CI failure was at a later file. The test-author showed it red with a
 forced failed `mv`, then green.
 
