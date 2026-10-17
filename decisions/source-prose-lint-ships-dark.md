@@ -2,14 +2,22 @@
 
 CLAUDE.md says: "A guard that goes red when nothing is wrong is spent,
 because the reader learns to scroll past it." This entry names why
-`ste_lint.py`'s new comment-and-docstring mode stays off by default. It also
+`ste_lint.py`'s comment-and-docstring mode stays off by default. It also
 names what turning the mode on will cost.
+
+Three later changes touch these counts. STE006 is not in the linter
+(`every-lint-rule-blocks-or-does-not-exist`, a lint rule blocks, or it does
+not exist). STE007 and STE008 read `warning` and never block (`plain-prose-lint`,
+the STE lint becomes a plain-prose lint). STE001 reads one budget of 30 words
+(`plain-prose-lint`, one budget with no split by mode). Every count below was
+taken before all three. No rerun exists, so the count under today's rules is
+unmeasured.
 
 ## The measurement
 
 A naive Markdown-style lint of every tracked `.py` and `.sh` file reports
 1222 errors. 718 are STE001, the sentence-length rule. 486 are STE006, the
-forbidden semicolon. 18 are other rules.
+semicolon rule, since deleted. 18 are other rules.
 
 Most of that count comes from the linter reading code as prose. It is not a
 real writing problem.
@@ -22,8 +30,8 @@ First shape: a semicolon inside a string literal.
 cmd[index - 1] in " \t\n;|&("
 ```
 
-This line sits in `hooks/guard.py`. A naive lint reports STE006 on it. The
-semicolon never reaches a reader. It sits inside code.
+This line sits in `hooks/guard.py`. A naive lint reported STE006 on it, when
+that rule existed. The semicolon never reaches a reader. It sits inside code.
 
 Second shape: a comment block stitched to the code line beside it. A naive
 lint reads both as one sentence. It then reports a count near 70 words, for
@@ -56,7 +64,7 @@ value. An existing caller sees no change.
 Comments and docstrings only, across this repository's tracked `.py`
 files, held 275 errors by the count that ordered this work.
 
-A rerun today, against the finished checker, counts 564 errors. 486 are
+A rerun against the finished checker counted 564 errors. 486 are
 STE001. 72 are STE006. 4 are STE007. 2 are STE008. The two counts disagree,
 and this entry does not smooth that over.
 
@@ -74,7 +82,13 @@ first run teaches its own reader to stop reading it.
 
 ## What turning it on will cost
 
-Someone must clear 275 to 564 real sentences and semicolons first. The
-exact number depends on which count a maintainer trusts. That cleanup is a
-separate job from this one. Mixing it with the gate would bury the gate in
-noise on the day it ships.
+Someone must clear the real sentences first. By the counts above, that is 275
+to 564 errors, which include semicolons and warnings that no longer block.
+The STE001 share still applies, and it is unmeasured under the 30-word
+budget. `check_source` also runs STE011 and STE013, and both read `error`. The
+564 count lists no STE011 or STE013 error, so their share is unmeasured too. The exact number depends on which count a maintainer trusts. That
+cleanup is a separate job from this one. Mixing it with the gate would
+bury the gate in noise on the day it ships.
+
+Kind: process
+Home: lint/ste_lint.py
