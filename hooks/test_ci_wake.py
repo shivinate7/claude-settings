@@ -1198,7 +1198,6 @@ def main():
     res = run_hook({"tool_name": "Bash", "tool_input": "ls -la"}, fixture(READY, [GREEN]))
     expect_verdict("uncaught error: tool_input is not an object", res, "unknown")
 
-    # Review round 2: skipped-only head, draft PR, import and flush errors, separators, low items.
     case_skipped_only_head_is_no_run_yet()
     case_draft_pr_starts_no_watch()
     case_import_error_wakes_unknown()
