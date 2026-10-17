@@ -74,6 +74,6 @@ if bad:
 PYEOF
 )
 
-python3 -c "$PY" "$0" "$@"
+python3 -I -c "$PY" "$0" "$@"
 [ $? -eq 3 ] && exit 1
 exec "$REAL" "$@"

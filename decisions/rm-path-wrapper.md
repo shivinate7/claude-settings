@@ -50,9 +50,14 @@ MEASURED 2026-10-17: a copy of the shim with no `hooks/` beside it printed the w
 - Flags are read anywhere before `--`. On macOS `rm dir -rf` treats `-rf` as a file name, so the shim
   refuses a call that BSD `rm` would not have run as recursive. A false alarm that costs one retry.
   Debt `rm-shim-flag-order` (a flag after an operand is read as a flag).
+- GNU abbreviations such as `--rec` and `--recur` are not read as recursive, so such a call passes
+  unjudged. Debt `rm-shim-flag-order`.
 - Cost per call, MEASURED 2026-10-17: real `rm` 1.9 ms. The shim with `CLAUDECODE` unset, or set and not
   recursive: 4.4 ms. Set and recursive: 40 ms, one Python start. Debt `rm-shim-call-cost` (a recursive
   call pays one Python start).
+- The marker search reads the real `rm`'s first line byte by byte. MEASURED 2026-10-17: 4.4 ms under
+  `sh`, 7.0 ms under `dash`. A 20 MB `rm` on PATH with no newline costs 1.6 s under `sh` and 5.7 s under
+  `dash`. Debt `rm-shim-call-cost`.
 
 Kind: build
 Plan: decisions/rm-path-wrapper.md#the-ruling (macos)
