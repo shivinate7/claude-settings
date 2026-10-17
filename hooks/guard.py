@@ -88,7 +88,7 @@ Other tools, in `judge` order:
                        deny. A spawn below the model floor, or a round or try on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys in each `agent()` call. A model set through a variable,
-                       a spread, an alias, a concatenation, a ternary, a computed key or a
+                       a spread, an alias, a concatenation, a template `${}`, a ternary, a computed key or a
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (subagent-model-cap)

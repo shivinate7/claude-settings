@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Before a Write or Edit of a markdown or UI file, fixes the Simplified Technical English errors it can fix in a markdown file. Denies the write for errors that remain. A UI file is checked, never fixed.
+"""Before a Write, Edit or MultiEdit of a markdown or UI file, fixes the Simplified Technical English errors it can fix in a markdown file. Denies the write for errors that remain. A UI file is checked, never fixed.
 
 Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file at error
 severity only. Prints JSON when there is something to say. Always exits 0.
