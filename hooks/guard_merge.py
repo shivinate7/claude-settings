@@ -21,7 +21,7 @@ from guard_pointer import (
 # predicate-is-the-act.md), never a substring of the text. `echo git commit`, a `git log`, a
 # quoted message and a heredoc body name an act and perform none.
 #
-# 1. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
+# 1. merge-checks: a merge made outside the merge tool is
 #    refused while the head has a check or a workflow run pending or red, or when that read could
 #    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.

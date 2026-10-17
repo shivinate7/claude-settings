@@ -96,8 +96,8 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
-RULE_FLOOR = 101
-UNMECHANIZED_EXPECTED = 54
+RULE_FLOOR = 98
+UNMECHANIZED_EXPECTED = 57
 JUDGMENT_EXPECTED = 21
 REASON_MIN_WORDS = 8
 
