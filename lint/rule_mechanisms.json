@@ -564,8 +564,14 @@
     },
     "style-time-central-24h": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "A hook for this rule is built on branch local-time-line and is not yet on main. This entry moves to a gate when that branch merges."
+        "kind": "gate",
+        "ref": "hooks/local_time.py",
+        "test": "hooks/test_local_time.py::CLI as UserPromptSubmit hook: one Central line on stdout",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.UserPromptSubmit[*].hooks[*].command",
+          "contains": "hooks/local_time.py"
+        }
       }
     },
     "style-no-unmeasured-estimate": {

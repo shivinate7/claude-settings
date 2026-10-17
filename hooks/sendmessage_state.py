@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for SendMessage: judge a message by the receiver's state on the session board.
+"""Before a SendMessage, reads the receiver's state from the session board. Allows a message to an idle or waiting receiver. A model judges a message to a busy receiver and may deny it.
 
 Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear
 something that changes its work). Spec: decisions/subagent-model-cap.md, the judge row.

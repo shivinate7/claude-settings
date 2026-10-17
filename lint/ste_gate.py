@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: Simplified Technical English gate.
+"""Before a Write or Edit of a markdown or UI file, fixes the Simplified Technical English errors it can fix. Denies the write for errors that remain.
 
 Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file at error
 severity only. Prints JSON when there is something to say. Always exits 0.

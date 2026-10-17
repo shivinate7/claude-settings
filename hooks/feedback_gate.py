@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: feedback inbox gate (Stop). Decision owner-feedback-inbox.
+"""At Stop, blocks once when the owner's feedback inbox is malformed: a captured message with no item lines, a bad item line, or an open item whose id is missing from the handoff.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes while the owner's
 `fb` capture is open, and the session's handoff beside it. It blocks a turn end in these cases:

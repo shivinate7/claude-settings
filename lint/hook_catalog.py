@@ -44,7 +44,7 @@ Sources, all read from the root:
   enabled repo mods       `enabledPlugins` keys `<name>@claude-settings` set true. The text is
                           the intro under the first heading of mods/<name>/README.md. A mod with no
                           README takes the `description` in its .claude-plugin/plugin.json,
-                          then the text of its SOURCE.md (repo, commit, licence).
+                          and must hold a SOURCE.md (repo, commit, licence), which the page omits.
   skills                  the `description` in the frontmatter of skills/<name>/SKILL.md.
   model and effort        the row of the model table whose first cell names the script.
 
@@ -324,7 +324,7 @@ Where each text comes from:
 
 - A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script that runs under more than one flag or event needs a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
-- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
+- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, and must hold a `SOURCE.md`, which says where it came from. The page omits that file's text.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
 Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
@@ -455,8 +455,6 @@ def render():
             text = under_first_heading(read(base + "/README.md"))
         else:
             text = mod_manifest_description(base) if has_file(base + "/SOURCE.md") else ""
-            if text:
-                text += " Source: " + under_first_heading(read(base + "/SOURCE.md"))
         if not text:
             problems.append("%s: no text under the first heading of README.md, and no plugin.json description with a SOURCE.md" % base)
             continue

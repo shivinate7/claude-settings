@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PermissionRequest hook on Bash: answer allow for a guarded delete of a bound, safe path.
+"""At a permission request for Bash in bypass mode, answers allow for a guarded delete of a safe, bound path. Prints nothing for any other command.
 
 Deferred item rm-prompt-answer-hook, decision rm-on-a-variable-needs-a-guard (owner, 2026-10-11).
 It answers allow only when all of these hold, and prints nothing otherwise:
