@@ -4540,14 +4540,22 @@ sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 
 # Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
-# flag (CI runs the mod tests this way). Its path is the NODE_TEST pattern, the same as after --test.
-# The first two are red on main, which needs --test. The rest pin the edge: plain node on any other
-# script, and on a test name with a suffix, an eval flag, a climbing path or an absolute path, stays
-# refused.
+# flag (CI runs the mod tests this way). Review round 1 (orchestrator call): plain node runs only its
+# first file, and the rest become argv. So the plain form takes exactly one literal test path. A glob
+# or a second file gives a false green. `--test` keeps its glob and multi-file form. Red on head
+# 730cb365: the glob and two-file plain calls. Red on main: the one-path allow (main needs --test).
 sh("wsl: a plain node test file, no --test flag",
    "wsl -e node mods/x/x.test.mjs", "allow", cwd=NOGIT)
-sh("wsl: a glob in a plain node test path",
-   "wsl -e node mods/*/*.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a glob in a plain node test path is refused",
+   "wsl -e node mods/*/*.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: two test files in a plain node call are refused",
+   "wsl -e node mods/a/a.test.mjs mods/b/b.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test file then a script in a plain node call is refused",
+   "wsl -e node x.test.mjs other.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a flag before the test file in a plain node call is refused",
+   "wsl -e node --inspect x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a --test node path is allowed",
+   "wsl -e node --test mods/*/*.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: a plain node script that is not a test",
    "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node file whose name only starts like a test",
