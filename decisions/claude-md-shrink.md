@@ -18,6 +18,8 @@ Owner ruling, 2026-10-17 00:40 CDT:
 - `judgment` means that no exact check can judge the rule. A model hook that comments on a reply is not an exact check.
 - A reason that says no check reads the rule yet stays `unmechanized`. Only a reason that says no check can judge it moves to `judgment`.
 
+Owner, 2026-10-17 02:28 CDT: "Merge it." The second lane scored zero net value at review round 3. Its one opened hole (hole 14) comes from the deleted rules themselves.
+
 Owner interview, 2026-10-17 (00:44 to 01:55 CDT), on the 23 rules left by the first lane:
 
 - `roles-sonnet-is-the-default`: delete only the sentence "An unlisted agent runs Sonnet, and that needs no word." Re-kind the row to `unmechanized`.
