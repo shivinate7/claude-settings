@@ -5285,10 +5285,11 @@ def _lane_entry(root, path):
 class DanglingDefaultBaseTests(unittest.TestCase):
     """Finding (review): guard.resolve_default_base returned origin/HEAD without checking that it
     resolves. A dangling origin/HEAD makes every base read unreadable, so no squash-merged lane is
-    ever exempted. The base must fall back to a ref that resolves (local main, then master). An
-    origin/HEAD that resolves stays the first base (owner's order)."""
+    ever exempted. The base must fall back to a ref that resolves. Owner's order (2026-10-16):
+    origin/HEAD when it resolves, then origin/main, origin/master, local main, local master. An
+    origin/HEAD that resolves stays the first base."""
 
-    def _squash_lane(self, origin_head_target):
+    def _squash_lane(self, origin_head_target, push_squash=False):
         base = tempfile.mkdtemp(prefix="dangling-base-", dir=ROOT)
         root = os.path.join(base, "repo")
         make_repo(root, {"f.txt": "x\n"})
@@ -5303,19 +5304,98 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         write(os.path.join(root, "lane.txt"), "work\n")
         run_vcs(root, "add", "-A")
         run_vcs(root, *IDENT, "commit", "-q", "-m", "squash of lane-squash")
+        if push_squash:  # the squash is on origin/main too, so the base the lane is read against has it
+            pushed = run_vcs(root, "push", "-q", "origin", "main")
+            require(pushed.returncode == 0, "pushing the squash failed: %s" % pushed.stderr.strip())
+            run_vcs(root, "fetch", "-q", "origin")
         set_head = run_vcs(root, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head_target)
         require(set_head.returncode == 0, "setting origin/HEAD failed: %s" % set_head.stderr.strip())
         return root, lane
 
     def test_dangling_origin_head_falls_back_to_a_ref_that_resolves(self):
         root, _ = self._squash_lane("refs/remotes/origin/gone")  # a remote branch that is missing
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+
+    def test_dangling_origin_head_reads_origin_main_when_it_is_ahead_of_local_main(self):
+        """Owner's ruling 2026-10-16: past a dangling origin/HEAD the base is origin/main, never a
+        local main that sits behind it."""
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        ahead = run_vcs(root, *IDENT, "commit-tree", "main^{tree}", "-p", "main",
+                        "-m", "pushed by someone else")
+        require(ahead.returncode == 0, "commit-tree failed: %s" % ahead.stderr.strip())
+        # origin/main is a child of local main, so it is ahead. Local main stays where it is.
+        moved = run_vcs(root, "update-ref", "refs/remotes/origin/main", ahead.stdout.strip())
+        require(moved.returncode == 0, "moving origin/main failed: %s" % moved.stderr.strip())
+        require(run_vcs(root, "rev-parse", "--verify", "-q",
+                        "refs/remotes/origin/HEAD^{commit}").returncode != 0,
+                "origin/HEAD resolves, so the case is not about a dangling one")
+        require(run_vcs(root, "merge-base", "--is-ancestor", "main", "origin/main").returncode == 0
+                and run_vcs(root, "rev-parse", "main").stdout != run_vcs(root, "rev-parse", "origin/main").stdout,
+                "origin/main is not strictly ahead of local main")
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+
+    def _drop_ref(self, root, ref):
+        gone = run_vcs(root, "update-ref", "-d", ref)
+        require(gone.returncode == 0, "dropping %s failed: %s" % (ref, gone.stderr.strip()))
+        require(run_vcs(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode != 0,
+                "%s still resolves" % ref)
+
+    def test_dangling_origin_head_and_no_origin_main_reads_origin_master_before_local_main(self):
+        """Owner's order 2026-10-16: origin/HEAD, origin/main, then origin/master, then local main.
+        Local main exists here and is still skipped for origin/master."""
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        self._drop_ref(root, "refs/remotes/origin/main")
+        made = run_vcs(root, "update-ref", "refs/remotes/origin/master", "main")
+        require(made.returncode == 0, "making origin/master failed: %s" % made.stderr.strip())
+        require(run_vcs(root, "rev-parse", "--verify", "-q", "refs/heads/main").returncode == 0,
+                "local main is gone, so the case does not prove origin/master precedes it")
+        self.assertEqual(guard.resolve_default_base(root), "origin/master")
+
+    def test_dangling_origin_head_and_no_origin_branch_reads_local_master_when_local_main_is_gone(self):
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        self._drop_ref(root, "refs/remotes/origin/main")
+        renamed = run_vcs(root, "branch", "-m", "main", "master")
+        require(renamed.returncode == 0, "renaming main to master failed: %s" % renamed.stderr.strip())
+        for ref in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
+                    "refs/heads/main"):
+            require(run_vcs(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode != 0,
+                    "%s resolves, so the case does not reach local master" % ref)
+        self.assertEqual(guard.resolve_default_base(root), "master")
+
+    def test_resolving_origin_head_stays_first_even_when_origin_main_exists(self):
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        made = run_vcs(root, "update-ref", "refs/remotes/origin/trunk", "refs/remotes/origin/main")
+        require(made.returncode == 0, "making origin/trunk failed: %s" % made.stderr.strip())
+        set_head = run_vcs(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        require(set_head.returncode == 0, "pointing origin/HEAD at trunk failed")
+        self.assertEqual(guard.resolve_default_base(root), "origin/trunk")
+
+    def test_a_repository_with_no_remote_reads_local_main(self):
+        root = os.path.join(tempfile.mkdtemp(prefix="no-remote-base-", dir=ROOT), "repo")
+        make_repo(root, {"f.txt": "x\n"})
+        require(run_vcs(root, "remote").stdout.strip() == "", "the fixture has a remote")
         self.assertEqual(guard.resolve_default_base(root), "main")
 
-    def test_squash_merged_unpushed_lane_is_removable_when_origin_head_dangles(self):
-        root, lane = self._squash_lane("refs/remotes/origin/gone")
+    def test_git_that_cannot_run_answers_none(self):
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        with mock.patch.object(sys.modules["guard_core"], "_git", return_value=None):
+            self.assertIsNone(guard.resolve_default_base(root))
+
+    def test_squash_merged_lane_is_removable_when_origin_head_dangles(self):
+        root, lane = self._squash_lane("refs/remotes/origin/gone", push_squash=True)
         decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
         self.assertEqual(decision["action"], "reap", decision)
         self.assertEqual(decision["reason"], "removable")
+
+    def test_dangling_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
+        # Past a dangling origin/HEAD the base is origin/main, not a local main that sits ahead of
+        # it (owner's order 2026-10-16). The squash is on local main only, so the base lacks the
+        # patch and the unpushed lane is kept. The reap test above pushes its squash.
+        root, lane = self._squash_lane("refs/remotes/origin/gone")
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
 
     def test_resolving_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
         # Local main is ahead of origin/main and holds the squash. origin/HEAD resolves, so it

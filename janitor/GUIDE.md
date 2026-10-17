@@ -40,9 +40,9 @@ patch ids, so it sees through a rebase, where a commit id no longer matches.
 The sweep keeps a branch, and names it as the only copy, when a patch survives
 that test and no remote ref carries the branch.
 
-The sweep resolves your default branch in this order: `origin/HEAD`, then local
-`main`, then local `master`. If none of the three answers, the sweep refuses
-your whole repository and reaps nothing in it.
+The sweep resolves your default branch in this order: `origin/HEAD`, then
+`origin/main`, `origin/master`, local `main`, local `master`. If none of the
+five answers, the sweep refuses your whole repository and reaps nothing in it.
 
 ## How it picks repositories
 
