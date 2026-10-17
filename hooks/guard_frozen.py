@@ -281,11 +281,9 @@ def _resolve_vars(cmd: str) -> str:
 # holds no data: a background job, a call operator, a PowerShell group such as `(iex "...")`.
 # A word in view that holds a quote is read in whole: the text of each quote is its own words, so
 # `system("sh", "-c", "tee P")` shows its `tee P`.
-# RESIDUAL GAPS, each a debt: a write made by a program's own code (cap-write-by-python-unseen);
-# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"` (debts
-# shell-write-miss-pipe-heredoc, -eval-heredoc, -subshell, -dq-substitution); `sort -o P`,
-# `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space
-# (shell-write-miss-sort-output, -git-diff-output, -git-config-file, -noclobber, -spaced-target).
+# RESIDUAL GAPS: a write made by a program's own code;
+# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `sort -o P`,
+# `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space.
 # Main missed these too.
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}

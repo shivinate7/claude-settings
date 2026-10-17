@@ -12,7 +12,7 @@ Protected by `hooks/test_guard.py` and `hooks/test_wrappers.py`.
 
 ## Holes, named
 
-Debts: `env-grep-long-abbrev-unpinned`, `env-file-rule-false-alarms`, `env-flat-crash-allows` and `env-node-env-file-prints` (the env-file holes), `guard-audit-subagent-stop-open` (SubagentStop fails open on a missing guard module).
+Debts: `env-file-rule-false-alarms` (an env-file hole).
 
 Kind: process
 Home: hooks/guard_env.py

@@ -22,7 +22,4 @@ Home: .github/workflows/gates.yml
 
 ## Holes, named
 
-Debts: `mods-check-mjs-skipped`, `mods-session-board-timer-margins`, `mods-node-version-unpinned`,
-`mods-step-order-unpinned`, `mods-linux-proof-pending`, `harness-scope-pipe-regex-quotes`,
-`harness-scope-line5-too-long`, `process-record-dead-plan-line`.
 Unverified: zizmor on the step (not installed here); whether `cancelled()` is true on a job timeout.

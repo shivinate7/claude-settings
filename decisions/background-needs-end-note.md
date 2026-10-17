@@ -21,7 +21,7 @@ Why: a server or watcher can run long after its work ends, and nothing in the st
 
 ## Holes, named
 
-Debts: `timeout-moved-server-unchecked` (a foreground server moved to background at 120 s is not checked), `node-file-server-unchecked` (a background `node server.js` is not refused), `until-note-unjudged` (the note is checked for presence only), `server-wrappers-unread` (a server behind some wrappers and forms is not refused), `bg-end-false-alarms` (script names and flask or jupyter commands are refused), `bg-end-roster-gaps` (watch flags and servers outside the roster pass, and a `nohup x &` call is left to the detached-launch rule).
+Debts: `timeout-moved-server-unchecked` (a foreground server moved to background at 120 s is not checked), `node-file-server-unchecked` (a background `node server.js` is not refused), `server-wrappers-unread` (a server behind some wrappers and forms is not refused), `bg-end-false-alarms` (script names and flask or jupyter commands are refused), `bg-end-roster-gaps` (watch flags and servers outside the roster pass, and a `nohup x &` call is left to the detached-launch rule).
 
 Kind: process
 Home: hooks/guard_stream.py

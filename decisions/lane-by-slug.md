@@ -18,8 +18,6 @@ Protected by the `lane-by-slug` block in `hooks/test_guard.py`.
 
 ## Holes, named
 
-Debts: `cite-by-id-skips-merge-subject` (cite-by-id does not read a `gh pr merge` subject), `lane-slug-lowercase-n-passes` (lowercase `n20` and four-digit numbers pass), `lane-slug-part-code-refused` (a part code such as `N12` is refused), `lane-slug-heredoc-untested` (the heredoc header reader has thin tests and no mutant), `guard-split-heredocs-here-string` (a here-string is read as a heredoc), `lane-slug-header-count-shift` (an interpreter body or a `case` shifts the header count), `lane-slug-piped-body-unread` (a piped commit body is not read), `lane-slug-tag-messages-unchecked` (tag messages are out of scope), `lane-slug-gh-m-flag-passes` (a session number after gh -m passes the rule).
-
 Limits: old history is not checked, only new acts. Reopen when a session number reaches main through an act the guard does not read: widen the scan and name the new limit here.
 
 Kind: process

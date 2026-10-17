@@ -36,12 +36,6 @@ Kind: build
 Plan: decisions/merge-reinstalls-from-main.md#the-ruling (all)
 Home: merge/install_from_main.sh
 
-## Holes, named
-
-Debts: `pin-switch-in-place-mix`, `live-pin-first-move-gap`, `install-lock-stale-by-age`,
-`install-lock-trap-no-id`, `install-early-exit-unlogged`, `guard-old-install-mixes-once`,
-`guard-realpath-after-flip`.
-
 ## Named limits
 
 - When the local main does not move, the install runs from the old main. The merge tool reports the failed move.

@@ -21,5 +21,5 @@ Home: hooks/mutate_guard.py
 
 ## Holes, named
 
-Debt `mutant-crash-audit-missing`: mutants other than the watch target are not audited for hidden
+Mutants other than the watch target are not audited for hidden
 crashes. The required-name field narrows this risk. It is not proof against every crash shape.

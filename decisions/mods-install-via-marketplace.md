@@ -11,10 +11,5 @@ Reason: work saved here must reach every PC and Mac with no step a person runs. 
 marketplace writes an absolute path into `settings.json`, which is a link to the shared copy on a
 Mac, so one machine path would reach every machine.
 
-## Holes, named
-
-Debts: `mods-macos-untested`, `mods-marketplace-no-ref-pin`, `mods-refresh-cadence-unmeasured`,
-`mods-load-needs-new-session`.
-
 Kind: process
 Home: settings.json

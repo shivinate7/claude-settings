@@ -32,6 +32,4 @@ Home: hooks/stall_watch.py
 
 ## Holes, named
 
-Debts: `stall-message-repeats-every-stop`, `stall-open-job-no-age-ceiling`, `stall-closes-on-quoted-notice`,
-`stall-macos-no-stop-suite`, `stall-message-delivery-unproven`, `stall-list-result-first-block`,
-`stall-windows-ci-unknown`.
+Debts: `stall-message-repeats-every-stop`, `stall-open-job-no-age-ceiling`, `stall-message-delivery-unproven`.

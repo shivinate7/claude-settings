@@ -18,8 +18,6 @@ Why: an agent resumed after the harness removed its worktree (folder and branch)
 
 ## Holes, named
 
-Debts: `home-cd-escaped-space` (a home path with a `\`-escaped space or a trailing newline, or one that holds `&`, `;`, `(`, `)` or `$`, refuses the move home; quoted forms are allowed). `home-cwd-mutant-fragment` (the four `home_cwd` mutants in `hooks/mutate_guard.py` name no case, only the fragment `worktree-home:`).
-
 Reopen when the harness payload stops carrying `agent_id`, or carries a `cwd` this rule cannot resolve. Reopen when the worktree naming scheme is not `agent-<agent_id>`. Reopen on a confirmed case on Windows, or in a Write or Edit payload, that disagrees. Unmeasured: Windows, and the Write and Edit payload shape on this machine (covered by fixture in `hooks/test_guard.py`).
 
 Kind: build

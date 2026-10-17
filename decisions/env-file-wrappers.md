@@ -20,7 +20,7 @@ Protected by the env-family cases in `hooks/test_guard.py`. Unpinned: the bare f
 
 ## Holes, named
 
-Debts: `env-grep-long-abbrev-unpinned` (grep --regex= style abbreviations are not pinned), `env-file-rule-false-alarms` (ag -f, ack -f, grep --exclude and rg -t are false refusals), `env-flat-crash-allows` (a crash in `_env_flat` allows the call), `env-node-env-file-prints` (node --env-file with -e prints the file through the runner).
+Debts: `env-file-rule-false-alarms` (ag -f, ack -f, grep --exclude and rg -t are false refusals).
 
 Limit: an `awk -v` value holding a glob is cleared as a search pattern. `hooks/test_guard.py` pins it as an allow.
 

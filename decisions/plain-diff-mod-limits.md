@@ -39,12 +39,6 @@ Kind: build
 Plan: decisions/plain-diff-mod-limits.md#the-ruling (all)
 Home: mods/plain-diff/hooks/register.mjs
 
-## Holes, named
-
-Debts: `plain-diff-keyvalue-misses`, `plain-diff-secret-file-names`, `plain-diff-quoted-path-label`,
-`plain-diff-long-line-anchor`, `plain-diff-limiter-slot-early`, `plain-diff-desktop-untested`,
-`plain-diff-4mib-unconfirmed`, `plain-diff-trimnote-regex`, `plain-diff-env-innocent-name`.
-
 ## Named limits
 
 - A secret in a form the filter does not know passes. An npm token (`npm_` then 36 letters) is an

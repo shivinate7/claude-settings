@@ -12,10 +12,6 @@ No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. The gua
 
 Why: a child `git init` inherited the variables and wrote `core.worktree` into the shared config, so every checkout read the wrong tree. An approved ask would reopen that path, so deny wins.
 
-## Holes, named
-
-Debts: `git-env-set-indirect-forms` (indirect sets pass the guard), `git-env-glued-block` (a glued block opener hides the set), `git-env-set-false-alarms` (safe forms are denied), `git-env-set-untested-forms` (some escape, group and heredoc forms have no case), `git-env-warn-session-start` (the warning runs at session start only), `git-env-lower-case-fold` (lower-case names fold to the rule, so `git_dir=x cmd` is denied too).
-
 ## Build plan
 
 Code in `hooks/guard_kill.py`, `hooks/guard.py` and `hooks/session_start.sh`. Cases in `hooks/test_guard.py`, families `git-env` and `shared-tree`.

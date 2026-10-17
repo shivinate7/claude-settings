@@ -12,9 +12,5 @@ Why: the silent-undo check (`silent-undo-check-design`) requires the trailer whe
 
 Protected by the twelve "Drops-lines" cases in `hooks/test_guard.py` and the mutant "excused in every paragraph" in `hooks/mutate_guard.py`.
 
-## Holes, named
-
-Debts: `drops-dot-slash-guard-lint` (`./deferred/a.md` after the key passes the guard, and the lint refuses it), `drops-mixed-paragraph-exempt` (a last paragraph that mixes prose with the trailer is exempt in the guard), `drops-cite-forms-unchecked` (`git commit --trailer`, a `Refs:` token, `git merge -m` and `git tag -m` are never cite-checked), `drops-whole-token-no-mutant` (no mutant removes the whole-token match), `drops-reads-msg-unlike-git` (a folded trailer and a `--file=-` heredoc are read in a different order than git), `drops-stdin-message-unread` (a message from `-F -` stdin is never read).
-
 Kind: process
 Home: hooks/guard.py

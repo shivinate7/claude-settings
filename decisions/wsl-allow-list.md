@@ -45,7 +45,3 @@ Protection: the WSL section of the guard tests (section 2c-bis) pins each allowe
 Kind: process
 Home: hooks/guard_wsl.py
 
-## Holes, named
-
-Debts: `wsl-bare-bash-not-refused`, `guard-substitution-in-token`, `wsl-wslenv-no-equals-unrefused`,
-`wsl-wslenv-false-alarms`, `wsl-env-path-form-untested`.

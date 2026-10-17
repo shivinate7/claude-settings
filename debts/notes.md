@@ -326,3 +326,4 @@
 - frozen copy-out after cd: `cd <frozen dir> && cp <frozen abs> rel` is allowed, because the guard does not track cd (hooks/guard_frozen.py _copy_reads).
 - frozen folder name copied into the config root: `cp -r <src named hooks|lint> ~/.claude/` is allowed on main too (hooks/guard_frozen.py).
 - notes-file history check: no test pins that the history check runs on the notes file (lint/hook_catalog.py, lint/test_hook_catalog.py).
+- rule-audit-row-test-field-unread: lint/rule_audit.py does not read a guard row's row-level test field; such a check needs loop-built case-name support (lint/rule_audit.py)

@@ -13,7 +13,7 @@ Why: the delete guard denied a quoted `rm -rf /` in an `echo` and missed `rm -rf
 
 ## Holes, named
 
-Debts: `bare-words-shares-env-list` (the `bare_words` search-tool exemption shares `ENV_PATTERN_COMMANDS` with the env-file rule). `git-rm-cached-false-alarm` (an index-only `git rm -rf --cached` denies). `quoted-script-unnamed-runner` (a quoted script for an unnamed runner is unread). `glued-subshell-unread` (a subshell with `)` glued to the last word is unread). `kill-guard-word-only` (the kill guard reads one word). `stream-guard-quadratic` (a long segment is slow).
+Debts: `git-rm-cached-false-alarm` (an index-only `git rm -rf --cached` denies).
 
 Kind: build
 Plan: decisions/guard-reads-wrapped-commands.md#the-ruling (all)

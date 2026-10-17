@@ -22,8 +22,6 @@ Why: after /clear or a fork a session started blind. After compaction nothing ch
 
 ## Holes, named
 
-Debts: `handoff-wake-misses-ready-forms` (the CI wake misses an obfuscated `gh pr re''ady` and a `gh pr ready 2>&1` form), `handoff-pointer-swept-compact` (another session's compact reorient can sweep a /clear pointer), `handoff-pointers-age-out` (pointers with a handoff have no age rule, and a raised `cleanupPeriodDays` still sweeps after 30 days).
-
 Limits:
 
 - The /clear pointer matches by project directory. Two sessions that clear in the same directory at the same time can swap pointers.

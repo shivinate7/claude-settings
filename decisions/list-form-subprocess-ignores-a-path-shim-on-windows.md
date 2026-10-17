@@ -10,9 +10,5 @@ A blind-command fixture cannot shadow a real executable for a list-form subproce
 - The `git.cmd` sibling next to each blind `git` stays, because the shell-form arm in `hooks/test_guard.py` still needs it.
 - `hooks/mutate_guard.py` carries the same shape for its mutants as a sixth tuple field, `only_on`.
 
-## Holes, named
-
-Debts: `schtasks-test-not-in-ci` (`janitor/test_install_schtasks.py` is not in any CI job, so its skip never runs on Windows CI), `blind-git-fixtures-unaudited` (other blind-command fixtures are not audited for the same gap).
-
 Kind: process
 Home: hooks/test_guard.py

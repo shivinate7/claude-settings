@@ -89,10 +89,6 @@ the two reads that stay allowed, and at a commit on a branch of the worker's own
 It names no forbidden action. A worker sent here by the reminder reads what to do
 instead, which is the only half of the conflict this repository controls.
 
-## Holes, named
-
-Debts: `unknown-stash-word-tree-only` (an unknown stash word is judged on the tree side only). `stash-create-false-refusal` (create is denied over a non-empty stack). `stash-read-to-run-race` (a stack entry pushed after the read is missed). `stash-all-ignored-tree-passes` (stash -a passes a tree with ignored files). `stash-help-flag-refused-as-push` (stash -h and --help are refused as a push). `stash-export-comment-stale` (a test comment is stale).
-
 ## Build plan
 
 The rule lives in `hooks/guard_shared_tree.py`, and the shared-tree family of

@@ -26,13 +26,8 @@ mode of the generator (`--records-only`). A broken generator import prints one l
 paths have tests. `RECORDS_HEADER` in `hooks/guard_merge.py` copies the first line of `RECORDS_INTRO` in
 `lint/hook_catalog.py`, and a pin test compares them.
 
-Debts: `old-before-was-flags-history`, `merge-by-button-stale-page`, `silent-undo-oracle-hides-cause`,
-`page-excuse-trailer-only`, `index-row-drop-no-finding`.
+Debt: `silent-undo-oracle-hides-cause`.
 
 Debts on the guard `records-page`:
 
-- `records-page-reader-gaps`: the guard reads only the paths of `git commit -i` or `--include`. It does not read `git rebase`, `git cherry-pick`, `git am` or `git revert`. It does not read a `sh -c`, `bash -c` or `cmd /c` script. `python -m lint.hook_catalog` does not count as a generator run.
-- `records-page-first-adoption`: a base with no page lets any page commit pass, by design.
 - `records-page-gen-false-alarm`: a generator run, then a commit that holds the page in the same call, is denied with no compare of the page.
-- `records-page-colon-spec-alarm`: `git add -A ':!docs/records.md'` likely counts as an add that reaches the page (read from code, unrun).
-- `records-page-handwritten-header`: a hand-written page that opens with `# Records index` reads as generated.

@@ -21,6 +21,5 @@ Home: actions/stamp/stamp.mjs
 
 ## Holes, named
 
-Debts: `stamp-quote-fence-closes-early`, `stamp-list-fence-not-seen`, `stamp-list-marker-column`,
-`stamp-blank-line-quote-fence`, `stamp-html-comment-hides-file`, `stamp-scan-frontmatter-links`. Each is
+Debt `stamp-scan-frontmatter-links` is
 low harm. None is a regression against main.
