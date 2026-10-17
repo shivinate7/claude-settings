@@ -44,12 +44,14 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
   - `ci`: a step name that appears in a `- name:` line of .github/workflows/gates.yml.
   - `unmechanized`: the literal token, paired with a `reason` of real length. A rule that
     genuinely cannot be checked by a machine still needs a row saying so, and saying why.
+  - `judgment`: the same shape and reason floor as `unmechanized`, with its own pin. A rule
+    only judgment can apply, so no hook or check could judge it. Not counted as a debt.
 
 NON-VACUITY, TWO WAYS. A reader that finds no anchors must never print `ok`: that is this
 repo's own signature defect in a new coat, a check that cannot tell "nothing is wrong" from
 "nothing is known yet". So a fall in the anchor count below RULE_FLOOR fails loud, and names
 the drop, rather than reporting a clean map over a page the parser stopped seeing.
-UNMECHANIZED_EXPECTED is an equality on purpose, not a ceiling: a ceiling lets a mutation that
+UNMECHANIZED_EXPECTED and JUDGMENT_EXPECTED are equalities on purpose, not a ceiling: a ceiling lets a mutation that
 deletes an honest `unmechanized` admission pass silently, because the count only falls, which
 reads as debt paid rather than as debt hidden. Both directions are guarded: build a mechanism
 for a rule and lower this pin in the same commit, or add a rule with no mechanism and raise it
@@ -89,15 +91,17 @@ ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 GUARD_RULE_RE = re.compile(r'(?:refuse|record)\(\s*\w+\s*,\s*"[a-z-]+"\s*,\s*"([a-z-]+)"')
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 
-# THREE PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
+# FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
 # module docstring, "NON-VACUITY, TWO WAYS", for the argument. Update RULE_FLOOR when a rule
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
-RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 75
+# JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
+RULE_FLOOR = 101
+UNMECHANIZED_EXPECTED = 60
+JUDGMENT_EXPECTED = 15
 REASON_MIN_WORDS = 8
 
-KINDS = {"guard", "gate", "ci", "unmechanized"}
+KINDS = {"guard", "gate", "ci", "unmechanized", "judgment"}
 # A case-registering call whose first argument is a literal case name.
 CASE_REGISTRARS = {"add", "sh", "check"}
 
@@ -361,10 +365,11 @@ def check(
     workflow_text: str,
     rule_floor: int = RULE_FLOOR,
     unmechanized_expected: int = UNMECHANIZED_EXPECTED,
+    judgment_expected: int = JUDGMENT_EXPECTED,
 ) -> List[str]:
     """Return every problem found. An empty list means the audit passes.
 
-    `rule_floor` and `unmechanized_expected` default to this repo's own pinned numbers.
+    `rule_floor`, `unmechanized_expected` and `judgment_expected` default to this repo's own pinned numbers.
     Fixture tests pass their own, sized to the small CLAUDE.md fragment they build, so a
     fixture's rule count is never mistaken for a shrunk real document.
     """
@@ -404,6 +409,7 @@ def check(
     ci_names = ci_step_names(workflow_text)
 
     unmechanized_count = 0
+    judgment_count = 0
     for slug in sorted(rules.keys() & anchor_set):
         entry = rules[slug]
         mech = entry.get("mechanism") if isinstance(entry, dict) else None
@@ -415,12 +421,15 @@ def check(
             problems.append(f"row `{slug}` has an unknown mechanism kind {kind!r}.")
             continue
 
-        if kind == "unmechanized":
-            unmechanized_count += 1
+        if kind in ("unmechanized", "judgment"):
+            if kind == "judgment":
+                judgment_count += 1
+            else:
+                unmechanized_count += 1
             reason = (mech.get("reason") or "").strip()
             if len(reason.split()) < REASON_MIN_WORDS:
                 problems.append(
-                    f"row `{slug}` is `unmechanized` with {len(reason.split())} words of "
+                    f"row `{slug}` is `{kind}` with {len(reason.split())} words of "
                     f"reason. Say what a hook or a check would have to see, in at least "
                     f"{REASON_MIN_WORDS} words, or the token is a rubber stamp."
                 )
@@ -481,6 +490,15 @@ def check(
             f"count moves only in the commit that changes it."
         )
 
+    if judgment_count != judgment_expected:
+        direction = "more" if judgment_count > judgment_expected else "fewer"
+        problems.append(
+            f"{judgment_count} rules read `judgment`, {direction} than the pinned "
+            f"{judgment_expected}. Gave a rule a machine check? Lower JUDGMENT_EXPECTED "
+            f"in this commit. Added a rule only judgment can apply? Raise it and say why. This "
+            f"count moves only in the commit that changes it."
+        )
+
     return problems
 
 
@@ -512,10 +530,12 @@ def main() -> None:
     anchors = claude_md_anchors(claude_text)
     rules = rule_map["rules"]
     unmechanized = sum(1 for s in anchors if rules[s]["mechanism"]["kind"] == "unmechanized")
+    judgment = sum(1 for s in anchors if rules[s]["mechanism"]["kind"] == "judgment")
     print(
         f"rule_audit: OK. {len(anchors)} rule anchors, "
-        f"{len(anchors) - unmechanized} name a mechanism that resolves, "
-        f"{unmechanized} argue `unmechanized` (pinned at {UNMECHANIZED_EXPECTED})."
+        f"{len(anchors) - unmechanized - judgment} name a mechanism that resolves, "
+        f"{unmechanized} argue `unmechanized` (pinned at {UNMECHANIZED_EXPECTED}), "
+        f"{judgment} are `judgment` (pinned at {JUDGMENT_EXPECTED})."
     )
 
 
