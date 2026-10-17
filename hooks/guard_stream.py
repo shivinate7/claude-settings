@@ -9,16 +9,18 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    inline_script, resolve_command, segment_tokens, split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
+    split_segments,
 )
 
 
 # ------------------------------------------------------------------ a stream that never ends
 #
-# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag turns `tail` or
-# `Get-Content` into a command that never exits on its own, so it outlives the turn and the
-# agent that started it. The COMMAND WORD is checked first, so an unrelated `-f` on another
-# program never matches.
+# Guard rule live-stream. A follow flag turns `tail` or `Get-Content` into a command that never
+# exits on its own, so it outlives the turn and the agent that started it. A `tail` at any bare
+# (unquoted) word counts, so a runner no reader names still shows it (bare_words). Quoted text, a
+# commit message or a search command's pattern never matches. A script inside one quoted word
+# (`sh -c`, `ssh`, `docker exec` and the like) is read as a nested command (inner_commands).
 #
 # The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
 # `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
@@ -27,23 +29,39 @@ LIVE_STREAM_TAIL_TOOL = "tail"
 LIVE_STREAM_GETCONTENT_TOOLS = ("get-content", "gc")
 
 
-def live_stream_hit(segment: str) -> str:
-    """Return the matched text when one segment follows a stream and never ends, else ''."""
-    tokens = segment.split()
-    for index, token in enumerate(tokens):
-        tool = basename(token)
+def _follow_hit(token: str, args) -> str:
+    """The matched text when the command `token` with arguments `args` follows a stream, else ''."""
+    tool = basename(token)
+    for arg in args:
         if tool == LIVE_STREAM_TAIL_TOOL:
-            for arg in tokens[index + 1:]:
-                if arg == "--follow" or arg.startswith("--follow="):
-                    return token + " " + arg
-                if arg.startswith("-") and not arg.startswith("--") and (
-                        "f" in arg or "F" in arg):
-                    return token + " " + arg
-        elif tool in LIVE_STREAM_GETCONTENT_TOOLS:
-            for arg in tokens[index + 1:]:
-                if arg.lower() == "-wait":
-                    return token + " " + arg
+            if arg == "--follow" or arg.startswith("--follow="):
+                return token + " " + arg
+            if arg.startswith("-") and not arg.startswith("--") and ("f" in arg or "F" in arg):
+                return token + " " + arg
+        elif tool in LIVE_STREAM_GETCONTENT_TOOLS and arg.lower() == "-wait":
+            return token + " " + arg
     return ""
+
+
+def live_stream_hit(segment: str) -> str:
+    """Return the matched text when one segment follows a stream and never ends, else ''.
+
+    A segment shlex cannot parse is read word by word, every word as a command word, so an
+    unmatched quote elsewhere in the line does not hide a follow."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        words = segment.split()
+        return next((h for i, w in enumerate(words) if (h := _follow_hit(w, words[i + 1:]))), "")
+    for start in command_indexes(tokens):
+        hit = _follow_hit(tokens[start], tokens[start + 1:])
+        if hit:
+            return hit
+    words, bare = bare_words(segment)
+    hit = next((h for i in sorted(bare) if (h := _follow_hit(words[i], words[i + 1:]))), "")
+    if hit:
+        return hit
+    return next((h for text in inner_commands(tokens) for part in split_segments(text)
+                 if (h := live_stream_hit(part))), "")
 
 
 LIVE_STREAM_REASON = (

@@ -353,6 +353,14 @@ WRAPPER_VALUE_FLAGS = {
              "--close-from", "-D", "--chdir", "-R", "--chroot", "-T", "--command-timeout",
              "-r", "--role", "-t", "--type", "-U", "--other-user"},
 }
+# Runners that start another command but are no `COMMAND_WRAPPERS` entry: `wrapped_commands` reads
+# them. Their value flags sit here so `_wrapper_flags` skips the same way.
+WRAPPER_VALUE_FLAGS.update({
+    "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
+    "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+})
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
@@ -2167,6 +2175,99 @@ def nested_script(tokens) -> str:
     if word == "eval":
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
+
+
+# The ssh options that take a value: `-p 22`, `-i key`, `-o X=y`. The value is never the host.
+SSH_VALUE_LETTERS = "BbcDEeFIiJLlmOopQRSWw"
+
+
+def ssh_remote_script(tokens) -> str:
+    """The command `ssh [options] host COMMAND...` runs on the far side, else ''. Not part of
+    `nested_script`: that one also feeds the step count of an ask, which this must not move."""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ssh":
+        return ""
+    index = at + 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        flag, index = tokens[index], index + 1
+        for pos, letter in enumerate(flag[1:], 1):
+            if letter in SSH_VALUE_LETTERS:
+                index += pos == len(flag) - 1   # the value is the next word, else glued on
+                break
+    return " ".join(tokens[index + 1:])   # tokens[index] is the host
+
+
+def wrapped_commands(tokens, at: int):
+    """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "kubectl" and "exec" in rest and "--" in rest:
+        return [shlex.join(rest[rest.index("--") + 1:])]
+    if word == "find":
+        found = []
+        for i, token in enumerate(rest):
+            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+                end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
+                found.append(shlex.join(rest[i + 1:end]))
+        return found
+    if word == "su":
+        return [rest[i + 1] for i, t in enumerate(rest[:-1]) if t in ("-c", "--command")][:1]
+    skip = 0
+    if word in ("docker", "podman"):
+        if rest[:1] in (["container"], ["compose"]):
+            rest = rest[1:]
+        if rest[:1] != ["exec"]:
+            return []
+        rest, skip = rest[1:], 1   # the container
+    elif word == "flock":
+        skip = 1   # the lock file
+    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+        return []
+    index, _ = _wrapper_flags(word, rest, 0)
+    inner = rest[index + skip:]
+    return [shlex.join(inner)] if inner else []
+
+
+def bare_words(segment: str):
+    """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
+    no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
+    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
+    words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
+    has no bare word."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is not None and basename(tokens[at]) in ENV_PATTERN_COMMANDS:
+        return [], set()
+    spans, start, bare = [], None, True
+    for index, char, quote in walk_quotes(segment):
+        if not quote and char in " \t\r\n":
+            if start is not None:
+                spans.append((segment[start:index], bare))
+            start, bare = None, True
+            continue
+        start = index if start is None else start
+        bare = bare and not quote and char not in "'\"\\"
+    if start is not None:
+        spans.append((segment[start:], bare))
+    words = []
+    for text, _ in spans:
+        try:
+            words.append("".join(shlex.split(text)))
+        except ValueError:
+            words.append(text)
+    return words, {i for i, (_, b) in enumerate(spans) if b}
+
+
+def inner_commands(tokens):
+    """Every command text one segment hands on, for a rule that judges the command word: what a
+    shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
+    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
+    found = [nested_script(tokens), ssh_remote_script(tokens)]
+    for at in command_indexes(tokens):
+        found.extend(wrapped_commands(tokens, at))
+    return [text for text in found if text]
 
 
 def _command_starts(tokens):
