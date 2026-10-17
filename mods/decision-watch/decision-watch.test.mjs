@@ -99,10 +99,10 @@ await test('source: the host reads $.model.complete( and the event names as lite
 })
 
 // Debt dw-ffff-regex-literal. A raw U+FFFF (a noncharacter) in the file can be dropped or mangled by an editor
-// or a transfer, and then the asciiJson range end changes with no sign. The escape ￿ is plain ASCII.
+// or a transfer, and then the asciiJson range end changes with no sign. The escape \uFFFF is plain ASCII.
 // This is a character-presence check, not a scan of strings and comments, so it needs no opener cases.
 await test('source: hooks/register.mjs holds no raw U+FFFF character, the asciiJson range end is an escape', () => {
-  assert.ok(!readFileSync(REGISTER, 'utf8').includes('￿'), 'a raw U+FFFF character is in hooks/register.mjs')
+  assert.ok(!readFileSync(REGISTER, 'utf8').includes('\uFFFF'), 'a raw U+FFFF character is in hooks/register.mjs')
 })
 
 // Item 1. The validator rejects a $ noun read as a value. $.fs.write makes folders, so there is no mkdir.
@@ -670,7 +670,7 @@ await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, 
 await test('stdin: the JSON sent to python is ASCII-only, and a non-ASCII path round-trips', async () => {
   const cwd = '/work/café/repo'
   // U+FFFF is the top of the escaped range (debt dw-ffff-regex-literal): it must escape, and round-trip.
-  const transcript = REAL_CFG + '/projects/café￿/' + SID + '.jsonl'
+  const transcript = REAL_CFG + '/projects/café\uFFFF/' + SID + '.jsonl'
   const h = await load(host())
   await fire(h, 'classic.Stop', stopEvent({ cwd, transcript_path: transcript }), {})
   await judged(h)
