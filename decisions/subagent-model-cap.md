@@ -286,13 +286,13 @@ the model on that one call, on the owner's word: narrower and cheaper than a rep
 raise. The grant is for several lanes in a row.
 
 The raise is a standing change. Every spawn in that repository that names no model reads it, and
-it outlives the turn that wrote it. Two parts guard it. Both key on the model variable alone.
+it outlives the turn that wrote it. Two parts guard it. Both key on the model variables alone: `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`.
 
 - Guard rule `subagent-model-cap` asks on the write. The ask names the model and the file. The
-  rule matches the model key with an optional `_FORCE` group. The group stays, so the ask still
+  rule matches either model key with an optional `_FORCE` group. The group stays, so the ask still
   fires on a stale file, or another repository, that sets the flag.
 - `hooks/config_watch.py` judges the override on every sweep. `cap_lift_value` returns true for
-  any value of `CLAUDE_CODE_SUBAGENT_MODEL` other than `sonnet`. `_subagentCapUntil` sits outside
+  any value of either model key other than `sonnet`. `_subagentCapUntil` sits outside
   `env`, only the watch reads it, and it must be no more than 24 hours ahead. A deadline that is
   missing, unparseable, passed or too far out gets the file reverted to the `prior` content the
   watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner to read

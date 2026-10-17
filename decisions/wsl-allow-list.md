@@ -34,7 +34,7 @@ The guard finds a WSL call by its launcher path:
 
 - `wsl` or `wsl.exe`, by any path.
 - `bash.exe` under `System32` or `Sysnative`. Git bash is not one of these.
-- `ubuntu*.exe`.
+- `ubuntu*.exe`, `debian*.exe` and `kali*.exe`.
 
 ## Before this rule
 
