@@ -79,7 +79,7 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 
 1. The watch reverts the cap override only at expiry. No text now tells an agent to remove the file before then. Debt: `override-removal-unreminded`, no early-removal reminder.
 2. An agent now meets the `_subagentCapUntil` field only in the revoke message of `hooks/config_watch.py`, after a bad write. Debt: `cap-until-field-taught-late`, the field is taught late.
-3. The `unmechanized` line in the `lint/rule_audit.py` docstring still says "genuinely cannot be checked by a machine". That overlaps `judgment`. Debt: `unmech-doc-overlaps-judgment`, the docstring overlaps the new kind.
+3. Closed: the `unmechanized` line in the `lint/rule_audit.py` docstring no longer overlaps `judgment`.
 4. These 14 rules stay as prose, unchanged by the interview: `outcomes-mechanize-rules`, `roles-opus-override-guarded`, `roles-third-try-steps-up`, `git-never-discard-output`, `git-remedy-never-names-target`, `git-slug-then-claim-number`, `git-cite-by-id`, `verification-trust-guard-after-red`, `verification-cry-wolf-guard-is-spent`, `verification-report-unknown-reads`, `building-allow-list-is-the-constant`, `building-scanner-respects-strings`, `reports-order-of-labels`, `reports-done-format`.
 5. A move from `unmechanized` to `judgment` takes a rule off the list of rules that still wait for a check. Only the 8-word reason floor and the two pins in one commit stand in the way. Debt: `judgment-exits-debt-count`, a re-kind leaves the waiting list.
 6. A measured time table (deferred item measured-time-table) may let a check judge `style-no-unmeasured-estimate`. Debt: `estimate-rule-may-be-checkable`, the time table may give it a check.

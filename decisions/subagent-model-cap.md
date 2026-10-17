@@ -84,7 +84,7 @@ A check, `lint/check_skill_model_rows.py`, fails CI when a skill has no row or a
 
 ## Holes, named
 
-Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence). `skill-rows-phrase-any-cell` (the two phrases match any cell). `skill-rows-unclosed-fence-silent` (an unclosed fence hides rows without a name). `skill-rows-dir-named-skill-md` (a directory named SKILL.md counts as a skill). `skill-rows-test-gaps` (three shapes have no test). `skill-rows-posix-only-test` (the exit 2 test is POSIX only). `sendmessage-judge-blind-recvs` (the busy-state layer does not see some receivers). `sendmessage-judge-dup-names` (a name shared by two sessions is read as unseen). `sendmessage-wording-judge-always` (the wording judge runs on every send).
+Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence). `skill-rows-test-gaps` (three shapes have no test). `skill-rows-posix-only-test` (the exit 2 test is POSIX only). `sendmessage-judge-blind-recvs` (the busy-state layer does not see some receivers). `sendmessage-judge-dup-names` (a name shared by two sessions is read as unseen). `sendmessage-wording-judge-always` (the wording judge runs on every send).
 
 ## Named limits
 

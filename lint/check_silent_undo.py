@@ -99,7 +99,7 @@ def misplaced(cwd, rng):
     try:  # the hint is an extra: a failed read of it never changes the verdict
         # One read and no --grep, which grep.patternType in the repo config would change. git refuses a NUL in a message, so
         # NUL splits each commit into sha, parsed trailers (keys, not values: an empty or folded trailer counts once), body.
-        f = git(cwd, "log", "-z", "--format=%H%x00%(trailers:key=" + TRAILER + ",unfold)%x00%B", rng)[1].split("\0")
+        f = git(cwd, "log", "-z", "--no-show-signature", "--format=%H%x00%(trailers:key=" + TRAILER + ",unfold)%x00%B", rng)[1].split("\0")
     except Unknown:
         return []  # ponytail: a failed read gives no hint at all, and no note; the finding and its exit code stand
     return ["%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER)

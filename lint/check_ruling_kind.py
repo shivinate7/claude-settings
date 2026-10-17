@@ -164,7 +164,8 @@ def changed(base):
     return r.stdout.split("\n")
 
 
-args = sys.argv[1:]
+# --opt=VALUE reads as --opt VALUE.
+args = [p for a in sys.argv[1:] for p in (a.split("=", 1) if a.startswith("--") and "=" in a else [a])]
 base = "origin/main"
 if "--base" in args:
     i = args.index("--base")
@@ -196,6 +197,10 @@ if "--dir" in args:  # the records folder, for a repo that keeps its records els
         if not ok or not os.path.isdir(here):
             print("check_ruling_kind: FAIL: records folder '%s' is not a folder under %s" % (given, ROOT))
             sys.exit(1)
+for a in args:  # an option left over is a typo: fail, never read it as a file name
+    if a.startswith("-"):
+        print("check_ruling_kind: FAIL: unknown option '%s'" % a)
+        sys.exit(1)
 files = args or changed(base)
 bad = 0
 for f in files:

@@ -864,6 +864,33 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "")
 
 
+class RemovedBudgetKeysTests(unittest.TestCase):
+    """load_config says so when a config still sets a removed word-budget key (plain-prose-lint)."""
+
+    def load(self, data):
+        import contextlib
+        import io
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with open(os.path.join(tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            cfg = ste_lint.load_config(tmp.name)
+        return cfg, err.getvalue()
+
+    def test_removed_budget_keys_print_a_notice_each(self):
+        for key in ("max_words_procedural", "max_words_descriptive"):
+            with self.subTest(key=key):
+                _cfg, err = self.load({key: 20})
+                self.assertIn(key, err)
+
+    def test_a_current_key_prints_no_notice(self):
+        cfg, err = self.load({"max_words": 20})
+        self.assertEqual(cfg["max_words"], 20)
+        self.assertEqual(err, "")
+
+
 class SentenceSplitBoldTests(unittest.TestCase):
     """A sentence end inside bold or italic markers still splits (claude-settings patch)."""
 

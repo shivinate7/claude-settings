@@ -59,7 +59,7 @@ The writer gets a rewrite only where the rewrite keeps the meaning. Where the li
 
 1. The advisory note is not logged to guard.log. At the 30-day trigger of `ste-into-agent-briefs`, no log can show whether the nudge ran. Debt: `advisory-note-not-logged`, the advisory note leaves no log line.
 2. The sweep prints an advisory-only note as a `systemMessage`. Unmeasured: whether the model sees a Stop `systemMessage`. Debt: `sweep-note-delivery-unmeasured`, the sweep note may reach the user only.
-3. `load_config` in `lint/ste_lint.py` keeps only the keys of `DEFAULT_CONFIG`. A `.ste.json` that sets `max_words_procedural` or `max_words_descriptive` is ignored with no message. A repo that set them gets 30 words with no notice. Debt: `old-budget-keys-ignored`, removed budget keys are dropped silently.
+3. Closed: `load_config` in `lint/ste_lint.py` prints a notice on stderr for `max_words_procedural` and `max_words_descriptive` in a config.
 4. The rule text says "one term per meaning". No check reads it. The gate covers sentence length and filler only. Debt: `one-term-per-meaning-unchecked`, no check reads one term per meaning.
 5. The gate and the sweep read file writes only. Replies, briefs and agent messages are unchecked. Debt: `plain-prose-writes-only`, the plain-prose rule is checked on file writes only.
 6. Unmeasured: how often a kept STE011 swap changes meaning. Only five rows were read for meaning. Debt: `kept-bloat-rows-unaudited`, 97 kept fix rows are not read against a corpus.
