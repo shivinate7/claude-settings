@@ -1,6 +1,6 @@
 # A branch is redundant by patch, not by ancestry
 
-The sweep in `plans/janitor-build-plan.md` keeps or reaps a local branch. This
+The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) keeps or reaps a local branch. This
 entry records the test it uses, and the measurement behind it.
 
 ## The defect in the older rule
@@ -54,3 +54,6 @@ the record holds it.
 
 `janitor/test_sweep.py` holds the rebase-ghost fixture. That fixture goes red
 against a sweep that tests ancestry alone.
+
+Kind: process
+Home: janitor/sweep.py
