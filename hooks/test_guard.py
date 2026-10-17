@@ -908,9 +908,11 @@ def build_fixtures():
     write(os.path.join(PROJ, ".claude", "hooks", "g.py"), "# hook\n")
     write(os.path.join(PROJ, "src", "app.py"), "print(1)\n")
     # The clone of claude-settings. Its own settings.json is the SOURCE the install script copies,
-    # so it must stay editable. The two marker files are what tell the clone from a config folder.
+    # so it must stay editable. The marker files tell the clone from a config folder, and the install
+    # script is the one that makes the pin, so a folder beside a clone that holds it is a pin.
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
+    write(os.path.join(CLONE, "merge", "install_from_main.sh"), "# install\n")
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
@@ -7829,6 +7831,143 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
    "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
+# OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
+# reads the frozen file, so it is allowed. A copy INTO a frozen path, a copy between two frozen
+# paths and a `mv` of a frozen file stay denied: `mv` takes the file away, and a copy writes into
+# the frozen set. The two copy-out cases are RED on main, where MUTATING_COMMAND denies any `cp`.
+sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /tmp/guard.bak",
+   "allow", cwd=NOGIT)
+sh("frozen: cp FROM the frozen settings to scratch is a read",
+   "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: cp from a frozen path TO a frozen path still denies",
+   "cp " + CFG_HOOK + " " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM a frozen hook still denies", "mv " + CFG_HOOK + " /tmp/guard.bak", "deny",
+   "frozen-path", cwd=NOGIT)
+# A LINK IS NOT A COPY. `cp -l` and `cp -s` (also `-a` with either, and the long forms) make a hard or
+# symbolic link to the frozen file, so a later write to the new name writes the frozen file. Only a
+# plain copy reads its source.
+sh("frozen: cp -al FROM a frozen hook makes a link, and stays denied",
+   "cp -al " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -l FROM a frozen hook makes a hard link, and stays denied",
+   "cp -l " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --link FROM a frozen hook stays denied",
+   "cp --link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -s FROM a frozen hook makes a symbolic link, and stays denied",
+   "cp -s " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --symbolic-link FROM a frozen hook stays denied",
+   "cp --symbolic-link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A HARD LINK TO A DIRECTORY LINKS EACH FILE IN IT. `cp -al` of the config directory (the test's
+# stand-in for ~/.claude) or `cp -Rl` of its hooks folder gives /tmp/x the frozen files themselves.
+sh("frozen: cp -al of the config directory makes links into it, and stays denied",
+   "cp -al " + slash(CFG) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -Rl of the frozen hooks folder makes links, and stays denied",
+   "cp -Rl " + slash(os.path.join(CFG, "hooks")) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A redirect of stderr to the null device writes no frozen file. A redirect onto one still denies.
+sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
+   "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
+sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
+   "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
+# no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
+# worktree `<clone>-live-<12 hex>`. The links in ~/.claude load from it, so a write into either one
+# changes what every session runs. The fixture clone is CLONE, so its pin is ROOT/clone-live.
+# ONLY THE TREE THE PIN LINKS TO IS FROZEN. install_from_main.sh makes `<clone>-live` a link to the
+# current stamped tree, and the trees before it stay on disk until pruned. OLD_PIN is one of those.
+LIVE_PIN = CLONE + "-live"
+STAMPED_PIN = CLONE + "-live-abcdef123456"
+OLD_PIN = CLONE + "-live-111111111111"
+LIVE_CLAUDEMD = slash(os.path.join(LIVE_PIN, "CLAUDE.md"))
+STAMPED_GUARD = slash(os.path.join(STAMPED_PIN, "hooks", "guard.py"))
+OLD_GUARD = slash(os.path.join(OLD_PIN, "hooks", "guard.py"))
+write(STAMPED_GUARD, "# pinned\n")
+write(OLD_GUARD, "# old\n")
+try:
+    os.symlink(STAMPED_PIN, LIVE_PIN)
+    PIN_LINKED = True
+except OSError:
+    PIN_LINKED = False   # no link rights: the pin is a plain folder, and the link cases do not run
+write(LIVE_CLAUDEMD, "# pinned\n")
+add("frozen: Write of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, content="rules\n")
+add("frozen: Edit of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Edit",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, old_string="# pinned", new_string="# rewritten")
+if PIN_LINKED:
+    add("frozen: Write of a hook in the stamped tree the pin links to", "deny", "frozen-path",
+        tool="Write", cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
+    sh("frozen: sed -i on a hook in the stamped tree the pin links to",
+       "sed -i '' s/a/b/ " + STAMPED_GUARD, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i on the live pinned checkout's CLAUDE.md", "sed -i '' s/a/b/ " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a redirect onto the live pinned checkout's CLAUDE.md", "echo rules > " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp onto the live pinned checkout's CLAUDE.md", "cp /tmp/x.md " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM the live pinned checkout's CLAUDE.md still denies",
+   "mv " + LIVE_CLAUDEMD + " /tmp/live.md", "deny", "frozen-path", cwd=NOGIT)
+# A copy OUT of the pin reads it, the same as the copy-out rule above.
+sh("frozen: cp OUT of the live pinned checkout to scratch is a read",
+   "cp " + LIVE_CLAUDEMD + " /tmp/live.md", "allow", cwd=NOGIT)
+add("frozen: Read of the live pinned checkout's CLAUDE.md is allowed", "allow", tool="Read",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD)
+# NOT THE PIN: the clone itself, a folder whose name only starts with the pin's name, a `-live`
+# folder that belongs to no clone, and a `-live-` folder whose tail is not 12 hex.
+add("frozen: an edit in the clone itself is allowed", "allow", tool="Edit", cwd=CLONE,
+    file_path=slash(os.path.join(CLONE, "CLAUDE.md")), old_string="rules", new_string="rewritten")
+sh("frozen: sed -i on the clone's own CLAUDE.md is allowed",
+   "sed -i '' s/a/b/ " + slash(os.path.join(CLONE, "CLAUDE.md")), "allow", cwd=NOGIT)
+add("frozen: an edit in claude-settings-livestock is allowed", "allow", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clone-livestock", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in an unrelated folder named -live is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "other-live", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in a -live folder whose tail is not 12 hex is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clone-live-scratch", "CLAUDE.md")),
+    old_string="a", new_string="b")
+# THE RECOVERY PATH STAYS OPEN. A broken pin is repaired by running the install by hand, or by
+# running the merge tool, so neither may be gated on the pin being healthy (verification-recovery-
+# not-gated-on-own-state). Each runs from the clone, and each from the pin itself.
+sh("recovery: merge/install_from_main.sh run by hand from the clone is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=CLONE)
+sh("recovery: merge/install_from_main.sh run by hand from the live pin is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=LIVE_PIN)
+sh("recovery: the merge tool run from the clone is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=CLONE)
+sh("recovery: the merge tool run from the live pin is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=LIVE_PIN)
+# A STAMPED TREE NO LINK POINTS AT IS NOT FROZEN. install_from_main.sh says "move it aside" when a
+# tree is in the way (move_pin), and prune_trees removes the old ones. Neither may be blocked.
+sh("recovery: mv of an old stamped tree that no link points at is allowed",
+   "mv " + OLD_PIN + " /tmp/aside", "allow", cwd=NOGIT)
+sh("recovery: rm -rf of an old stamped tree that no link points at is allowed",
+   "rm -rf " + OLD_PIN, "allow", cwd=NOGIT)
+# A FOLDER IS A PIN ONLY WHEN ITS SIBLING CLONE HOLDS merge/install_from_main.sh, the script that
+# makes the pin (orchestrator call, 2026-10-17). The two marker files alone do not make one, so a
+# sibling with only settings.json, or only install.ps1, leaves `X-live` editable.
+write(os.path.join(ROOT, "clonea", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonea-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloneb", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "cloneb-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "clonec", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonec", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "clonec-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloned", "merge", "install_from_main.sh"), "# install\n")
+write(os.path.join(ROOT, "cloned-live", "CLAUDE.md"), "# pinned\n")
+add("frozen: Write of X-live beside a clone with only settings.json stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clonea-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with only install.ps1 stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "cloneb-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with both markers and no install script stays editable",
+    "allow", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clonec-live", "CLAUDE.md")), content="rules\n")
+add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
+    "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
