@@ -5387,6 +5387,16 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         self.assertEqual(decision["action"], "reap", decision)
         self.assertEqual(decision["reason"], "removable")
 
+    def test_dangling_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
+        # Past a dangling origin/HEAD the base is origin/main, not a local main that sits ahead of
+        # it (owner's order 2026-10-16). The squash is on local main only, so the base lacks the
+        # patch and the unpushed lane is kept. The reap test above pushes its squash.
+        root, lane = self._squash_lane("refs/remotes/origin/gone")
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
+
     def test_resolving_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
         # Local main is ahead of origin/main and holds the squash. origin/HEAD resolves, so it
         # stays the base (owner's order), origin/main lacks the patch, and the lane is kept.

@@ -396,6 +396,14 @@ PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
 PUSHDANGLING = os.path.join(ROOT, "pushdangling")
+# Where origin/HEAD does not name the branch, main AND master stay protected. PUSHNOHEADMAIN has
+# origin/main and no origin/HEAD. PUSHONLYMASTER has origin/master and no origin/HEAD (local main
+# exists, as in any checkout). PUSHUPSTREAM has two remotes: origin/HEAD names develop,
+# upstream/HEAD names main, and `feat` tracks upstream/main with push.default upstream. A push
+# reads the PUSHED remote's default branch, never origin's.
+PUSHNOHEADMAIN = os.path.join(ROOT, "pushnoheadmain")
+PUSHONLYMASTER = os.path.join(ROOT, "pushonlymaster")
+PUSHUPSTREAM = os.path.join(ROOT, "pushupstream")
 # push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
 # named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
 PUSHUP = os.path.join(ROOT, "pushup")
@@ -1283,6 +1291,40 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHDANGLING needs a dangling origin/HEAD "
                  "and a live origin/main")
 
+    # origin/HEAD unset, one remote branch: origin/main (PUSHNOHEADMAIN) or origin/master (PUSHONLYMASTER).
+    for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
+                                         (PUSHONLYMASTER, "master", "main")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + remote_branch + "^{commit}").returncode != 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + absent + "^{commit}").returncode == 0):
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin/%s, no origin/%s and "
+                     "no origin/HEAD" % (where, remote_branch, absent))
+
+    # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
+    make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
+    for remote, default in (("origin", "develop"), ("upstream", "main")):
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
+        run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
+                "refs/remotes/%s/%s" % (remote, default))
+    run_vcs(PUSHUPSTREAM, "checkout", "-q", "-b", "feat")
+    run_vcs(PUSHUPSTREAM, "config", "push.default", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.remote", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.merge", "refs/heads/main")
+    if (run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip()
+            != "refs/remotes/origin/develop"
+            or run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/upstream/HEAD").stdout.strip()
+            != "refs/remotes/upstream/main"
+            or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
+                 "upstream/HEAD -> main and feat tracking upstream")
+
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
         make_repo(where, {"base.txt": "base\n"})
@@ -1453,8 +1495,8 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHUP, PUSHUPSELF,
-              PUSHNOUP, PUSHMATCH], _build_push)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -5358,6 +5400,28 @@ push_case("a dangling origin/HEAD, a delete refspec at main asks", "origin :main
           cwd=PUSHDANGLING)
 push_case("a dangling origin/HEAD, --delete after the remote at main asks", "origin --delete main", "ask",
           cwd=PUSHDANGLING)
+# Where origin/HEAD does not name the branch (dangling, or unset), main AND master stay protected:
+# the read order finds origin/main, but a repository that has origin/main may still hold master.
+for why, fixture in (("a dangling origin/HEAD", PUSHDANGLING),
+                   ("no origin/HEAD, origin/main present", PUSHNOHEADMAIN)):
+    push_case(why + ", a forced push to master asks",
+              "--force-with-lease --force-if-includes origin master", "ask", cwd=fixture)
+    push_case(why + ", a delete refspec at master asks", "origin :master", "ask", cwd=fixture)
+    push_case(why + ", --delete at master asks", "origin --delete master", "ask", cwd=fixture)
+    push_case(why + ", a delete off the default names allows", "origin :feat", "allow", cwd=fixture)
+push_case("no origin/HEAD, only origin/master present, a delete refspec at main asks", "origin :main",
+          "ask", cwd=PUSHONLYMASTER)
+push_case("no origin/HEAD, only origin/master present, a delete off the default names allows",
+          "origin :feat", "allow", cwd=PUSHONLYMASTER)
+# A push reads the PUSHED remote's default branch (upstream/HEAD -> main), never origin's (develop).
+push_case("another remote, --delete at its default branch asks", "--delete upstream main", "ask",
+          cwd=PUSHUPSTREAM)
+push_case("another remote, --delete at the branch origin names as default allows, it is ordinary there",
+          "--delete upstream develop", "allow", cwd=PUSHUPSTREAM)
+push_case("another remote, a bare lease follows branch.feat.remote to its default branch asks",
+          LEASE.strip(), "ask", cwd=PUSHUPSTREAM)
+push_case("origin with its own origin/HEAD, --delete at its default branch asks", "--delete origin develop",
+          "ask", cwd=PUSHUPSTREAM)
 push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
 push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
 push_case("--no-force-if-includes cancels --force-if-includes",
