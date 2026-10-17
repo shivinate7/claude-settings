@@ -49,6 +49,11 @@ Agents in a worktree are still refused by Claude Code's own worktree isolation, 
 The list stops accidents. It does not stop a hostile test. WSL interop and `/mnt/c` let a test
 file run any code. A native test run has the same limit.
 
+Basis of the three forms: each is how the `gates` CI workflow runs one of this repo's own suites,
+`python3 hooks/test_guard.py`, `pwsh -NoProfile -File install.test.ps1` and
+`node --test testing/skip-locally-fail-in-ci.test.mjs`. The mod tests run as plain
+`node <file>`, which the list does not allow.
+
 Research basis (2026-10-13): pin `-e`. Sources:
 
 - learn.microsoft.com/windows/wsl/basic-commands
