@@ -17,9 +17,10 @@ Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times."
   orchestrator's call under the same ruling, after the incident of 2026-10-14: the merge of PR
   435 failed 7 times at "cannot make the lock commit" on GitHub's secondary write limit. The
   owner, through the coordinator, named a 429 a rate limit too.
-- The rate waits are 60, 300 and 900 s, in that order (the ladder, 21 minutes in all). The
-  retry count stays 3. The ladder answers the incident of 2026-10-14: GitHub's secondary write
-  limit refused the lock commit from 22:41 to past 23:00, and four merge tries of PR 436 failed.
+- The rate waits are 60, 300 and 900 s, in that order (the ladder, 21 minutes in all). This is
+  the orchestrator's call, 2026-10-16. The retry count stays 3 (owner, 2026-10-16). The ladder
+  answers the incident of 2026-10-14: GitHub's secondary write limit refused the lock commit
+  from 22:41 to past 23:00, and four merge tries of PR 436 failed.
 - GitHub's reset time is the wait in place of the rung, when `gh api -i` gives one.
   `Retry-After` always counts. `X-Ratelimit-Reset` counts only while `X-Ratelimit-Remaining`
   is 0. A missing, unreadable or past value gives the rung. No wait is over 900 s.
@@ -41,17 +42,18 @@ Code: `merge/merge.py`.
 
 - `Host.gh` is the one home of every `gh` call. It retries a network error, then raises NetStop.
 - `retry_net` is the one retry loop. `Host.gh`, `GhLock.api` (every lock step) and
-  `host_default_branch` call it. `RATE_LIMIT` picks the rate wait. A rate text that holds 404
+  `host_default_branch` call it. `RATE_LIMIT` sends a rate limit to `rate_wait` in place of
+  the 5 s pause. A rate text that holds 404
   never reads as a gone lock. A lock read that outlasts the retries raises NetStop.
 - The guard's head read keeps no retry.
 - `rate_wait` gives the wait, from `RATE_LADDER` and the reply headers. `GhLock.api` asks for
   the headers (`gh api -i`). `split_headers` drops the header block before the reply is read.
   MEASURED 2026-10-17 03:13 CDT: real `gh api -i` output parses with `split_headers` (28
   headers, bare body).
-- `retry_net` runs `before_wait(wait)` before each rate wait. After the lock is taken,
-  `confirm` sets `Host.before_wait`, and `GhLock.api` passes it, to `Lock.extend_for`.
-  Before the take, the lock is not yet the run's, so a rate wait follows the ladder alone: 21
-  minutes per call at most.
+- `retry_net` runs `before_wait(wait)` before each rate wait. After the take, `confirm` sets
+  `Host.before_wait` to `Lock.extend_for`. `GhLock.api` always passes its own `extend_for`.
+  Before the take, `extend_for` does nothing, because the lock is not yet the run's. A rate
+  wait then follows the ladder alone: 21 minutes per call at most.
 - `Lock.extend_for(wait)` moves the expiry to now + wait + `LOCK_MARGIN` (300 s). It writes
   nothing when the expiry already covers that. `LOCK_MAX_HOLD` (6 h from the take) is the hard
   bound: a longer hold stops the run.
