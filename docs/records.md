@@ -170,6 +170,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
 | `an-agent-outside-its-home-tree-must-stop` | An agent outside its home tree must stop | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
+| `bare-merge-asks` | Orchestrator call, lane bare-gh-merge-ask. | [`decisions/bare-merge-asks.md`](../decisions/bare-merge-asks.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16 03:27 CDT: "Report only." (Feedback item fb-claude-md-flag: "how can i confirm an agent does not just edit claude.md without asking me first".) | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
 | `deleted-record-keeps-its-number` | Settled by the owner. | [`decisions/deleted-record-keeps-its-number.md`](../decisions/deleted-record-keeps-its-number.md) |
@@ -256,6 +257,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ask-alone-tail-args-unchecked` | `harmless_tail` takes any arguments to `echo` and `Write-Host`. | [`debts/ask-alone-tail-args-unchecked.md`](../debts/ask-alone-tail-args-unchecked.md) |
 | `ask-alone-tail-test-gap` | `hooks/test_guard.py` has ask-alone rows for a quoted `#`, a quoted `/*` and a lone apostrophe. | [`debts/ask-alone-tail-test-gap.md`](../debts/ask-alone-tail-test-gap.md) |
 | `ask-step-hidden-in-script` | The guard does not see a settings write of the subagent model cap in some shapes. | [`debts/ask-step-hidden-in-script.md`](../debts/ask-step-hidden-in-script.md) |
+| `bare-merge-reads-folder-not-repo` | `gh pr merge -R other/repo` in a merge-tool folder asks, and in a plain folder it allows silently, whatever the named repo uses. | [`debts/bare-merge-reads-folder-not-repo.md`](../debts/bare-merge-reads-folder-not-repo.md) |
+| `bare-merge-skips-host-merge-tool` | `mcp__github__merge_pull_request` merges bare in a merge-tool repo, and the bare-merge rule says nothing. | [`debts/bare-merge-skips-host-merge-tool.md`](../debts/bare-merge-skips-host-merge-tool.md) |
+| `bare-merge-symlink-cwd` | `uses_merge_tool` walks up the path as written. | [`debts/bare-merge-symlink-cwd.md`](../debts/bare-merge-symlink-cwd.md) |
+| `bare-merge-tool-unloadable` | When `merge/merge.py` cannot load, the head read is unknown and merge-checks denies a bare `gh pr merge` before the bare-merge ask runs. | [`debts/bare-merge-tool-unloadable.md`](../debts/bare-merge-tool-unloadable.md) |
 | `base-read-midway-untested` | If a later verify cannot run, `read_default_base` returns unknown. | [`debts/base-read-midway-untested.md`](../debts/base-read-midway-untested.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
@@ -559,7 +564,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `split-paren-pkill-unpinned` | Lane merge-guard-b dropped the row `echo don't (x; pkill foo`. | [`debts/split-paren-pkill-unpinned.md`](../debts/split-paren-pkill-unpinned.md) |
 | `split-quoted-hash-unpinned` | Lane merge-guard-b dropped the row `echo a's # b'; pkill foo`. | [`debts/split-quoted-hash-unpinned.md`](../debts/split-quoted-hash-unpinned.md) |
 | `split-reader-misses-cd-forms` | `split_segments` does not model `$'...'` ANSI-C quoting, `$(...)`, or backtick substitution. | [`debts/split-reader-misses-cd-forms.md`](../debts/split-reader-misses-cd-forms.md) |
-| `stale-comment-cites` | Comments in code and tests still name records and plans that were deleted. | [`debts/stale-comment-cites.md`](../debts/stale-comment-cites.md) |
 | `stall-closes-on-quoted-notice` | The closing match also reads the text of user tool_result blocks. | [`debts/stall-closes-on-quoted-notice.md`](../debts/stall-closes-on-quoted-notice.md) |
 | `stall-list-result-first-block` | A list-form result closes a job only from its first text block. | [`debts/stall-list-result-first-block.md`](../debts/stall-list-result-first-block.md) |
 | `stall-macos-no-stop-suite` | The macOS CI jobs run no stop suite. | [`debts/stall-macos-no-stop-suite.md`](../debts/stall-macos-no-stop-suite.md) |
@@ -623,7 +627,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `banchi-build-steps` | Banchi build steps are not claimed by the shared stamp | [`deferred/banchi-build-steps.md`](../deferred/banchi-build-steps.md) |
-| `bare-gh-merge-refusal` | A bare `gh pr merge` in a repo that uses `merge` | [`deferred/bare-gh-merge-refusal.md`](../deferred/bare-gh-merge-refusal.md) |
 | `build-disk-guard` | Low-disk guard refuses builds below 20 GB | [`deferred/build-disk-guard.md`](../deferred/build-disk-guard.md) |
 | `install-copies-from-main` | Install copies from main, not links into the clone | [`deferred/install-copies-from-main.md`](../deferred/install-copies-from-main.md) |
 | `measured-time-table` | A measured-time table for machine steps | [`deferred/measured-time-table.md`](../deferred/measured-time-table.md) |

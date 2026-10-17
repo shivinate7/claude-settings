@@ -222,8 +222,9 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of, merge_call_of,
-            merge_gate, merge_gate_reason, records_page_hit, settings_roots, undrafted_pr_create,
+            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of,
+            merge_call_of, merge_gate, merge_gate_reason, records_page_hit, settings_roots,
+            undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1836,8 +1837,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             if agent_owned_worktree(root) is True:
                 record(tool, "noted", "shared-tree", matched)
                 continue
-            # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
-            # own change to those files, so no ask.
+            # agent-worktree-discard-is-noted ("Named files in a linked worktree"): named files
+            # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
             ask_step("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
@@ -2012,6 +2013,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+        # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
+        if cite_where and uses_merge_tool(cite_where):
+            ask_step("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

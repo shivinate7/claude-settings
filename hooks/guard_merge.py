@@ -4,6 +4,7 @@ guard.py is the only entry point, and it runs these checks in its fixed order (d
 guard-split-by-family). Other files reach these names through `guard`.
 """
 import fnmatch
+import json
 import os
 
 from guard_core import (
@@ -180,6 +181,30 @@ MERGE_GATE_REASON = (
 
 def merge_gate_reason(verdict: str, detail: str) -> str:
     return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+def uses_merge_tool(where: str) -> bool:
+    """True when the repo root's `.github/stamp.json` parses as a JSON object with a `merge` key.
+    The root is the nearest folder at or above `where` that holds `.git` (a folder or a file). No
+    root, or a missing, unreadable, invalid or non-object file, is False: nothing to ask."""
+    root = os.path.abspath(where)
+    while not os.path.exists(os.path.join(root, ".git")):
+        if os.path.dirname(root) == root:
+            return False
+        root = os.path.dirname(root)
+    try:
+        with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    return isinstance(config, dict) and "merge" in config
+
+
+BARE_MERGE_REASON = (
+    "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
+    "leaves the local main behind origin. "
+    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call."
+)
 
 
 DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create. "
