@@ -12,16 +12,17 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 - A job is a Bash call that a background run began. Its id is the `backgroundTaskId` in the
   record's structured `toolUseResult`. Text that quotes a result does not make a job.
 - A job is dropped once the transcript holds a `<task-notification>` for its id whose
-  `<status>` is terminal: completed, failed, killed or stopped. A stopped notice comes on a session
-  resume for a job that did not finish. A running notice closes nothing. The notice is a user
-  message or a queued_command attachment record.
+  `<status>` is terminal: completed, failed, killed or stopped, in any letter case. A stopped notice
+  comes on a session resume for a job that did not finish. A running notice closes nothing. The
+  notice is a user message or a queued_command attachment record.
 - A job is also dropped once a TaskStop result says `Successfully stopped task: <id>` for its id.
   The result is a JSON string, or a list of text blocks. A stop result, or any other text, that
   names another id closes nothing.
 - A record whose tool_use_id is not a string does not stop the scan: a job after it is still
   listed.
 - A job is stale when its output file has not changed for the quiet age (STALL_WATCH_QUIET,
-  default 300 s). A job whose output file is missing is listed as "unknown", never dropped.
+  default 300 s). A job whose output file is missing, or whose path os.stat rejects (a NUL byte), is
+  listed as "unknown", never dropped, and it never drops the other rows.
 - A listed job shows its note: the text after `until:` in the description of the Bash call that
   started it, to the end of that line. The note sits on the job's own line, and the message asks
   whether it is met. A job whose call holds no `until:` text is still listed, with no note.
@@ -810,6 +811,37 @@ def malformed_tool_use_id_does_not_drop_the_alarm():
     return problems
 
 
+def mixed_case_status_closes_job():
+    """S19. a notice with status 'Completed', and an attachment notice with status 'KILLED', close
+    their jobs. An open stale job beside them is still listed"""
+    base = new_dir()
+    for job in ("bmixc600", "bmixk600", "bmixopen600"):
+        output_file(base, job, 600)
+    recs = (moved("bmixc600") + moved("bmixk600") + moved("bmixopen600")
+            + [notice("bmixc600", "Completed"), attachment_notice("bmixk600", "KILLED")])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for job in ("bmixc600", "bmixk600"):
+        problems += expect(job not in msg, f"job {job} has a mixed-case terminal notice but is listed: {msg!r}")
+    problems += listed_once(msg, "bmixopen600")
+    return problems
+
+
+def nul_path_drops_one_row_not_the_run():
+    """S12c. a job whose output path holds a NUL byte (os.stat raises ValueError) is listed as
+    unknown, and a stale job beside it is still listed"""
+    base = new_dir()
+    output_file(base, "bnulgood600", 600)
+    recs = moved("bnul600", path=WIN_DIR + "\\bnul\x00600.output") + moved("bnulgood600")
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("unknown" in line_of(msg, "bnul600"), f"the NUL-path job has no unknown row: {msg!r}")
+    problems += listed_once(msg, "bnulgood600")
+    return problems
+
+
 def line_of(msg, job_id):
     """The line of the message that names the job, or '' when none does."""
     return next((line for line in msg.splitlines() if job_id in line), "")
@@ -896,6 +928,7 @@ NOTICE_ROWS = (
     attachment_failed_and_killed_notices_close_jobs,
     stopped_notice_in_record_form_closes_job,
     stopped_notice_in_attachment_form_closes_job,
+    mixed_case_status_closes_job,
 )
 JUNK_ROWS = (
     missing_or_unreadable_transcript_prints_nothing,
@@ -904,6 +937,7 @@ JUNK_ROWS = (
     garbage_or_truncated_line_keeps_earlier_jobs,
     attachment_record_without_prompt_does_not_stop_the_scan,
     malformed_tool_use_id_does_not_drop_the_alarm,
+    nul_path_drops_one_row_not_the_run,
 )
 TASKSTOP_ROWS = (
     stop_result_closes_stopped_job,

@@ -24,17 +24,19 @@ reaches the reader, exactly one stub call naming the peer, with no agents call. 
 "no model call" pass proves nothing.
 
 Timing: the answer cases set READER_TIMEOUT to None, so a slow runner cannot cut the stub short. A stub
-that never answers ends at run_hook's cap as a traceback: a hang guard, not a speed check. Only the hang
-and hold cases set a short timeout, and they need it to fire.
+that never answers ends at run_hook's cap as one FAIL line that names the case: a hang guard, not a speed
+check. Only the hang and hold cases set a short timeout, and they need it to fire.
 
 Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run instead. Its
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
 """
+import atexit
 import contextlib
 import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +46,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sendmessage_state.py")
 ROOT = tempfile.mkdtemp(prefix="sendmessage_state_cases_")
+atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 SKIPPED = []
@@ -498,15 +501,19 @@ def case_model_row_names_the_call():
 
 
 def case_hook_runs():
-    case_model_row_names_the_call()
-    case_idle_and_waiting_allow_with_no_model_call()
-    case_busy_flag_rows()
-    case_busy_allows_when_the_model_does_not_flag()
-    case_unseen_receivers_allow_with_no_model_call()
-    case_malformed_input_fails_open_with_no_deny()
-    case_model_failures_fail_open_with_no_deny()
-    case_reader_timeout_allows_with_one_plain_line()
-    case_reader_that_holds_the_pipe_returns_before_the_child_ends()
+    for case in (case_model_row_names_the_call,
+                 case_idle_and_waiting_allow_with_no_model_call,
+                 case_busy_flag_rows,
+                 case_busy_allows_when_the_model_does_not_flag,
+                 case_unseen_receivers_allow_with_no_model_call,
+                 case_malformed_input_fails_open_with_no_deny,
+                 case_model_failures_fail_open_with_no_deny,
+                 case_reader_timeout_allows_with_one_plain_line,
+                 case_reader_that_holds_the_pipe_returns_before_the_child_ends):
+        try:
+            case()
+        except subprocess.TimeoutExpired as exc:  # run_hook's cap: one FAIL line naming the case, no traceback
+            check(case.__name__, False, "the hook run hit its %s s cap (a hang guard)" % exc.timeout)
 
 
 if __name__ == "__main__":

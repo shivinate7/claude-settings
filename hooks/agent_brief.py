@@ -54,9 +54,10 @@ def cite_form(cwd):
 
 
 def build(agent_type, form=None):
-    writes = agent_type not in READ_ONLY
+    key = agent_type.lower() if isinstance(agent_type, str) else agent_type  # the match ignores case
+    writes = key not in {t.lower() for t in READ_ONLY}
     lines = [t for always, t in COMMON if always or writes]
-    text = "\n".join(lines).format(scope=SCOPE.get(agent_type, GENERAL))
+    text = "\n".join(lines).format(scope=next((v for k, v in SCOPE.items() if k.lower() == key), GENERAL))
     if form:  # appended after format(): a form may hold braces
         text += "\n- Cite a record in this repo's form: %s. Any other wrapper around a slug stays dead text." % form
     return text
