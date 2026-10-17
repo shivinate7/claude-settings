@@ -7815,26 +7815,55 @@ sh("frozen: cp from a frozen path TO a frozen path still denies",
    "cp " + CFG_HOOK + " " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: mv FROM a frozen hook still denies", "mv " + CFG_HOOK + " /tmp/guard.bak", "deny",
    "frozen-path", cwd=NOGIT)
+# A LINK IS NOT A COPY. `cp -l` and `cp -s` (also `-a` with either, and the long forms) make a hard or
+# symbolic link to the frozen file, so a later write to the new name writes the frozen file. Only a
+# plain copy reads its source.
+sh("frozen: cp -al FROM a frozen hook makes a link, and stays denied",
+   "cp -al " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -l FROM a frozen hook makes a hard link, and stays denied",
+   "cp -l " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --link FROM a frozen hook stays denied",
+   "cp --link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -s FROM a frozen hook makes a symbolic link, and stays denied",
+   "cp -s " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --symbolic-link FROM a frozen hook stays denied",
+   "cp --symbolic-link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A redirect of stderr to the null device writes no frozen file. A redirect onto one still denies.
+sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
+   "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
+sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
+   "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
 # worktree `<clone>-live-<12 hex>`. The links in ~/.claude load from it, so a write into either one
 # changes what every session runs. The fixture clone is CLONE, so its pin is ROOT/clone-live.
+# ONLY THE TREE THE PIN LINKS TO IS FROZEN. install_from_main.sh makes `<clone>-live` a link to the
+# current stamped tree, and the trees before it stay on disk until pruned. OLD_PIN is one of those.
 LIVE_PIN = CLONE + "-live"
 STAMPED_PIN = CLONE + "-live-abcdef123456"
+OLD_PIN = CLONE + "-live-111111111111"
 LIVE_CLAUDEMD = slash(os.path.join(LIVE_PIN, "CLAUDE.md"))
 STAMPED_GUARD = slash(os.path.join(STAMPED_PIN, "hooks", "guard.py"))
-write(LIVE_CLAUDEMD, "# pinned\n")
+OLD_GUARD = slash(os.path.join(OLD_PIN, "hooks", "guard.py"))
 write(STAMPED_GUARD, "# pinned\n")
+write(OLD_GUARD, "# old\n")
+try:
+    os.symlink(STAMPED_PIN, LIVE_PIN)
+    PIN_LINKED = True
+except OSError:
+    PIN_LINKED = False   # no link rights: the pin is a plain folder, and the link cases do not run
+write(LIVE_CLAUDEMD, "# pinned\n")
 add("frozen: Write of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Write",
     cwd=NOGIT, file_path=LIVE_CLAUDEMD, content="rules\n")
 add("frozen: Edit of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Edit",
     cwd=NOGIT, file_path=LIVE_CLAUDEMD, old_string="# pinned", new_string="# rewritten")
-add("frozen: Write of a hook in a stamped pinned checkout", "deny", "frozen-path", tool="Write",
-    cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
+if PIN_LINKED:
+    add("frozen: Write of a hook in the stamped tree the pin links to", "deny", "frozen-path",
+        tool="Write", cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
+    sh("frozen: sed -i on a hook in the stamped tree the pin links to",
+       "sed -i '' s/a/b/ " + STAMPED_GUARD, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the live pinned checkout's CLAUDE.md", "sed -i '' s/a/b/ " + LIVE_CLAUDEMD,
-   "deny", "frozen-path", cwd=NOGIT)
-sh("frozen: sed -i on a hook in a stamped pinned checkout", "sed -i '' s/a/b/ " + STAMPED_GUARD,
    "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto the live pinned checkout's CLAUDE.md", "echo rules > " + LIVE_CLAUDEMD,
    "deny", "frozen-path", cwd=NOGIT)
@@ -7873,6 +7902,24 @@ sh("recovery: the merge tool run from the clone is allowed", "python3 bin/merge 
    "allow", cwd=CLONE)
 sh("recovery: the merge tool run from the live pin is allowed", "python3 bin/merge 12 --confirm",
    "allow", cwd=LIVE_PIN)
+# A STAMPED TREE NO LINK POINTS AT IS NOT FROZEN. install_from_main.sh says "move it aside" when a
+# tree is in the way (move_pin), and prune_trees removes the old ones. Neither may be blocked.
+sh("recovery: mv of an old stamped tree that no link points at is allowed",
+   "mv " + OLD_PIN + " /tmp/aside", "allow", cwd=NOGIT)
+sh("recovery: rm -rf of an old stamped tree that no link points at is allowed",
+   "rm -rf " + OLD_PIN, "allow", cwd=NOGIT)
+# THE PIN STAYS FROZEN WHEN ITS SIBLING CLONE LACKS ONE MARKER FILE. A clone is told by its two marker
+# files, but a pin with one of them missing is still a pin: the freeze must not depend on both.
+write(os.path.join(ROOT, "clonea", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonea-live", "CLAUDE.md"), "# pinned\n")
+write(os.path.join(ROOT, "cloneb", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "cloneb-live", "CLAUDE.md"), "# pinned\n")
+add("frozen: Write of the pin of a clone with no install.ps1 is frozen", "deny", "frozen-path",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clonea-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of the pin of a clone with no settings.json is frozen", "deny", "frozen-path",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "cloneb-live", "CLAUDE.md")),
+    content="rules\n")
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
