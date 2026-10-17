@@ -1,6 +1,7 @@
 # The stream and delete guards read the command a wrapper runs
 
 Kind: build
+Plan: decisions/guard-reads-wrapped-commands.md#the-change (all)
 Home: hooks/guard_core.py
 
 The guard audit (findings 2, 3 and 4) found three gaps. The delete guard matched raw text, so it
@@ -24,7 +25,7 @@ Rule `guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacke
 
 ## Net safety value
 
-Review round 3 probed about 300 forms on main and the branch. The value is positive.
+Review round 3 probed about 300 forms on main and the branch. The value is positive. The lane opens some forms main denies, so it waited for the owner. The owner's word, 2026-10-17 09:13 CDT: "yes merge guard fixes".
 
 - Closed: `rm -rf ${HOME}`, `~/`, `/*`, `./*`, `-Rf`, long flags, `--`, and subshell braces.
   Kills by `lsof -ti`, `fuser -k`, `kill-port` and `kill -9 -1`. `tail -f` inside `sh -c`,
