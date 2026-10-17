@@ -21,7 +21,10 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 ## Procedure
 
 1. **List the changed pages.** Name each changed page and route. Capture a screenshot of each
-   one at every size and theme it ships in.
+   one at every size and theme it ships in. Use a headless or isolated browser. If a
+   page needs the owner's login, use it; otherwise use none
+   (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
+   owner's screen, say so in one line (`verification-announce-own-screen`).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    screenshots. Never give a reviewer the repo's design spec, tokens or design decisions.
    - Reviewer A is spawned with agentType `reviewer`. It fetches the rules at the pinned URL.
@@ -29,8 +32,8 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
      against them. Its brief also asks for the house checklist: it marks each changed screen
      pass or fail per rule id in `~/.claude/ux/checklist.md`. The checklist holds house rules,
      not the repo's design, so the blind rule still holds.
-   - Reviewer B runs `/impeccable audit` and `/impeccable critique` only. It never runs
-     impeccable's build commands. Guard rule `impeccable-review-only` refuses them on the Skill
+   - Reviewer B is spawned with agentType `reviewer`. It runs `/impeccable audit` and
+     `/impeccable critique` only. It never runs impeccable's build commands. Guard rule `impeccable-review-only` refuses them on the Skill
      tool.
 3. **Write the full list first.** When both reports return, record every finding. Tag each
    one with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until
@@ -45,11 +48,16 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 6. **Send the owner one list per repo.** Give each clash three parts: what the skill wants,
    what the repo has, and a recommendation.
 7. **Verdict.** Give a verdict per screen at each size and theme
-   (verification-screens-verdict: a verdict per screen, never a description).
+   (verification-screens-verdict: a verdict per screen, never a description). A screen that did
+   not render, or has no screenshot, gets `unknown`, never pass or fail
+   (`verification-report-unknown-reads`).
 
 ## Rules
 
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
+- A change gets at most three review rounds (`roles-review-cap-three`). A round is steps 2 to
+  5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
+  is still open goes on the owner's list (step 6) and becomes a debt (`roles-holes-are-debts`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.
