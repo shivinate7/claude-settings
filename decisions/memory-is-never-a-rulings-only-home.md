@@ -151,8 +151,8 @@ These change CLAUDE.md text. The owner answered each one:
 - Reword `rule:tokens-compacting-keep-essentials` to keep each ruling's home, not the ruling.
   Adopted.
 - Add the rule "A memory entry may point to a ruling. It is never the ruling's only home."
-  Adopted, as `rule:building-memory-never-only-home`. `hooks/ruling_home.py` is its
-  mechanism.
+  Adopted. `hooks/ruling_home.py` enforces it, so its prose left CLAUDE.md (decision
+  claude-md-shrink).
 - Give each answer to a question a home. Adopted, as `rule:output-answer-has-a-home`. In the
   owner's view, the report is a scratchpad. Each ruling in it moves to its real home, a
   decision entry or a deferred item. Nothing checks this rule yet.
