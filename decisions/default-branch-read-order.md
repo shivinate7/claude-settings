@@ -32,3 +32,8 @@ Owner, 2026-10-16: read in this order. The first ref that resolves wins.
 A dangling `origin/HEAD` hid the default branch. A push to `main` read as allowed, and a
 squash-merged lane was never freed. A repository that has `origin/main` may still hold
 `master`, so a missing HEAD protects both names.
+
+## Holes, named
+
+1. A verify that cannot run after an earlier step answered "no" has no test. The code returns unknown, so the sweep refuses the repo and the push guard protects main, master and the HEAD name. It fails safe. Debt: `base-read-midway-untested`, the midway unreadable path has no test.
+2. The push guard reads the current branch with `symbolic-ref --short HEAD`. A tag named like that branch makes git print `heads/<name>`, and a lease push of `HEAD` then allows. Main has the same gap. Claude would need a tag named exactly like the default branch. Debt: `push-head-tag-misread`, a same-name tag misreads HEAD.

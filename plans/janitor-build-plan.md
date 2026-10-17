@@ -169,8 +169,8 @@ Build `janitor/sweep.py`. It takes one or more repository roots, or it
 discovers them. It sweeps each repository against that repository's own default
 branch.
 
-Resolve the default branch in this order: `origin/HEAD`, then local `main`,
-then local `master`. If none answers, refuse the repository out loud and reap
+Resolve the default branch in the order of decision default-branch-read-order
+(`origin/HEAD`, `origin/main`, `origin/master`, local `main`, local `master`). If none answers, refuse the repository out loud and reap
 nothing there. One repository on this machine, `sillage`, has an unset
 `origin/HEAD` with an `origin` remote present, so the fallback runs on day one.
 
