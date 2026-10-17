@@ -1046,6 +1046,15 @@ class RecordsPage(Tree):
             with self.subTest(name):
                 self.assertEqual(got.get("r%d" % i), gist)
 
+    def test_a16_the_notes_file_in_debts_is_no_record(self):
+        # Owner ruling 2026-10-17 11:56 CDT: a finding too unlikely to hit is one line in the notes file, not a debt.
+        # Red on 26cfc87f: the notes file has no **What.** line, so the page is refused (PR 497 merge).
+        notes = "# Notes\n\n- A finding too unlikely to hit. Decision: none.\n"
+        root = self.tree(with_records({"debts/notes.md": notes}))
+        code, out, err = generator(root)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(listed(records_rows(self.records_text(root)))["Debts"], ["gap-one"])
+
 
 class RecordsStale(Tree):
     def published(self, extra=None):
@@ -1402,7 +1411,10 @@ class RealRecords(unittest.TestCase):
                    ("deferred", ("Deferred",)), ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder)) if f.endswith(".md") and f != "README.md")
+            # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            # Compared by path: a decisions/notes.md is still a record and needs its row.
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
+                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
