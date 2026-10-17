@@ -2229,6 +2229,37 @@ def wrapped_commands(tokens, at: int):
     return [shlex.join(inner)] if inner else []
 
 
+def bare_words(segment: str):
+    """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
+    no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
+    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
+    words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
+    has no bare word."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is not None and basename(tokens[at]) in ENV_PATTERN_COMMANDS:
+        return [], set()
+    spans, start, bare = [], None, True
+    for index, char, quote in walk_quotes(segment):
+        if not quote and char in " \t\r\n":
+            if start is not None:
+                spans.append((segment[start:index], bare))
+            start, bare = None, True
+            continue
+        start = index if start is None else start
+        bare = bare and not quote and char not in "'\"\\"
+    if start is not None:
+        spans.append((segment[start:], bare))
+    words = []
+    for text, _ in spans:
+        try:
+            words.append("".join(shlex.split(text)))
+        except ValueError:
+            words.append(text)
+    return words, {i for i, (_, b) in enumerate(spans) if b}
+
+
 def inner_commands(tokens):
     """Every command text one segment hands on, for a rule that judges the command word: what a
     shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts

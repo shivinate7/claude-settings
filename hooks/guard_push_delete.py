@@ -9,7 +9,7 @@ import re
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
-    _strip_heredoc_bodies_unconditionally, basename, command_indexes, inner_commands,
+    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     resolve_command, segment_tokens, split_segments,
 )
 
@@ -269,6 +269,11 @@ def rm_delete_hit(segment: str) -> str:
             target = _rm_args_wide(tokens[start + 1:])
             if target:
                 return "rm -rf " + target
+    words, bare = bare_words(segment)
+    for at in sorted(bare):
+        target = basename(words[at]) == "rm" and _rm_args_wide(words[at + 1:])
+        if target:
+            return "rm -rf " + target
     for script in inner_commands(tokens):
         for inner in split_segments(script):
             found = rm_delete_hit(inner)
