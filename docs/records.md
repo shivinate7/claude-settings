@@ -95,143 +95,132 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 
 | Slug | Gist | Link |
 |---|---|---|
-| `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) keeps or reaps a local branch. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
-| `a-gates-allow-list-is-the-constant` | CLAUDE.md now names this rule: a gate's allow list must point at the constant the code emits, never a copy of it. | [`decisions/a-gates-allow-list-is-the-constant.md`](../decisions/a-gates-allow-list-is-the-constant.md) |
-| `a-rule-with-no-gate-leaves-claude-md` | On 2026-09-28 the owner ruled that the semicolon line leaves `CLAUDE.md`. | [`decisions/a-rule-with-no-gate-leaves-claude-md.md`](../decisions/a-rule-with-no-gate-leaves-claude-md.md) |
+| `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
+| `a-gates-allow-list-is-the-constant` | CLAUDE.md `building-allow-list-is-the-constant`: a gate's allow list must point at the constant the code emits, never a copy of it. | [`decisions/a-gates-allow-list-is-the-constant.md`](../decisions/a-gates-allow-list-is-the-constant.md) |
+| `a-kill-by-pid-needs-an-owned-pid` | CLAUDE.md: "Never kill a process you did not start." `kill` with a literal pid is denied under rule `machine-wide-kill` when the pid is not owned. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
+| `a-rule-with-no-gate-leaves-claude-md` | Owner, 2026-09-28: a rule that `every-lint-rule-blocks-or-does-not-exist` (a rule blocks or it does not exist) took off the gate also leaves `CLAUDE.md`. | [`decisions/a-rule-with-no-gate-leaves-claude-md.md`](../decisions/a-rule-with-no-gate-leaves-claude-md.md) |
+| `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
 | `agent-end-reap-stops-what-a-finished-agent-left` | Kind: process Home: janitor/agent_end_reap.py | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `agent-worktree-discard-is-noted` | The shared-tree rule asks the owner before a discarding git command runs. | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
-| `agents-wait-with-monitor` | Which way may an agent wait for a condition? | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
-| `ask-steps-run-alone` | Owner ruling, 2026-10-14. | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
-| `audit-rework-order` | Owner ruling, 2026-10-16 10:50 CDT. | [`decisions/audit-rework-order.md`](../decisions/audit-rework-order.md) |
-| `background-needs-end-note` | Owner ruling, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
-| `build-dirs-reaped-at-agent-end` | Owner ruling, 2026-10-11, labeled "Agent-end hook + low-disk guard". | [`decisions/build-dirs-reaped-at-agent-end.md`](../decisions/build-dirs-reaped-at-agent-end.md) |
+| `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
+| `ask-steps-run-alone` | An agent never chains a step that needs the owner's answer onto other steps in one command (owner, 2026-10-14). | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
+| `audit-rework-order` | Owner, 2026-10-16 10:50 CDT. | [`decisions/audit-rework-order.md`](../decisions/audit-rework-order.md) |
+| `background-needs-end-note` | Owner, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
+| `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | Python code on Windows never hands `subprocess.run` a bare `"bash"` or `"gh"`. | [`decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
+| `branch-delete-wrong-cause-was-a-filename-collision` | `safe_name` in `hooks/mutate_shared.py` appends a short digest of the exact label, case included. | [`decisions/branch-delete-wrong-cause-was-a-filename-collision.md`](../decisions/branch-delete-wrong-cause-was-a-filename-collision.md) |
+| `browser-prompts-are-the-apps` | Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's approval prompts on outside sites. | [`decisions/browser-prompts-are-the-apps.md`](../decisions/browser-prompts-are-the-apps.md) |
+| `build-dirs-reaped-at-agent-end` | Owner, 2026-10-11, "Agent-end hook + low-disk guard". | [`decisions/build-dirs-reaped-at-agent-end.md`](../decisions/build-dirs-reaped-at-agent-end.md) |
+| `builders-cannot-edit-tests` | A builder that cannot pass a test must not delete, skip or rewrite it. | [`decisions/builders-cannot-edit-tests.md`](../decisions/builders-cannot-edit-tests.md) |
+| `ci-spend-rules` | Owner, 2026-10-06 ("Both, skill first"): skill steps 1 and 11 to 14 hold these rules. | [`decisions/ci-spend-rules.md`](../decisions/ci-spend-rules.md) |
 | `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
+| `ci-wall-time-cuts` | Owner, 2026-10-07 (A to D) and 2026-10-10 (F). | [`decisions/ci-wall-time-cuts.md`](../decisions/ci-wall-time-cuts.md) |
 | `cite-by-id-blocks-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): keep the block. | [`decisions/cite-by-id-blocks-unread-file.md`](../decisions/cite-by-id-blocks-unread-file.md) |
-| `claude-md-shrink` | Owner ruling, 2026-10-16 23:53 CDT. | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
+| `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
+| `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`decisions/copy-mode-overwrites-no-backup.md`](../decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`decisions/cull-rules.md`](../decisions/cull-rules.md) |
 | `debts-have-their-own-store` | A known gap that Claude is likely to hit in normal work is a debt. | [`decisions/debts-have-their-own-store.md`](../decisions/debts-have-their-own-store.md) |
-| `decision-watch-mod-limits` | Yes. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
-| `default-branch-read-order` | Owner, 2026-10-16: read in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
+| `decision-watch-mod-limits` | The Stop-time decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
+| `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
 | `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`decisions/dependabot-security-only.md`](../decisions/dependabot-security-only.md) |
-| `design-skills` | Owner ruling, 2026-10-10. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
-| `draft-until-reviewed` | Owner rulings, 2026-10-10 and 2026-10-13. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
+| `design-skills` | Owner, 2026-10-10: three third-party skills apply to any repo with screens. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
+| `docs-only-prs-skip-code-suites` | `hooks/test_install_src.sh` takes case names as arguments and runs only those. | [`decisions/docs-only-prs-skip-code-suites.md`](../decisions/docs-only-prs-skip-code-suites.md) |
+| `docs-only-prs-skip-review` | Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, gate or product code, gets no reviewer pass. | [`decisions/docs-only-prs-skip-review.md`](../decisions/docs-only-prs-skip-review.md) |
+| `draft-until-reviewed` | Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
 | `drops-lines-trailer-exempt` | Owner, 2026-10-12: the `Drops-lines: <record path> -- <reason>` trailer is the one place a record path is allowed in a commit message. | [`decisions/drops-lines-trailer-exempt.md`](../decisions/drops-lines-trailer-exempt.md) |
-| `env-file-wrappers` | The `env-file` rule allows `--env-file` only when the command word is a runner (`ENV_LOADER_COMMANDS`). | [`decisions/env-file-wrappers.md`](../decisions/env-file-wrappers.md) |
-| `every-lint-rule-blocks-or-does-not-exist` | CLAUDE.md says: "Judge every rule, check, and design by the outcome for the person the software serves." The owner ruled that a rule either blocks or does not exist. | [`decisions/every-lint-rule-blocks-or-does-not-exist.md`](../decisions/every-lint-rule-blocks-or-does-not-exist.md) |
-| `fewest-words-mandate` | On 2026-09-28 the owner asked for a verbiage mandate. | [`decisions/fewest-words-mandate.md`](../decisions/fewest-words-mandate.md) |
+| `env-file-wrappers` | Owner, 2026-10-13 14:40, rule 1 of `guard-audit-high`. | [`decisions/env-file-wrappers.md`](../decisions/env-file-wrappers.md) |
+| `every-lint-rule-blocks-or-does-not-exist` | Owner: a lint rule either blocks or does not exist. | [`decisions/every-lint-rule-blocks-or-does-not-exist.md`](../decisions/every-lint-rule-blocks-or-does-not-exist.md) |
+| `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`decisions/fewest-words-mandate.md`](../decisions/fewest-words-mandate.md) |
+| `frozen-path-resolves-shell-vars` | Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right and keeps a table of variable assignments: | [`decisions/frozen-path-resolves-shell-vars.md`](../decisions/frozen-path-resolves-shell-vars.md) |
 | `gate-hooks-fail-closed` | Owner, 2026-10-12: a gate whose script or python is missing refuses the call. | [`decisions/gate-hooks-fail-closed.md`](../decisions/gate-hooks-fail-closed.md) |
-| `guard-audit-high` | Which guard refusals are false alarms or gaps? | [`decisions/guard-audit-high.md`](../decisions/guard-audit-high.md) |
-| `guard-command-position` | One resolver finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
-| `guard-guards-mistakes-only` | Owner ruling, 2026-10-17 09:07 CDT. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
-| `guard-log-read-weekly` | `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
-| `guard-that-cries-wolf-is-spent` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry records the missing half, and the two false alarms that made the half worth writing down. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
-| `guard-trims-from-the-audit` | The owner approved these trims from an audit of `~/.claude/guard.log`: 2,713 lines, 2026-09-16 to 2026-10-02. | [`decisions/guard-trims-from-the-audit.md`](../decisions/guard-trims-from-the-audit.md) |
+| `guard-audit-high` | Owner, 2026-10-13 14:40, on an audit by the oversight session: | [`decisions/guard-audit-high.md`](../decisions/guard-audit-high.md) |
+| `guard-command-position` | One resolver in `hooks/guard_core.py` finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
+| `guard-guards-mistakes-only` | Owner, 2026-10-17 09:07 CDT, "widen": every guard, gate and check stops Claude's mistakes, never an attacker. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
+| `guard-log-read-weekly` | Owner, 2026-10-13. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
+| `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
+| `guard-trims-from-the-audit` | The owner approved these trims from an audit of `~/.claude/guard.log`. | [`decisions/guard-trims-from-the-audit.md`](../decisions/guard-trims-from-the-audit.md) |
 | `haiku-prompt-hooks` | Owner ruling, 2026-10-17 11:33 CDT, the trial review: the blocking judges stay. | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
-| `hold-unsafe-after-round-3` | Owner ruling, 2026-10-15 12:00 CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
-| `install-sh-mv-retries` | Kind: process Home: install.sh | [`decisions/install-sh-mv-retries.md`](../decisions/install-sh-mv-retries.md) |
+| `hold-unsafe-after-round-3` | Owner, 2026-10-15 12:00 CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
+| `hooks-share-the-transcript-reader` | The Stop hooks read the transcript through one module, `lint/_transcript.py`. | [`decisions/hooks-share-the-transcript-reader.md`](../decisions/hooks-share-the-transcript-reader.md) |
+| `install-sh-mv-retries` | `put_file` in `install.sh` renames `DEST.cs-new` over `DEST` with up to 25 attempts, 0.1 s apart (about 2.4 s), the budget of `Move-OverFile` in `install.ps1`. | [`decisions/install-sh-mv-retries.md`](../decisions/install-sh-mv-retries.md) |
 | `janitor-dirty-test-stays` | Owner word, 2026-10-13 15:56 CDT: option A. | [`decisions/janitor-dirty-test-stays.md`](../decisions/janitor-dirty-test-stays.md) |
-| `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
-| `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
-| `local-time-central` | Owner, 2026-10-12: US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
+| `known-bad-input-proves-the-gate` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The rule audit (`lint/rule_audit.py`) therefore does not cite a gate by a `needle`, a substring that a docstring or label also satisfies. | [`decisions/known-bad-input-proves-the-gate.md`](../decisions/known-bad-input-proves-the-gate.md) |
+| `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: the guard refuses a session number that names a lane, such as `N20` or `(N16)`. | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
+| `list-form-subprocess-ignores-a-path-shim-on-windows` | A blind-command fixture cannot shadow a real executable for a list-form subprocess call on Windows. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
+| `local-time-central` | Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
+| `main-branch-protection` | `main` of shivinate7/claude-settings requires the ten checks that `.github/stamp.json` `requiredChecks` names: scope, gates, gates-windows, gates-windows-guard, gates-mutate-guard, gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows. | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
-| `merge-needs-a-proven-head` | Owner, 2026-10-12: "Fix both now, one lane." | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
-| `mods-deferred-table` | Owner word, 2026-10-13 21:00 CDT: leave these as deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
-| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
+| `merge-needs-a-proven-head` | Required checks on main cannot close this: GitHub counts a skipped job as passing. | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
+| `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
+| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
-| `mods-tests-run-in-gates` | Merge session, 2026-10-13, 13:16 CDT. | [`decisions/mods-tests-run-in-gates.md`](../decisions/mods-tests-run-in-gates.md) |
-| `mutant-cause-of-death` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry is that sentence applied to the guard's own test harness. | [`decisions/mutant-cause-of-death.md`](../decisions/mutant-cause-of-death.md) |
-| `one-shared-record-stamp` | CLAUDE.md: "Never allocate a numbered record on a branch. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
-| `opt-in-ci-templates-composite` | Owner approved six templates any repo can adopt. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
-| `plain-prose-lint` | Owner ruling, 2026-10-17 01:52 CDT: turn the STE lint into a plain-prose lint. | [`decisions/plain-prose-lint.md`](../decisions/plain-prose-lint.md) |
-| `purge-keeps-younger-restore-ref` | The purge drops a restore ref only when both hold: | [`decisions/purge-keeps-younger-restore-ref.md`](../decisions/purge-keeps-younger-restore-ref.md) |
-| `question-judge-reads-rulings` | Owner ruling, 2026-10-12 22:10 CDT: the question judge reads the repo's decision and deferred records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
-| `question-outcome-check` | Owner ruling, 2026-10-13 19:48 CDT: the standard question format is a `Goal:` line first, then a `Problem:` sentence, then the options. | [`decisions/question-outcome-check.md`](../decisions/question-outcome-check.md) |
-| `recovery-must-not-gate-on-its-own-state` | CLAUDE.md's Verification paragraph now states this rule. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
-| `review-cap-red-ci` | Owner ruling, 2026-10-13 14:50 CDT: "Split, then ask." | [`decisions/review-cap-red-ci.md`](../decisions/review-cap-red-ci.md) |
-| `rulings-declare-kind` | Owner ruling, 2026-10-12. | [`decisions/rulings-declare-kind.md`](../decisions/rulings-declare-kind.md) |
+| `mods-tests-run-in-gates` | The mod tests (`*.test.mjs` and `*.test.js` under `mods/`) run as the last step of the existing required `gates` job, on Linux. | [`decisions/mods-tests-run-in-gates.md`](../decisions/mods-tests-run-in-gates.md) |
+| `mutant-cause-of-death` | A test harness must not judge its tests by exit code or by "some output changed". | [`decisions/mutant-cause-of-death.md`](../decisions/mutant-cause-of-death.md) |
+| `one-shared-record-stamp` | `lint/rule_mechanisms.json` maps `git-slug-then-claim-number` to the refusal in `actions/stamp/stamp.mjs` (`branchNumbered`). | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
+| `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no workflow step. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
+| `plain-prose-lint` | The STE lint is a plain-prose lint. | [`decisions/plain-prose-lint.md`](../decisions/plain-prose-lint.md) |
+| `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
+| `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`decisions/playwright-install-once.md`](../decisions/playwright-install-once.md) |
+| `precompact-handoff` | Auto-compact drops detail. | [`decisions/precompact-handoff.md`](../decisions/precompact-handoff.md) |
+| `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
+| `purge-keeps-younger-restore-ref` | The restore ref is `refs/janitor/reaped/<branch>`. | [`decisions/purge-keeps-younger-restore-ref.md`](../decisions/purge-keeps-younger-restore-ref.md) |
+| `question-judge-reads-rulings` | The question judge (question-outcome-check) reads the repo's decision and deferred records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
+| `question-outcome-check` | A prompt hook sees only the question, never the chat, so it judges form alone (haiku-prompt-hooks). | [`decisions/question-outcome-check.md`](../decisions/question-outcome-check.md) |
+| `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
+| `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
+| `rm-on-a-variable-needs-a-guard` | Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt. | [`decisions/rm-on-a-variable-needs-a-guard.md`](../decisions/rm-on-a-variable-needs-a-guard.md) |
+| `rulings-declare-kind` | A decision record that a pull request adds or changes must say what kind each ruling is: a build task, or a process change. | [`decisions/rulings-declare-kind.md`](../decisions/rulings-declare-kind.md) |
+| `session-end-sweep-is-disarmed-until-liveness-is-proven` | The `SessionEnd` hook in `settings.json` runs `janitor/session_end_sweep.py`. | [`decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`](../decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md) |
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`decisions/silent-undo-check-design.md`](../decisions/silent-undo-check-design.md) |
-| `source-prose-lint-ships-dark` | CLAUDE.md says: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." This entry names why `ste_lint.py`'s comment-and-docstring mode stays off by default. | [`decisions/source-prose-lint-ships-dark.md`](../decisions/source-prose-lint-ships-dark.md) |
-| `stall-watch` | A background command can stop making progress. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
-| `stall-watch-stop-check` | A background shell can stay open after a turn ends. | [`decisions/stall-watch-stop-check.md`](../decisions/stall-watch-stop-check.md) |
-| `stamp-cite-near-miss` | Where does the check for a wrongly wrapped cite live, and how does an agent learn the right form? | [`decisions/stamp-cite-near-miss.md`](../decisions/stamp-cite-near-miss.md) |
+| `source-prose-lint-ships-dark` | The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and `check_source`). | [`decisions/source-prose-lint-ships-dark.md`](../decisions/source-prose-lint-ships-dark.md) |
+| `stale-safe-force-push` | The owner gets no prompt for a safe push, and no push overwrites newer remote work with a stale copy. | [`decisions/stale-safe-force-push.md`](../decisions/stale-safe-force-push.md) |
+| `stall-watch` | The session learns within minutes that a background command stalled, and diagnoses the cause. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
+| `stall-watch-stop-check` | When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. | [`decisions/stall-watch-stop-check.md`](../decisions/stall-watch-stop-check.md) |
+| `stamp-cite-near-miss` | The stamp action flags a cite that uses a record's prefix and a known slug in the wrong wrapper, such as D`slug` with inline-code backticks. | [`decisions/stamp-cite-near-miss.md`](../decisions/stamp-cite-near-miss.md) |
 | `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
-| `stash-push-is-clone-wide` | CLAUDE.md says: "Set work aside with a commit on your own branch, never a stash." It also says: "A stash entry belongs to no branch. | [`decisions/stash-push-is-clone-wide.md`](../decisions/stash-push-is-clone-wide.md) |
+| `stash-push-is-clone-wide` | `git stash push`, `save` and a bare `git stash` deny in every tree, worktree or not. | [`decisions/stash-push-is-clone-wide.md`](../decisions/stash-push-is-clone-wide.md) |
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `ste-lint-gloss-collapse` | `lint/ste_lint.py`'s `STE001` counts words per sentence. | [`decisions/ste-lint-gloss-collapse.md`](../decisions/ste-lint-gloss-collapse.md) |
-| `stop-guardrail-became-a-command-hook` | The `type: agent` Stop hook in `settings.json` judged every turn for a silent change to a decision, gate, build-order, CLAUDE.md rule, or setting. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
-| `subagent-model-cap` | CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry records how the worker-model rule is mechanized. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
-| `test-strategy-reset` | Owner ruling, 2026-10-14 17:14 CDT. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
-| `the-janitor-is-one-machine-wide-sweep` | Kind: process Home: janitor/sweep.py | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
+| `stop-guardrail-became-a-command-hook` | The `type: agent` Stop hook is out of `settings.json`. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
+| `subagent-model-cap` | This entry mechanizes the worker-model rule. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
+| `test-strategy-reset` | A test must not fail on runner speed. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
+| `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch when that branch holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `unattended-sweep-stops-proven-orphans` | PR #132 added an orphaned-listener check to `janitor/sweep.py`. | [`decisions/unattended-sweep-stops-proven-orphans.md`](../decisions/unattended-sweep-stops-proven-orphans.md) |
-| `wsl-allow-list` | Owner ruling, 2026-10-13 15:20: "fixed test list is fine; surf the web for a consensus first". | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
+| `ux-house-rules` | The UX rules that every repo with screens shares, beyond the three third-party sets, live in `ux/`. | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
+| `verdict-reads-runner-markers` | A run whose output holds `** TEST FAILED **` or `** BUILD FAILED **` prints FAIL, also when the command exits 0. | [`decisions/verdict-reads-runner-markers.md`](../decisions/verdict-reads-runner-markers.md) |
+| `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`decisions/worktree-setup-is-per-repo.md`](../decisions/worktree-setup-is-per-repo.md) |
+| `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
 
 ## Build designs
 
 | Slug | Gist | Link |
 |---|---|---|
-| `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
-| `an-agent-outside-its-home-tree-must-stop` | An agent outside its home tree must stop | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
-| `bare-merge-asks` | Orchestrator call, lane bare-gh-merge-ask. | [`decisions/bare-merge-asks.md`](../decisions/bare-merge-asks.md) |
-| `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
-| `claude-md-change-is-flagged` | Owner, 2026-10-16 03:27 CDT: "Report only." (Feedback item fb-claude-md-flag: "how can i confirm an agent does not just edit claude.md without asking me first".) | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
-| `deleted-record-keeps-its-number` | Settled by the owner. | [`decisions/deleted-record-keeps-its-number.md`](../decisions/deleted-record-keeps-its-number.md) |
-| `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
-| `guard-reads-wrapped-commands` | Kind: build Plan: decisions/guard-reads-wrapped-commands.md#the-change (all) Home: hooks/guard_core.py | [`decisions/guard-reads-wrapped-commands.md`](../decisions/guard-reads-wrapped-commands.md) |
+| `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
+| `an-agent-outside-its-home-tree-must-stop` | An agent whose worktree is gone must stop and report. | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
+| `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`decisions/bare-merge-asks.md`](../decisions/bare-merge-asks.md) |
+| `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
+| `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
+| `git-env-set-denied` | No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
+| `guard-reads-wrapped-commands` | The guards judge the command a wrapper runs, not the raw text. | [`decisions/guard-reads-wrapped-commands.md`](../decisions/guard-reads-wrapped-commands.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
-| `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
-| `install-hooks-whole` | The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
-| `liveness-read-is-platform-specific-and-unreadable-is-not-death` | `hooks/guard.py`'s liveness oracle (`_process_start_ms`, `session_is_live`, `worktree_live_session`) folded two different facts into one answer. | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
-| `merge-follows-the-prs-base` | Settled by the owner, written down 2026-10-07. | [`decisions/merge-follows-the-prs-base.md`](../decisions/merge-follows-the-prs-base.md) |
-| `merge-lock-names-its-holder` | Settled by the owner. | [`decisions/merge-lock-names-its-holder.md`](../decisions/merge-lock-names-its-holder.md) |
-| `merge-net-retry` | Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times." | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
-| `merge-notice-checks-the-report` | CLAUDE.md: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." And: trust a guard only once it goes red on the defect it guards. | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
-| `merge-reinstalls-from-main` | Owner, 2026-10-11, owner, 2026-10-15 (the pinned checkout), and owner, 2026-10-15 17:40 CDT (the install switch): | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
-| `merge-waits-on-every-check` | Settled by the owner, written down 2026-10-01. | [`decisions/merge-waits-on-every-check.md`](../decisions/merge-waits-on-every-check.md) |
-| `owner-feedback-inbox` | Owner ruling, 2026-10-13, from an interview in the claude-settings audit session. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
-| `plain-diff-mod-limits` | The mod sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
-| `prune-cases-skip-without-symlink-privilege` | Prune cases skip when this account cannot make a real symlink | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
-| `records-index-at-merge` | Owner ruling, 2026-10-14 10:59 and 13:18 CDT. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
-| `rm-path-wrapper` | Owner, 2026-10-11 ("Yes, only for Claude sessions"): `bin/rm` sits ahead of the real `rm` on PATH. | [`decisions/rm-path-wrapper.md`](../decisions/rm-path-wrapper.md) |
-| `session-board-mod-limits` | Owner intent: stop typing "status?" into many sessions. | [`decisions/session-board-mod-limits.md`](../decisions/session-board-mod-limits.md) |
-| `split-segments-comment-rule` | `hooks/guard.py:split_segments` tracked single and double quotes. | [`decisions/split-segments-comment-rule.md`](../decisions/split-segments-comment-rule.md) |
+| `handoff-hooks-wave-2` | Owner, 2026-10-13 11:20 CDT: three hooks live in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
+| `install-hooks-whole` | No running session judges a call with a missing, short or mixed set of hook files. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
+| `liveness-read-is-platform-specific-and-unreadable-is-not-death` | A read that can fail has three outcomes: yes, no, and "I could not tell" (`verification-report-unknown-reads`). | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
+| `merge-config-defaults` | Merge works in a repo with no config file. | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
+| `merge-follows-the-prs-base` | `<base>` is the pull request's own base, read from `gh`. | [`decisions/merge-follows-the-prs-base.md`](../decisions/merge-follows-the-prs-base.md) |
+| `merge-lock-names-its-holder` | The lock is a ref on origin, `refs/merge-lock/<base>`, made through the GitHub API. | [`decisions/merge-lock-names-its-holder.md`](../decisions/merge-lock-names-its-holder.md) |
+| `merge-net-retry` | What `bin/merge` does when a network error or a rate limit stops a `gh` or `git` call. | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
+| `merge-notice-checks-the-report` | The merge notice in `hooks/decision_watch.py` fires only for a merge the reply's report does not name (`verification-cry-wolf-guard-is-spent`). | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
+| `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
+| `merge-waits-on-every-check` | **Check first, then claim.** Before `--confirm` pushes a claim, it reads the head's own checks with the same wait. | [`decisions/merge-waits-on-every-check.md`](../decisions/merge-waits-on-every-check.md) |
+| `owner-feedback-inbox` | When the owner opens a feedback burst, a hook writes each message to a per-session inbox. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
+| `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
+| `prune-cases-skip-without-symlink-privilege` | A Windows account without Developer Mode holds no `SeCreateSymbolicLinkPrivilege`, so `ln -s` writes a copy. | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
+| `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
+| `rm-path-wrapper` | `bin/rm` sits ahead of the real `rm` on PATH, for Claude sessions only. | [`decisions/rm-path-wrapper.md`](../decisions/rm-path-wrapper.md) |
+| `session-board-mod-limits` | The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all sessions and a safe stopping point, with no typing of "status?" into each one. | [`decisions/session-board-mod-limits.md`](../decisions/session-board-mod-limits.md) |
+| `split-segments-comment-rule` | **The predicate is the shell's own rule.** An unquoted `#` that STARTS A WORD opens a comment. | [`decisions/split-segments-comment-rule.md`](../decisions/split-segments-comment-rule.md) |
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "Never run `git stash` ... | [`decisions/stash-stack-is-a-shared-subject.md`](../decisions/stash-stack-is-a-shared-subject.md) |
-| `sweep-shuts-down-idle-simulators` | Owner rulings, 2026-10-10. | [`decisions/sweep-shuts-down-idle-simulators.md`](../decisions/sweep-shuts-down-idle-simulators.md) |
-
-## Unsorted decisions
-
-| Slug | Gist | Link |
-|---|---|---|
-| `a-kill-by-pid-needs-an-owned-pid` | CLAUDE.md says: "Never kill a process you did not start." The guard denied a kill by name or by pattern. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
-| `adoptions-declined-2026-09-28` | A review of public Claude Code configs and native features proposed these. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
-| `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | `hooks/test_config_watch.py`'s bypass cases handed `subprocess.run(["bash", "-c", command], ...)` a bare command name. | [`decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
-| `bash-path-breaks-only-when-the-snapshot-breaks` | The Bash tool's PATH breaks only when its shell snapshot breaks | [`decisions/bash-path-breaks-only-when-the-snapshot-breaks.md`](../decisions/bash-path-breaks-only-when-the-snapshot-breaks.md) |
-| `branch-delete-wrong-cause-was-a-filename-collision` | `decisions/branch-delete-wrong-cause-on-windows-unexplained.md` named a real defect and said its cause stayed unexplained. | [`decisions/branch-delete-wrong-cause-was-a-filename-collision.md`](../decisions/branch-delete-wrong-cause-was-a-filename-collision.md) |
-| `browser-prompts-are-the-apps` | Owner, 2026-10-11: no. | [`decisions/browser-prompts-are-the-apps.md`](../decisions/browser-prompts-are-the-apps.md) |
-| `builders-cannot-edit-tests` | Builders cannot edit tests | [`decisions/builders-cannot-edit-tests.md`](../decisions/builders-cannot-edit-tests.md) |
-| `ci-spend-rules` | Skill steps 1 and 11 to 14 hold these rules. | [`decisions/ci-spend-rules.md`](../decisions/ci-spend-rules.md) |
-| `ci-wall-time-cuts` | The owner chose cuts A to D on 2026-10-07. | [`decisions/ci-wall-time-cuts.md`](../decisions/ci-wall-time-cuts.md) |
-| `copy-mode-overwrites-no-backup` | Owner, 2026-10-03: in copy mode, an installer overwrites its own old copy. | [`decisions/copy-mode-overwrites-no-backup.md`](../decisions/copy-mode-overwrites-no-backup.md) |
-| `docs-only-prs-skip-code-suites` | `hooks/test_install_src.sh` takes case names as arguments and runs only those. | [`decisions/docs-only-prs-skip-code-suites.md`](../decisions/docs-only-prs-skip-code-suites.md) |
-| `docs-only-prs-skip-review` | Docs-only pull requests skip the reviewer | [`decisions/docs-only-prs-skip-review.md`](../decisions/docs-only-prs-skip-review.md) |
-| `frozen-path-resolves-shell-vars` | Rule 7 resolves shell variables before it matches a write target | [`decisions/frozen-path-resolves-shell-vars.md`](../decisions/frozen-path-resolves-shell-vars.md) |
-| `hooks-share-the-transcript-reader` | Four hooks each carried their own copy of the same transcript readers. | [`decisions/hooks-share-the-transcript-reader.md`](../decisions/hooks-share-the-transcript-reader.md) |
-| `known-bad-input-proves-the-gate` | A `gate` row cites a `test` id (`path::name`, `path::Class.name`) or a `setting` value. | [`decisions/known-bad-input-proves-the-gate.md`](../decisions/known-bad-input-proves-the-gate.md) |
-| `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
-| `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
-| `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
-| `playwright-browsers-path` | No. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
-| `playwright-install-once` | Owner, 2026-10-11 (rule `playwright-install` in `hooks/guard.py`): | [`decisions/playwright-install-once.md`](../decisions/playwright-install-once.md) |
-| `precompact-handoff` | Auto-compact drops detail. | [`decisions/precompact-handoff.md`](../decisions/precompact-handoff.md) |
-| `predicate-is-the-act` | CLAUDE.md says: "Fix the cause, not the symptom." It also says: "Check whether the primitive exists before building a workaround." This entry records why the markdown sweep stopped reading command text, and what that rule means for the next gate. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
-| `repeal-the-no-prefix-report-rule` | CLAUDE.md's Reports paragraph said: | [`decisions/repeal-the-no-prefix-report-rule.md`](../decisions/repeal-the-no-prefix-report-rule.md) |
-| `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
-| `rm-on-a-variable-needs-a-guard` | Owner, 2026-10-11 ("Ship guard now, hook later"): | [`decisions/rm-on-a-variable-needs-a-guard.md`](../decisions/rm-on-a-variable-needs-a-guard.md) |
-| `session-end-sweep-is-disarmed-until-liveness-is-proven` | The `SessionEnd` hook in `settings.json` runs `janitor/session_end_sweep.py`. | [`decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`](../decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md) |
-| `stale-safe-force-push` | CLAUDE.md says: "Judge every rule, check, and design by the outcome for the person the software serves." The outcome here: the owner gets no prompt for a safe push, and no push overwrites newer remote work with a stale copy. | [`decisions/stale-safe-force-push.md`](../decisions/stale-safe-force-push.md) |
-| `ux-house-rules` | Owner ruling, 2026-10-11: "build a ux folder". | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
-| `verdict-reads-runner-markers` | Owner, 2026-10-11 ("start the verdict lane"): | [`decisions/verdict-reads-runner-markers.md`](../decisions/verdict-reads-runner-markers.md) |
-| `which-start-shapes-outlive-the-agent-on-windows` | This entry is step 1 of a plan. | [`decisions/which-start-shapes-outlive-the-agent-on-windows.md`](../decisions/which-start-shapes-outlive-the-agent-on-windows.md) |
-| `worktree-setup-is-per-repo` | Owner, 2026-10-10: no. | [`decisions/worktree-setup-is-per-repo.md`](../decisions/worktree-setup-is-per-repo.md) |
+| `sweep-shuts-down-idle-simulators` | Sessions boot simulators. The sweep stops idle ones. | [`decisions/sweep-shuts-down-idle-simulators.md`](../decisions/sweep-shuts-down-idle-simulators.md) |
 
 ## Debts
 

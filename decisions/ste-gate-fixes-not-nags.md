@@ -1,66 +1,44 @@
 # The STE gate fixes what it can and denies the rest
 
-## The question
-
-When a write has STE errors, does the STE gate refuse the write, or fix the text first?
-
 ## The ruling
 
-The gate fixes first. For a Markdown write, it rewrites the fixable STE errors and returns the
-fixed text through `updatedInput`. It denies only the errors that remain after the rewrite.
-Only STE011 bloat phrases are fixable (`plain-prose-lint`, the STE lint becomes a plain-prose
-lint). Five borderline rows have no fix: `in a timely manner`, `along the lines of`, `close down`,
-`of major importance` and `except when`. A bloat phrase in ALL CAPS has no fix. Latin
-abbreviations, contractions and nominalizations are advisory and never rewritten. An advisory
-finding never denies and never rewrites. The gate prints it as a non-blocking note, which a
-denied write does not show. The owner accepts the note as a temporary nudge.
-A UI file is never rewritten. A UI file with STE errors is denied, as before. The UI suffixes
-are `.tsx`, `.jsx`, `.html` and `.vue`.
+The gate fixes first. For a Markdown write, it rewrites the fixable STE errors and returns the fixed text
+through `updatedInput`. It denies only the errors that remain after the rewrite. The gate fixes and does
+not nag. Reason: a deny sends the writer back for another write.
 
-Owner intent: the gate fixes. It does not nag. The owner marks no golden set.
-
-The mechanism:
-
+- Only STE011 bloat phrases are fixable (`plain-prose-lint`). Five borderline rows have no fix:
+  `in a timely manner`, `along the lines of`, `close down`, `of major importance` and `except when`. A
+  bloat phrase in ALL CAPS has no fix.
+- Latin abbreviations, contractions and nominalizations are advisory and never rewritten. An advisory
+  finding never denies and never rewrites. The gate prints it as a non-blocking note, which a denied
+  write does not show. The owner accepts the note as a temporary nudge.
+- A UI file is never rewritten. A UI file with STE errors is denied. The UI suffixes are `.tsx`, `.jsx`,
+  `.html` and `.vue`.
 - The fixer runs in a child process. Its limit is 5 s. Env `STE_FIXER_LIMIT_S` sets the limit.
 - Text over 262144 bytes skips the fixer. Env `STE_FIXER_MAX_BYTES` sets the ceiling.
-- A fixer crash, a timeout, or oversize input falls back to plain lint. Plain lint denies the
-  errors it finds, as before. The hook exits 0 on that path. The fixer adds no refusal of its own.
+- A fixer crash, a timeout, or oversize input falls back to plain lint. Plain lint denies the errors it
+  finds. The hook exits 0 on that path. The fixer adds no refusal of its own (`gate-hooks-fail-closed`).
 - Unsafe or ambiguous patterns stay unfixed. An unfixed error denies the write.
-- A fix never changes the line count.
+- A fix changes words, never the line count.
 - The gate reads stdin as UTF-8 bytes.
-- Each outcome writes one guard.log line through `guard_logger`: `fixed`, `deny`, or `noted`
-  with rule STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not
-  run). md_sweep writes one Stop `deny` line per blocked run. The line format is in
-  guard-log-read-weekly, the record of what the reader counts. A write with no fix, deny,
-  fallback or unchecked outcome writes no line. A write with advisory findings only writes no
-  line (debt `advisory-note-not-logged`, the advisory note leaves no log line).
+- Each outcome writes one guard.log line through `guard_logger`: `fixed`, `deny`, or `noted` with rule
+  STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not run). md_sweep writes
+  one Stop `deny` line per blocked run. The line format is in `guard-log-read-weekly`. A write with no
+  fix, deny, fallback or unchecked outcome writes no line. A write with advisory findings only writes no
+  line (debt `advisory-note-not-logged`).
 
 Files: `lint/ste_gate.py` (`autofix`, `run_autofix`, `rewrite_output`) and `lint/ste_lint.py`
 (`apply_fixes`). Logging: `lint/_transcript.py` (`guard_logger`).
 
-## Why
-
-A deny sends the writer back for another write. The owner wants the gate to fix, not nag.
-How often a deny led to a retry is still unmeasured. The log counts denies, fixes and fallbacks per
-session, with `--by-session`. It does not pair a deny with the retry that followed. Each line holds
-the time, the session and the basename, so a count can be made by hand.
-
-The fixer changes words, not line counts. A word swap is the only kind of change it makes.
-
-## What it costs
-
-A rewrite of a bloat phrase can change meaning in a sentence that no test holds. See Holes. The
-fixed text lands without the writer editing it.
-
-## What protects it
-
-- `lint/test_ste_autofix.py`. It runs on the Linux job only (see Holes). `KeptFixesTests` pins the
-  rows that fix. `RemovedFixesTests` and `RemovedFixesGateTests` pin the rows that do not.
-- The crash rule in gate-hooks-fail-closed (a fixer crash keeps plain lint, never a refusal).
-
-## Holes, named
-
-Debts: `ste-edit-fence-blind` (Edit rewrites text inside fences that Write denies). `ste-hook-timeout-fails-open` (the hook timeout can kill the gate). `ste-comment-gt-mask-early` (a > inside a comment ends the mask). `ste-eg-in-fence-reported` (`e.g.` inside a fence is still reported, as a warning). `ste-autofix-tests-linux-only` (the autofix tests run on Linux only). `ste-macos-child-route-unverified` (the macOS child-process route is unverified). `kept-bloat-rows-unaudited` (97 kept fix rows are not read against a corpus).
+Protection: `lint/test_ste_autofix.py` runs on the Linux job only. `KeptFixesTests` pins the rows that
+fix. `RemovedFixesTests` and `RemovedFixesGateTests` pin the rows that do not.
 
 Kind: process
 Home: lint/ste_gate.py
+
+## Holes, named
+
+Debts: `ste-edit-fence-blind`, `ste-hook-timeout-fails-open`, `ste-comment-gt-mask-early`,
+`ste-eg-in-fence-reported`, `ste-autofix-tests-linux-only`, `ste-macos-child-route-unverified`,
+`kept-bloat-rows-unaudited`. A rewrite of a bloat phrase can change meaning in a sentence that no test
+holds. How often a deny led to a retry is unmeasured.

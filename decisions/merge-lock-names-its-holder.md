@@ -1,13 +1,6 @@
 # The merge lock is a ref on origin, and it names its holder
 
-## The question
-
-How does the merge tool let only one run merge into a base? What does a waiting run learn
-about the run that holds the lock?
-
 ## The ruling
-
-Settled by the owner. The holder fields were written down 2026-10-07.
 
 1. The lock is a ref on origin, `refs/merge-lock/<base>`, made through the GitHub API. The API
    refuses a ref that exists, so only one session holds it. Cloud sessions merge too, and a
@@ -22,24 +15,18 @@ Settled by the owner. The holder fields were written down 2026-10-07.
 5. `--unlock` stays unconditional. Nothing breaks a live lock by itself.
 6. A release that fails, or finds another run's lock, says so in one line. It never raises.
 
+Reason: an anonymous lock let an `--unlock` break a live merge, so a second PR merged in the gap.
+
 Kind: build
 Plan: decisions/merge-lock-names-its-holder.md#the-ruling (all)
 Home: merge/merge.py
 
-## Why
-
-Incident: q_max, 2026-10-06. A live `merge 445` held an anonymous lock. An `--unlock` broke
-it, #451 merged in the gap, and #445 hit a conflict.
-
 ## Holes, named
 
-- The expired-lock delete can remove a live lock. The API cannot delete a ref only if it still
-  holds a given value. Debt `expired-lock-delete-race` (two runs can hold the lock).
-- Debts that sit on the same lock path: `lock-delete-retry-window` (the delete retries through
-  rate waits and ignores its result), `lock-ttl-rate-wait` (rate waits can outlast the lock
-  expiry), `lock-read-error-never-expires` (a failed lock read gives a lock that never expires).
+- The expired-lock delete can remove a live lock. Debt `expired-lock-delete-race` (two runs can hold the lock).
+- Debts on the same path: `lock-delete-retry-window`, `lock-ttl-rate-wait`, `lock-read-error-never-expires`.
 
 ## Related
 
-- Decision merge-follows-the-prs-base (the lock is per base, and `--unlock` takes a branch).
-- Decision merge-net-retry (a lock call that hits a rate limit or a network error).
+- merge-follows-the-prs-base (the lock is per base, and `--unlock` takes a branch).
+- merge-net-retry (a lock call that hits a rate limit or a network error).

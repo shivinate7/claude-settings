@@ -337,7 +337,7 @@ MUTATIONS = [
      'trim: env: grep with a dot-star pattern'),
     ("machine-wide-kill: pkill and killall no longer deny in command position",
      '    if tool in KILL_COMMAND_WORDS:\n        return word',
-     '    if False:\n        return word', "guard", 'kill: pkill by pattern'),
+     '    if False:\n        return word', "guard", 'kill: pkill by pattern denies'),
     ("machine-wide-kill: taskkill's image flag no longer denies",
      '    if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):\n'
      '        return word',
@@ -763,6 +763,10 @@ MUTATIONS = [
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
+    ("cap: a Write of a settings file never asks, so an opus lift lands unasked",
+     '        if is_settings_file(target, cwd):\n            change = cap_change_parts(write_content_parts(tool_input))',
+     '        if False:\n            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
      '    return "haiku" in str(model).lower()',
      '    return "haiku" in str(model)', "guard", 'floor: Agent with a mixed-case haiku spelling is denied'),
@@ -775,6 +779,10 @@ MUTATIONS = [
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
      'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)'),
+    ("step-up: a builder try 3 on a non-opus model is no longer refused",
+     'if role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
+     'if False and role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
+     "guard", 'floor step-up: builder Try 3 of 3 on sonnet is denied'),
     ("frozen-path: the config-watch baseline store is not frozen",
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),
@@ -790,7 +798,7 @@ MUTATIONS = [
     #   "silent-write: the quiet-flag arm no longer fires for any subcommand"
     #     -> "silent-write: push's own quiet flag needs no redirect at all"
     #   "silent-write: a discarding redirect no longer silences anything"
-    #     -> "silent-write: a discarded proof of landing, stdout alone"
+    #     -> "silent-write: discarding a write command output denies, stdout alone"
     #   "silent-write: the merge --abort carve-out is gone"
     #     -> "silent-write: an abort lands nothing, so it is carved out"
     #   "silent-write: fetch joins the denied subcommands"
@@ -809,7 +817,7 @@ MUTATIONS = [
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
      '            refuse(tool, "deny", "silent-write",', "guard",
-     "silent-write: a discarded proof of landing, stdout alone"),
+     "silent-write: discarding a write command output denies, stdout alone"),
     ("silent-write: the quiet-flag arm no longer fires for any subcommand",
      '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
      '        if False and quiet_write(args):', "guard",
@@ -817,7 +825,7 @@ MUTATIONS = [
     ("silent-write: a discarding redirect no longer silences anything",
      '        if silenced:\n            return matched, "redirect"',
      '        if False:\n            return matched, "redirect"', "guard",
-     'silent-write: a discarded proof of landing, stdout alone'),
+     'silent-write: discarding a write command output denies, stdout alone'),
     ("silent-write: the merge --abort carve-out is gone",
      '        if subcommand == "merge" and "--abort" in args:\n            continue',
      '        if False:\n            continue', "guard",

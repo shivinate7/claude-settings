@@ -1,23 +1,18 @@
 # Worktree setup is per repo
 
-## The question
-
-A worktree made mid-session gets no setup of its untracked state (node_modules, venv, caches).
-A SessionStart hook runs only when a session starts in that worktree. Should claude-settings own
-one shared fix for every repo that imports it?
-
-Scope: untracked state only. Dev-server ports are decision reuse-needs-checkout-proof.
-
 ## The ruling
 
-Owner, 2026-10-10: no. Each repo solves it itself. claude-settings ships no worktree-setup hook.
+Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. claude-settings
+ships no worktree-setup hook. Reason: a worktree made mid-session gets no setup, because a SessionStart
+hook runs only when a session starts in it. Dev-server ports are in reuse-needs-checkout-proof.
 
-## Facts a repo needs
+Facts a repo needs:
 
-- Measured 2026-10-10: Claude Code's own worktrees (Agent `isolation: worktree`) do not fire
-  git `post-checkout`. A plain `git worktree add` does, with the old HEAD all zeros.
-- From the docs: a `WorktreeCreate` hook replaces Claude Code's worktree creation, must print
-  the path, and fails creation if it fails. No documented event fires after default creation.
-  Native options: the `worktree.symlinkDirectories` setting and a `.worktreeinclude` file.
-- Incident: banchi (PR shivinate7/banchi#793). Checks needing node_modules reported "unknown"
-  in a worktree made mid-session.
+- Claude Code's own worktrees (Agent `isolation: worktree`) do not fire git `post-checkout`. A plain
+  `git worktree add` does, with the old HEAD all zeros.
+- A `WorktreeCreate` hook replaces Claude Code's worktree creation, must print the path, and fails
+  creation if it fails. No documented event fires after default creation. Native options: the
+  `worktree.symlinkDirectories` setting and a `.worktreeinclude` file.
+
+Kind: process
+Home: decisions/worktree-setup-is-per-repo.md
