@@ -26,8 +26,8 @@ Per question with two or more options (a clarifying question passes first):
 - The judge also reads the rulings of the repo at the payload `cwd`: each "The ruling" / "Ruling" /
   "The rulings" / "The owner's rulings" H2 section (any suffix, to the next H2 outside a code
   fence) of decisions/*.md, and the "**Why it waits.**" paragraph of deferred/*.md. Each ruling
-  is fenced and labeled with its record id and H1 title. A question the owner already settled
-  is FLAGged with the record id, and the deny reason gives the id and title, never a path. A
+  is fenced and labeled with its record id (`<folder>/<stem>`) and H1 title. A question the owner already
+  settled is FLAGged with the record id, and the deny reason gives the id and title, never an absolute path. A
   question that asks to change a ruling passes. Each ruling is cut to RULING_CAP chars at a
   sentence end. The section holds at most RULINGS_MAX chars, the most recently changed records
   first (one git log call; file mtime when git fails); older rulings are left out, and a mark
@@ -452,7 +452,7 @@ def _rulings(cwd):
             continue
         if not ruling:
             continue
-        rid = path.split("/")[1][:-3]
+        rid = path[:-3]  # "<folder>/<stem>"
         block = _block("Ruling of record %s (%s)" % (rid, title or "untitled"), _cap_ruling(ruling))
         if left_out or len(block) + SEP > room:
             left_out += 1
