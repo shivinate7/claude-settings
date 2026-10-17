@@ -1,6 +1,6 @@
 # Debts
 
-A debt is a known gap. The rule `roles-holes-are-debts` in `CLAUDE.md` makes every known gap a debt. This folder is the debt store for this repo.
+A debt is a known gap. The rule `roles-holes-are-debts` in `CLAUDE.md` makes a known gap a debt when Claude is likely to hit it in normal work. This folder is the debt store for this repo.
 
 ## Shape
 
