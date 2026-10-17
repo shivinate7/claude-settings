@@ -4,17 +4,21 @@
 bin/rm sits ahead of the real rm on PATH. With CLAUDECODE set it refuses a recursive delete of /,
 the home folder, the cwd or a parent of the cwd, and execs the real rm for every other call. With
 CLAUDECODE unset it does nothing. It reuses _rm_target_bad (guard_rm_var), the one home for the
-critical-path reading. Deferred item rm-path-wrapper. The install.ps1 half is out of scope.
+critical-path reading. Decision rm-path-wrapper (an rm shim on PATH, active only in Claude sessions).
+The install.ps1 half is out of scope.
 
 Never runs a wide delete: HOME and the cwd are temp dirs, and the module refuses to run if the shim
 under test is the real rm. RM_SHIM_UNDER_TEST overrides the shim path (red proofs on a scratch shim).
 Tests live here, not in bin/: bin/ is landed on PATH.
 """
-import os, re, shutil, subprocess, tempfile, unittest
+import os, re, shutil, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHIM = os.environ.get("RM_SHIM_UNDER_TEST") or os.path.join(ROOT, "bin", "rm")
 REAL_RMS = ("/bin/rm", "/usr/bin/rm")
+# Fixed paths, not `which`: in a Claude session `which rm` is the shim itself.
+REAL_RM = next((p for p in REAL_RMS if os.path.exists(p)), REAL_RMS[0])
+REAL_SH = "/bin/sh"
 
 
 def setUpModule():
@@ -62,23 +66,47 @@ class Shim(unittest.TestCase):
         with open(p, "w") as f:
             f.write("x")
 
-    def rm(self, *args, claude=True):
-        """Run the shim in the cwd with the fake HOME. claude=False leaves CLAUDECODE unset."""
-        self.assertTrue(os.access(SHIM, os.X_OK), "%s is missing or not executable" % SHIM)
+    def env(self, claude=True, path=None):
+        """The fake HOME, and CLAUDECODE only when claude. path replaces PATH when given."""
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         env["HOME"] = self.home
         if claude:
             env["CLAUDECODE"] = "1"
-        return subprocess.run([SHIM, *args], cwd=self.cwd, env=env, capture_output=True, text=True, timeout=30)
+        if path is not None:
+            env["PATH"] = path
+        return env
+
+    def run_in(self, argv, timeout=30, **kw):
+        """subprocess.run, and a timeout is a failure: a shim that execs itself in a loop never exits."""
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, **kw)
+        except subprocess.TimeoutExpired:
+            self.fail("no exit within %ss (a loop?): %s" % (timeout, argv))
+
+    def rm(self, *args, claude=True, shim=None, path=None, timeout=30):
+        """Run the shim in the cwd with the fake HOME. claude=False leaves CLAUDECODE unset."""
+        shim = shim or SHIM
+        self.assertTrue(os.access(shim, os.X_OK), "%s is missing or not executable" % shim)
+        return self.run_in([shim, *args], timeout=timeout, cwd=self.cwd, env=self.env(claude, path))
+
+    def bindir(self, name, **tools):
+        """A new folder of symlinks: bindir("x", rm="/bin/rm") holds x/rm -> /bin/rm."""
+        d = self.path(name)
+        os.mkdir(d)
+        for tool, target in tools.items():
+            os.symlink(target, os.path.join(d, tool))
+        return d
 
     def assertIntact(self):
         gone = [p for p in self.live + [self.link] if not os.path.lexists(p)]
         self.assertEqual(gone, [], "a refused call deleted: %s" % gone)
 
     def assertRefused(self, args, bad):
+        self.assertRefusal(self.rm(*args), args, bad)
+
+    def assertRefusal(self, r, args, bad):
         """Nonzero exit, nothing deleted, a printed reason, and no remedy that is a delete of a forbidden
         target (rule git-remedy-never-names-target). bad lists the forbidden targets as the call named them."""
-        r = self.rm(*args)
         msg = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0, "exit 0 on %s: %s" % (args, msg))
         self.assertIntact()
@@ -133,6 +161,17 @@ class Shim(unittest.TestCase):
             with self.subTest(arg):
                 self.assertRefused(["-rf", arg], [arg, self.home])
 
+    def test_a_removed_cwd_still_refuses_home(self):
+        # A session's shell can sit in a folder that another command removed. getcwd then fails, but an
+        # absolute HOME is still HOME: the shim must refuse, not fall open to the real rm.
+        doomed = self.path("doomed")
+        os.mkdir(doomed)
+        self.assertTrue(os.access(SHIM, os.X_OK), "%s is missing or not executable" % SHIM)
+        script = 'cd "$1" && rmdir "$1" && echo armed && "$2" -rf "$3"'
+        r = self.run_in([REAL_SH, "-c", script, "sh", doomed, SHIM, self.home], env=self.env())
+        self.assertIn("armed", r.stdout, "the shell's folder was not removed under it: " + r.stderr)
+        self.assertRefusal(r, ["-rf", self.home], [self.home])
+
     # CLAUDECODE=1: these pass and delete.
 
     def test_passes_a_build_folder(self):
@@ -166,6 +205,44 @@ class Shim(unittest.TestCase):
         r = self.rm("-rf", self.home, claude=False)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(self.home))
+
+    def test_unset_needs_nothing_but_the_real_rm_and_sh_on_path(self):
+        # A PATH with no python3: the shim must still hand the call to the real rm. Exit 127 means the
+        # shebang's interpreter was not found, so a Claude-free shell lost its rm.
+        bins = self.bindir("realbin", rm=REAL_RM, sh=REAL_SH)
+        r = self.rm("file.txt", claude=False, path=bins)
+        self.assertEqual(r.returncode, 0, "exit %s: %s" % (r.returncode, r.stderr))
+        self.assertFalse(os.path.exists(self.path("work", "proj", "file.txt")))
+
+    # Pass-through: calls the shim does not judge reach the real rm unchanged.
+
+    def test_two_shim_copies_on_path_do_not_loop(self):
+        # A cloud install copies bytes instead of linking, so PATH can hold two copies of the shim. Neither
+        # is the other's real path, so "the next rm that is not me" must not pick the other copy.
+        a, b = self.path("A"), self.path("B")
+        for d in (a, b):
+            os.mkdir(d)
+            shutil.copy2(SHIM, os.path.join(d, "rm"))
+        real = self.bindir("C", rm=REAL_RM, sh=REAL_SH)
+        py = os.path.dirname(shutil.which("python3") or sys.executable)  # after the real rm, so it never wins
+        path = os.pathsep.join([a, b, real, py])
+        r = self.rm("file.txt", shim=os.path.join(a, "rm"), path=path, timeout=5)
+        self.assertEqual(r.returncode, 0, "exit %s: %s" % (r.returncode, r.stderr))
+        self.assertFalse(os.path.exists(self.path("work", "proj", "file.txt")))
+
+    def test_a_missing_file_gives_the_real_rm_exit_code(self):
+        want = self.run_in([REAL_RM, "nosuch.txt"], cwd=self.cwd, env=self.env(claude=False)).returncode
+        self.assertNotEqual(want, 0)
+        r = self.rm("nosuch.txt")
+        self.assertEqual(r.returncode, want, r.stderr)
+        self.assertIntact()
+
+    def test_a_file_named_with_a_dash_is_deleted_after_dashes(self):
+        self.touch("work/proj/-dash")
+        r = self.rm("--", "-dash")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.lexists(self.path("work", "proj", "-dash")))
+        self.assertIntact()
 
 
 if __name__ == "__main__":

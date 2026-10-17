@@ -229,8 +229,8 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
 
     # The rm shim suite also runs in gates-macos: BSD rm and the /var symlink change what the shim reads,
-    # and a Linux pass proves neither. bin/rm falls to the catch-all (everything on), so only a diff
-    # that names the suite alone needs its own rule. The lint/* rule sets `code` only.
+    # and a Linux pass proves neither. harness-scope.sh maps bin/rm and the suite to that job ahead of
+    # the lint/* rule, which sets `code` only, so a diff that names the suite alone still reaches it.
     def test_an_rm_shim_suite_change_turns_on_the_macos_job(self):
         self.assertFlags(run(["lint/test_rm_shim.py"], existing=["lint/test_rm_shim.py"]), want_true=["gates_macos", "code"])
 
