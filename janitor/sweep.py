@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The machine-wide janitor sweep.
 
-Governed by plans/janitor-build-plan.md. Reaps local branches that hold no unique work and
+Governed by decision the-janitor-is-one-machine-wide-sweep (the janitor is one machine-wide sweep). Reaps local branches that hold no unique work and
 removes git worktrees that no session still uses, across every repository the sweep is pointed
 at, or discovers.
 

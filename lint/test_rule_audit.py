@@ -358,6 +358,24 @@ SIBLING_MAP = {
 }
 
 
+class KindDocTests(unittest.TestCase):
+    """The module docstring keeps the two kinds apart: only `judgment` says no check can judge the rule.
+    A reader of `unmechanized` must not read it as the same case (claude-md-shrink)."""
+
+    def bullet(self, kind):
+        doc = rule_audit.__doc__
+        start = doc.index("  - `%s`:" % kind)
+        end = doc.find("\n  - `", start + 1)
+        return doc[start:end if end != -1 else len(doc)]
+
+    def test_unmechanized_bullet_does_not_say_cannot_be_checked(self):
+        self.assertNotIn("cannot be checked", self.bullet("unmechanized"))
+
+    def test_the_bullet_slice_reads_the_whole_unmechanized_bullet(self):
+        # Control: a slice that came back short would pass the case above for the wrong reason.
+        self.assertIn("reason", self.bullet("unmechanized"))
+
+
 class GuardTextTests(unittest.TestCase):
     """`guard_text(root)` reads every hooks/guard*.py under root. A rule refused in a sibling
     module (guard_x.py, not guard.py) must resolve, and test files must not count as rule homes."""

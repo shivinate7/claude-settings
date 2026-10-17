@@ -3,8 +3,8 @@
 
 Modes:
 - UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
-  `fb` starts owner feedback capture to the session's inbox file, until `fb done`, 10 minutes
-  of quiet, or a judge that says a prompt is not feedback.
+  `fb` also starts feedback capture to the session's inbox file. Capture ends at `fb done`,
+  after 10 minutes of quiet, or when a judge says a prompt is not feedback.
 - --subagent: At SubagentStart, gives the subagent the time in US Central as context.
 
 Owner ruling 2026-10-13: sessions speak times in US Central, 24-hour clock. See decision

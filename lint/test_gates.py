@@ -864,6 +864,33 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "")
 
 
+class RemovedBudgetKeysTests(unittest.TestCase):
+    """load_config says so when a config still sets a removed word-budget key (plain-prose-lint)."""
+
+    def load(self, data):
+        import contextlib
+        import io
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with open(os.path.join(tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            cfg = ste_lint.load_config(tmp.name)
+        return cfg, err.getvalue()
+
+    def test_removed_budget_keys_print_a_notice_each(self):
+        for key in ("max_words_procedural", "max_words_descriptive"):
+            with self.subTest(key=key):
+                _cfg, err = self.load({key: 20})
+                self.assertIn(key, err)
+
+    def test_a_current_key_prints_no_notice(self):
+        cfg, err = self.load({"max_words": 20})
+        self.assertEqual(cfg["max_words"], 20)
+        self.assertEqual(err, "")
+
+
 class SentenceSplitBoldTests(unittest.TestCase):
     """A sentence end inside bold or italic markers still splits (claude-settings patch)."""
 
@@ -876,16 +903,16 @@ class SentenceSplitBoldTests(unittest.TestCase):
         text = (
             "**First short sentence.** Second short sentence that alone is well "
             "under the limit for this test case and it stays clear plain short "
-            "words here.\n"
+            "words here for every reader who checks the count today.\n"
         )
-        # Each sentence alone is under the 25-word descriptive budget. Joined as
+        # Each sentence alone is under the 30-word budget. Joined as
         # one sentence (the pre-patch behavior), the word count would exceed it.
         findings = self.lint(text)
         codes = [f.code for f in findings]
         self.assertNotIn("STE001", codes)
 
-    def test_20_plain_thirty_word_sentence_still_ste001(self):
-        words = ["word"] * 30
+    def test_20_plain_thirty_one_word_sentence_still_ste001(self):
+        words = ["word"] * 31
         text = " ".join(words).capitalize() + ".\n"
         findings = self.lint(text)
         codes = [f.code for f in findings]
@@ -919,7 +946,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
     def test_genuinely_long_sentence_without_citation_still_ste001(self):
         self.write_entry("d-001.md", "D-001", "A short title")
-        words = ["word"] * 30
+        words = ["word"] * 31
         text = " ".join(words).capitalize() + ".\n"
         codes = [f.code for f in self.lint(text, use_gloss=True)]
         self.assertIn("STE001", codes)
@@ -929,7 +956,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         text = (
             "The team agreed today that this long sentence about D-001, A title "
             "of exactly six whole words still carries plenty of authored words "
-            "for the sentence count today.\n")
+            "for the sentence count today at the main site now.\n")
         uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
         self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
         collapsed = [f.code for f in self.lint(text, use_gloss=True)]
@@ -940,7 +967,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         text = (
             "The team agreed today that this long sentence about D-001, some "
             "text that is not entry one real title still carries plenty of "
-            "authored words for the count today.\n")
+            "authored words for the count today at the main site now.\n")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
         self.assertIn("STE001", codes)
 
@@ -949,18 +976,22 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         self.write_entry("d-002.md", "D-002", "The newer rule", body="reverses: D-001\n")
         text = (
             "The team agreed that this sentence about D-001, A title of exactly six "
-            "whole words (reversed by D-002, The newer rule) still carries words today.\n")
+            "whole words (reversed by D-002, The newer rule) still carries plenty of "
+            "words for the whole crew today and for the late shift too.\n")
+        uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
+        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
         self.assertNotIn("STE001", codes)
 
     def test_heading_gloss_trigger_word_does_not_force_procedural_mode(self):
         # D-448's real title in q_max, "The operator tiers run themselves", carries
-        # `run`, a `PROCEDURAL_HEADINGS` trigger word. 23 authored words in the body:
-        # under the 25-word descriptive limit, over the 20-word procedural one.
+        # `run`, a `PROCEDURAL_HEADINGS` trigger word. The sentence limit is one number now, so
+        # the mode shows through STE015, a rule that reads procedural text only. The body holds a
+        # condition after its instruction: STE015 fires in procedural mode, never in descriptive.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
         body = (
             "The server brings Postgres up on the machine own loopback interface, "
-            "and a scratch database on it is the best possible subject here.\n")
+            "and restarts it when the health check fails here.\n")
         rows = [
             # Catches: a trigger word in the gloss forces procedural mode on a cited heading.
             "## A loopback server is the first target here (D-001, The operator "
@@ -974,17 +1005,17 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         for text in rows:
             with self.subTest(heading=text.split("\n")[0]):
                 codes = [f.code for f in self.lint(text, use_gloss=True)]
-                self.assertNotIn("STE001", codes)
+                self.assertNotIn("STE015", codes)
 
-    def test_authored_procedural_heading_still_selects_procedural_limit(self):
+    def test_authored_procedural_heading_still_selects_procedural_mode(self):
         # Check 5: the fix must not blind the heuristic to a real procedural heading.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
         text = (
             "## Running the probes\n\n"
             "The server brings Postgres up on the machine own loopback interface, "
-            "and a scratch database on it is the best possible subject here.\n")
+            "and restarts it when the health check fails here.\n")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertIn("STE001", codes)
+        self.assertIn("STE015", codes)
 
     def test_heading_with_no_citation_is_unaffected(self):
         # Check 7: a heading naming no id behaves exactly as it did before this fix.
@@ -992,7 +1023,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         text = (
             "## A loopback server is the first target here today\n\n"
             "The server brings Postgres up on the machine own loopback interface, "
-            "and a scratch database on it is the best possible subject here.\n")
+            "and restarts it when the health check fails here.\n")
         with_dir = [f.code for f in self.lint(text, use_gloss=True)]
         without_feature = [f.code for f in self.lint(text, use_gloss=False)]
         self.assertEqual(with_dir, without_feature)
@@ -1001,15 +1032,15 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         # The list-item path reads its first word through `IMPERATIVE_STARTERS`,
         # through `re.match(r"([A-Za-z]+)", body)`. An id such as "D-001" stops that
         # match at its own hyphen. The gloss's words are never reached. No fix was
-        # needed here, and this proves it. The body holds 21 words, over the
-        # 20-word procedural limit, under the 25-word descriptive one. A wrong
+        # needed here, and this proves it. The body holds a condition after its
+        # instruction: STE015 fires in procedural mode only, so a wrong
         # classification would fail this test.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
         text = (
             "- D-001, The operator tiers run themselves, so nothing else here "
-            "needs a restart or a rebuild ever for any reason today.\n")
+            "needs a restart when the check fails today.\n")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", codes)
+        self.assertNotIn("STE015", codes)
 
     def test_pending_entry_has_no_id_to_collapse(self):
         self.write_entry("d-003.md", "pending", "Not stamped yet")
@@ -1022,13 +1053,14 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 
 class PromotedRuleTests(unittest.TestCase):
-    """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
-    blocks or does not exist. Seven rules were promoted to error. Each case here proves
-    the promoted rule actually fires at error severity, the thing a table-row edit alone
-    cannot prove. The deleted rules get one companion case each: their codes are gone
-    from RULES entirely, not merely downgraded. STE006 and STE018, deleted later (the
-    owner's ruling of 2026-09-23), get their own no-finding cases instead, since a
-    deleted rule has no severity left to assert.
+    """The owner's ruling of 2026-10-17 (turn the STE lint into a plain-prose lint) replaced
+    the ruling that a rule either blocks or does not exist (decisions/every-lint-rule-blocks-
+    or-does-not-exist.md). Five rules block: STE001, STE011, STE013, STE020, STE021. Six are
+    advisory: STE003, STE007, STE008, STE009, STE015, STE017 are warnings that the linter
+    reports and no gate ever blocks on. Each case here proves a rule fires at its severity,
+    the thing a table-row edit alone cannot prove. STE006 and STE018, deleted by the owner's
+    ruling of 2026-09-23, get their own no-finding cases instead, since a deleted rule has no
+    severity left to assert.
     """
 
     def lint(self, text, mode=None):
@@ -1044,13 +1076,19 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertTrue(hit, "%s did not fire on %r" % (code, text))
         self.assertEqual(hit[0].severity, "error")
 
-    def test_ste003_nominalization_blocks(self):
-        self.assert_blocks(
+    def assert_advisory(self, text, code, mode=None):
+        findings = self.lint(text, mode=mode)
+        hit = [f for f in findings if f.code == code]
+        self.assertTrue(hit, "%s did not fire on %r" % (code, text))
+        self.assertEqual(hit[0].severity, "warning")
+
+    def test_ste003_nominalization_is_advisory(self):
+        self.assert_advisory(
             "The team performs a validation of the payload before it saves the record.\n",
             "STE003")
 
-    def test_ste009_phrasal_verb_blocks(self):
-        self.assert_blocks(
+    def test_ste009_phrasal_verb_is_advisory(self):
+        self.assert_advisory(
             "Do not set up the server unless you read the runbook first.\n",
             "STE009")
 
@@ -1064,15 +1102,21 @@ class PromotedRuleTests(unittest.TestCase):
             "The setting is not unavailable after the restart finishes.\n",
             "STE013")
 
-    def test_ste015_condition_order_blocks(self):
-        self.assert_blocks(
+    def test_ste015_condition_order_is_advisory(self):
+        self.assert_advisory(
             "Restart the service if the health check fails.\n",
             "STE015", mode="procedural")
 
-    def test_ste017_omitted_that_blocks(self):
-        self.assert_blocks(
+    def test_ste017_omitted_that_is_advisory(self):
+        self.assert_advisory(
             "The linter ensures the file is valid before it runs.\n",
             "STE017")
+
+    def test_ste007_latin_abbreviation_is_advisory(self):
+        self.assert_advisory("Send the report via email.\n", "STE007")
+
+    def test_ste008_contraction_is_advisory(self):
+        self.assert_advisory("They'd finished the work.\n", "STE008")
 
     def test_gendered_pronoun_produces_no_finding(self):
         # The owner's ruling (2026-09-23): STE018 is deleted outright, not merely
@@ -1091,14 +1135,283 @@ class PromotedRuleTests(unittest.TestCase):
         # that together cross the word budget is one sentence to the counter, and
         # must still trip STE001.
         text = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13; "
-                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26.\n")
+                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32.\n")
         findings = self.lint(text)
         self.assertIn("STE001", [f.code for f in findings])
 
-    def test_every_remaining_rule_is_error(self):
+    def test_errors_are_exactly_the_five_blocking_codes_and_warnings_the_six_advisory_ones(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
-        self.assertTrue(severities)
-        self.assertEqual(set(severities.values()), {"error"})
+        self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
+        self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
+        self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
+
+
+# Owner ruling 2026-10-17 (turn the STE lint into a plain-prose lint). These errors block:
+ERROR_CODES = ("STE001", "STE011", "STE013", "STE020", "STE021")
+# These six are advisory: reported as warnings, never a deny, a rewrite or a failed run.
+ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017")
+# One input per advisory code. Each holds that code's finding and no error finding, and none is
+# text the old fixer rewrote, so a failing run on old code comes from the severity alone.
+ADVISORY_SAMPLES = {
+    "STE003": "The team performs a validation of the payload before it saves the record.\n",
+    "STE007": "Send the report via email.\n",
+    "STE008": "They'd finished the work.\n",
+    "STE009": "Do not set up the server unless you read the runbook first.\n",
+    "STE015": "<!-- ste: procedural -->\n\nRestart the service if the health check fails.\n",
+    "STE017": "The linter ensures the file is valid before it runs.\n",
+}
+
+
+def plain_words(n):
+    """A sentence of exactly n words, one per `word`."""
+    return " ".join(["word"] * n).capitalize() + ".\n"
+
+
+# One input per kept error code: (file suffix, text). None is text the fixer rewrites.
+KEPT_SAMPLES = {
+    "STE001": (".md", plain_words(31)),
+    "STE011": (".md", "In conclusion, the plan works.\n"),
+    "STE013": (".md", "This step is not unsafe.\n"),
+    "STE020": (".tsx", "const x = <button>Save the file right now</button>;\n"),
+    "STE021": (".tsx", "const x = (\n  // ste-disable-next-line STE020\n  <p>Hello.</p>\n);\n"),
+}
+
+
+def run_lint_cli(text, suffix=".md"):
+    """ste_lint.py at its defaults on a file holding text: (exit code, parsed JSON)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t" + suffix)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        run = subprocess.run([sys.executable, os.path.join(HERE, "ste_lint.py"), "--no-color",
+                              "--format", "json", path], capture_output=True, text=True, timeout=15)
+    return run.returncode, json.loads(run.stdout)
+
+
+def run_write_gate(text, name="t.md"):
+    """The STE gate on a Write of text to a new file: (process, hookSpecificOutput)."""
+    with tempfile.TemporaryDirectory() as d:
+        run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": os.path.join(d, name), "content": text}})
+    out = json.loads(run.stdout).get("hookSpecificOutput", {}) if run.stdout.strip() else {}
+    return run, out
+
+
+def note_text(run):
+    """The note a hook printed, as one string: systemMessage and additionalContext. "" when it
+    printed none. Either field shows the note to the reader, so a case does not pick one."""
+    if not run.stdout.strip():
+        return ""
+    out = json.loads(run.stdout)
+    parts = (out.get("systemMessage"), (out.get("hookSpecificOutput") or {}).get("additionalContext"))
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
+class OneSentenceBudgetTests(unittest.TestCase):
+    """Owner ruling 2026-10-17: one sentence budget of 30 words, procedural or descriptive.
+    The procedural limit of 20 and the descriptive limit of 25 are gone."""
+
+    def lint(self, text, mode):
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        config["mode"] = mode
+        return ste_lint.Linter(config).check_text("t.md", text)
+
+    def test_b01_26_to_30_words_pass_in_both_modes(self):
+        for mode in ("descriptive", "procedural"):
+            for n in (26, 30):
+                with self.subTest(mode=mode, words=n):
+                    self.assertNotIn("STE001", [f.code for f in self.lint(plain_words(n), mode)])
+
+    def test_b02_31_words_error_in_both_modes_and_name_the_limit(self):
+        # A guard: green before the ruling and after it. The message states the one limit.
+        for mode in ("descriptive", "procedural"):
+            with self.subTest(mode=mode):
+                hit = [f for f in self.lint(plain_words(31), mode) if f.code == "STE001"]
+                self.assertTrue(hit)
+                self.assertEqual(hit[0].severity, "error")
+                self.assertRegex(hit[0].message, r"\b30\b")
+
+    def test_b03_the_cli_passes_26_words_in_a_procedural_file_and_a_descriptive_file(self):
+        for label, text in (("descriptive", plain_words(26)),
+                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(26))):
+            with self.subTest(file=label):
+                rc, data = run_lint_cli(text)
+                self.assertEqual(data["findings"], [])
+                self.assertEqual(rc, 0)
+
+    def test_b04_the_cli_fails_31_words_in_a_procedural_file_and_a_descriptive_file(self):
+        for label, text in (("descriptive", plain_words(31)),
+                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(31))):
+            with self.subTest(file=label):
+                rc, data = run_lint_cli(text)
+                self.assertEqual([f["code"] for f in data["findings"]], ["STE001"])
+                self.assertEqual(rc, 1)
+
+    def test_b05_the_gate_allows_26_words_in_both_modes(self):
+        for label, text in (("descriptive", plain_words(26)),
+                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(26))):
+            with self.subTest(file=label):
+                run, out = run_write_gate(text)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+
+    def test_b06_the_gate_denies_31_words_in_both_modes_and_names_the_limit(self):
+        for label, text in (("descriptive", plain_words(31)),
+                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(31))):
+            with self.subTest(file=label):
+                run, out = run_write_gate(text)
+                self.assertEqual(out.get("permissionDecision"), "deny")
+                reason = out["permissionDecisionReason"]
+                self.assertIn("31", reason)
+                self.assertRegex(reason, r"\b30\b")
+                self.assertIn("split", reason.lower())
+
+    def test_b06b_the_deny_note_does_not_call_an_advisory_rule_an_error(self):
+        # The deny text ends in a note that lists the rules that block. After the ruling it names
+        # none of the six advisory rules, or the writer is told to fix what no gate checks.
+        run, out = run_write_gate(plain_words(31))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        note = out["permissionDecisionReason"].lower()
+        for phrase in ("nominalization", "latin abbreviation", "contraction", "phrasal verb",
+                       "condition order", "omitted 'that'"):
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, note)
+
+    # building-scanner-respects-strings: text a scanner can misread must not move the boundary.
+    # (label, template, filler words that make the sentence exactly 30 words)
+    TRAPS = [
+        ("comment openers inside inline code",
+         'Run `x = "/* a */"` then `y = "// b"` and `z = "# c"` before you read %s.', 21),
+        ("a lone double quote and a JSX-style apostrophe",
+         'The 5" pipe and <p>Don\'t</p> stay in the line so please read %s.', 18),
+    ]
+
+    def test_b07_scanner_traps_do_not_move_the_boundary(self):
+        for label, template, fit in self.TRAPS:
+            for filler, flagged in ((fit, False), (fit + 1, True)):
+                with self.subTest(trap=label, filler=filler):
+                    text = template % " ".join(["word"] * filler)
+                    codes = [f.code for f in self.lint(text, "descriptive")]
+                    self.assertEqual("STE001" in codes, flagged)
+
+    def test_b08_a_fenced_multiline_template_literal_adds_no_words(self):
+        fence = ("```js\nconst s = `line one " + " ".join(["word"] * 20)
+                 + "\nline two // keep /* keep */`;\n```\n\n")
+        for n, flagged in ((30, False), (31, True)):
+            with self.subTest(words=n):
+                codes = [f.code for f in self.lint(fence + plain_words(n), "descriptive")]
+                self.assertEqual("STE001" in codes, flagged)
+
+
+class AdvisoryCodesTests(unittest.TestCase):
+    """Owner ruling 2026-10-17: STE003, STE007, STE008, STE009, STE015 and STE017 are reported
+    and never block: not the linter's exit code, not the gate, not the sweep, not CI."""
+
+    def test_a01_each_advisory_code_is_reported_as_a_warning_and_the_cli_exits_zero(self):
+        for code, text in ADVISORY_SAMPLES.items():
+            with self.subTest(code=code):
+                rc, data = run_lint_cli(text)
+                hits = [f for f in data["findings"] if f["code"] == code]
+                self.assertTrue(hits, "%s is not reported: %r" % (code, data["findings"]))
+                self.assertEqual({f["severity"] for f in hits}, {"warning"})
+                self.assertEqual(data["summary"]["error"], 0, data["findings"])
+                self.assertEqual(rc, 0)
+
+    def test_a02_the_gate_notes_an_advisory_code_and_neither_denies_nor_rewrites(self):
+        # Owner's nudge ruling (orchestrator call 4): an advisory must be seen. The write goes
+        # ahead, unchanged, with a note that names the code.
+        for code, text in ADVISORY_SAMPLES.items():
+            with self.subTest(code=code):
+                run, out = run_write_gate(text)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertNotIn(out.get("permissionDecision"), ("deny", "ask"), out)
+                self.assertNotIn("updatedInput", out)
+                self.assertNotIn("decision", json.loads(run.stdout) if run.stdout.strip() else {})
+                self.assertIn(code, note_text(run), "no note for %s: %r" % (code, run.stdout))
+
+    def test_a03_all_six_in_one_file_still_pass_the_cli_and_the_gate(self):
+        text = "\n".join(ADVISORY_SAMPLES.values())
+        rc, data = run_lint_cli(text)
+        self.assertEqual({f["code"] for f in data["findings"]} & set(ERROR_CODES), set())
+        self.assertEqual(rc, 0)
+        run, out = run_write_gate(text)
+        self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+        self.assertNotIn("updatedInput", out)
+        for code in ADVISORY_CODES:
+            with self.subTest(code=code):
+                self.assertIn(code, note_text(run))
+
+    def test_a05_a_clean_write_prints_nothing(self):
+        # Guard: green before and after. A note on clean text is a guard that cries wolf.
+        run, out = run_write_gate("This is a short clean sentence.\n")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_a06_a_fix_and_an_advisory_in_one_write_show_both(self):
+        # "in order to" is a kept bloat fix. The advisory must not be lost when a fix lands.
+        run, out = run_write_gate("Close the valve in order to stop the pump.\n\n"
+                                  "They'd finished the work.\n")
+        self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+        self.assertIn("Close the valve to stop the pump.", json.dumps(out.get("updatedInput", {})))
+        self.assertIn("STE008", note_text(run))
+
+    def test_a07_an_edit_notes_only_the_changed_block(self):
+        head = "They'd finished the work.\n\nThis is a short clean sentence.\n"
+        rows = [
+            # Catches: an advisory in an untouched block is noted again on every edit.
+            ("This is a short clean sentence.\n", "This is one more short clean sentence.\n", False),
+            # Catches: an advisory the edit adds is not noted.
+            ("This is a short clean sentence.\n", "Send the report via email.\n", True),
+        ]
+        for old, new, noted in rows:
+            with self.subTest(noted=noted):
+                with tempfile.TemporaryDirectory() as d:
+                    target = os.path.join(d, "t.md")
+                    with open(target, "w", encoding="utf-8") as f:
+                        f.write(head)
+                    run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                                              "tool_input": {"file_path": target, "old_string": old,
+                                                             "new_string": new}})
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout).get("hookSpecificOutput", {}) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
+                note = note_text(run)
+                self.assertNotIn("STE008", note, "an advisory outside the edit was noted")
+                if noted:
+                    self.assertIn("STE007", note)
+                else:
+                    self.assertEqual(note, "")
+
+    def test_a04_the_advisory_samples_are_what_they_say(self):
+        # The samples above hold their code and no error code, so the cases are not vacuous.
+        for code, text in ADVISORY_SAMPLES.items():
+            with self.subTest(code=code):
+                codes = [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)]
+                self.assertIn(code, codes)
+                self.assertEqual(set(codes) & set(ERROR_CODES), set())
+
+
+class KeptErrorCodesTests(unittest.TestCase):
+    """Owner ruling 2026-10-17: STE001, STE011, STE013, STE020 and STE021 stay errors. A guard:
+    green before the ruling and after it."""
+
+    def test_k01_each_kept_code_is_an_error_and_the_cli_exits_one(self):
+        for code, (suffix, text) in KEPT_SAMPLES.items():
+            with self.subTest(code=code):
+                rc, data = run_lint_cli(text, suffix)
+                hits = [f for f in data["findings"] if f["code"] == code]
+                self.assertTrue(hits, "%s is not reported: %r" % (code, data["findings"]))
+                self.assertEqual({f["severity"] for f in hits}, {"error"})
+                self.assertEqual(rc, 1)
+
+    def test_k02_the_gate_denies_each_kept_code(self):
+        for code, (suffix, text) in KEPT_SAMPLES.items():
+            with self.subTest(code=code):
+                run, out = run_write_gate(text, "t" + suffix)
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn(code, out["permissionDecisionReason"])
+                self.assertNotIn("updatedInput", out)
 
 
 class MdSweepTests(unittest.TestCase):
@@ -1117,7 +1430,7 @@ class MdSweepTests(unittest.TestCase):
     the new predicate opens.
     """
 
-    ERROR_TEXT = "This sentence isn't clean, and that trips the STE008 rule.\n"
+    ERROR_TEXT = "This sentence is not unclean, and that trips the STE013 rule.\n"
     CLEAN_TEXT = "This is a short clean sentence.\nHere is one more short clean sentence.\n"
 
     def setUp(self):
@@ -1227,7 +1540,46 @@ class MdSweepTests(unittest.TestCase):
                 self._write_md(name, self.ERROR_TEXT)
                 run = self.run_sweep()
                 self.assert_blocks(run, name)
-                self.assertIn("STE008", json.loads(run.stdout).get("reason", ""))
+                self.assertIn("STE013", json.loads(run.stdout).get("reason", ""))
+
+    def test_25b_advisory_findings_never_block_the_sweep_but_are_reported(self):
+        # Owner ruling 2026-10-17: STE003, STE007, STE008, STE009, STE015 and STE017 are warnings.
+        # A file holding only these does not block, and the sweep names the code in a note
+        # (orchestrator call 4: an advisory must be seen).
+        for code, text in ADVISORY_SAMPLES.items():
+            with self.subTest(code=code):
+                self._fresh_root()
+                self._write_md("notes.md", text)
+                run = self.run_sweep()
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn(code, note_text(run), "no note for %s: %r" % (code, run.stdout))
+                self.assertIn("notes.md", note_text(run))
+
+    def test_25c_the_sweep_note_follows_the_changed_block_only(self):
+        head = "They'd finished the work.\n\nThis is a short clean sentence.\n"
+        rows = [
+            # Catches: an advisory in an untouched block is noted again on every turn.
+            ("This is a short clean sentence.\n", "This is one more short clean sentence.\n", False),
+            # Catches: an advisory in the changed block is not noted in a git work tree.
+            ("They'd finished the work.\n", "They'd finished the job.\n", True),
+        ]
+        for old, new, noted in rows:
+            with self.subTest(noted=noted):
+                self._fresh_root()
+                self._init_git()
+                self._write_md("notes.md", head)
+                self._git_commit_all()
+                self._write_md("notes.md", head.replace(old, new))
+                run = self.run_sweep()
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("decision"), "block", out)
+                if noted:
+                    self.assertIn("STE008", note_text(run))
+                else:
+                    self.assertEqual(note_text(run), "")
 
     def test_26_new_clean_markdown_no_block(self):
         rows = [
@@ -1465,26 +1817,26 @@ class MdSweepTests(unittest.TestCase):
     # ---------------------------------------------------------- scoping to changed blocks
 
     THREE_ERRORS_ONE_CLEAN = (
-        "This sentence isn't clean, and that trips the STE008 rule.\n"
+        "This sentence is not unclean, and that trips the STE013 rule.\n"
         "\n"
-        "This one also isn't clean, right here for good measure.\n"
+        "This one is also not unclean, right here for good measure.\n"
         "\n"
-        "A third sentence that isn't clean sits in its own paragraph.\n"
+        "A third sentence that is not unclean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited later.\n"
     )
     THREE_ERRORS_ONE_CLEAN_EDITED = (
-        "This sentence isn't clean, and that trips the STE008 rule.\n"
+        "This sentence is not unclean, and that trips the STE013 rule.\n"
         "\n"
-        "This one also isn't clean, right here for good measure.\n"
+        "This one is also not unclean, right here for good measure.\n"
         "\n"
-        "A third sentence that isn't clean sits in its own paragraph.\n"
+        "A third sentence that is not unclean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited later today.\n"
     )
 
     def test_59_pre_existing_errors_elsewhere_edited_clean_block_no_block(self):
-        # THE HEADLINE CASE. HEAD already holds 3 STE008 errors in 3 untouched blocks. This
+        # THE HEADLINE CASE. HEAD already holds 3 STE013 errors in 3 untouched blocks. This
         # turn edits only the last, clean block, and keeps it clean. Against the pre-scoping
         # gate this blocks and names all 3 pre-existing errors (see redgreen.py in the task
         # report). Scoped to the changed block, it must not block at all.
@@ -1500,7 +1852,7 @@ class MdSweepTests(unittest.TestCase):
         # must still block, even while 3 other, untouched blocks also hold errors.
         edited_with_new_error = self.THREE_ERRORS_ONE_CLEAN.replace(
             "This is the clean block that gets edited later.\n",
-            "This is the block that gets edited later, and now isn't clean either.\n",
+            "This is the block that gets edited later, and now is not unclean either.\n",
         )
         self._init_git()
         self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)
@@ -1509,14 +1861,14 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        # Only the edited block's own STE008 finding surfaces, at its own line 7. The 3
+        # Only the edited block's own STE013 finding surfaces, at its own line 7. The 3
         # pre-existing errors, in untouched blocks, stay out of scope.
-        self.assertIn("line 7: STE008", out["reason"])
-        self.assertEqual(out["reason"].count("STE008"), 1)
+        self.assertIn("line 7: STE013", out["reason"])
+        self.assertEqual(out["reason"].count("STE013"), 1)
 
     def test_61_multiline_sentence_crossing_a_changed_line_still_blocks(self):
         # THE TRAP. A sentence starts on the paragraph's first line (unchanged this turn) and
-        # only crosses the descriptive 25-word limit because of words added on its THIRD
+        # only crosses the 30-word limit because of words added on its THIRD
         # line, the only line this turn's edit touches. A naive line-only filter keeps only
         # the changed line and drops the finding, because the finding is reported at the
         # SENTENCE-START line, which is outside the diff. A block-scoped filter must not.
@@ -1528,7 +1880,7 @@ class MdSweepTests(unittest.TestCase):
         edited = (
             "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
             "w13 w14 w15 w16 w17 w18 w19 w20\n"
-            "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n"
+            "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31.\n"
         )
         self._init_git()
         self._write_md("sentence.md", head)
@@ -1560,7 +1912,7 @@ class MdSweepTests(unittest.TestCase):
 
     def test_63_untracked_file_blocks_on_every_pre_existing_error(self):
         # Item 5: an untracked file has no HEAD baseline to diff against, so it lints in
-        # full. All 3 STE008 errors in it must surface, not only one.
+        # full. All 3 STE013 errors in it must surface, not only one.
         self._init_git()
         self._write_md("README.md", self.CLEAN_TEXT)
         self._git_commit_all()
@@ -1568,7 +1920,7 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        self.assertEqual(out["reason"].count("STE008"), 3)
+        self.assertEqual(out["reason"].count("STE013"), 3)
 
     def test_64_staged_new_file_blocks_on_every_error(self):
         # Item 4: a brand new file, `git add`-ed but not yet committed, has no content in
@@ -1583,7 +1935,7 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        self.assertEqual(out["reason"].count("STE008"), 3)
+        self.assertEqual(out["reason"].count("STE013"), 3)
 
 
 class SteGatePreToolUseTests(unittest.TestCase):
@@ -1592,15 +1944,15 @@ class SteGatePreToolUseTests(unittest.TestCase):
     differ from disk. See ste_gate.py's own module docstring, "SCOPING TO CHANGED BLOCKS".
     """
 
-    ERROR_LINE = "This sentence isn't clean, and that trips the STE008 rule.\n"
+    ERROR_LINE = "This sentence is not unclean, and that trips the STE013 rule.\n"
     CLEAN_LINE = "This is a short clean sentence.\n"
 
     THREE_ERRORS_ONE_CLEAN = (
-        "This sentence isn't clean, and that trips the STE008 rule.\n"
+        "This sentence is not unclean, and that trips the STE013 rule.\n"
         "\n"
-        "This one also isn't clean, right here for good measure.\n"
+        "This one is also not unclean, right here for good measure.\n"
         "\n"
-        "A third sentence that isn't clean sits in its own paragraph.\n"
+        "A third sentence that is not unclean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited.\n"
     )
@@ -1655,10 +2007,10 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "This is the clean block that gets edited.\n",
-            "new_string": "We'd call this block clean, right in the edit itself.\n",
+            "new_string": "This block is not unclean, right in the edit itself.\n",
         })
         reason = self.assert_denied(run)
-        self.assertIn("contraction", reason.lower())
+        self.assertIn("STE013", reason)
 
     # ---------------------------------------------------------- the multi-line trap (item 3)
 
@@ -1672,7 +2024,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "w21 w22 w23.\n",
-            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n",
+            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31.\n",
         })
         reason = self.assert_denied(run)
         self.assertIn("STE001", reason)
@@ -1681,18 +2033,18 @@ class SteGatePreToolUseTests(unittest.TestCase):
 
     def test_62_new_file_via_write_denied_on_every_error(self):
         target = os.path.join(self.tmp.name, "new.md")  # never created: Write makes it
-        # Three STE008 contractions the fixer leaves alone (ste_lint _NO_FIX: we'd, they'd),
-        # so every one is denied, not rewritten.
-        content = ("We'd keep the first block clean.\n"
+        # Three STE013 double negatives the fixer has no fix for, so every one is denied,
+        # not rewritten.
+        content = ("This first block is not unclean.\n"
                    "\n"
-                   "They'd keep the second block clean too.\n"
+                   "This second block is not unclean too.\n"
                    "\n"
-                   "We'd keep the third block clean as well.\n"
+                   "This third block is not unclean as well.\n"
                    "\n"
                    "This is the clean block.\n")
         run = self.run_pretooluse("Write", {"file_path": target, "content": content})
         reason = self.assert_denied(run)
-        self.assertEqual(reason.count("STE008"), 3)
+        self.assertEqual(reason.count("STE013"), 3)
 
     # ---------------------------------------------------------- MultiEdit and Write scoping
 
@@ -1709,21 +2061,21 @@ class SteGatePreToolUseTests(unittest.TestCase):
         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
         proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
             "This is the clean block that gets edited.\n",
-            "We'd call this block clean, right in the edit itself.\n",
+            "This block is not unclean, right in the edit itself.\n",
         )
         run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
         reason = self.assert_denied(run)
-        self.assertIn("contraction", reason.lower())
+        self.assertIn("STE013", reason)
 
     # ---------------------------------------------------------- fail-open on an unresolved edit
 
     def test_66_old_string_not_found_falls_back_to_linting_the_new_text_in_full(self):
         # The edit cannot be replayed: `old_string` is not in the file on disk. Rather than
         # guess which blocks changed, the gate lints the proposed new_string in full. The
-        # STE008 contraction in it must still be caught.
+        # STE013 double negative in it must still be caught.
         bad_edit = {
             "old_string": "text that is not actually in the file",
-            "new_string": "We'd call this new text clean, introduced here.",
+            "new_string": "This new text is not unclean, introduced here.",
         }
         rows = [
             # Catches: an unreplayable Edit is not linted in full.
@@ -1740,14 +2092,14 @@ class SteGatePreToolUseTests(unittest.TestCase):
                 target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
                 run = self.run_pretooluse(tool, dict(tool_input, file_path=target))
                 reason = self.assert_denied(run)
-                self.assertIn("contraction", reason.lower())
+                self.assertIn("STE013", reason)
 
     def test_67b_non_prose_suffix_with_an_ste_error_still_allowed(self):
         # The path guard, not the text, must be what lets this through: the content has a
-        # contraction, an STE008 error if the file were linted.
+        # double negative, an STE013 error if the file were linted.
         rows = [
-            # Catches: a .txt file with an STE008 error is linted as prose.
-            ("notes.txt", "This isn't prose the gate should read.\n"),
+            # Catches: a .txt file with an STE013 error is linted as prose.
+            ("notes.txt", "This is not unclear prose the gate should read.\n"),
             # Catches: a .py file is linted as prose.
             ("notes.py", "print('a; b')\n"),
         ]
@@ -1760,7 +2112,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
     def test_67d_ambiguous_edit_is_not_replayed_at_the_first_match(self):
         # old_string sits in two paragraphs, no replace_all. Edit itself refuses that, and
         # the gate lints only new_string (short, clean). Replaying at the first match would
-        # join it to the 20 words above and wrongly report a long sentence.
+        # join it to the 20 words above and wrongly report a 31-word sentence.
         head = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
                 "w13 w14 w15 w16 w17 w18 w19 w20\n"
                 "w21 w22 w23.\n\n"
@@ -1770,7 +2122,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "w21 w22 w23.\n",
-            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n",
+            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31.\n",
         })
         self.assert_allowed(run)
 
@@ -1807,12 +2159,13 @@ class SourceProseLintTests(unittest.TestCase):
     def test_72_reported_line_numbers_match_source(self):
         rows = [
             # Catches: a long sentence across comment lines is not reported.
-            ("\n".join("# " + w for w in ["word"] * 30) + "\n", None),
+            ("\n".join("# " + w for w in ["word"] * 31) + "\n", None),
             # Catches: a reported line number points at the wrong source line.
             ("x = 1\n"
              "# a short first comment line\n"
              "# and this comment run keeps going to make the sentence long enough "
-             "that it holds more than twenty five words in total across these lines\n",
+             "that it holds more than thirty words in total across these comment lines "
+             "of the sample file for the test\n",
              {2, 3}),
         ]
         for text, allowed_lines in rows:
@@ -2388,16 +2741,16 @@ GL_SESSION = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
 GL_ENV_SESSION = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 GL_RULE_CAP = 40  # pinned: the rule field holds at most this many characters
 GL_LONG = ("The operators on each shift must record every valve position, every pressure reading, "
-           "every alarm, and every handover note in the shared log before they leave the site today.")
-GL_FIXED_DOC = "We don't stop the pump, e.g. at night.\n"  # fixed: STE007 x1, STE008 x1
-GL_DENY_DOC = "It's not been tested.\n"  # denied: STE008 stays
+           "every alarm, and every handover note in the shared log before they leave the site today "
+           "and then sign the page for the next crew.")  # 38 words: over the one budget of 30
+GL_FIXED_DOC = "We close the valve in order to stop the pump, prior to the shift.\n"  # fixed: STE011 x2
+GL_DENY_DOC = "The pump is not unsafe.\n"  # denied: STE013 has no fix
 GL_CLEAN_DOC = "This is a short clean sentence.\n"
 GL_MIXED_DOC = GL_FIXED_DOC + "\n" + GL_LONG + "\n"  # fixed, then STE001 stays: a deny
-GL_SIX_CODE_DOC = (  # six findings after the fix: STE003, STE008, STE009, STE013, STE015, STE017
-    "<!-- ste: procedural -->\n\nWe set up the valve.\n\n"
-    "The team made a determination of the seals.\n\nIt's not been tested.\n\n"
-    "This is not uncommon.\n\nStop the valve if the gauge reads high.\n\n"
-    "We ensure the seals are sound.\n")
+GL_MANY_FINDINGS_DOC = (  # seven error findings, three codes: STE001, STE011, STE013
+    "In conclusion, the seals are sound.\n\nNeedless to say, the valve is shut.\n\n"
+    "This is not uncommon.\n\nThis is not unusual.\n\nThis is not unsafe.\n\n"
+    + GL_LONG + "\n\n" + GL_LONG + "\n")
 GL_STRIPPED = ("STE_FIXER_LIMIT_S", "STE_FIXER_MAX_BYTES", "CLAUDE_CODE_SESSION_ID",
                "MD_SWEEP_DISABLE", "MD_SWEEP_EXCLUDE")
 # Characters a guard.log field must never hold: C0 and C1 controls, line and paragraph separators,
@@ -2605,7 +2958,7 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(sorted(by), ["deny", "noted"], rows)
         self.assertEqual(by["noted"][1:5],
                          ["Write", "noted", "STE-fallback", "notes.md fallback=%s" % reason])
-        self.assertEqual(by["deny"][1:5], ["Write", "deny", "STE007,STE008", "notes.md denied=2"])
+        self.assertEqual(by["deny"][1:5], ["Write", "deny", "STE011", "notes.md denied=2"])
         self.assertEqual({fields[5] for fields in by.values()}, {GL_SESSION})
 
     # (1) a fixed write: one `fixed` line. The rule holds the fixed codes and matched the basename.
@@ -2617,7 +2970,7 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         when, *rest = gl_fields(rows[0])
         datetime.fromisoformat(when)
-        self.assertEqual(rest, ["Write", "fixed", "STE007,STE008", "notes.md fixed=2", GL_SESSION])
+        self.assertEqual(rest, ["Write", "fixed", "STE011", "notes.md fixed=2", GL_SESSION])
 
     # (1) Edit and MultiEdit log their own tool name. The codes and count match the rewrite note.
     def test_02_fixed_edit_and_multiedit_log_their_tool_name_and_note_codes(self):
@@ -2641,7 +2994,7 @@ class SteGateLogTests(unittest.TestCase):
     def test_03_deny_appends_the_remaining_codes_and_the_denied_count(self):
         rows = [
             # Catches: a plain deny logs the wrong code or count.
-            (GL_DENY_DOC, "STE008"),
+            (GL_DENY_DOC, "STE013"),
             # Catches: a mixed write logs the fixed code as well as the code that remains.
             (GL_MIXED_DOC, "STE001"),
         ]
@@ -2655,17 +3008,19 @@ class SteGateLogTests(unittest.TestCase):
                 self.assertEqual(gl_fields(log[0])[1:],
                                  ["Write", "deny", rule, "notes.md denied=1", GL_SESSION])
 
-    # (2) the rule field is capped, and the count still counts every finding, not the five shown.
-    def test_05_six_code_deny_keeps_the_rule_under_the_cap_and_counts_every_finding(self):
-        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_SIX_CODE_DOC})
+    # (2) the rule field stays under its cap, and the count still counts every finding, not the
+    # five shown. Only three codes can deny a Markdown write now (STE001, STE011, STE013), so the
+    # cap itself is out of reach of this input.
+    def test_05_many_findings_deny_keeps_the_rule_under_the_cap_and_counts_every_finding(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_MANY_FINDINGS_DOC})
         self.assertEqual(gl_decision(run), "deny")  # precondition
-        rows = self._rows("a six-code deny")
+        rows = self._rows("a many-findings deny")
         self.assertEqual(len(rows), 1)
         _, tool, decision, rule, matched, session = gl_fields(rows[0])
         self.assertEqual((tool, decision), ("Write", "deny"))
         self.assertLessEqual(len(rule), GL_RULE_CAP, rule)
-        self.assertTrue(rule.startswith("STE003,STE008,STE009"), rule)
-        self.assertEqual(matched, "notes.md denied=6")
+        self.assertEqual(rule, "STE001,STE011,STE013")
+        self.assertEqual(matched, "notes.md denied=7")
         self.assertEqual(session, GL_SESSION)
 
     # (3) a clean write adds no line. The fixed write first proves the line would be seen.
@@ -2756,12 +3111,12 @@ class SteGateLogTests(unittest.TestCase):
         marker = "ZQXMARK-7731"
         self._disk("edit.md", "Intro %s here.\n" % marker)
         gl_gate(self.cfg, "Write", {"file_path": self._path(),
-                                    "content": "We don't stop the pump, e.g. %s at night.\n" % marker})
+                                    "content": "We close the valve in order to stop %s, prior to the shift.\n" % marker})
         gl_gate(self.cfg, "Write", {"file_path": self._path("deny.md"),
-                                    "content": "It's not been tested, %s.\n" % marker})
+                                    "content": "The pump is not unsafe, %s.\n" % marker})
         gl_gate(self.cfg, "Edit", {"file_path": self._path("edit.md"),
                                    "old_string": "Intro %s here.\n" % marker,
-                                   "new_string": "We don't stop, e.g. here.\n"})
+                                   "new_string": "We close it in order to stop, prior to here.\n"})
         rows = self._rows("the privacy writes")
         self.assertGreaterEqual(len(rows), 2)
         text = gl_text(self.cfg)
@@ -2838,7 +3193,7 @@ class SteGateLogTests(unittest.TestCase):
             when, tool, decision, rule, matched, session = gl_fields(row)
             datetime.fromisoformat(when)
             self.assertEqual((tool, decision, rule, matched),
-                             ("Write", "fixed", "STE007,STE008", "notes.md fixed=2"), row)
+                             ("Write", "fixed", "STE011", "notes.md fixed=2"), row)
             sessions.append(session)
         self.assertEqual(len(sessions), len(set(sessions)), "a session wrote two lines")
         self.assertLessEqual(set(sessions), {"gl-par-%02d" % i for i in range(20)})
@@ -2918,7 +3273,7 @@ class SteGateLogTests(unittest.TestCase):
                     self.assertIn(got, ("fixed", "noted", "deny"))
                 else:
                     self.assertEqual(got, decision)
-                    self.assertEqual(rule, "STE007,STE008")
+                    self.assertEqual(rule, "STE011")
                 if contains is not None:
                     self.assertIn(contains, matched)
                 if ends is not None:
@@ -2949,7 +3304,7 @@ class SteGateLogTests(unittest.TestCase):
 class MdSweepLogTests(unittest.TestCase):
     """md_sweep (Stop) writes one guard.log line per run that blocks. A clean run writes none."""
 
-    ERROR_TEXT = "This sentence isn't clean, and that trips the STE008 rule.\n"
+    ERROR_TEXT = "This sentence is not unclean, and that trips the STE013 rule.\n"
     CLEAN_TEXT = "This is a short clean sentence.\nHere is one more short clean sentence.\n"
 
     def setUp(self):
@@ -3014,7 +3369,7 @@ class MdSweepLogTests(unittest.TestCase):
                 self.assertEqual(len(log), 1)
                 _, tool, decision, rule, matched, session = gl_fields(log[0])
                 self.assertEqual((tool, decision, rule, session),
-                                 ("Stop", "deny", "STE008", GL_SESSION))
+                                 ("Stop", "deny", "STE013", GL_SESSION))
                 self.assertRegex(matched, matched_pattern)
 
     # (5) a clean run adds no line after a blocking run.
@@ -3030,7 +3385,7 @@ class MdSweepLogTests(unittest.TestCase):
     # (10) the line holds no file text and no folder.
     def test_04_the_line_holds_no_file_text_and_no_folder(self):
         marker = "ZQXMARK-7731"
-        self._md("notes.md", "This sentence isn't clean, %s, and that trips STE008.\n" % marker)
+        self._md("notes.md", "This sentence is not unclean, %s, and that trips STE013.\n" % marker)
         self._sweep()
         self._rows("the blocking run")
         text = gl_text(self.cfg)
@@ -3106,7 +3461,7 @@ from _transcript import guard_logger
 tag, n, session = sys.argv[2], int(sys.argv[3]), sys.argv[4]
 log = guard_logger({"session_id": session})
 for i in range(n):
-    log("Write", "fixed", "STE007,STE008", "{}-{:05d}.md".format(tag, i), "fixed=2")
+    log("Write", "fixed", "STE007,STE013", "{}-{:05d}.md".format(tag, i), "fixed=2")
 '''
 
 

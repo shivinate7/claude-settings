@@ -284,6 +284,20 @@ def format_finding(f):
     return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
 
 
+def advisory_lines(findings):
+    """One line per advisory code: its first finding, then how many more of that code follow.
+    At most six lines, one per advisory rule, so no code hides behind a flood of another."""
+    first, extra = {}, {}
+    for f in findings:
+        code = f.get("code")
+        if code in first:
+            extra[code] = extra.get(code, 0) + 1
+        else:
+            first[code] = f
+    return [format_finding(f) + (" (%d more %s)" % (extra[c], c) if c in extra else "")
+            for c, f in first.items()]
+
+
 # ---------------------------------------------------------------- guard.log lines from the gates
 #
 # One home for the STE gate's and md_sweep's guard.log line. The line goes through

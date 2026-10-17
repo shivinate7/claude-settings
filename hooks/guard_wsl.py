@@ -23,9 +23,9 @@ _PATH = r"[\w./*?\[\]-]*"
 NODE_TEST = re.compile(r"^" + _PATH + r"[\w*?-]\.test\.mjs$")
 PWSH_TEST = re.compile(r"^" + _PATH + r"[\w*?-]\.test\.ps1$")
 PY_TEST = re.compile(r"^" + _PATH + r"test_[\w*?-]+\.py$")
-# A launcher other than the wsl command: a distro launcher, or the System32 bash.exe (Git bash
+# A launcher other than the wsl command: a distro launcher (ubuntu, debian, kali), or the System32 bash.exe (Git bash
 # is not one). shlex eats a backslash, so `C:\Windows\System32ash.exe` reads `C:WindowsSystem32bash.exe`.
-DISTRO_LAUNCHER = re.compile(r"ubuntu[\w.-]*\.exe$")
+DISTRO_LAUNCHER = re.compile(r"(?:ubuntu|debian|kali)[\w.-]*\.exe$")
 # A WSLENV assignment: `WSLENV=` bare or after export/set/env, `$env:WSLENV =`, an env: provider
 # path, or the quoted name an API call takes. WSLENV named as plain text is not one.
 WSLENV_SET = re.compile(
@@ -33,8 +33,8 @@ WSLENV_SET = re.compile(
     re.I)
 
 
-# The names `_launcher` reads, as text: `wsl`, `wsl.exe`, `ubuntu*.exe`, the System32 `bash.exe`.
-_LAUNCHER_TEXT = re.compile(r"wsl|ubuntu|bash\.exe", re.I)
+# The names `_launcher` reads, as text: `wsl`, `wsl.exe`, `ubuntu*.exe`, `debian*.exe`, `kali*.exe`, the System32 `bash.exe`.
+_LAUNCHER_TEXT = re.compile(r"wsl|ubuntu|debian|kali|bash\.exe", re.I)
 
 
 def _climbs(seg: str) -> bool:

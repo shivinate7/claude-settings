@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: ruling-home check (Stop).
+"""At Stop, blocks once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost.
 
 `decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
 closes: an orchestrator's auto-memory can hold an owner ruling that reaches no tracked file in

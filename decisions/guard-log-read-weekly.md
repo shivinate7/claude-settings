@@ -83,7 +83,7 @@ What the matched text says:
   whether the rule earns it.
 - `test-author-scope`, 375, and `detached-launch`, 206: unjudged.
 - `shared-tree`, 26 asks in 30 days: about one a day. This is the count the per-file discard
-  record (stash-push-is-clone-wide) called unmeasured.
+  record (agent-worktree-discard-is-noted, a discard or remove in a worktree) called unmeasured.
 
 ## Named limits
 
@@ -97,6 +97,9 @@ What the matched text says:
   note.
 - One machine per log. The Mac's log (9,537 lines on 2026-10-11) is a second reading, not in
   this table.
+- A guard.log count is a lower bound from one machine. It counts verdicts, not harm or false
+  alarms. It can miss lines: debts `guard-log-lines-lost` (a line can be lost on Windows) and
+  `guard-log-off-silent` (STE logging is disabled with no marker).
 
 ## Holes, named
 

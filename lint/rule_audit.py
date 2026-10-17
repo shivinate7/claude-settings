@@ -42,8 +42,8 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
   - `ci`: a step name that appears in a `- name:` line of .github/workflows/gates.yml.
-  - `unmechanized`: the literal token, paired with a `reason` of real length. A rule that
-    genuinely cannot be checked by a machine still needs a row saying so, and saying why.
+  - `unmechanized`: the literal token, paired with a `reason` of real length. A rule a check
+    could still cover needs a row saying so, and saying why.
   - `judgment`: the same shape and reason floor as `unmechanized`, with its own pin. A rule
     only judgment can apply, so no hook or check could judge it. Not counted as a debt.
 
@@ -96,8 +96,8 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
-RULE_FLOOR = 101
-UNMECHANIZED_EXPECTED = 54
+RULE_FLOOR = 98
+UNMECHANIZED_EXPECTED = 57
 JUDGMENT_EXPECTED = 21
 REASON_MIN_WORDS = 8
 

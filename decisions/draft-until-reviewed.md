@@ -48,13 +48,13 @@ because GitHub does not merge a draft. The GitHub docs say: "Draft pull requests
 (https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests).
 Marking it ready fires `ready_for_review`. That run gets the same scoped range as a `synchronize`
 run (`.github/scripts/harness-scope.sh`, line 13), not a full run.
-Measured in decision main-branch-protection: main requires a PR (0 approvals). It blocks force
-pushes and deletion. It requires no status checks, exempts admins, and has no rulesets. So no
-check is required, and a skipped draft run blocks nothing.
+main requires the `stamp.json` checks since 2026-10-12 (decision main-branch-protection,
+the one home of required-check state). A skipped draft run satisfies each of them. The merge
+tool refuses a head whose checks all skipped (decision merge-needs-a-proven-head).
 
 - Unmeasured: that `ready_for_review` starts this workflow. It comes from GitHub's documented
   behavior, not from a run here.
 - Unmeasured: the saving in runs.
 
 Kind: process
-Home: rule:git-draft-until-reviewed
+Home: hooks/guard.py

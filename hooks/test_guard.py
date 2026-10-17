@@ -399,6 +399,9 @@ PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
 PUSHTRUNKLOCAL = os.path.join(ROOT, "pushtrunklocal")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# PUSHSAMETAG sits on main and holds a TAG named main. There the short symbolic-ref read of HEAD
+# prints the ambiguous `heads/main`, which once hid the default branch from a lease push of HEAD.
+PUSHSAMETAG = os.path.join(ROOT, "pushsametag")
 PUSHDANGLING = os.path.join(ROOT, "pushdangling")
 # Where origin/HEAD does not name the branch, main AND master stay protected. PUSHNOHEADMAIN has
 # origin/main and no origin/HEAD. PUSHONLYMASTER has origin/master and no origin/HEAD (local main
@@ -1266,7 +1269,8 @@ def _build_push():
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
-                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None)):
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
+                                (PUSHSAMETAG, "main", "main")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1279,6 +1283,11 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    run_vcs(PUSHSAMETAG, "tag", "main")
+    if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHSAMETAG needs a tag named main that "
+                 "makes the short read of HEAD print an ambiguous name")
 
     run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
     if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
@@ -1506,7 +1515,7 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -1691,7 +1700,7 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
 # THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
-# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# stash-stack-is-a-shared-subject, the stash stack is shared). Git may omit `push` before `--`, before a pathspec after `--`, and
 # before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
 # A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
 # These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
@@ -2006,7 +2015,7 @@ sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore
 sh("per-file branch switch: checkout main in a worktree keeps today's answer",
    VCS + " checkout main", "allow", cwd=GITWT)
 
-# THE DISCARD FORMS THAT JOIN THE RULE (decisions/stash-push-is-clone-wide.md, "These discard forms
+# THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
 # named file. The shared checkout denies each one. Each case is tagged "per-file".
 
@@ -2080,7 +2089,7 @@ sh("per-file allow: -C names the shared checkout first and a worktree last, from
    VCS + " -C " + slash(GITMAIN) + " -C " + slash(GITWT) + " checkout -- f.txt", "allow",
    cwd=NOGIT)
 
-# THE LAST THREE BULLETS (decisions/stash-push-is-clone-wide.md, "These discard forms join the
+# THE LAST THREE BULLETS (decision agent-worktree-discard-is-noted, "These discard forms join the
 # rule"): each -C, every operand of restore as a path, and a pathspec the guard cannot read. Each
 # case is tagged "per-file".
 
@@ -2120,7 +2129,7 @@ sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout 
 sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
    "ask", "shared-tree", cwd=GITWT)
 
-# SECOND SET (decisions/stash-push-is-clone-wide.md, "These discard forms join the rule"). The
+# SECOND SET (decision agent-worktree-discard-is-noted, "These discard forms join the rule"). The
 # operand before `--` is a path, and the clean file after `--` must not hide it. keep.txt is clean
 # in every tree; f.txt is dirty in the shared checkout and in the lane.
 sh("per-file deny: restore f.txt -- keep.txt in the shared checkout, operand before --",
@@ -2143,10 +2152,11 @@ sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from
    lacks=(CHAIN_ASK,))
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
-# IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
-# checkout. The lane and the shared checkout both hold f.txt dirty, so a per-file restore is an
-# allow in the lane and a deny in the shared checkout. The segment text repeats, and the segment
-# lookup finds the FIRST copy, so the second call is judged in the lane. These MUST be red today.
+# IDENTICAL SEGMENTS. Decision agent-worktree-discard-is-noted, section "Named files in a linked
+# worktree": each git call is judged in its own checkout. The lane and the shared checkout both
+# hold f.txt dirty, so a per-file restore is an allow in the lane and a deny in the shared
+# checkout. The segment text repeats, and the segment lookup finds the FIRST copy, so the second
+# call is judged in the lane. These MUST be red today.
 sh("per-file deny: cd lane; restore f.txt; cd shared; the same restore f.txt, joined by ;",
    "cd " + slash(GITWT) + "; " + VCS + " restore f.txt; cd " + slash(GITMAIN) + "; "
    + VCS + " restore f.txt", "deny", "shared-tree", cwd=NOGIT)
@@ -2274,7 +2284,7 @@ sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
    VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
 
-# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
+# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
 # not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
 # Near misses must still ask or deny, proven against real git state, not a path guess.
@@ -2346,6 +2356,12 @@ sh("heredoc: a body fed to a shell stays under inspection",
 sh("heredoc: a stash push in a python body still denies, in one command",
    "python3 - <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
+# An interpreter word that ends a name (`ts-node`, `node.cmd`) keeps its body in view too: INTERPRETER_HEREDOC
+# reads the word after `-` and before `.cmd`. The impeccable rule reads only shell bodies, so a stash is the probe.
+for _header in ("ts-node -", "babel-node -", "git-bash.exe -c", "node.cmd -"):
+    sh("heredoc: a stash push in a %s body still denies" % _header.split()[0],
+       _header + " <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
+       carries="stash stack")
 sh("heredoc: a python heredoc with the delimiter E-F, then a stash push, still denies",
    "python3 - <<E-F\nx = 1\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
@@ -4621,6 +4637,8 @@ sh("wsl: the wsl.exe launcher by path, through sh",
 sh("wsl: a distro launcher run id", "ubuntu.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a versioned distro launcher run id", "ubuntu2204.exe run id", "deny", rule=WSL_RULE,
    cwd=NOGIT)
+sh("wsl: a debian distro launcher run id", "debian.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a kali distro launcher run id", "kali.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a bare bash -c is Git bash and keeps its verdict", "bash -c x", "allow", cwd=NOGIT)
 sh("wsl: WSLENV exported in an earlier statement",
    "export WSLENV=PATH/p; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
@@ -5521,6 +5539,11 @@ push_case("forced to master when no origin/HEAD is read asks (fallback)", "--for
           "ask", cwd=PUSHNOHEAD)
 push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
           "ask", cwd=PUSHNOHEAD)
+# A tag named main makes the short read of HEAD print `heads/main`. The guard must still read main.
+push_case("a tag named like the branch, a lease push of HEAD on main asks",
+          LEASE.strip() + " origin HEAD", "ask", cwd=PUSHSAMETAG)
+push_case("a tag named like the branch, a bare lease push on main asks", LEASE.strip(), "ask",
+          cwd=PUSHSAMETAG)
 push_case("forced from a detached HEAD, no current branch to resolve, asks",
           "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
 push_case("forced where git cannot be read asks",
@@ -6747,7 +6770,7 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 
 # =========================================================================== 5b. the merge gate
 #
-# `git-wait-for-required-checks`. A merge made outside the merge tool is refused while the head has
+# Decision `merge-waits-on-every-check`. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
 
@@ -6835,6 +6858,100 @@ sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12
 sh("merge-checks: a heredoc body that names a merge is data",
    "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=NOGIT,
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5c. a bare merge in a repo that uses the merge tool
+#
+# A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
+# tool: no claim, and the local main stays behind (incident claude-sharables 2026-10-06, four merges
+# left the local main four commits behind origin). The guard ASKS, never denies: a broken merge tool
+# leaves a bare merge as the only way out (`verification-recovery-not-gated-on-own-state`; owner
+# ruling, orchestrator call, lane bare-gh-merge-ask). Every other repo state allows, silently: no
+# stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp. The head is green in
+# every case, so merge-checks (5b) says nothing and only this rule can ask. BARE_MERGE is the rule id
+# the ask prints; one edit re-points every case below.
+BARE_MERGE = "bare-merge"
+BARE_SAYS = (("--confirm", "merge tool"),)   # any-of: the ask points at the tool it skips
+STAMPREPO = os.path.join(ROOT, "stamp_merge")        # stamp.json with a merge block
+STAMPNONE = os.path.join(ROOT, "stamp_none")         # a .github folder and no stamp.json
+STAMPNOBLOCK = os.path.join(ROOT, "stamp_noblock")   # stamp.json, valid, no merge block
+STAMPBAD = os.path.join(ROOT, "stamp_bad")           # stamp.json that is not JSON, but holds the word "merge"
+STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: it cannot be read
+STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
+STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
+
+
+def _build_stamp_repos():
+    stamp = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": ["gates"], "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
+    make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
+    make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
+    make_repo(STAMPDIR, {".github/stamp.json/keep": "x\n"})
+    make_repo(STAMPLIST, {".github/stamp.json": '["merge"]\n'})
+    if LINKS_MADE:
+        os.makedirs(os.path.dirname(STAMPLINK), exist_ok=True)
+        os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
+
+
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK],
+             _build_stamp_repos)
+
+_BARE_GATE = dict(env_path=GREEN_ON, config=MERGECFG)
+# ASK: the repo uses the merge tool, and the call skips it.
+sh("bare-merge: gh pr merge in a repo with a merge block asks",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a URL for the pull request asks",
+   "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a cd into the repo names the repo that is read",
+   "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=NOGIT, **_BARE_GATE)
+# The stamp is the repo's, not the folder's: a call from a subfolder, or a cd into one, reads the same repo.
+sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
+   "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
+   **_BARE_GATE)
+sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
+   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+# A cwd that links from outside the repo into it is read where it really is, not where it is spelled.
+if LINKS_MADE:
+    sh("bare-merge: a cwd that is a symlink into a subfolder of the repo asks",
+       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GATE)
+# building-scanner-respects-strings: text in the call's own arguments hides no merge.
+sh("bare-merge: comment openers inside a quoted argument hide no merge",
+   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a lone quote in an argument hides no merge",
+   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
+   'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
+   **_BARE_GATE)
+# A deny of 5b still wins: an ask must not turn a refusal of main into an ask (a guard, green on main).
+sh("bare-merge: a pending head in a repo with a merge block still denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# ALLOW: no merge block to read, or no merge made.
+for _name, _where in (
+    ("a repo with no stamp.json", STAMPNONE),
+    ("a stamp.json with no merge block", STAMPNOBLOCK),
+    ("a stamp.json that is not valid JSON", STAMPBAD),
+    ("a stamp.json that cannot be read", STAMPDIR),
+    ("a stamp.json that is JSON but not an object", STAMPLIST),
+):
+    sh("bare-merge: %s allows" % _name, "gh pr merge 12 --squash", "allow", silent=True,
+       cwd=_where, **_BARE_GATE)
+sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
+   silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GATE)
+sh("bare-merge: reading a pull request in a repo with a merge block allows",
+   "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: the merge tool in a repo with a merge block allows",
+   "python3 bin/merge 12 --confirm", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: quoted text that names a merge is text", "echo 'gh pr merge'", "allow",
+   silent=True, cwd=STAMPREPO)
+sh("bare-merge: a heredoc body that names a merge is data",
+   "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
+   silent=True, cwd=STAMPREPO)
 
 
 # =========================================================================== 5d. cite by id
@@ -8239,6 +8356,11 @@ add("cap: MultiEdit reaching an opus model asks", "ask", "subagent-model-cap", t
     carries=(OPUS,))
 add("cap: a managed settings file is a settings file", "ask", "subagent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
+# The workflow subagent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
+for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
+    add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
+        "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+        content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
 
 # THE EDIT LIST IS READ WHOLE. An earlier version read the first 200 edits, and the review MEASURED
 # the boundary that bought: 199 no-op edits ahead of the lift asked, 200 allowed. This case pins the

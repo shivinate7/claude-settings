@@ -98,7 +98,8 @@ make_checkout() {
   mkdir -p "$dir"
   cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
   for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
-  ( cd "$dir" && git init -q && git config user.email t@example.com && git config user.name t \
+  # -b master: init.defaultBranch=main (Xcode's git) would start the clone on main, which install.sh pins.
+  ( cd "$dir" && git init -q -b master && git config user.email t@example.com && git config user.name t \
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
   printf '{}\n' > "$dir/settings.json"
@@ -2184,8 +2185,9 @@ make_guard_clone() {
 
 # The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
 # shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
-# logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds. It runs the real mv. After the landing
-# it logs "landed <epoch seconds> <build>". Every other mv passes straight through.
+# logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds, once: install.sh retries a failed mv,
+# and the retry must not pause again. It runs the real mv. After the landing it logs
+# "landed <epoch seconds> <build>". Every other mv passes straight through.
 make_swap_bin() {
   mkdir -p "$1"
   real_mv=$(command -v mv)
@@ -2195,7 +2197,7 @@ dest=""
 for a in "\$@"; do dest="\$a"; done
 case "\$dest" in
   */hooks/guard*.py)
-    if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ]; then
+    if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ] && ! grep -q '^paused' "\$SWAP_EVENTS"; then
       printf 'paused\n' >> "\$SWAP_EVENTS"; sleep "\$SWAP_PAUSE"
     fi ;;
 esac

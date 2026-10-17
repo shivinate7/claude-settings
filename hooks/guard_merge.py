@@ -4,6 +4,7 @@ guard.py is the only entry point, and it runs these checks in its fixed order (d
 guard-split-by-family). Other files reach these names through `guard`.
 """
 import fnmatch
+import json
 import os
 
 from guard_core import (
@@ -21,7 +22,7 @@ from guard_pointer import (
 # predicate-is-the-act.md), never a substring of the text. `echo git commit`, a `git log`, a
 # quoted message and a heredoc body name an act and perform none.
 #
-# 1. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
+# 1. merge-checks: a merge made outside the merge tool is
 #    refused while the head has a check or a workflow run pending or red, or when that read could
 #    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
@@ -180,6 +181,37 @@ MERGE_GATE_REASON = (
 
 def merge_gate_reason(verdict: str, detail: str) -> str:
     return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+def _merge_config_at(root: str) -> bool:
+    """True when the nearest folder at or above `root` that holds `.git` has a `.github/stamp.json`
+    JSON object with a `merge` key. Any other outcome is False."""
+    while not os.path.exists(os.path.join(root, ".git")):
+        if os.path.dirname(root) == root:
+            return False
+        root = os.path.dirname(root)
+    try:
+        with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    return isinstance(config, dict) and "merge" in config
+
+
+def uses_merge_tool(where: str) -> bool:
+    """True when the repo the cwd sits in uses the merge tool (see `_merge_config_at`). The path is
+    walked as written AND with symlinks resolved: a cwd that is a symlink into a repo finds its
+    `.git` only on the real path, and a symlink out of one only on the written path. No root, or a
+    missing, unreadable, invalid or non-object file, is False: nothing to ask."""
+    return any(_merge_config_at(root) for root in dict.fromkeys(
+        (os.path.abspath(where), os.path.realpath(where))))
+
+
+BARE_MERGE_REASON = (
+    "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
+    "leaves the local main behind origin. "
+    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call."
+)
 
 
 DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create. "

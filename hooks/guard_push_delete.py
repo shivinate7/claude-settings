@@ -33,10 +33,11 @@ def _push_config(cwd: str, key: str, overrides=None):
 
 
 def _push_current_branch(cwd: str):
-    answer = guard_core._git(cwd, "symbolic-ref", "-q", "--short", "HEAD") if cwd else None
+    answer = guard_core._git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
-    return answer.stdout.strip()
+    # no `--short`: it prints `heads/<name>` when a tag has the branch's name
+    return answer.stdout.strip().removeprefix("refs/heads/")
 
 
 def _push_bare_destination(cwd: str, overrides=None):

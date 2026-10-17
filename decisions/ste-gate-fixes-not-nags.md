@@ -8,6 +8,12 @@ When a write has STE errors, does the STE gate refuse the write, or fix the text
 
 The gate fixes first. For a Markdown write, it rewrites the fixable STE errors and returns the
 fixed text through `updatedInput`. It denies only the errors that remain after the rewrite.
+Only STE011 bloat phrases are fixable (`plain-prose-lint`, the STE lint becomes a plain-prose
+lint). Five borderline rows have no fix: `in a timely manner`, `along the lines of`, `close down`,
+`of major importance` and `except when`. A bloat phrase in ALL CAPS has no fix. Latin
+abbreviations, contractions and nominalizations are advisory and never rewritten. An advisory
+finding never denies and never rewrites. The gate prints it as a non-blocking note, which a
+denied write does not show. The owner accepts the note as a temporary nudge.
 A UI file is never rewritten. A UI file with STE errors is denied, as before. The UI suffixes
 are `.tsx`, `.jsx`, `.html` and `.vue`.
 
@@ -26,7 +32,8 @@ The mechanism:
   with rule STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not
   run). md_sweep writes one Stop `deny` line per blocked run. The line format is in
   guard-log-read-weekly, the record of what the reader counts. A write with no fix, deny,
-  fallback or unchecked outcome writes no line.
+  fallback or unchecked outcome writes no line. A write with advisory findings only writes no
+  line (debt `advisory-note-not-logged`, the advisory note leaves no log line).
 
 Files: `lint/ste_gate.py` (`autofix`, `run_autofix`, `rewrite_output`) and `lint/ste_lint.py`
 (`apply_fixes`). Logging: `lint/_transcript.py` (`guard_logger`).
@@ -42,16 +49,18 @@ The fixer changes words, not line counts. A word swap is the only kind of change
 
 ## What it costs
 
-A rewrite can change meaning. See Holes. The fixed text lands without the writer editing it.
+A rewrite of a bloat phrase can change meaning in a sentence that no test holds. See Holes. The
+fixed text lands without the writer editing it.
 
 ## What protects it
 
-- `lint/test_ste_autofix.py`. It runs on the Linux job only (see Holes).
+- `lint/test_ste_autofix.py`. It runs on the Linux job only (see Holes). `KeptFixesTests` pins the
+  rows that fix. `RemovedFixesTests` and `RemovedFixesGateTests` pin the rows that do not.
 - The crash rule in gate-hooks-fail-closed (a fixer crash keeps plain lint, never a refusal).
 
 ## Holes, named
 
-Debts: `ste-edit-fence-blind` (Edit rewrites text inside fences that Write denies). `ste-eg-line-end-rewrite` (`e.g.` at a line end becomes a full stop). `ste-hook-timeout-fails-open` (the hook timeout can kill the gate). `ste-fix-changes-meaning` (some autofixes change the meaning). `ste-comment-gt-mask-early` (a > inside a comment ends the mask). `ste-eg-in-fence-reported` (`e.g.` inside a fence is still reported). `ste-autofix-tests-linux-only` (the autofix tests run on Linux only). `ste-macos-child-route-unverified` (the macOS child-process route is unverified).
+Debts: `ste-edit-fence-blind` (Edit rewrites text inside fences that Write denies). `ste-hook-timeout-fails-open` (the hook timeout can kill the gate). `ste-comment-gt-mask-early` (a > inside a comment ends the mask). `ste-eg-in-fence-reported` (`e.g.` inside a fence is still reported, as a warning). `ste-autofix-tests-linux-only` (the autofix tests run on Linux only). `ste-macos-child-route-unverified` (the macOS child-process route is unverified). `kept-bloat-rows-unaudited` (97 kept fix rows are not read against a corpus).
 
 Kind: process
 Home: lint/ste_gate.py

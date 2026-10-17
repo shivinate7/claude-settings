@@ -76,13 +76,8 @@
     },
     "roles-sonnet-is-the-default": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "settings.json",
-        "setting": {
-          "file": "settings.json",
-          "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
-          "equals": "sonnet"
-        }
+        "kind": "unmechanized",
+        "reason": "No check reads whether a workflow agent takes its role through agentType or runs its model from the model-per-role table."
       }
     },
     "roles-sonnet-is-the-ceiling": {
@@ -101,17 +96,6 @@
       "mechanism": {
         "kind": "guard",
         "ref": "subagent-model-cap"
-      }
-    },
-    "roles-workers-never-spawn": {
-      "mechanism": {
-        "kind": "gate",
-        "ref": "settings.json",
-        "setting": {
-          "file": "settings.json",
-          "path": "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
-          "equals": "1"
-        }
       }
     },
     "roles-brief-contents": {
@@ -198,13 +182,6 @@
         "reason": "Branch protection on main is a GitHub repository setting, external to this codebase. No file here proves it is switched on."
       }
     },
-    "git-wait-for-required-checks": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "merge-checks"
-      },
-      "test": "hooks/test_guard.py::merge-checks: --auto is gated like any merge"
-    },
     "git-never-merge-failing-ci": {
       "mechanism": {
         "kind": "unmechanized",
@@ -249,13 +226,6 @@
         "kind": "judgment",
         "reason": "Whether a new entry restates an open question or opens a new one is a judgment about meaning. A hook sees a new file, not its question."
       }
-    },
-    "git-draft-until-reviewed": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "draft-pr"
-      },
-      "test": "hooks/test_guard.py::draft-pr: a pull request opened without --draft is refused"
     },
     "git-integration-branch-merge": {
       "mechanism": {
@@ -421,7 +391,7 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/ste_lint.py",
-        "test": "lint/test_gates.py::PromotedRuleTests.test_ste003_nominalization_blocks"
+        "test": "lint/test_gates.py::PromotedRuleTests.test_ste011_bloat_blocks"
       }
     },
     "output-start-with-point": {
@@ -483,9 +453,8 @@
     },
     "reports-no-report-when-nothing-landed": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "lint/report_gate.py",
-        "test": "lint/test_gates.py::ReportGateTests.test_07_nothing_landed_prose_reply_passes"
+        "kind": "unmechanized",
+        "reason": "The report gate returns early when nothing landed, so no check sees a report written on such a turn."
       }
     },
     "verification-cry-wolf-guard-is-spent": {
@@ -497,8 +466,8 @@
     },
     "verification-recovery-not-gated-on-own-state": {
       "mechanism": {
-        "kind": "guard",
-        "ref": "pointer-head"
+        "kind": "unmechanized",
+        "reason": "A design principle. Cases in hooks/test_guard.py cover the guard's own recovery path: checkout or switch to main in the pointer checkout, and the clone still editable. No check reads the principle in other controls."
       }
     },
     "verification-green-proves-only-its-fixtures": {

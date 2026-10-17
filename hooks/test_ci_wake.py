@@ -28,8 +28,9 @@ Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook nev
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
 status` at once, then at most once every 30 s, and returns when the status is `completed` or when
 the deadline passes: its last pause ends at the deadline, never past it. A call made at its deadline
-or past it makes no read and returns at once. A failed or non-JSON read raises Unknown, so the wake
-line is `CI unknown`.
+or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
+STATUS_PAUSE pause (decision ci-wait-reads-run-status). A second failed read raises Unknown, so the wake
+line is `CI unknown`. A status that is not `completed` (in_progress, queued) means read again.
 
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
 A cancelled run beside a run of the same name that ran, on the same head, reads as the ran one,
@@ -64,6 +65,7 @@ connects to the localhost port in GH_STUB_READY_PORT, so a case can wait for tha
 accept() and no polling. A run with fail_status_read: that read exits 1. A run with in_progress_reads N: its first N
 `run view <id>` reads (any --json fields, counted from the call log) show it in progress with no
 conclusion, and later reads show the fixture: a run that ends only after N reads. A run with
+early_status S shows S (such as queued) in place of in_progress for those N reads. A run with
 appears_at_list N: `run list` leaves it out until the Nth `run list` call of the case (counted from the call
 log, all PRs together). A run with unfinished_to_list N: `run list` shows it in progress, with no
 conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
@@ -237,7 +239,7 @@ def main(args):
         if fields == "status" and r.get("ping_on_status_read"):
             ready_ping()
         if views_of(key) <= r.get("in_progress_reads", 0):
-            r = dict(r, status="in_progress", conclusion=None)
+            r = dict(r, status=r.get("early_status", "in_progress"), conclusion=None)
         out = view(r, False)
         if fields:
             out = {k: v for k, v in out.items() if k in fields.split(",")}
@@ -316,7 +318,7 @@ def job(name, conclusion):
 
 def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
         status="completed", ping=False, fail_status=False, in_progress_reads=0,
-        appears_at_list=1, unfinished_to_list=0):
+        appears_at_list=1, unfinished_to_list=0, early_status=None):
     out = {"databaseId": run_id, "name": name, "workflowName": name, "headSha": sha,
            "event": "pull_request", "status": status, "conclusion": conclusion,
            "jobs": jobs, "in_progress_at_list": in_progress_at_list}
@@ -330,6 +332,8 @@ def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
         out["fail_status_read"] = True
     if in_progress_reads:
         out["in_progress_reads"] = in_progress_reads
+    if early_status:
+        out["early_status"] = early_status
     return out
 
 
@@ -362,6 +366,8 @@ LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_a
 PENDING = run(908, "gates", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
 HOLD = run(909, "gates", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
 BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
+QUEUED_913 = run(913, "gates", "success", [job("unit", "success")], in_progress_reads=2,
+                 early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
 # skipped (the form that read red on main). DRAFT_DONE lists skipped (the form main already drops).
 DRAFT_LIVE = run(920, "gates", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
@@ -888,19 +894,62 @@ def case_watch_run_at_or_past_the_deadline_reads_nothing():
         check("%s: returns at once, the clock does not move" % label, clock.now == T0, detail)
 
 
-def case_watch_run_failed_read_is_unknown():
-    """A failed read, or one that is not JSON, ends the wait: Unknown, no retry."""
+def case_watch_run_failed_read_is_unknown_after_one_retry():
+    """A failed read, or one that is not JSON, is read once more after the 30 s pause. A second
+    failed read ends the wait: Unknown, and no third read of that failure."""
     rows = (
-        ("gh exits 1 at the first read", [(1, "", "HTTP 401: Bad credentials")], 1),
-        ("gh prints non-JSON at the first read", [(0, "<html>not json</html>", "")], 1),
-        ("gh exits 1 at the second read", [status_reply("in_progress"), (1, "", "HTTP 502: Bad Gateway")], 2),
+        ("gh exits 1 at the first read", [(1, "", "HTTP 401: Bad credentials")], 2),
+        ("gh prints non-JSON at the first read", [(0, "<html>not json</html>", "")], 2),
+        ("gh exits 1 at the second read", [status_reply("in_progress"), (1, "", "HTTP 502: Bad Gateway")], 3),
     )
     for label, replies, reads in rows:
         mod, raised, clock, calls, direct = watch_run_on_fakes(replies, 3600)
         detail = watch_detail(raised, clock, calls, direct)
         check("watch_run, %s: raises Unknown" % label, isinstance(raised, mod.Unknown), detail)
-        check("watch_run, %s: %d read(s) and no retry, no `gh run watch`" % (label, reads),
+        check("watch_run, %s: %d reads (one retry), no `gh run watch`" % (label, reads),
               len(calls) == reads and direct == [], detail)
+        check("watch_run, %s: the retry comes 30 s or more after the failed read" % label,
+              spaced(read_times(calls)), detail)
+
+
+def case_watch_run_retries_a_failed_read_once_and_goes_on():
+    """A failed read, then `completed`: the retry succeeds, so watch_run returns with no exception
+    after two reads, 30 s apart. A failed read, then queued, then `completed`: it reads on."""
+    rows = (
+        ("failed then completed", [(1, "", "HTTP 502: Bad Gateway"), status_reply("completed")], 2),
+        ("failed, queued, then completed",
+         [(1, "", "HTTP 502: Bad Gateway"), status_reply("queued"), status_reply("completed")], 3),
+    )
+    for label, replies, reads in rows:
+        mod, raised, clock, calls, direct = watch_run_on_fakes(replies, 3600)
+        detail = watch_detail(raised, clock, calls, direct)
+        check("watch_run, %s: returns, no exception, no `gh run watch`" % label,
+              raised is None and direct == [], detail)
+        check("watch_run, %s: %d status reads, 30 s or more apart" % (label, reads),
+              [a for _, a in calls] == [STATUS_READ] * reads and spaced(read_times(calls)), detail)
+
+
+def case_watch_run_reads_past_a_queued_status():
+    """queued, queued, completed: three reads, 30 s or more apart, and a return after the third.
+    `queued` is not `completed`, so the wait goes on."""
+    mod, raised, clock, calls, direct = watch_run_on_fakes(
+        [status_reply("queued"), status_reply("queued"), status_reply("completed")], 3600)
+    detail = watch_detail(raised, clock, calls, direct)
+    check("watch_run, queued twice then completed: returns, no exception", raised is None, detail)
+    check("watch_run, queued twice then completed: three status reads, 30 s or more apart",
+          [a for _, a in calls] == [STATUS_READ] * 3 and spaced(read_times(calls)), detail)
+
+
+def case_watch_run_retry_never_reads_or_pauses_past_the_deadline():
+    """A failed read with the deadline 10 s away: the retry pause ends at the deadline at the latest,
+    and no gh call comes at or after it. Whether watch_run raises Unknown or returns is not pinned."""
+    budget = 10
+    mod, raised, clock, calls, direct = watch_run_on_fakes([(1, "", "HTTP 502: Bad Gateway")], budget)
+    detail = watch_detail(raised, clock, calls, direct) + " now=%.1f" % (clock.now - T0)
+    check("watch_run, failed read, deadline in %d s: the clock never passes the deadline" % budget,
+          clock.now <= T0 + budget, detail)
+    check("watch_run, failed read, deadline in %d s: no gh call at or after the deadline" % budget,
+          all(t < T0 + budget for t, _ in calls) and len(calls) >= 1, detail)
 
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
@@ -1109,11 +1158,17 @@ def main():
     check("deadline 1 s, run still pending: wakes at its deadline (under 6 s): the 30 s pause stops at the deadline",
           not res.hung and res.elapsed < 6, "elapsed=%.1f s; the run never ends" % res.elapsed)
 
-    # Decision ci-wait-reads-run-status: a failed status read ends the wait as unknown, with no retry.
-    res = run_hook(bash("gh pr ready 12"), fixture(READY, [BAD_STATUS]))
+    # Decision ci-wait-reads-run-status: a failed status read is retried once, then the wait ends as
+    # unknown (decision ci-wait-reads-run-status). FAST_SLEEP_LAUNCHER: the retry pause costs 0.05 s.
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [BAD_STATUS]), launcher=FAST_SLEEP_LAUNCHER)
     expect_verdict("status read exits 1", res, "unknown")
-    check("status read exits 1: one status read, no retry, no run watch",
-          watched(res) == ["912"] and run_watches(res) == [], why(res))
+    check("status read exits 1: two status reads (one retry), no run watch",
+          watched(res) == ["912", "912"] and run_watches(res) == [], why(res))
+
+    # A run queued for two reads is read again until it completes: three status reads, then green.
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [QUEUED_913]), launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict("run queued for two reads, then completed", res, "green")
+    expect_watch("run queued for two reads, then completed", res, ["913"] * 3)
 
     # One watcher per PR.
     case_one_watcher_per_pr()
@@ -1156,7 +1211,10 @@ def main():
     case_watch_run_completed_at_the_first_read_does_not_pause()
     case_watch_run_returns_at_the_deadline()
     case_watch_run_at_or_past_the_deadline_reads_nothing()
-    case_watch_run_failed_read_is_unknown()
+    case_watch_run_failed_read_is_unknown_after_one_retry()
+    case_watch_run_retries_a_failed_read_once_and_goes_on()
+    case_watch_run_reads_past_a_queued_status()
+    case_watch_run_retry_never_reads_or_pauses_past_the_deadline()
 
     # Incident 2026-10-16 (PR 452): a draft run that skips, then the real run. Debt ci-wake-lists-runs-once.
     case_draft_run_then_real_run()

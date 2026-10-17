@@ -1,13 +1,40 @@
 # One shared parser, not four claim tools
 
-**Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic.
-The per-repo measurements below are history from 2026-09-24. The parent no longer holds
-them. Each repo measures its own fields when it adopts the action.
-
 CLAUDE.md: "Never allocate a numbered record on a branch. Write a slug. Claim the
 number at merge." (rule `git-slug-then-claim-number`.) `lint/rule_mechanisms.json` maps
 that rule to the refusal in `actions/stamp/stamp.mjs` (`branchNumbered`). The merge tool,
 `merge/merge.py`, is the claim side. Other repos adopt both.
+
+## The stamp stays generic
+
+Owner ruling, 2026-09-28. The owner said: "I think moreso you need to remain generic and
+provide me briefs that allow each of the repos to individually get compliant, rather than
+carving out exceptions for each repo."
+
+`actions/stamp` names no repo. It describes record shapes, config fields, and a contract.
+Each repo reads its own tree and writes its own config. The parent carves out no exception
+for one repo.
+
+The choice below holds: one engine, and a config file in each repo's own tree. The per-repo
+parts do not hold. These are the example configs named after repos, the README's per-repo
+notes, and any engine branch that exists for one repo alone. Each repo measures its own
+fields when it adopts the action. The per-repo measurements below were taken on 2026-09-24.
+
+Why. A parent that holds one repo's facts goes stale when that repo changes. Nothing in the
+parent reads the repo again, so the stale fact stays and looks true. A repo that reads its
+own tree at adoption time cannot hold a stale copy of itself.
+
+What it means:
+
+- The example configs are named for the shape they show, never for a repo.
+- The README states the contract that any adopting repo meets, and the checks that prove it.
+- A behavior that only one repo needs becomes a config field with a generic name, or the
+  engine drops it.
+- One adoption brief serves every repo. The repo's own session measures its own fields.
+
+Kind: process
+Home: rule:git-slug-then-claim-number
+Home: actions/stamp/stamp.mjs
 
 ## What was measured, 2026-09-24
 
@@ -157,6 +184,8 @@ The other is a pending record whose stamp run failed, or whose push was rejected
 twice. The question is asked only on the default branch, and only while something is
 pending. Off the default branch, `--check` asks a different question. It reads the merge
 base of HEAD and the base ref, and it refuses a number that the branch added or renamed.
+A feature branch that adds a record with `id: D-002` now fails `--check`. It passed with
+exit 0 when measured against `main` on 2026-09-24 and 2026-09-28.
 A branch may delete a numbered record. The owner ruled that records may be deleted and that
 numbers come from the highest ever used. A claim takes the next number past every number in
 the base tree and in the history of the base ref. It refuses a shallow or unreadable
@@ -173,8 +202,8 @@ way would only add a second chance to get it wrong.
 q_max's own `stamp.yml` pushed a commit with the workflow's own token. GitHub starts no
 workflow on a push made with that token, so nothing else checked the commit it pushed. The
 shared action once carried mode `stamp`, which gated, committed and pushed after the merge.
-Lane 9 of `plans/shared-merge-tool.md` deleted that mode on 2026-10-01. The action runs mode
-`check` only, with `contents: read`, and no workflow writes to the default branch. The claim
+The owner started the lane that deleted that mode (process-only), and it landed on 2026-10-01.
+The action runs mode `check` only, with `contents: read`, and no workflow writes to the default branch. The claim
 runs before the merge, on the pull request branch, in `merge/merge.py`. The pull request's own
 checks read the claimed tree. The `gate-command`, `token`, `commit-subject` and bot inputs, and
 the retry that re-derived the stamp, went with the mode. A pending record on the default branch
@@ -201,8 +230,8 @@ own real tree on 2026-09-24.
 ## The mechanism
 
 This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` maps
-`git-slug-then-claim-number` to `actions/stamp/stamp.mjs` (plan
-`plans/shared-merge-tool.md`). The engine enforces nothing until a repo's own workflow
+`git-slug-then-claim-number` to `actions/stamp/stamp.mjs`. The merge tool in `merge/merge.py`
+runs it before each merge. The engine enforces nothing until a repo's own workflow
 calls it. Fixtures:
 `actions/stamp/test_stamp.mjs` for the engine, and `actions/stamp/test_action.sh` for
 the composite action's own shell logic. Both are wired into `gates`, `gates-windows`
@@ -216,3 +245,6 @@ turns up with a shape none of the three formats covers. Either the `numbering` o
 `cite` assumption above turns out wrong for a repo nobody has read yet. Any of these is
 a reason to come back to this entry before writing a fourth format into `stamp.mjs`.
 None of them is a reason to guess one in.
+
+A shape that no config field can state without naming one repo also reopens it. Bring that
+shape to the owner as a question. Add no repo name to the parent to fit it.
