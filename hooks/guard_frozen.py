@@ -78,13 +78,13 @@ CONFIG_FROZEN_SKILLS = (
 # from it, so a write there changes what every session runs. The pin is `<clone>-live`, and each
 # move leaves a stamped worktree `<clone>-live-<12 hex>`. This suffix is the one copy in Python.
 # merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay equal to it.
-# A folder counts as a pin only when the clone sits beside it, told by the two marker files below,
-# so an unrelated `something-live` folder stays editable. Either marker is enough.
+# A folder counts as a pin only when the clone beside it holds the install script that makes the
+# pin, so an unrelated `something-live` folder stays editable.
 # A stamped worktree is frozen only while the pin link resolves to it: the install tells a person
 # to move an older one aside, and prunes them, so those stay writable.
 LIVE_PIN_SUFFIX = "-live"
 _LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
-_CLONE_MARKERS = ("settings.json", "install.ps1")
+_CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 
@@ -116,7 +116,7 @@ def _in_live_pin(target: str) -> bool:
         found = _LIVE_PIN.fullmatch(name)
         if found:
             clone = os.path.join(parent, found["clone"])
-            if any(os.path.isfile(os.path.join(clone, marker)) for marker in _CLONE_MARKERS):
+            if os.path.isfile(os.path.join(clone, _CLONE_MARKER)):
                 if not found["stamp"]:
                     return True
                 pin = os.path.realpath(clone + LIVE_PIN_SUFFIX)
@@ -489,8 +489,66 @@ def _copy_reads(raw, predicate, cwd):
     return set(operands)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
-    """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
+def _cp_link_source(raw, holds, cwd) -> str:
+    """The word of a linking `cp` (`-l`, `-s`, `--link`, `--symbolic-link`, in any cluster) that
+    `holds(word, cwd)` accepts, else ''. A link to a frozen file, or to a folder of them, gives the
+    new name the frozen file itself, so a later write there writes it. Every operand but a plain
+    DEST is judged; with `-t` every operand is, which fails closed."""
+    words = [_unquoted(word) for word in raw]
+    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    if _name(raw[start] if start < len(raw) else "") != "cp":
+        return ""
+    link = target = False
+    operands = []
+    for word in words[start + 1:]:
+        if word.startswith("--"):
+            name = word[2:].split("=")[0]
+            link = link or bool(name) and any(full.startswith(name) for full in _CP_LINK_LONG)
+            target = target or bool(name) and "target-directory".startswith(name)
+        elif word.startswith("-") and len(word) > 1:
+            flags, cut, _dir = word[1:].partition("t")
+            link = link or bool({"l", "s"} & set(flags))
+            target = target or bool(cut)
+        elif ">" not in word and "<" not in word:
+            operands.append(word)
+    if not link:
+        return ""
+    return next((word for word in (operands if target else operands[:-1]) if holds(word, cwd)), "")
+
+
+def _holds(path: str, cwd: str, predicate) -> bool:
+    """True when `predicate` accepts the path, a path inside it, or a path one level below it."""
+    base = path.rstrip("/\\") or path
+    if predicate(path, cwd) or predicate(base + "/_", cwd):
+        return True
+    try:
+        children = os.listdir(_expanded(path, cwd))
+    except (OSError, ValueError):
+        return False
+    return any(predicate(os.path.join(base, child), cwd) or
+               predicate(os.path.join(base, child, "_"), cwd) for child in children)
+
+
+def _holds_frozen(path: str, cwd: str) -> bool:
+    """`_holds` for the frozen set, plus a folder that holds the config directory at any depth.
+    ponytail: a live pin more than one level below the folder is missed (`cp -al /opt` with the
+    pin at /opt/a/clone-live); a walk of the tree closes it, at the cost of a slow hook."""
+    if _holds(path, cwd, is_frozen):
+        return True
+    try:
+        readings = ((_literal_resolved(path, cwd), os.path.normpath(guard_core.config_dir())),
+                    (_resolved(path, cwd), os.path.realpath(guard_core.config_dir())))
+    except Exception:
+        return False
+    return any(os.path.normcase(root) == target or
+               os.path.normcase(root).startswith(target.rstrip(os.sep) + os.sep)
+               for target, root in readings)
+
+
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None) -> str:
+    """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
+    `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`)."""
+    holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
     segments = split_segments(cmd, ends)
@@ -501,6 +559,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
+        linked = _cp_link_source(raw, holds, cwd)
+        if linked:
+            return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
         if kinds[number] in ("printer", "message"):
             last = number
@@ -530,7 +591,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
     """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen)
+    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
