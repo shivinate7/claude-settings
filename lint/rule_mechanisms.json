@@ -467,7 +467,7 @@
     "verification-recovery-not-gated-on-own-state": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "A design principle. Two tests cover the guard's own recovery path (hooks/test_wrappers.py, hooks/test_ci_wake.py). No check reads the principle in other controls."
+        "reason": "A design principle. Cases in hooks/test_guard.py cover the guard's own recovery path: checkout or switch to main in the pointer checkout, and the clone still editable. No check reads the principle in other controls."
       }
     },
     "verification-green-proves-only-its-fixtures": {
