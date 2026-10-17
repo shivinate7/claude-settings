@@ -1,59 +1,79 @@
-#!/usr/bin/env python3
-# rm shim: sits ahead of the real rm on PATH (install.sh puts ~/.claude/bin first).
-# CLAUDECODE unset: runs the real rm untouched. CLAUDECODE set: a recursive call is refused whole when any
-# operand is /, home, the cwd or a parent of the cwd (symlinks resolved). The reading is _rm_target_bad in
-# hooks/guard_rm_var.py, the one home. If that cannot load or run, the real rm runs and one warning prints
-# (decision rm-path-wrapper). Windows: install.ps1 half is a debt.
+#!/bin/sh
+# claude-settings-rm-shim
+# rm shim, ahead of the real rm on PATH (install.sh puts ~/.claude/bin first). Line 2 is the marker: the
+# search for the real rm skips every file whose line 2 is this line, so two copies never call each other.
+# CLAUDECODE unset: exec the real rm at once, with no python. CLAUDECODE set: a recursive call is refused
+# whole when an operand is /, home, the cwd or a parent of the cwd (symlinks resolved), read by
+# _rm_target_bad in hooks/guard_rm_var.py. No python3, or a helper that cannot load or run: warn once,
+# exec the real rm (decision rm-path-wrapper). Posix only; install.ps1 does not land this file.
+
+# Sets REAL to the first rm on PATH that is not a copy of this shim, else /bin/rm. No fork, no grep.
+find_real() {
+  REAL=/bin/rm
+  _ifs=$IFS
+  IFS=:
+  for _d in $PATH; do
+    IFS=$_ifs
+    _p=${_d:-.}/rm
+    if [ -f "$_p" ] && [ -x "$_p" ]; then
+      _l1= _l2=
+      { IFS= read -r _l1; case $_l1 in '#!'*) IFS= read -r _l2 ;; esac; } < "$_p" 2>/dev/null
+      IFS=$_ifs
+      if [ "$_l2" != "# claude-settings-rm-shim" ]; then REAL=$_p; return 0; fi
+    fi
+    IFS=:
+  done
+  IFS=$_ifs
+}
+
+find_real
+[ -n "${CLAUDECODE:-}" ] || exec "$REAL" "$@"
+
+# A call with no flag that holds r or R cannot be recursive: skip python. A superset of the python test.
+_maybe=
+for _a in "$@"; do case $_a in -*[rR]*) _maybe=1 ;; esac; done
+[ -n "$_maybe" ] || exec "$REAL" "$@"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "rm shim: python3 not found, so this call is not judged; running the real rm" >&2
+  exec "$REAL" "$@"
+fi
+
+PY=$(cat <<'PYEOF'
 import os, sys
 
-args = sys.argv[1:]
-me = os.path.realpath(__file__)
-
-
-def real_rm():
-    """The next rm on PATH that is not this shim, else /bin/rm."""
-    for d in os.environ.get("PATH", "").split(os.pathsep):
-        p = os.path.join(d or ".", "rm")
-        if os.path.isfile(p) and os.access(p, os.X_OK) and os.path.realpath(p) != me:
-            return p
-    return "/bin/rm"
-
-
-def run_real():
-    os.execv(real_rm(), ["rm"] + args)
-
-
-def operands():
-    """(recursive, operands). Flags are read anywhere before `--`: the shim stays strict where BSD rm would not."""
-    rec, ops, flags = False, [], True
-    for a in args:
-        if flags and a == "--":
-            flags = False
-        elif flags and a.startswith("--"):
-            rec = rec or a == "--recursive"
-        elif flags and a.startswith("-") and a != "-":
-            rec = rec or "r" in a or "R" in a
-        else:
-            ops.append(a)
-    return rec, ops
-
-
-if not os.environ.get("CLAUDECODE"):
-    run_real()
-rec, ops = operands()
+me, args = os.path.realpath(sys.argv[1]), sys.argv[2:]
+rec, ops, flags = False, [], True
+for a in args:   # flags are read anywhere before `--`: strict where BSD rm would not be
+    if flags and a == "--":
+        flags = False
+    elif flags and a.startswith("--"):
+        rec = rec or a == "--recursive"
+    elif flags and a.startswith("-") and a != "-":
+        rec = rec or "r" in a or "R" in a
+    else:
+        ops.append(a)
 if not rec:
-    run_real()
+    sys.exit(0)
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(me)), "hooks"))
     from guard_rm_var import _rm_target_bad
-    cwd = os.getcwd()
-    bad = [o for o in ops if _rm_target_bad(o, cwd)]
+    try:
+        cwd = os.getcwd()
+    except OSError:   # the cwd was removed: judge absolute operands against "/" and home, skip the rest
+        cwd = None
+    bad = [o for o in ops if (cwd is not None or o.startswith("/")) and _rm_target_bad(o, cwd or "/")]
 except Exception as e:
     sys.stderr.write("rm shim: cannot judge this call (%s); running the real rm\n" % e)
-    run_real()
+    sys.exit(0)
 if bad:
     sys.stderr.write(
         "rm: refused in a Claude session. Operand %r is /, the home folder, the working folder or a parent "
         "of it, and no part of the call ran. Name a narrower folder, or ask the owner to do it.\n" % bad[0])
-    sys.exit(1)
-run_real()
+    sys.exit(3)
+PYEOF
+)
+
+python3 -c "$PY" "$0" "$@"
+[ $? -eq 3 ] && exit 1
+exec "$REAL" "$@"
