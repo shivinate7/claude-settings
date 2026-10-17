@@ -432,7 +432,7 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
       }
     },
@@ -534,7 +534,7 @@
     },
     "style-simple-answer-short": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a question was simple, and whether the answer held to 1 to 3 sentences, is a content judgment."
       }
     },
@@ -552,7 +552,7 @@
     },
     "style-correct-over-brief": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a reply dropped a true and needed fact to stay short is a judgment no check can make."
       }
     },
@@ -577,7 +577,7 @@
     },
     "output-never-hand-off-doable-step": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. No check reads a reply and the tool list to decide that."
       }
     },
@@ -601,13 +601,13 @@
     },
     "style-no-unmeasured-estimate": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "No check can tell an estimate from a measured range, or know whether a sample count backs a duration. It is a content judgment on the reply."
       }
     },
     "style-status-is-report": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },

@@ -22,8 +22,10 @@ Precedent: `a-rule-with-no-gate-leaves-claude-md` (a rule the owner took off the
   `shared-trees-install-refusal-hook`, `verification-never-waiter-loop` and
   `building-memory-never-only-home`.
 - `shared-trees-no-destructive-git` stays as the reminder `No destructive git.`
-- 15 rows move from `unmechanized` to `judgment`. `lint/rule_audit.py` gains the kind and pins
-  the count: `JUDGMENT_EXPECTED` is 15. `UNMECHANIZED_EXPECTED` falls from 75 to 60.
+- 21 rows move from `unmechanized` to `judgment`: 15 in `CLAUDE.md` and 6 in
+  `output-styles/shiv-stylisms.md`. The re-kind covers every row in the map, not only `CLAUDE.md`.
+  `lint/rule_audit.py` gains the kind and pins the count: `JUDGMENT_EXPECTED` is 21.
+  `UNMECHANIZED_EXPECTED` falls from 75 to 54.
 - `CLAUDE.md` falls from 17175 to 16292 bytes.
 
 ## Why only 6 of 30
@@ -49,6 +51,7 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 2. An agent now meets the `_subagentCapUntil` field only in the revoke message of `hooks/config_watch.py`, after a bad write. Debt: `cap-until-field-taught-late`, the field is taught late.
 3. The `unmechanized` line in the `lint/rule_audit.py` docstring still says "genuinely cannot be checked by a machine". That overlaps `judgment`. Debt: `unmech-doc-overlaps-judgment`, the docstring overlaps the new kind.
 4. These 23 rules stay as prose, each unsure: `outcomes-mechanize-rules`, `roles-sonnet-is-the-default`, `roles-opus-override-guarded`, `roles-workers-never-spawn`, `roles-third-try-steps-up`, `shared-trees-no-machine-wide-kill`, `git-wait-for-required-checks`, `git-never-discard-output`, `git-remedy-never-names-target`, `git-slug-then-claim-number`, `git-cite-by-id`, `git-draft-until-reviewed`, `verification-trust-guard-after-red`, `verification-cry-wolf-guard-is-spent`, `verification-recovery-not-gated-on-own-state`, `verification-report-unknown-reads`, `building-allow-list-is-the-constant`, `building-scanner-respects-strings`, `speak-cite-id-plus-gloss`, `output-write-in-ste`, `reports-order-of-labels`, `reports-done-format`, `reports-no-report-when-nothing-landed`.
+5. A move from `unmechanized` to `judgment` takes a rule off the list of rules that still wait for a check. Only the 8-word reason floor and the two pins in one commit stand in the way. Debt: `judgment-exits-debt-count`, a re-kind leaves the waiting list.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
