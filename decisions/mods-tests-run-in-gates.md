@@ -41,7 +41,7 @@ The step is last. A red mod test therefore does not skip the other steps: zizmor
 
 ## Holes, named
 
-Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-tests-glob-too-narrow` (nested and `*.test.js` tests never run), `mods-session-board-timer-margins` (two real-timer margins are unproven on a slow runner), `mods-node-version-unpinned` (the runner's Node version is unknown), `mods-step-order-unpinned` (no test pins that this step is last), `mods-linux-proof-pending` (the first CI run on Linux is the real proof), `harness-scope-stale-comment` (the scope lint has a stale comment). `harness-scope-mods-flag-missing` (STEP_FLAGS lacks mods). `harness-scope-pipe-regex-quotes` (the pipe regex ignores quotes and comments). `harness-scope-line5-too-long` (a line in the scope script is about 140 characters). `process-record-dead-plan-line` (this record keeps a Plan line that no check reads).
+Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-tests-glob-too-narrow` (nested and `*.test.js` tests never run), `mods-session-board-timer-margins` (two real-timer margins are unproven on a slow runner), `mods-node-version-unpinned` (the runner's Node version is unknown), `mods-step-order-unpinned` (no test pins that this step is last), `mods-linux-proof-pending` (the first CI run on Linux is the real proof), `harness-scope-mods-flag-missing` (STEP_FLAGS lacks mods). `harness-scope-pipe-regex-quotes` (the pipe regex ignores quotes and comments). `harness-scope-line5-too-long` (a line in the scope script is about 140 characters). `process-record-dead-plan-line` (this record keeps a Plan line that no check reads).
 
 ## Unverified
 
