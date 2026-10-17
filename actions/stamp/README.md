@@ -122,13 +122,13 @@ enough, because git must find the merge base of HEAD and the base ref.
 
 **Record identity across the two trees.** A frontmatter record is the same record when it
 has the same kind and slug. Its key is the slug. A `folder` heading record is the same
-record when it has the same file. Its key is the file path. A `file` heading record has no
-key but its number. So a branch that renames a numbered `folder` heading file is refused
-too. So is a branch that changes the slug of a numbered frontmatter record. A rename of a
-frontmatter file with the same slug passes. An edit to a title passes in every shape.
+record when it has the same file. Its key is the file path. A `file` heading record's key is
+its number plus its title, so a title change under one number is refused as a rename. A branch
+that renames a numbered `folder` heading file is refused too. So is a branch that changes the
+slug of a numbered frontmatter record. A rename of a frontmatter file with the same slug passes.
 
 **A same-number swap.** A branch can delete a `file` heading record and write a different
-record with the same number. The new record reads as a rename, and the rename is refused. The engine does not compare titles or
+record with the same number. The new record reads as a rename, and the rename is refused. The engine does not compare
 content.
 
 ## The retired-numbers list
