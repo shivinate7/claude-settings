@@ -18,15 +18,20 @@ same vetting as the first eight mods (desktop support first). No row authorizes 
 | fleet | Skip | It wraps `claude agents`. |
 | LeakStop | Pass | Owner decision. |
 | Secret-warning mod | Pass for now | No real key in 25 sessions. |
-| claude-skins (hellosverre) | Unvetted, vet before any install | MIT. README says desktop works. 15 themes, diff cards, usage band. Compare with the plain-diff mod. One network GET per day, no data sent. |
-| project-sentinel (Arjun0014) | Unvetted, take only with its policies off | MIT. Highest reach. README says desktop works for local sessions. Can ask or deny tool calls by category. Windows method for machine stats is undocumented. |
-| hamzafer picks: mission-control, where-am-i, usage-meter, cache-clock, merge-gate, switchboard, session-saver, rulebook-guard | Unvetted, vet before any install | Desktop support is not stated. |
-| prismantis, claude-show-your-work | Skip for now | Desktop support is unverified or absent. |
 
 Parked, not built, flag to the owner as later items:
 
 - An `agent.spawn` hook sets a subagent's model. It would replace the guard deny for the step-up rule (reviewer rounds 2 and 3 on Sonnet, builder try 3 on Opus) with correct spawns.
 - A `$.audio` sound when a session starts waiting on the owner. No community mod uses `$.audio`.
+
+## Unvetted candidates
+
+| Item | Status | Reason |
+| --- | --- | --- |
+| claude-skins (hellosverre) | Unvetted, vet before any install | MIT. README says desktop works. 15 themes, diff cards, usage band. Compare with the plain-diff mod. One network GET per day, no data sent. |
+| project-sentinel (Arjun0014) | Unvetted, take only with its policies off | MIT. Highest reach. README says desktop works for local sessions. Can ask or deny tool calls by category. Windows method for machine stats is undocumented. |
+| hamzafer picks: mission-control, where-am-i, usage-meter, cache-clock, merge-gate, switchboard, session-saver, rulebook-guard | Unvetted, vet before any install | Desktop support is not stated. |
+| prismantis, claude-show-your-work | Skip for now | Desktop support is unverified or absent. |
 
 Kind: process
 Home: decisions/mods-deferred-table.md
