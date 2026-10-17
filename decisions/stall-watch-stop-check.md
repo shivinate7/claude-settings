@@ -11,25 +11,14 @@ The hook exits 0 and never blocks. A crash never refuses a call, as advisory hoo
 (`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path (`stall-watch`), so
 that parsing has one home (`building-one-home-per-capability`).
 
+- Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
+  number of seconds.
+- A job counts as finished when the transcript holds a completion notice with status completed, failed,
+  killed or stopped (as a user record, or as an attachment record of type queued_command), or a
+  "Successfully stopped task: <ID>" result of a TaskStop call.
+
 Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id
 exists for the job, so the age of its output file is the signal.
 
-**Age.** The default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
-number of seconds. Test seams: `STALL_WATCH_NOW` sets the clock in epoch seconds.
-`STALL_WATCH_OUTPUT_BASE` replaces the folder of each output path and keeps the file name.
-
-**Finished jobs.** A job counts as finished when the transcript holds one of these:
-
-- a completion notice with status completed, failed, killed or stopped, as a user record;
-- the same notice as an attachment record of type queued_command;
-- a "Successfully stopped task: <ID>" result of a TaskStop call.
-
-Tests: `hooks/test_stall_watch_stop.py`. Two steps named "Stall watch stop suite" in
-`.github/workflows/gates.yml` run it, one on Linux and one on Windows.
-
 Kind: process
 Home: hooks/stall_watch.py
-
-## Holes, named
-
-Debts: `stall-message-repeats-every-stop`, `stall-open-job-no-age-ceiling`, `stall-message-delivery-unproven`.
