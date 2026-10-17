@@ -45,8 +45,8 @@ unspecified person from a named person.
 ## The mechanism
 
 `lint/ste_lint.py`. The STE006 and STE018 rows go, and their detection code
-goes with them. `GENDERED` goes too. `RULES` holds 9 rows. Every row reads
-`error`. The other rules keep their codes.
+goes with them. `GENDERED` goes too. `RULES` holds 11 rows. Five read
+`error` and six read `warning` (decision plain-prose-lint, the STE lint turned plain-prose lint). The other rules keep their codes.
 
 `lint/ste_gate.py` and `lint/md_sweep.py`. Each `NOTE` string names only the
 rules that remain.
@@ -68,3 +68,6 @@ It adds no STE018 guidance to CLAUDE.md. It does not reword the 3 STE018
 lines, which are no longer findings. It does not fix the 2 STE013 findings.
 It does not touch source-prose-lint-ships-dark, the source lint stays off.
 Its STE006 counts were true when that entry was written.
+
+Kind: process
+Home: lint/ste_lint.py

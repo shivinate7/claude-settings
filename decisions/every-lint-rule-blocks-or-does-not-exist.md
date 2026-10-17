@@ -1,16 +1,22 @@
-# Every lint rule blocks, or it does not exist
+# A lint rule blocks, or it does not exist, bar six advisory codes
 
 CLAUDE.md says: "Judge every rule, check, and design by the outcome for the
 person the software serves." `lint/ste_lint.py` held 19 rules. Four were
 `error`. Thirteen were `warning`, two were `info`, and both gates that call
-the linter, `lint/ste_gate.py` and `lint/md_sweep.py`, filter their findings
+the linter, `lint/ste_gate.py` and `lint/md_sweep.py`, filtered their findings
 to `error` only. Fifteen rules fired on every run. None of them changed a
 single outcome. A rule nobody can see is not a rule. The owner ruled that a
 rule either blocks or does not exist.
 
+Six codes are the owner's exception: STE003, STE007, STE008, STE009, STE015
+and STE017 read `warning`. They never block. The gates show them in a
+non-blocking note, as a temporary nudge (`plain-prose-lint`, the STE lint
+becomes a plain-prose lint). Five rules block: STE001, STE011, STE013, STE020
+and STE021.
+
 ## A finding the gate fixes is not a block
 
-The STE gate rewrites a Markdown finding it can fix, and denies only the
+The STE gate rewrites a Markdown STE011 finding it can fix, and denies only the
 findings it cannot fix. A fixed finding is not a block. A finding the gate
 cannot fix still blocks, as this entry says. See ste-gate-fixes-not-nags, the
 STE rewrite ruling.
@@ -21,8 +27,9 @@ Every one of the 32 tracked Markdown files in this repository, already
 accepted into it, ran through `lint/ste_lint.py` at every severity. The
 number beside each rule is the share of those 32 files it hit.
 
-Promoted to `error`. Each one is a binary lookup: a fixed phrase, a fixed
-pronoun set, a missing conjunction, a word order. No judgment call sits
+Promoted when ruled. STE003, STE009, STE015 and STE017 are advisory now. STE018 is deleted. Each
+one is a binary lookup: a fixed phrase, a fixed pronoun set, a missing
+conjunction, a word order. No judgment call sits
 between the text and the finding.
 
 | Rule | Firing rate |
@@ -62,14 +69,15 @@ spent, because the reader learns to scroll past it." STE002 at 81% would
 have been the loudest, most-ignored guard in this repository from its first
 commit.
 
-Kept exactly as they were: STE001 sentence-length, STE006 semicolon, STE007
-latin-abbreviation, STE008 contraction. All four were already `error`. All
-four are the same kind of binary lookup as the seven promoted above.
+Kept as the same kind of binary lookup as the seven promoted above: STE001
+sentence-length, STE006 semicolon, STE007 latin-abbreviation and STE008
+contraction. STE001 reads `error`. STE007 and STE008 read `warning`. STE006 is
+not in the linter (semicolon-and-gendered-pronoun-rules-leave-the-gate).
 
 ## What this changes
 
-`lint/ste_lint.py`. Seven rules promoted to `error`: STE003, STE009, STE011,
-STE013, STE015, STE017, STE018. Eight rules deleted, table row and
+`lint/ste_lint.py`. STE011 and STE013 are `error`. STE003, STE009, STE015 and
+STE017 are `warning`. STE018 is not in the linter. Eight rules deleted, table row and
 detection code together, not the row alone: STE002, STE004, STE005, STE010,
 STE012, STE014, STE016, STE019.
 
@@ -79,21 +87,19 @@ with it. That list is long: `AMBIGUOUS`, `VAGUE_VERBS`, `THIS_VERBS`, `BE`,
 `FUNCTION_WORDS`, `COMMON_VERBS`, `DRIFT_GROUPS`, and the whole
 `check_terminology` method. Three config keys went the same way:
 `max_sentences_per_paragraph`, `max_noun_cluster`, and `glossary`. `RULES`
-now holds 11 rows. Every row reads `error`.
+holds 11 rows. Five read `error` and six read `warning`.
 
-`lint/ste_gate.py:56` and `lint/md_sweep.py:431` filter findings to
-`severity == "error"`. That filter is still correct. It once selected 4
-rules out of 19. It now selects all 11 that remain, and the filter itself
-never needed to change. Its printed `NOTE` string named the old four rules
-by name. It now names the new eleven. That is a one-line fix, inside a file
-this repository asks changes to stay tight in.
+`lint/ste_gate.py` and `lint/md_sweep.py` split the findings by severity.
+An `error` blocks. A `warning` goes in a non-blocking note. Each gate prints
+a `NOTE` string that names what blocks: a sentence over 30 words, bloat, and
+a double negative.
 
 `lint/test_gates.py`. No case named a deleted rule, so none needed removal.
-A new `PromotedRuleTests` class adds one fixture per promoted rule. Each one
-proves the rule fires at `error` severity on a small, targeted example. One
+A `PromotedRuleTests` class holds one fixture per promoted rule. Each one
+proves the rule fires, at its own severity, on a small, targeted example. One
 more case proves the eight deleted codes hold no row in `RULES`. One more
-proves every remaining row reads `error`. The suite held 106 cases before
-this change and holds 115 after.
+proves the severity of every remaining row. The suite held 106 cases before
+the promotion and held 115 after it.
 
 The 32 tracked Markdown files held 20 errors under the new rule set, before
 any wording changed. They hold 0 after. Every fix below changed wording
@@ -116,10 +122,10 @@ they show up. So are long paragraphs, ambiguous words, ambiguous leading
 "this," complex verb forms, and terminology drift. What changed is only
 that no machine stops a write over them.
 
-`CLAUDE.md` already says "Write in Simplified Technical English by
-default." That line was enough before this change. It stays enough after
-it. It names the house style without claiming that a rule enforces every
-part of it. A future reader who sees eight rules vanish from `ste_lint.py`
+`CLAUDE.md` says "Write plainly: short sentences, one term per meaning,
+no filler." That line was enough before the eight rules went. It stays
+enough after them. It names the house style without claiming that a rule
+enforces every part of it. A future reader who sees eight rules vanish from `ste_lint.py`
 should read this file. That reader should not assume that the deletion was
 permission to write passive, vague, over-clustered prose. It is a decision
 to stop gating style with a pattern that cannot judge it. It is not a
@@ -133,3 +139,6 @@ beyond the one `NOTE` line above. It does not renumber the surviving rule
 codes. STE001, STE003, STE006 through STE009, STE011, STE013, and STE015
 through STE018 keep the codes they already had. An old citation of STE003 or
 STE009 still names the same rule.
+
+Kind: process
+Home: lint/ste_lint.py

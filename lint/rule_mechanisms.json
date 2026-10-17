@@ -391,7 +391,7 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/ste_lint.py",
-        "test": "lint/test_gates.py::PromotedRuleTests.test_ste003_nominalization_blocks"
+        "test": "lint/test_gates.py::PromotedRuleTests.test_ste011_bloat_blocks"
       }
     },
     "output-start-with-point": {

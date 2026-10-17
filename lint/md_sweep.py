@@ -14,7 +14,8 @@ is newer than this turn's last human message, kept only when it is also dirty ag
 a git work tree. It never reads a command string.
 
 SEVERITY. This hook blocks the turn once when it finds an error, the same severity as the
-PreToolUse gate. A gate a lane can skip by picking another tool is not a gate.
+PreToolUse gate. A gate a lane can skip by picking another tool is not a gate. An advisory
+finding (a warning) never blocks: the hook shows it in a note.
 
 SCOPE. This hook lints only the markdown files this turn changed, whatever tool wrote them.
 It reads the last human message's timestamp from the transcript, the way
@@ -47,8 +48,8 @@ THE PREDICATE.
    this filter drops them.
 4. Outside a git tree, mtime alone decides, from a plain filesystem walk. Inside one, a
    failed git call returns nothing at all, never mtime alone: see `collect_markdown_targets`.
-5. Lint the survivors from disk with ste_lint.py at error severity, exactly as before. Block
-   once, naming every file and its findings.
+5. Lint the survivors from disk with ste_lint.py. Block once on errors, naming every file and
+   its findings. Advisory findings go in a note and never block.
 
 HOLES IN THE NEW PREDICATE, NAMED HONESTLY.
 
@@ -100,7 +101,7 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work  # noqa: E402
+from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work, advisory_lines  # noqa: E402
 try:
     from _transcript import guard_logger  # noqa: E402
 except Exception:  # an older _transcript.py beside this script: the sweep runs, with no log line
@@ -115,9 +116,8 @@ SKIP_DIR_NAMES = {"node_modules"}
 DISABLE_VAR = "MD_SWEEP_DISABLE"
 EXCLUDE_VAR = "MD_SWEEP_EXCLUDE"
 
-NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
-        "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
-        "condition order, omitted 'that'.")
+NOTE = ("Code in backticks or a fence is exempt. Errors only: a sentence over 30 words, "
+        "bloat, double negative.")
 
 
 # ------------------------------------------------------------------ transcript walking
@@ -412,7 +412,8 @@ def scope_for(cwd, path, untracked):
 # ------------------------------------------------------------------ linting from disk
 
 def lint_files(paths, exclude):
-    """Return {path: [finding dict]} for the error-level findings of ste_lint.py on paths.
+    """Return {path: [finding dict]} for the findings of ste_lint.py on paths, errors and
+    advisory warnings.
 
     Every path here was already checked to exist and to be readable. That check runs before
     this call, not during it. If a path vanishes in the gap between the two, ste_lint.py
@@ -434,8 +435,6 @@ def lint_files(paths, exclude):
         return {}
     by_path = {}
     for f in data.get("findings", []):
-        if f.get("severity") != "error":
-            continue
         by_path.setdefault(f.get("path"), []).append(f)
     return by_path
 
@@ -521,7 +520,7 @@ def main():
     if not by_path:
         return
 
-    lines, blocked, codes = [], [], []
+    lines, blocked, codes, notes = [], [], [], []
     for resolved in lintable:
         findings = by_path.get(resolved)
         if not findings:
@@ -529,6 +528,12 @@ def main():
         scope = scopes[resolved]
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
+        # Advisory findings never block. They go in a note, so the writer still sees them.
+        advisory = [f for f in findings if f.get("severity") != "error"]
+        findings = [f for f in findings if f.get("severity") == "error"]
+        if advisory:
+            notes.append("%s:" % os.path.basename(resolved))
+            notes.extend("  " + line for line in advisory_lines(advisory))
         if not findings:
             continue
         blocked.append(resolved)
@@ -536,6 +541,10 @@ def main():
         lines.append("%s:" % os.path.basename(resolved))
         lines.extend("  " + format_finding(f) for f in findings)
     if not lines:
+        if notes:
+            print(json.dumps({"systemMessage": "STE advisory after the write (the turn goes ahead):\n"
+                              + "\n".join(notes)}))
+            sys.stdout.flush()
         return
 
     reason = (
@@ -543,6 +552,8 @@ def main():
         "in the file on disk after the write.\n%s\n%s Fix the text, then finish the turn."
         % ("\n".join(lines), NOTE)
     )
+    if notes:
+        reason += "\nSTE advisory (does not block):\n" + "\n".join(notes)
     print(json.dumps({"decision": "block", "reason": reason}))
     sys.stdout.flush()  # the answer is out before the log write; a stalled disk can still delay exit
     guard_logger(hook)("Stop", "deny", codes, blocked[0], "files=%d" % len(blocked))
