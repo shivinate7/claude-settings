@@ -2850,6 +2850,37 @@ sh("kill: pgrep piped into xargs kill", "pgrep -f node | xargs kill", "deny",
 sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | xargs kill -l",
    "allow", cwd=NOGIT)
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
+
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 3). Four ways to stop a process by port, or every
+# process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
+# a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
+# same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
+# never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
+# a dev server holds a port, so each is a mistake it could make. `kill -KILL -1` and `kill -s KILL -1`
+# are the same hole as `kill -9 -1`; they were found while verifying the finding, not named in it.
+for _name, _command in (
+    ("a pid list made by lsof -t", "kill $(lsof -t -i :3000)"),
+    ("a pid list made by lsof -ti behind a signal", "kill -9 $(lsof -ti :3000)"),
+    ("a pid list made by lsof -t, backtick form", "kill `lsof -t -i :3000`"),
+    ("fuser -k by port", "fuser -k 3000/tcp"),
+    ("fuser -k bundled with -n", "fuser -kn tcp 3000"),
+    ("npx kill-port", "npx kill-port 3000"),
+    ("npx kill-port behind a flag", "npx --yes kill-port 3000"),
+    ("kill-port on the path", "kill-port 3000"),
+    ("every process behind a signal number", "kill -9 -1"),
+    ("every process behind a signal name", "kill -KILL -1"),
+    ("every process behind -s", "kill -s KILL -1"),
+):
+    sh("kill: " + _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: every process behind a signal number, with the root unknown", "kill -9 -1", "deny",
+   "machine-wide-kill", cwd=NOGIT, no_root=True)
+# PINS, green today. The new matchers read the COMMAND WORD, so a tool named in text, and a read of
+# a port, stay allowed: `fuser` without -k lists the holders, and kill-port in a quoted message is text.
+sh("kill: fuser without -k only lists the holders", "fuser -v 3000/tcp", "allow", cwd=NOGIT)
+sh("kill: grep for kill-port in a file is no kill", 'grep -n "kill-port" package.json', "allow",
+   cwd=NOGIT)
+sh("kill: a commit message that names fuser -k and kill-port is no kill",
+   VCS + ' commit -m "docs: refuse fuser -k and kill-port"', "allow", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
 sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", tool="PowerShell",
    cwd=NOGIT)
@@ -3828,8 +3859,7 @@ for _label, _open, _close, _mw in (
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
 #
-# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
-# it outlives the turn and the agent that started it.
+# A follow flag never ends on its own, so it outlives the turn and the agent that started it.
 
 sh("stream: tail -f never ends", "tail -f app.log", "deny", "live-stream", cwd=NOGIT)
 sh("stream: tail -F retries across rotation", "tail -F app.log", "deny", "live-stream", cwd=NOGIT)
@@ -3844,11 +3874,34 @@ sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=N
 sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", "allow",
    tool="PowerShell", cwd=NOGIT)
 
-# BLAST RADIUS of the loop-keyword fix: `live_stream_hit` already reads every token of its
-# segment, not only the first, so a follow flag inside a loop's do-block denied before this fix
-# too. Pinned here so a later change cannot narrow that read back to command position only.
+# A follow flag in a loop's do-block is still the command word's own flag: the loop keyword and the
+# wrappers are skipped before the command word is read. Pinned so reading the command word, not every
+# token, does not let the do-block through.
 sh("stream: tail -f inside a loop's do-block denies unchanged",
    "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
+
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 4). The rule reads every token of a segment, not the
+# command word, so a command that only NAMES `tail` or `Get-Content` before a flag is a false alarm:
+# a commit message or a note that names the refused form, and `grep ... tail -F`, where -F is grep's
+# fixed-string flag. Claude writes the first two whenever it works on this rule. RED today.
+for _name, _command in (
+    ("a commit message that names tail -f", VCS + ' commit -m "Refuse tail -f in the guard"'),
+    ("a commit message that names Get-Content -Wait",
+     VCS + ' commit -m "Refuse Get-Content -Wait on logs"'),
+    ("an echo that names tail -f", 'echo "never tail -f app.log"'),
+    ("grep for tail with -F after the pattern", "grep -rn tail -F hooks/"),
+):
+    sh("stream: false alarm: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
+# PINS, green today. Reading the command word must keep a follow behind a wrapper, behind a path and
+# in a later step. Not pinned: `bash -c 'tail -f x'` allows today, and `ssh host tail -f x` denies
+# today but a command-word read would allow it (orchestrator's call).
+for _name, _command in (
+    ("behind sudo", "sudo tail -f app.log"),
+    ("behind env and an assignment", "env X=1 tail -f app.log"),
+    ("by absolute path", "/usr/bin/tail -f app.log"),
+    ("as the second step", "cd logs && tail -f app.log"),
+):
+    sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
 
 
 # =========================================================================== 2c. shell traps
@@ -5590,6 +5643,60 @@ sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"',
 sh("delete: a grep pattern naming the cmd.exe form calls nothing",
    'grep "del /s" notes.md', "allow", cwd=NOGIT)
 
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 2). The `rm` pattern reads raw text: a target must end
+# at a space or the end, the flags must be one `-rf` cluster, and a quote hides nothing. Three
+# misses and one false alarm, each a form Claude writes.
+#
+# MISSES, RED today: a trailing slash or glob on a root or home, the long flags, and `--` before the
+# target. Each is the same act as `rm -rf /` or `rm -rf ~`, which deny.
+for _name, _command in (
+    ("the home directory with a trailing slash", "rm -rf ~/"),
+    ("everything under the root", "rm -rf /*"),
+    ("everything under the home directory", "rm -rf ~/*"),
+    ("the root, long flags", "rm --recursive --force /"),
+    ("the home directory, long flags", "rm --recursive --force ~"),
+    ("the home variable, long flags in the other order", "rm --force --recursive $HOME"),
+    ("the root after --", "rm -rf -- /"),
+    ("the home directory after --", "rm -rf -- ~"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# FOUND WHILE VERIFYING, not named in the audit: the same pattern misses a capital R, an extra flag
+# letter after f, and the working directory spelled `./` or `./*` (`rm -rf .` and `rm -rf *` deny).
+for _name, _command in (
+    ("the root, capital R", "rm -Rf /"),
+    ("the home directory, a verbose flag after f", "rm -rfv ~"),
+    ("the working directory as ./", "rm -rf ./"),
+    ("everything in the working directory as ./*", "rm -rf ./*"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# FALSE ALARMS, RED today: the text of the command sits inside a quoted argument of another command
+# (a note, a commit message, a grep pattern). The cmd.exe forms above are already read by token.
+for _name, _command in (
+    ("an echo that quotes the root form", 'echo "rm -rf /"'),
+    ("an echo that quotes the home form", "echo 'rm -rf ~'"),
+    ("a commit message that names the root form", VCS + " commit -m 'never run rm -rf / here'"),
+    ("a grep for the root form", 'grep "rm -rf /" notes.md'),
+):
+    sh("delete: " + _name + " calls nothing", _command, "allow", cwd=NOGIT)
+# PINS, green today. Reading tokens must still see a delete that sits in a quoted argument of a
+# shell that RUNS it, and behind a wrapper. (`ssh host 'rm -rf /'` also denies today: orchestrator's
+# call whether a token read keeps it, so it is not pinned.)
+for _name, _command in (
+    ("bash -c", "bash -c 'rm -rf /'"),
+    ("sh -c", 'sh -c "rm -rf ~"'),
+    ("eval", 'eval "rm -rf /"'),
+    ("sudo", "sudo rm -rf /"),
+):
+    sh("delete: the root form behind " + _name + " still denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# PINS, green today: a named folder stays allowed in every spelling the new matches read.
+for _name, _command in (
+    ("a dot-slash folder", "rm -rf ./build"),
+    ("a folder after --", "rm -rf -- build"),
+    ("a folder, long flags", "rm --recursive --force build/"),
+):
+    sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+
 
 # =========================================================================== 4. environment files
 FAMILY = "env"
@@ -6609,6 +6716,22 @@ for _name, _command in (
 sh("cite-by-id: a message file that cannot be read is unknown, and denies",
    VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt", "deny", "cite-by-id",
    carries="could not be read", cwd=NOGIT, config=MERGECFG)
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 7). "An unreadable -F file makes git fail, so allow it"
+# does not hold for these three: the file is unreadable at hook time, and git reads it fine when the
+# command runs. The same command writes it first (a redirect, or the usual `cat > f <<EOF` then
+# `commit -F f`), or the shell makes it (`<(...)`). An unconditional allow would let a message that
+# cites a record path through. PINS, green today, so a fix for the missing-file case cannot open them.
+MSG_MADE = slash(ROOT) + "/msg-made-in-this-command.txt"   # no such file: only the command makes it
+for _name, _command in (
+    ("a file written by a redirect in the same command",
+     "printf 'cites " + CITE + "' > " + MSG_MADE + " && " + VCS + " commit -F " + MSG_MADE),
+    ("a file written by a heredoc in the same command",
+     "cat > " + MSG_MADE + " <<'EOF'\ncites " + CITE + "\nEOF\n" + VCS + " commit -F " + MSG_MADE),
+    ("a message made by a process substitution",
+     VCS + " commit -F <(printf 'cites " + CITE + "')"),
+):
+    sh("cite-by-id: %s is unread at hook time, and denies" % _name, _command, "deny",
+       "cite-by-id", carries="could not be read", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
