@@ -1411,7 +1411,9 @@ class RealRecords(unittest.TestCase):
                    ("deferred", ("Deferred",)), ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder)) if f.endswith(".md") and f != "README.md")
+            # notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
+                           if f.endswith(".md") and f not in ("README.md", "notes.md"))
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
