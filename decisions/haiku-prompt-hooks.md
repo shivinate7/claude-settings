@@ -9,10 +9,8 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 ## Five prompt hooks
 
-Five `type: prompt` hooks judge rules that no script can parse. Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. This is a trial.
-The owner reviews with the orchestrator on 2026-10-14 whether the blocks land well, and
-rules then to keep, change or remove each hook. A prompt hook
-cannot warn: it answers `ok` and shows nothing, or blocks with a reason.
+Five `type: prompt` hooks judge rules that no script can parse. Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. A prompt hook cannot warn: it answers `ok` and shows nothing, or
+blocks with a reason.
 
 | Hook on | Rules it judges |
 |---|---|
@@ -25,7 +23,7 @@ A prompt hook sees only the event's input, never the chat. So no hook judges
 `style-question-inside-box` or `roles-one-role-per-worker`, because neither hook can see
 what those rules need. A block returns its reason to the session and the turn goes on
 (`continueOnBlock`). The rules these hooks judge stay `unmechanized` in
-`lint/rule_mechanisms.json` until a hook catches a real defect in the trial. The SendMessage hook cannot
+`lint/rule_mechanisms.json` until a hook catches a real defect. The SendMessage hook cannot
 see the receiver's task, so it judges by wording alone. A hook that cries wolf is spent, by
 `verification-cry-wolf-guard-is-spent`. Remove one that blocks good input.
 
@@ -104,3 +102,9 @@ Limits, named:
 
 Kind: process
 Home: hooks/reply_judge.py
+Home: settings.json
+
+## Ruling
+
+Owner ruling, 2026-10-17 11:33 CDT, the trial review: the blocking judges stay. They work
+well and can still improve.
