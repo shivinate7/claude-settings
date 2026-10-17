@@ -1120,7 +1120,6 @@ def case_token_t10_undecodable_file_is_an_error():
 # The child writes UTF-8 (the judge's JSON carries an em dash in the why). The fake child
 # returns BYTES, and decodes them the way subprocess.run does for the call's own arguments:
 # the named encoding when one is passed, else the Windows code page (cp1252) when text=True.
-# That is the live defect (2026-10-09): a deny reason read "â€”" instead of "—".
 E1_WHY = "The wait option answers timing — the three-try limit is not in it."
 
 
