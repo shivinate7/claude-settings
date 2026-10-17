@@ -19,6 +19,12 @@ Owner answers, 2026-10-17 12:14 CDT:
 - Workers take the model-per-role table in `subagent-model-cap`.
 - A test-case rename is allowed for a prose-proof test. The change updates the mutants that name it in the same commit.
 
+Owner answers, 2026-10-17 12:53 CDT:
+
+- (a) A lane may reword a line when the result has fewer lines and words than before and keeps the current reason. Why: a trim that cannot reword leaves long lines in the tree.
+- (b) Delete the decision on the Bash tool's PATH snapshot. Why: it held a claim and a measurement, with no ruling in force.
+- (c) A delete-only change opens no hole unless it removes a guard, gate or check, which round 1 must judge (`hold-unsafe-after-round-3`). Why: deleting prose or a record cannot let an act through.
+
 ## Why
 
 The tree carries more records than a session can read. A cull keeps the rulings in force and drops the rest. The protected outcome: a session finds the current ruling fast, and no stale text misleads it.

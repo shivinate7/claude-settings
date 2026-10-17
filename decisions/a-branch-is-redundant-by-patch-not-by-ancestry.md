@@ -1,64 +1,14 @@
 # A branch is redundant by patch, not by ancestry
 
-The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) keeps or reaps a local branch. This
-entry records the test it uses, and the measurement behind it.
+## The ruling
 
-## The defect in the older rule
+The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. It keeps the branch, and names it as the only copy, when a `+` survives and no remote ref contains it.
 
-A sibling repository runs a sweep with one test:
+Why: `git merge-base --is-ancestor` reads commit ids, and a rebase writes new ids for the same patch, so ancestry holds work that nobody can lose. `git cherry` compares patch ids. The direction is safe: an altered commit prints `+` and is kept, and a false `-` needs two identical patches, so the content already sits on the base.
 
-    git merge-base --is-ancestor <branch> <base>
+Limit: a squash merge writes one new patch id, so `git cherry` still prints `+`. The known fix runs `git cherry` against a synthetic commit from `git commit-tree <tree> -p <base>`. The sweep does not ship it, because no branch of that shape exists to prove it.
 
-That test reads commit ids. A rebase writes new commit ids for the same patch.
-The test then goes false while the same patch sits on the base branch. The
-sweep holds the branch, and it reports work that nobody can lose.
-
-## The rule
-
-`git cherry <base> <branch>` compares patch ids. A commit already on the base
-prints `-`. A new commit prints `+`.
-
-The sweep reaps a branch when the branch is an ancestor of the base, OR when
-`git cherry` prints no `+`. The sweep keeps the branch, and names it as the
-only copy, when a `+` survives and no remote ref contains it.
-
-## Why the direction is safe
-
-A rebase can alter a commit. An altered commit prints `+`, so the sweep keeps
-it. A kept branch is the safe error.
-
-A false `-` needs two identical patches. Two identical patches mean that the
-content really sits on the base. The delete then costs nothing.
-
-## The measurement
-
-Taken on 2026-09-20, across the five repositories under `~/Developer`. Of 98
-local branches, the ancestry test reaps 46. The patch test reaps 5 more. One of
-those 5 carries 47 commits, and `git cherry` marks every one of them `-`.
-
-42 of the 98 are genuinely unmerged. Six of those hold the only copy of their work. The
-sweep keeps all six and names them.
-
-These counts cover content only. The sweep applies its refusals in order first. A branch that
-a worktree checks out lands in the checked-out group and never reaches the ancestor group. Of
-the 46 ancestors, 29 sat in a worktree. 46 minus 29 leaves the 17 that the sweep's own preview
-reports. A review re-measured both numbers on 2026-09-20.
-
-## The gap this entry does not close
-
-A squash merge writes one new patch id, so `git cherry` still prints `+`. The
-known fix builds a synthetic commit with `git commit-tree <tree> -p <base>`,
-and runs `git cherry` against that commit.
-
-This machine holds no branch of that shape today. The measurement found zero.
-A rule that ships without a subject is a rule nobody sees work, so the sweep
-does not ship this test. The suite carries a fixture that proves the gap, so
-the record holds it.
-
-## The mechanism
-
-`janitor/test_sweep.py` holds the rebase-ghost fixture. That fixture goes red
-against a sweep that tests ancestry alone.
+Protected by the rebase-ghost fixture in `janitor/test_sweep.py`, which goes red against a sweep that tests ancestry alone.
 
 Kind: process
 Home: janitor/sweep.py
