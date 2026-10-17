@@ -323,15 +323,17 @@ jobs:
       # Last step, so a red mod test skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
       # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
-      # fails the step. No pipe.
+      # fails the step. The find runs first and fails the step if it errors or lists nothing. No pipe.
       - name: Mod tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: |
+          list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print) || { echo "find failed"; exit 1; }
+          [ -n "$list" ] || { echo "no mod test file found"; exit 1; }
           fail=0
           while IFS= read -r f; do
             node "$f" || fail=1
-          done < <(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print)
+          done <<< "$list"
           exit "$fail"
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.

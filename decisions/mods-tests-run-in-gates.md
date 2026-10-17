@@ -12,7 +12,8 @@ The step has these traits:
 
 - It sets `shell: bash`.
 - Its condition is `if: !cancelled() && needs.scope.outputs.mods == 'true'`.
-- It loops over `find mods`, every `*.test.mjs` and `*.test.js` file except under `node_modules`. For each file, it runs `node "$f" || fail=1`.
+- It captures `find mods` first: every `*.test.mjs` and `*.test.js` file except under `node_modules`. It fails if find fails (a missing `mods/` too) or lists no file. A silent empty run cannot pass.
+- It then loops over that list. For each file, it runs `node "$f" || fail=1`.
 - It ends with `exit "$fail"`. Every file runs. Any failure fails the step.
 - It uses the runner's Node. It has no `setup-node` step.
 
