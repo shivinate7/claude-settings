@@ -1836,8 +1836,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             if agent_owned_worktree(root) is True:
                 record(tool, "noted", "shared-tree", matched)
                 continue
-            # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
-            # own change to those files, so no ask.
+            # agent-worktree-discard-is-noted ("Named files in a linked worktree"): named files
+            # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
             ask_step("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
