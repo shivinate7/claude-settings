@@ -1064,7 +1064,7 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
 # - Each ruling is shown with its record id, `<dir>/<stem>`: the record path minus `.md`. A decisions/
 #   and a deferred/ record with one file stem show two different ids, and a FLAG on either id cites
-#   that record's own title (debt judge-title-stem-collision).
+#   that record's own title (decision question-judge-reads-rulings).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
 #   holds the id and the record's H1 title, and names no `.md` file.
 
