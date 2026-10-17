@@ -454,6 +454,31 @@ def report_names_pid_and_asks_owner_to_stop():
 
 
 @posix_case
+def report_pid_is_the_job_not_its_wrapper():
+    """12. the STALL report's pid is the job's own pid, not the shell that wraps it"""
+    problems = []
+    for shell in shells():
+        d = new_dir()
+        pidfile = os.path.join(d, "job.pid")
+        code = "import os, time\nopen(%r, 'w').write(str(os.getpid()))\ntime.sleep(30)" % pidfile
+        orig = " ".join(shlex.quote(a) for a in [PY, "-c", code])
+        rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
+        problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+        m = PID_RE.search(text)
+        job = open(pidfile).read().strip() if os.path.exists(pidfile) else ""
+        if m is None or not job.isdigit():
+            problems.append(f"{shell}: report pid or job pid file missing")
+        else:
+            named = int(m.group(1))
+            problems += [f"{shell}: {p}" for p in expect(
+                named == int(job),
+                f"report names pid {named}, but the job is pid {job}. Stopping pid {named} "
+                f"leaves the job running")]
+        reap()
+    return problems
+
+
+@posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
     rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second")
