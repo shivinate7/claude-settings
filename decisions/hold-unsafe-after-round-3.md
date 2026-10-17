@@ -26,14 +26,15 @@ Owner ruling, 2026-10-15 12:00 CDT. The owner's words:
 - The owner's word can allow work on a held change. A merge still needs positive net value.
 - A main ask that the change turns into a refusal is a hole closed.
 - Owner ruling, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split. A change that is not held keeps the split in `review-cap-red-ci` (red CI is split, not a hole).
+- Owner ruling, 2026-10-17 11:56 CDT: a change that only deletes and adds nothing gets one review round. It skips rounds 2 and 3 and the net-value test, unless round 1 finds a hole Claude could hit in normal work. Then the normal path applies. A change that adds anything takes the normal path.
 
 ## Why
 
 The owner does not want worse changes on main. He does want partial progress merged. A change that takes main from 6 safety holes to 3 merges. A change that changes no guard, gate or check scores zero by construction, so the test would park it for wording nits.
 
-Holes that main already has do not count against a change. Every guard on main has known gaps. Only the holes a change opens count against it, and the holes it closes count for it.
+A delete-only change opens no hole by construction, unless round 1 shows one Claude could hit. Holes that main already has do not count against a change. Every guard on main has known gaps. Only the holes a change opens count against it, and the holes it closes count for it.
 
-Protected outcome: no merge leaves main worse on net. No open gap stays out of sight.
+Protected outcome: no merge leaves main worse on net. No open gap that Claude is likely to hit stays out of sight.
 
 ## Holes, named
 
