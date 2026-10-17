@@ -12,7 +12,7 @@ from guard_core import QUOTE_MARKS, basename, command_indexes, nested_script, se
 WSL_REASON = (
     "WSL runs only a fixed list of Linux test commands. Allowed forms, each with -e or --exec, "
     "alone on the line, and optionally behind `python bin/verdict`: "
-    "`wsl -e node --test <file>.test.mjs ...`, "
+    "`wsl -e node --test <file>.test.mjs ...`, `wsl -e node <file>.test.mjs` (one file, no glob), "
     "`wsl -e pwsh -NoProfile -File <file>.test.ps1`, and `wsl -e python3 <dir>/test_<name>.py`. "
     "Not allowed: a shell program, -u, -d, --cd, --system, --shell-type, a management verb, a "
     "WSLENV prefix, or a pipe, redirect, `;`, `&` or newline after the wsl part."
@@ -63,8 +63,10 @@ def _allowed(args) -> bool:
         return False
     prog, rest = args[1], args[2:]
     if prog == "node":
-        files = rest[1:] if rest[0] == "--test" else rest
-        return bool(files) and all(_test_path(p, NODE_TEST) for p in files)
+        if rest[0] == "--test":
+            return len(rest) > 1 and all(_test_path(p, NODE_TEST) for p in rest[1:])
+        # Plain node runs only its first file, so more would be a false green: one literal path.
+        return len(rest) == 1 and not set("*?") & set(rest[0]) and _test_path(rest[0], NODE_TEST)
     if prog == "pwsh":
         return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _test_path(rest[2], PWSH_TEST)
     if prog == "python3":
