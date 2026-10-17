@@ -54,7 +54,7 @@ files with a `merge` block, 2026-10-17 (not re-measured in this lane).
 - A merge tool that will not load is not recoverable by a bare merge. `merge_gate` returns
   unknown, and the merge-checks deny comes before the ask, so the owner is never asked. The
   recovery the ask exists for then needs the owner to merge outside the hook. Debt
-  `bare-merge-tool-unloadable-denies`.
+  `bare-merge-tool-unloadable`.
 - A bare merge chained after a step that is not harmless (`ls && gh pr merge 12`) is denied as
   ask-alone, not asked. That is stricter than main, which allows the chain. The remedy is to
   split the command and run the merge alone.
