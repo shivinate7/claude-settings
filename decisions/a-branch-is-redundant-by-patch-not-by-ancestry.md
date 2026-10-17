@@ -36,8 +36,13 @@ Taken on 2026-09-20, across the five repositories under `~/Developer`. Of 98
 local branches, the ancestry test reaps 46. The patch test reaps 5 more. One of
 those 5 carries 47 commits, and `git cherry` marks every one of them `-`.
 
-Six branches hold the only copy of their work. The sweep keeps all six and
-names them.
+42 of the 98 are genuinely unmerged. Six of those hold the only copy of their work. The
+sweep keeps all six and names them.
+
+These counts cover content only. The sweep applies its refusals in order first. A branch that
+a worktree checks out lands in the checked-out group and never reaches the ancestor group. Of
+the 46 ancestors, 29 sat in a worktree. 46 minus 29 leaves the 17 that the sweep's own preview
+reports. A review re-measured both numbers on 2026-09-20.
 
 ## The gap this entry does not close
 

@@ -9,8 +9,8 @@ missing, short or mixed set of hook files?
 
 - The installer writes each non-guard file to a temp name in the same folder, then renames it
   over the target. A rename held up by an open reader is retried briefly.
-- Guard files follow no per-file rule. The guard set switches by item 7 of
-  `merge-reinstalls-from-main` (each merge reinstalls from the main checkout).
+- Guard files follow no per-file rule. The guard set switches by the install switch ruling
+  of `merge-reinstalls-from-main` (each merge reinstalls from the main checkout).
 - The guard checks the `INSTALL_ID` of the modules it loaded. On an import failure, a load failure
   or a stamp mismatch, it waits in short steps for about 5 s and loads again. After the wait it
   fails closed with guard-crash, never open. This wait stays in the guard.
