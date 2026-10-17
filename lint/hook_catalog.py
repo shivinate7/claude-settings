@@ -686,10 +686,12 @@ def collect_records():
             raise Unreadable(folder) from err
         for name in names:
             rel = "%s/%s" % (folder, name)
-            if not name.endswith(".md") or name == "README.md" or rel == NOTES_FILE or not has_file(rel):
+            if not name.endswith(".md") or name == "README.md" or not has_file(rel):
                 continue
             text = read(rel)
             problems += history_problems(rel, text)
+            if rel == NOTES_FILE:
+                continue
             if folder == "decisions":
                 section, gist = decision_section(text), decision_gist(text)
             elif folder == "debts":
