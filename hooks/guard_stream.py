@@ -9,8 +9,7 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    command_indexes, inline_script, resolve_command, segment_tokens, split_segments,
-    ssh_remote_script,
+    command_indexes, inline_script, inner_commands, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -19,7 +18,8 @@ from guard_core import (
 # Guard rule live-stream. A follow flag turns `tail` or `Get-Content` into a command that never
 # exits on its own, so it outlives the turn and the agent that started it. Only the COMMAND WORD is
 # read, wrappers skipped: a commit message, an `echo` or `grep -rn tail -F` that merely names `tail`
-# never matches. The command `ssh` runs on the far side is read as a nested command.
+# never matches. The command a wrapper runs (`ssh`, `sh -c`, `docker exec`, `find -exec`, `flock` and the like)
+# is read as a nested command (inner_commands).
 #
 # The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
 # `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
@@ -55,8 +55,8 @@ def live_stream_hit(segment: str) -> str:
         hit = _follow_hit(tokens[start], tokens[start + 1:])
         if hit:
             return hit
-    remote = ssh_remote_script(tokens)
-    return next((h for part in split_segments(remote) if (h := live_stream_hit(part))), "") if remote else ""
+    return next((h for text in inner_commands(tokens) for part in split_segments(text)
+                 if (h := live_stream_hit(part))), "")
 
 
 LIVE_STREAM_REASON = (

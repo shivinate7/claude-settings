@@ -9,8 +9,8 @@ import re
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
-    _strip_heredoc_bodies_unconditionally, basename, command_indexes, nested_script,
-    resolve_command, segment_tokens, split_segments, ssh_remote_script,
+    _strip_heredoc_bodies_unconditionally, basename, command_indexes, inner_commands,
+    resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -211,7 +211,7 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
 # read with backslashes already turned into forward slashes, which is why a drive root reads
 # as `C:/`.
 WIDE_TARGET = (
-    r"(?:/|~|\.|\*|\$HOME|%USERPROFILE%|\$env:USERPROFILE|[A-Za-z]:/?\*?)"
+    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?)"
 )
 # The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
@@ -228,11 +228,10 @@ DESTRUCTIVE_DELETE = (
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
     ),
 )
-# A target `rm -rf` must not take: a root, a home, the working directory or a glob of one, with an
-# optional trailing slash and `*`. `.*` and `..` are not here: they were allowed before.
-RM_WIDE_TARGET = re.compile(
-    r"/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?"
-)
+# The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
+# home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
+# `..` are not here: they were allowed before.
+RM_WIDE_TARGET = re.compile(WIDE_TARGET)
 
 
 def _rm_args_wide(args) -> str:
@@ -270,8 +269,8 @@ def rm_delete_hit(segment: str) -> str:
             target = _rm_args_wide(tokens[start + 1:])
             if target:
                 return "rm -rf " + target
-    for script in (nested_script(tokens), ssh_remote_script(tokens)):
-        for inner in split_segments(script) if script else ():
+    for script in inner_commands(tokens):
+        for inner in split_segments(script):
             found = rm_delete_hit(inner)
             if found:
                 return found
