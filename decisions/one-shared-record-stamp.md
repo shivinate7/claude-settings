@@ -56,6 +56,10 @@ the tool. They do not touch q_max's, sharables', or job-cost-reporting's own tre
 Each repo's own Claude session writes its own config later. Each switches its own
 workflow over, on its own schedule.
 
+Kind: build
+Plan: decisions/one-shared-record-stamp.md#the-choice (all)
+Home: actions/stamp/stamp.mjs
+
 ## Formats built, and left out
 
 `actions/stamp/stamp.mjs` covers three shapes:
@@ -173,8 +177,8 @@ way would only add a second chance to get it wrong.
 q_max's own `stamp.yml` pushed a commit with the workflow's own token. GitHub starts no
 workflow on a push made with that token, so nothing else checked the commit it pushed. The
 shared action once carried mode `stamp`, which gated, committed and pushed after the merge.
-Lane 9 of `plans/shared-merge-tool.md` deleted that mode on 2026-10-01. The action runs mode
-`check` only, with `contents: read`, and no workflow writes to the default branch. The claim
+The owner started the lane that deleted that mode (process-only), and it landed on 2026-10-01.
+The action runs mode `check` only, with `contents: read`, and no workflow writes to the default branch. The claim
 runs before the merge, on the pull request branch, in `merge/merge.py`. The pull request's own
 checks read the claimed tree. The `gate-command`, `token`, `commit-subject` and bot inputs, and
 the retry that re-derived the stamp, went with the mode. A pending record on the default branch
@@ -201,8 +205,8 @@ own real tree on 2026-09-24.
 ## The mechanism
 
 This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` maps
-`git-slug-then-claim-number` to `actions/stamp/stamp.mjs` (plan
-`plans/shared-merge-tool.md`). The engine enforces nothing until a repo's own workflow
+`git-slug-then-claim-number` to `actions/stamp/stamp.mjs`. The merge tool in `merge/merge.py`
+runs it before each merge. The engine enforces nothing until a repo's own workflow
 calls it. Fixtures:
 `actions/stamp/test_stamp.mjs` for the engine, and `actions/stamp/test_action.sh` for
 the composite action's own shell logic. Both are wired into `gates`, `gates-windows`

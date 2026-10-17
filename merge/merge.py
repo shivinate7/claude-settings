@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
+"""The shared merge tool, git half. The flow is `confirm` in merge/merge.py.
 
   merge <pr>              preview: what it would claim and merge, and the silent-undo check on the head. Presses
                           nothing. A draft is previewed too; a dropped line exits 1.
