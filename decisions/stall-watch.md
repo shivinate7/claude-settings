@@ -51,7 +51,7 @@ visible at once.
 
 - Stop the command on a timer. A slow but healthy job would die, and the stop loses the state
   that explains the stall.
-- A polling timer in the session. Rule verification-never-waiter-loop forbids a waiter loop.
+- A polling timer in the session. The `waiter` guard rule refuses a waiter loop.
   The watcher does the waiting, and the session is told once.
 - Run the original in `bash -c` with quoting. The deny rules then see one quoted string, and
   the shell differs from the one the session expects.

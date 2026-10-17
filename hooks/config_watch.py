@@ -76,8 +76,7 @@ reverted, and only when the guard did not ask about it.
 
 THE EXPIRY, ADDED 2026-09-20. An APPROVED lift (the guard asked, the owner said yes) used to stay
 lifted forever: nothing removed the file once the work was done. `decisions/subagent-model-cap.md`
-records that as the grant's own promise, and `lint/rule_mechanisms.json` recorded rule
-`roles-remove-override-file` as `unmechanized` for exactly that reason.
+records that as the grant's own promise.
 
 The fix reads a second field the override file carries OUTSIDE its `env` block:
 `_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside

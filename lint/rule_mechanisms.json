@@ -1,21 +1,21 @@
 {
-  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; a gate row cites `test` (path::name, resolved by AST) and/or `setting` (a JSON value in settings.json), never a `needle`. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
+  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, gate, ci, unmechanized, judgment. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; a gate row cites `test` (path::name, resolved by AST) and/or `setting` (a JSON value in settings.json), never a `needle`. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see. judgment.reason must say why only judgment can apply the rule.",
   "rules": {
     "outcomes-judge-by-outcome": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Judging the outcome for the person served is a human read of context and consequence. No test scores outcome quality."
       }
     },
     "outcomes-decision-is-argument": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "A stance for how to read a recorded decision, not an independently checkable action a hook can observe."
       }
     },
     "outcomes-stale-decision-protocol": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Naming a stale decision, measuring its claim, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality."
       }
     },
@@ -27,7 +27,7 @@
     },
     "outcomes-word-covers-named-act": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a stated act matches the literal word given, versus a variant of it, is a judgment call on wording. No hook parses an instruction and an action for a match."
       }
     },
@@ -85,12 +85,6 @@
         }
       }
     },
-    "roles-sonnet-is-the-floor": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "subagent-model-floor"
-      }
-    },
     "roles-sonnet-is-the-ceiling": {
       "mechanism": {
         "kind": "unmechanized",
@@ -99,23 +93,11 @@
     },
     "roles-opus-shaped-say-so": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Judging whether a task is Opus-shaped, and whether the assistant said so in one line first, is a human read of the transcript."
       }
     },
     "roles-opus-override-guarded": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "subagent-model-cap"
-      }
-    },
-    "roles-override-carries-expiry": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "subagent-model-cap"
-      }
-    },
-    "roles-remove-override-file": {
       "mechanism": {
         "kind": "guard",
         "ref": "subagent-model-cap"
@@ -170,7 +152,7 @@
     },
     "parallelism-argue-max-parallelism": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Naming the open lanes correctly is a factual claim written in prose, not a structure a check can verify."
       }
     },
@@ -206,19 +188,8 @@
     },
     "shared-trees-reverify-after-incident": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Detecting an incident and confirming a re-verify followed it both need a human read of the transcript."
-      }
-    },
-    "shared-trees-install-refusal-hook": {
-      "mechanism": {
-        "kind": "gate",
-        "ref": "settings.json",
-        "setting": {
-          "file": "settings.json",
-          "path": "hooks.PreToolUse[*].hooks[*].command",
-          "contains": "hooks/guard.py"
-        }
       }
     },
     "git-main-only-by-pr": {
@@ -275,7 +246,7 @@
     },
     "git-one-entry-per-question": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a new entry restates an open question or opens a new one is a judgment about meaning. A hook sees a new file, not its question."
       }
     },
@@ -300,7 +271,7 @@
     },
     "verification-browser-login-only-needed": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a headless or isolated browser would have done, and whether a login was needed for a given check, are judgment calls, not a loggable fact this repo captures."
       }
     },
@@ -321,12 +292,6 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation harness's WRONG CAUSE verdict covers only mutant cause of death, not this."
-      }
-    },
-    "verification-never-waiter-loop": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "waiter"
       }
     },
     "verification-never-dry-run-blocklist": {
@@ -386,19 +351,19 @@
     },
     "tokens-compacting-keep-essentials": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Compaction content is a judgment call about what to keep. Nothing scores a compacted context against this rule."
       }
     },
     "building-never-guess-answer": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Telling a guessed answer from a computed one needs a read of the reasoning, which no check performs."
       }
     },
     "building-surface-ambiguity": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether an ambiguity was surfaced or silently resolved is a judgment call on the reply's content."
       }
     },
@@ -416,7 +381,7 @@
     },
     "building-fix-cause-not-symptom": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Distinguishing a cause fix from a symptom fix is a code-review judgment, not a parseable property."
       }
     },
@@ -442,7 +407,7 @@
     },
     "speak-never-explain-in-paragraph": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Judging whether a rule explanation ran to a paragraph is a style read, not a parsed structure."
       }
     },
@@ -467,7 +432,7 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
       }
     },
@@ -549,13 +514,6 @@
         "test": "lint/test_check_landed_dirs.py::CheckLandedDirsTests.test_manifest_dir_missing_from_the_guard_literal_fails"
       }
     },
-    "building-memory-never-only-home": {
-      "mechanism": {
-        "kind": "gate",
-        "ref": "hooks/ruling_home.py",
-        "test": "hooks/test_ruling_home.py::case_a_no_home_line"
-      }
-    },
     "building-memory-is-short-term": {
       "mechanism": {
         "kind": "unmechanized",
@@ -576,7 +534,7 @@
     },
     "style-simple-answer-short": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a question was simple, and whether the answer held to 1 to 3 sentences, is a content judgment."
       }
     },
@@ -594,7 +552,7 @@
     },
     "style-correct-over-brief": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a reply dropped a true and needed fact to stay short is a judgment no check can make."
       }
     },
@@ -619,7 +577,7 @@
     },
     "output-never-hand-off-doable-step": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. No check reads a reply and the tool list to decide that."
       }
     },
@@ -643,13 +601,13 @@
     },
     "style-no-unmeasured-estimate": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "No check can tell an estimate from a measured range, or know whether a sample count backs a duration. It is a content judgment on the reply."
       }
     },
     "style-status-is-report": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
@@ -661,7 +619,7 @@
     },
     "building-guard-needs-incident": {
       "mechanism": {
-        "kind": "unmechanized",
+        "kind": "judgment",
         "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
       }
     },

@@ -87,9 +87,7 @@ hunk there. Two conflicts are certain and small:
 ## Not covered
 
 `lint/rule_mechanisms.json` and its pin (70 `unmechanized`) do not change, because no row names a cut
-rule. The rows for `roles-override-carries-expiry` and `roles-remove-override-file` still cite guard
-rule `subagent-model-cap`, though the expiry is the work of `config_watch`. That was true before this
-change.
+rule. The expiry rows have since left the map (decision claude-md-shrink); `config_watch` enforces the expiry.
 
 Not touched, by instruction: `destructive-delete`, `subagent-model-floor` and `machine-wide-kill`.
 Bypass mode shows no prompt, so they stay.
@@ -104,3 +102,6 @@ Also fixed after review: an unquoted heredoc body with no `$(...)` made `env_her
 IndexError. The guard failed open, so every rule after the env check was skipped. The body is now
 judged and passes. The top-level crash handler of `guard.py` now logs one `crash` line, so the next
 hidden crash shows in `guard.log`.
+
+Kind: process
+Home: hooks/guard.py
