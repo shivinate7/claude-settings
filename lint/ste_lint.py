@@ -61,31 +61,30 @@ def _rule(code, name, severity, tags, summary, detail):
 
 _rule(
     "STE001", "sentence-length", "error", "[5.1] [6.3]",
-    "The sentence is longer than the budget.",
-    "A procedural sentence holds 20 words at most. A descriptive sentence holds\n"
-    "25 words at most. Counting follows [8.4]-[8.7]: a number with its unit, an\n"
-    "abbreviation, an identifier, quoted text, parenthesized text, and a\n"
-    "hyphenated word each count as one word.",
+    "The sentence is longer than 30 words.",
+    "A sentence holds 30 words at most. Counting follows [8.4]-[8.7]: a number\n"
+    "with its unit, an abbreviation, an identifier, quoted text, parenthesized\n"
+    "text, and a hyphenated word each count as one word.",
 )
 _rule(
-    "STE003", "nominalization", "error", "[3.7]",
+    "STE003", "nominalization", "warning", "[3.7]",
     "An action is written as a noun.",
     "Keep the action in the verb. 'Perform a validation of the payload' becomes\n"
     "'Validate the payload'.",
 )
 _rule(
-    "STE007", "latin-abbreviation", "error", "[GR-6]",
+    "STE007", "latin-abbreviation", "warning", "[GR-6]",
     "The text uses a Latin abbreviation.",
     "Latin abbreviations are read differently by different readers, and machine\n"
     "translation handles them badly. Write the words.",
 )
 _rule(
-    "STE008", "contraction", "error", "[4.2]",
+    "STE008", "contraction", "warning", "[4.2]",
     "The text uses a contraction.",
     "Contractions hide a word. Write the full form.",
 )
 _rule(
-    "STE009", "phrasal-verb", "error", "[9.3]",
+    "STE009", "phrasal-verb", "warning", "[9.3]",
     "The text uses a phrasal verb.",
     "The particle changes the meaning of the verb in a way that is not\n"
     "predictable. Non-native readers and machine translation both fail on it.",
@@ -101,13 +100,13 @@ _rule(
     "State the positive. The reader then needs one step instead of two.",
 )
 _rule(
-    "STE015", "condition-order", "error", "[5.4]",
+    "STE015", "condition-order", "warning", "[5.4]",
     "The condition comes after the instruction.",
     "The reader acts before the reader reaches the condition. Put the condition\n"
     "first and separate it with a comma.",
 )
 _rule(
-    "STE017", "omitted-that", "error", "[GR-1]",
+    "STE017", "omitted-that", "warning", "[GR-1]",
     "The conjunction 'that' is missing.",
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
@@ -181,7 +180,6 @@ BLOAT = [
     (r"\bin the vicinity of\b", "near"),
     (r"\bwith regard to\b", "about"),
     (r"\bwith respect to\b", "about"),
-    (r"\bin terms of\b", "for"),
     (r"\ba large number of\b", "many"),
     (r"\ba small number of\b", "a few"),
     (r"\bthe majority of\b", "most"),
@@ -247,11 +245,9 @@ BLOAT = [
     (r"\bin a thoughtful manner\b", "thoughtfully"),
     (r"\bin addition\b(?! to\b)", "also"),
     (r"\bin an effort to\b", "to"),
-    (r"\bin between\b", "between"),
     (r"\bin lieu of\b", "instead of"),
     (r"\bin spite of\b", "despite"),
     (r"\bin the (?:very )?near future\b", "soon"),
-    (r"\bit would appear that\b", "apparently"),
     (r"\blift up\b", "lift"),
     (r"\bmade reference to\b", "referred to"),
     (r"\bmake reference to\b", "refer to"),
@@ -399,8 +395,7 @@ LABEL_TAGS_DEFAULT = ("button", "label")
 
 DEFAULT_CONFIG = {
     "mode": "auto",
-    "max_words_procedural": 20,
-    "max_words_descriptive": 25,
+    "max_words": 30,
     "disable": [],
     "enable": [],
     "fail_on": "error",
@@ -1701,13 +1696,12 @@ class Linter:
     def check_sentence(self, seg: Block, offset: int, sentence: str,
                        mode: str) -> List[Finding]:
         out: List[Finding] = []
-        limit = (self.config["max_words_procedural"] if mode == "procedural"
-                 else self.config["max_words_descriptive"])
+        limit = self.config["max_words"]
         words = count_words(sentence)
         if words > limit:
             self._add(out, seg, offset, "STE001",
-                      "The sentence holds %d words. The %s limit is %d."
-                      % (words, mode, limit),
+                      "The sentence holds %d words. The limit is %d."
+                      % (words, limit),
                       "Split the sentence, or cut the words that carry no meaning.",
                       strip_placeholders(sentence)[:120])
 
@@ -1840,72 +1834,29 @@ class Linter:
 # Automatic fixes
 # --------------------------------------------------------------------------
 
-# A pattern is fixable only when the swap reads as correct English, with the same punctuation,
-# in every sentence. These keep their lint finding, and the writer fixes them by hand. "vs",
-# "cf", "via" and "per se" change meaning or grammar, a deletion leaves a lowercase start, a
-# stray comma or a space, and "we'd", "they'd", "he'd", "she'd" and "it'd" may mean "had".
-_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bper\s+se\b", r"\bN\.\s?B\.", r"\bwe'd\b", r"\bthey'd\b",
-           r"\bthe majority of\b"}
-
-# An 's is "is" or "has", and an 'd is "would" or "had". These forms are fixed only when the
-# next word makes the meaning clear. Data, not code: pattern -> words that may follow.
-# Only the FIRST word after the form is read. An adverb (not, never, always, also, just, still,
-# now, only) can sit before "been" or "had", so no adverb is in these tables.
-_S_FOLLOW = (r"a|an|the|very|too|so|here|there|more|"
-             r"less|better|best|worse|no|any|all|each|every|another|my|your|our|their|his|her|its|"
-             r"safe|full|fine|true|ready|clear|open|closed|important|possible|easy|hard|good|bad|"
-             r"correct|wrong|okay|ok|likely|enough|about|in|on|at|for|to|from|\w+ing")
-_THERE_FOLLOW = r"a|an|no|one|nothing|something|another|enough"
-_D_FOLLOW = r"like|love|prefer|rather|need|want|be"
-_CONTEXT_FIX = {
-    r"\bit's\b": _S_FOLLOW, r"\bthat's\b": _S_FOLLOW, r"\bwhat's\b": _S_FOLLOW,
-    r"\bthere's\b": _THERE_FOLLOW, r"\byou'd\b": _D_FOLLOW,
-}
-# Any other 's or 'd form here stays unfixed.
-_NO_FIX |= {r"\bhe's\b", r"\bshe's\b", r"\bhe'd\b", r"\bshe'd\b", r"\bit'd\b"}
+# Only STE011 bloat phrases are fixed. A row is fixable only when the swap reads as correct
+# English, with the same punctuation, in every sentence. These keep their lint finding, and
+# the writer fixes them by hand. A deletion leaves a lowercase start, a stray comma or a
+# space, and the other rows change meaning or tone in some sentences. Latin abbreviations,
+# contractions and nominalizations are advisory and never rewritten.
+_NO_FIX = {r"\bthe majority of\b", r"\bin a timely manner\b", r"\balong the lines of\b",
+           r"\bclose down\b", r"\bof major importance\b", r"\bexcept when\b"}
 
 # Fixer-only rewrites of a table row. The lint rule keeps the original pattern. A row whose
 # swap would double or drop punctuation has a guard, so it fixes only where the result is right.
-_EG_CLOSE = r"(?=\s*\))"
 _FIX_PATTERN = {
-    # Keep the period when "etc." ends the sentence.
-    r"\betc\.": [(r"\betc\.(?=\s*$|\s+(?-i:[A-Z]))", "and so on."), (r"\betc\.", "and so on")],
-    # "e.g." before a bracket or at the end of the line takes no comma.
-    r"\be\.\s?g\.(?:,)?": [
-        (r"\be\.\s?g\.,?" + _EG_CLOSE, "for example"),
-        (r"\be\.\s?g\.\s*$", "for example."),
-        (r"\be\.\s?g\.,?(?=\s+[\w\"'(\[`])", "for example,")],
-    r"\bi\.\s?e\.(?:,)?": [
-        (r"\bi\.\s?e\.,?" + _EG_CLOSE, "that is"),
-        (r"\bi\.\s?e\.\s*$", "that is."),
-        (r"\bi\.\s?e\.,?(?=\s+[\w\"'(\[`])", "that is,")],
-    # Keep the period when "et al." ends the sentence.
-    r"\bet\s+al\.": [(r"\bet\s+al\.(?=\s*$|\s+(?-i:[A-Z]))", "and others."),
-                     (r"\bet\s+al\.", "and others")],
     # A comma before it leaves "Stop, to test".
     r"\bin order to\b": [(r"(?<!,)(?<!, )\bin order to\b", "to")],
-    r"\bmake a decision about\b": [(r"\bmake a decision about\b", "decide about")],
-    # The verb must agree with the subject.
-    r"\bmake(?:s)? use of\b": [(r"\bmakes use of\b", "uses"), (r"\bmake use of\b", "use")],
-    r"\bgive(?:s)? consideration to\b": [(r"\bgives consideration to\b", "considers"),
-                                         (r"\bgive consideration to\b", "consider")],
-    r"\bprovide(?:s)? support for\b": [(r"\bprovides support for\b", "supports"),
-                                       (r"\bprovide support for\b", "support")],
 }
 
 
 def _fixable():
     rows = []
-    for code, table in (("STE007", [(p, r) for p, r, _ in LATIN]),
-                        ("STE008", CONTRACTIONS), ("STE011", BLOAT),
-                        ("STE003", [(p, r) for p, r, _ in NOMINALIZATION_PHRASES])):
-        for pattern, replacement in table:
-            if not replacement or (pattern in _NO_FIX and pattern not in _CONTEXT_FIX):
-                continue
-            if pattern in _CONTEXT_FIX:
-                pattern = pattern + r"(?=\s+(?:%s)\b)" % _CONTEXT_FIX[pattern]
-            for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
-                rows.append((p2, r2, code))
+    for pattern, replacement in BLOAT:
+        if not replacement or pattern in _NO_FIX:
+            continue
+        for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
+            rows.append((p2, r2, "STE011"))
     return rows
 
 
@@ -1984,8 +1935,11 @@ def _fix_line(body: str, labels=frozenset()):
     codes: List[str] = []
     for pattern, replacement, code in FIXABLE:
         def repl(match, replacement=replacement, code=code):
+            word = match.group(0)
+            if len(word) > 1 and word.isupper():
+                return word  # ALL CAPS stays as it is: a swap never changes the case of the text
             codes.append(code)
-            if match.group(0)[:1].isupper():
+            if word[:1].isupper():
                 return replacement[:1].upper() + replacement[1:]
             return replacement
         masked = re.sub(pattern, repl, masked, flags=re.I)
@@ -2163,7 +2117,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Rule codes: run --list-rules. Rule detail: run --explain STE003.")
     parser.add_argument("paths", nargs="*", help="files or directories to check")
     parser.add_argument("--mode", choices=("auto", "procedural", "descriptive"),
-                        default=None, help="sentence budget to apply (default: auto)")
+                        default=None, help="how headings and lists read: procedural also checks condition order (default: auto)")
     parser.add_argument("--format", choices=("text", "json", "github"),
                         default="text", help="output format")
     parser.add_argument("--fail-on", choices=("error", "warning", "info", "never"),
