@@ -34,7 +34,7 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
 
 ## Holes, named
 
-Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-stamp-line-unpinned` (no test pins the stampers' placeholder text), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand).
+Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand).
 
 Guard-set and pin-move holes are named in merge-reinstalls-from-main.
 
