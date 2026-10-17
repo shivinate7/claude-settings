@@ -1,7 +1,7 @@
 # A base change just before the merge command is not caught
 
 **What waits.** The merge tool reads the pull request base under the lock, and again on each
-pass of the wait (plan ruling 12, plans/shared-merge-tool.md). If the base changes after the
+pass of the wait (decision merge-follows-the-prs-base, the merge follows the PR's own base). If the base changes after the
 last pass and before `gh pr merge`, the merge lands on the new base. The claim and the checks
 were made for the old base.
 

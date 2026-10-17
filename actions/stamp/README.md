@@ -322,50 +322,34 @@ Do each step in your own repo, from your own tree.
 
 The command `merge` (`merge/merge.py`, see the claude-settings README) claims before the
 merge, on the pull request branch. Main never holds a pending record. A repo that moves to it
-meets each item below.
+meets each item below. What the tool does when it runs is written in `confirm` in
+`merge/merge.py`, and in the decisions that the README names.
 
 1. One config file holds everything: `.github/stamp.json`. The command reads it from the pull
    request's base branch, never from the local checkout. A different path goes in `--config`.
-2. A file that leaves out a field gets that field's default. An unknown field name in the
-   `merge` block stops the command with one line. A broken file stops it with one line that
-   names the file.
-3. A `merge` block can set `method` (`merge`, `squash` or `rebase`) and `deadlineMinutes`.
-   The command says which defaults it filled. Read `method` from the repo's own merge
-   history before you set it.
-4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
+   The `merge` block is optional. Defaults and refusals: decision merge-config-defaults (merge
+   needs no config file).
+2. `merge.method` is `merge`, `squash` or `rebase`. Read it from the repo's own merge history
+   before you set it. `merge.deadlineMinutes` is the longest that one wait for checks may last.
+3. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
    `"protection"` reads the branch protection of the pull request's base. If the list is
    empty or cannot be read, the command stops before the claim push. A repo with no branch
    protection on a base, such as an integration branch, must write the list.
+4. `merge.ignoreChecks` is an optional list of `{"name": "...", "reason": "..."}`. The wait
+   leaves out a check named there, and the output names it. A name that is also a required
+   check refuses the config.
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
-   after the local base branch moves. `merge.deleteBranch` is a boolean.
-6. Every pull request runs mode `check`, with `fetch-depth: 0`. A number that a
-   `Record-claim` commit added is accepted. Any other number a branch adds is refused.
-7. Every push to the default branch runs mode `check` too. It refuses any pending record
-   there, and needs only `contents: read`.
-8. A check name can repeat, such as one job in two workflows. The wait keeps every entry
-   of a name. All of them must pass, and one red entry stops the wait.
-
-The tool keeps these behaviours. The adopting repo needs no setting for them.
-
-- It claims only for a pull request into the default branch. For any other base, records
-  stay `id: pending` until that base merges into the default branch.
-- It takes a lock, the ref `refs/merge-lock/<base>` on origin, for the pull request's base. The lock expires
-  after `deadlineMinutes` plus ten minutes.
-- It claims in a temporary worktree at the pull request head. It pushes the claim as a
-  plain push, never a force push.
-- The wait stops on any failed or cancelled check, required or not. This holds
-  for each entry of a duplicate check name. A DIRTY branch or a moved head stops it too.
-- A head that still reads as the pre-claim SHA is waited on until the deadline.
-- On a stop, it reverts the claim, only while the origin head is the claim commit.
-- It merges with `--match-head-commit`. It never passes `--admin`.
+   after the local base branch moves. `merge.deleteBranch` is a boolean. When it is true, the
+   command deletes the head branch on origin and locally after the merge.
 
 ## Adoption checklist, the merge tool
 
 Do each step in your own repo, from your own tree.
 
 The config file is optional for merge. With no `.github/stamp.json`, merge uses the defaults
-(decision merge-config-defaults, merge needs no config file) and claims no numbers. If the repo has numbered records, or
-needs a non-default method, deadline, required checks or `afterMerge`, do the steps below.
+(decision merge-config-defaults, merge needs no config file) and claims no numbers. If the
+repo has numbered records, or needs a non-default method, deadline, required checks or
+`afterMerge`, do the steps below.
 
 1. Do steps 1 to 5 of the engine checklist above, so the config reads your tree correctly.
 2. Add the `merge` block. Read `method` from the repo's merge history. Set

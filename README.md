@@ -5,23 +5,34 @@ One source of truth for my user-level Claude Code config. Local sessions and clo
 
 ## What is here
 
-| Path            | Holds                                                    | Becomes                       |
-| --------------- | --------------------------------------------------------- | ------------------------------ |
-| `CLAUDE.md`     | Global working rules                                       | `~/.claude/CLAUDE.md`, through a one-line `@` import |
-| `settings.json` | Output style, env vars, hooks                               | `~/.claude/settings.json` |
-| `agents/`       | The `builder`, `reviewer`, `test-author` roles              | `~/.claude/agents/*.md` |
-| `hooks/`        | `guard.py` (refuses destructive git in a shared tree), config and decision watches, `session_start.sh` | `~/.claude/hooks/*` |
-| `lint/`         | The Simplified Technical English prose linter and its hook gate | `~/.claude/lint/*` |
-| `janitor/`      | A machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md` | not installed to `~/.claude`, runs from the clone |
-| `decisions/`    | One file per ruling, cited by slug                          | stays in the repo |
-| `debts/`        | One file per known gap, pointing to its decision where one exists. See `debts/README.md` | stays in the repo |
-| `deferred/`, `plans/` | Open questions and plans, not yet a ruling             | stay in the repo |
-| `actions/`      | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`) | callers pin them by commit SHA |
-| `merge/`, `bin/` | The `merge` command, and its launchers `bin/merge` and `bin/merge.cmd` | `bin/` lands in `~/.claude/bin`. `merge/` runs from the clone |
-| `.github/`      | `gates.yml`, the CI that checks this repo                   | runs here only, never installed |
+Each folder that `landed-dirs.txt` names lands in `~/.claude`. Both installers read that
+file, so a folder added there lands on every platform with no other change. Every other path
+stays in the clone. The mods install from the marketplace instead (decision
+`mods-install-via-marketplace`, mods install with no installer step).
 
-`agents/`, `hooks/`, and `lint/` are the folders `landed-dirs.txt` names. Both installers read
-that file, so a new folder added there lands on every platform with no other change.
+| Path | Holds |
+| --- | --- |
+| `CLAUDE.md` | Global working rules. A one-line `@` import in `~/.claude/CLAUDE.md` loads it. |
+| `settings.json` | Output style, env vars, hooks. It becomes `~/.claude/settings.json`. |
+| `landed-dirs.txt` | The folders that both installers land. |
+| `agents/` | The subagent roles, one file each. |
+| `hooks/` | The guard, the watches, and the other hook scripts. |
+| `lint/` | The Simplified Technical English linter, and the gates and checks that CI runs. |
+| `skills/` | The shipped skills, one folder each. |
+| `output-styles/` | The `shiv-stylisms` output style. |
+| `ux/` | The house UX rules. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`. |
+| `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
+| `merge/` | The code of the `merge` command, started by `bin/merge`. |
+| `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
+| `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
+| `githooks/` | Git hooks for a repo, such as `main-ref`. |
+| `testing/` | A shared test helper, `skip-locally-fail-in-ci.mjs`. |
+| `decisions/`, `debts/`, `deferred/`, `plans/` | The records: one file per ruling, known gap, open question, and plan. See `debts/README.md`. |
+| `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
+| `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
+| `.claude/` | Instructions that load only in sessions on this repo. |
+| `install.sh`, `install.ps1` | The installers. The `install*.test.ps1` files test them. |
 
 ## Quick start
 
@@ -97,57 +108,40 @@ Once merged:
 
 One command merges a pull request in any repo that has opted in. It claims record numbers
 before the merge, waits for CI on the claim commit, reverts the claim if a step fails, and
-then merges. Plan: `plans/shared-merge-tool.md`. The repo's own opt-in is the `merge` block of
-its stamp config, see "The merge tool contract" in `actions/stamp/README.md`.
+then merges. The repo's own opt-in is the `merge` block of its stamp config, see "The merge
+tool contract" in `actions/stamp/README.md`.
 
 Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, move the local main, clean up.
-merge --unlock          remove this repo's merge lock. Reads no other state.
+                        NAME shows in the lock to a waiting run.
+merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Reads no lock state.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
+`merge --help` lists every flag.
+
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
-  on PATH. Both find this clone through
-  `CLAUDE_SETTINGS_DIR`, then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default
-  `~/.claude`). With neither, they clone
-  the public repo into a temporary folder. The checkout must have `origin` set to
-  `shivinate7/claude-settings`. Any other result stops before a pull request read.
+  on PATH. The launcher holds no merge logic. It finds this clone through `CLAUDE_SETTINGS_DIR`,
+  then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default `~/.claude`). With
+  neither, it clones the public repo into a temporary folder. The checkout must have `origin`
+  set to `shivinate7/claude-settings`. Any other result stops before a pull request read. A
+  repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
   SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
   checkout's own tree. Use it only to work on the tool.
-* **Preview.** `merge <pr>` runs the claim in a temporary worktree and drops it. It prints
-  the lock state, the state of the head's checks (green, or every pending or red check by name), the claim line, and the steps a run would take. Nothing reaches origin.
-* **`--confirm`.** It takes the lock, then reads the required checks. If the list is empty or
-  unreadable, it stops before the claim push. Then it checks first: it waits for the head's
-  own checks, and a red one stops the run with nothing claimed or pushed. Only on green does it
-  claim and push the claim, and wait for the checks on the claim SHA. It checks that each claimed number is still free on the base tip,
-  and merges with `--match-head-commit`. Then it moves the local main, runs `afterMerge`, and
-  deletes the head branch if `merge.deleteBranch` is set. A rerun on a branch that already
-  holds its own claim resumes at the wait.
-* **The wait.** It ends green only when every check run and status on the head SHA has finished
-  and none failed, required or not. Skipped and neutral pass. A pending check is waited on. A
-  failed, cancelled, timed out, action required or startup failure check stops the run, and so does
-  any status the tool does not know. The required list must still be non-empty, and each name must
-  be present, so a check that never started cannot pass by its absence. Both waits (the head
-  before the claim, and the claim SHA) work this way. `merge.ignoreChecks` is an optional list of
-  `{"name": "...", "reason": "..."}` in the `merge` block. A check named there is left out of the
-  wait, and the output names it. An entry whose name or reason is not a non-empty string refuses the config, and so does a name that is also a required check.
-  Before the wait ends green it also reads the workflow runs of the head SHA: each must be completed with success, skipped or neutral,
-  so a run whose jobs are not listed yet holds the wait. Then it waits 30 seconds and reads again, and the result must be green again.
-  One window stays: a workflow that GitHub has not created yet.
-* **A stop in the wait.** The wait stops on any failed or cancelled check, required or not,
-  and on a DIRTY branch or a moved head. It reverts the claim, but only while the origin head
-  is still the claim commit. A head that still reads as the pre-claim SHA is GitHub lagging
-  the push, so the wait goes on until the deadline.
-* **`--unlock`.** The lock is the ref `refs/merge-lock/<defaultBranch>` on origin. It expires
-  after twice `merge.deadlineMinutes` plus ten minutes (a run can wait twice), and a later run breaks an expired lock.
-  `--unlock` removes it at once, for a run that died. It reads no lock state. It still reads the git root and the config.
-  The lock records the PR, branch, host, pid and start time. Sessions should pass `--session NAME` with their session name. A held message names the holder and says if it is alive, dead, or unknown (another host, or an old lock). A release that fails prints one line and never hides the run's own result.
+* **After a stop.** The message on stderr names the cause. A held lock names its holder and
+  says if the holder is alive, dead, or unknown. `--unlock` is for a dead holder only.
+  A rerun on a branch that already holds its own claim resumes at the wait.
+* **Where the rest is written.** The flow is `confirm` in `merge/merge.py`. The rulings are
+  in decisions merge-config-defaults (merge needs no config file), merge-follows-the-prs-base
+  (the PR's own base drives every step), merge-waits-on-every-check (check first, then claim;
+  never merge on a running or failing check), merge-lock-names-its-holder (the lock is a ref
+  on origin), merge-needs-a-proven-head, ci-wait-reads-run-status and merge-net-retry.
 
 Exit codes:
 
