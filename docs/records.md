@@ -104,6 +104,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `debts-have-their-own-store` | Every known gap is a debt. | [`decisions/debts-have-their-own-store.md`](../decisions/debts-have-their-own-store.md) |
 | `decision-watch-mod-limits` | Yes. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: read in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
+| `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`decisions/dependabot-security-only.md`](../decisions/dependabot-security-only.md) |
 | `design-skills` | Owner ruling, 2026-10-10. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
 | `draft-until-reviewed` | Owner rulings, 2026-10-10 and 2026-10-13. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
 | `drops-lines-trailer-exempt` | Owner, 2026-10-12: the `Drops-lines: <record path> -- <reason>` trailer is the one place a record path is allowed in a commit message. | [`decisions/drops-lines-trailer-exempt.md`](../decisions/drops-lines-trailer-exempt.md) |
@@ -156,14 +157,20 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `an-agent-outside-its-home-tree-must-stop` | An agent outside its home tree must stop | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT: "Status read only." Neither program runs `gh run watch`. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16 03:27 CDT: "Report only." (Feedback item fb-claude-md-flag: "how can i confirm an agent does not just edit claude.md without asking me first".) | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
+| `deleted-record-keeps-its-number` | Settled by the owner. | [`decisions/deleted-record-keeps-its-number.md`](../decisions/deleted-record-keeps-its-number.md) |
 | `git-env-set-denied` | No. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `handoff-hooks-wave-2` | Owner ruling, 2026-10-13 11:20 CDT: build all three in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
 | `install-hooks-whole` | The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
 | `liveness-read-is-platform-specific-and-unreadable-is-not-death` | `hooks/guard.py`'s liveness oracle (`_process_start_ms`, `session_is_live`, `worktree_live_session`) folded two different facts into one answer. | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
+| `merge-follows-the-prs-base` | Settled by the owner, written down 2026-10-07. | [`decisions/merge-follows-the-prs-base.md`](../decisions/merge-follows-the-prs-base.md) |
+| `merge-lock-names-its-holder` | Settled by the owner. | [`decisions/merge-lock-names-its-holder.md`](../decisions/merge-lock-names-its-holder.md) |
 | `merge-net-retry` | Owner, 2026-10-13, about 16:25 CDT: "Retry 3 times." | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
 | `merge-notice-checks-the-report` | CLAUDE.md: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." And: trust a guard only once it goes red on the defect it guards. | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
 | `merge-reinstalls-from-main` | Owner, 2026-10-11, owner, 2026-10-15 (the pinned checkout), and owner, 2026-10-15 17:40 CDT (the install switch): | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
+| `merge-runs-from-the-clone` | Settled by the owner. | [`decisions/merge-runs-from-the-clone.md`](../decisions/merge-runs-from-the-clone.md) |
+| `merge-waits-on-every-check` | Settled by the owner, written down 2026-10-01. | [`decisions/merge-waits-on-every-check.md`](../decisions/merge-waits-on-every-check.md) |
+| `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `owner-feedback-inbox` | Owner ruling, 2026-10-13, from an interview in the claude-settings audit session. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
 | `plain-diff-mod-limits` | The mod sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `prune-cases-skip-without-symlink-privilege` | Prune cases skip when this account cannot make a real symlink | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
@@ -205,7 +212,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
-| `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `playwright-browsers-path` | No. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Owner, 2026-10-11 (rule `playwright-install` in `hooks/guard.py`): | [`decisions/playwright-install-once.md`](../decisions/playwright-install-once.md) |
 | `precompact-handoff` | Auto-compact drops detail. | [`decisions/precompact-handoff.md`](../decisions/precompact-handoff.md) |
@@ -264,6 +270,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cites-lack-gloss-unchecked` | Some cites of record ids, in decisions and debts, carry no gloss. | [`debts/cites-lack-gloss-unchecked.md`](../debts/cites-lack-gloss-unchecked.md) |
 | `cmd-c-quote-count-bash-reader` | cmd reads `\` as a plain character, and each `"` toggles its quote state. | [`debts/cmd-c-quote-count-bash-reader.md`](../debts/cmd-c-quote-count-bash-reader.md) |
 | `cmd-c-script-skips-kill` | `cmd /c taskkill /F /IM node.exe` is allowed. | [`debts/cmd-c-script-skips-kill.md`](../debts/cmd-c-script-skips-kill.md) |
+| `dead-run-extended-lock-blocks` | A run that dies after a lock extension leaves a lock that expires up to 1200 s (a 900 s wait plus the 300 s margin) after the extension. | [`debts/dead-run-extended-lock-blocks.md`](../debts/dead-run-extended-lock-blocks.md) |
 | `debt-decision-link-unchecked` | No check confirms that a debt's decision still names its gap. | [`debts/debt-decision-link-unchecked.md`](../debts/debt-decision-link-unchecked.md) |
 | `debts-no-check-reads-parts` | No check reads the four parts of a debt file. | [`debts/debts-no-check-reads-parts.md`](../debts/debts-no-check-reads-parts.md) |
 | `discards-output-slow-path` | Unmeasured. | [`debts/discards-output-slow-path.md`](../debts/discards-output-slow-path.md) |
@@ -290,6 +297,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `env-node-env-file-prints` | `node --env-file=.env -e 'console.log(process.env)'` prints the file through the runner. | [`debts/env-node-env-file-prints.md`](../debts/env-node-env-file-prints.md) |
 | `env-split-string-wsl-only` | `env -S 'cmd'` runs `cmd`. | [`debts/env-split-string-wsl-only.md`](../debts/env-split-string-wsl-only.md) |
 | `estimate-rule-may-be-checkable` | The deferred measured time table may let a check compare a stated time with a measured range. | [`debts/estimate-rule-may-be-checkable.md`](../debts/estimate-rule-may-be-checkable.md) |
+| `expired-delete-net-error-stops` | The delete of an expired lock in `GhLock.acquire` runs once. | [`debts/expired-delete-net-error-stops.md`](../debts/expired-delete-net-error-stops.md) |
+| `expired-lock-delete-race` | The API cannot delete a ref only if it still holds a given value. | [`debts/expired-lock-delete-race.md`](../debts/expired-lock-delete-race.md) |
 | `fb-done-forms-unpinned` | The tests check only a plain last line `fb done`. | [`debts/fb-done-forms-unpinned.md`](../debts/fb-done-forms-unpinned.md) |
 | `fb-done-unclosed-fence` | The close rule reads only the last line of a message. | [`debts/fb-done-unclosed-fence.md`](../debts/fb-done-unclosed-fence.md) |
 | `fb-inbox-append-race` | On Windows, two processes that append with `open(..., "ab")` at the same time lost 406 of 8000 lines in a stress test. | [`debts/fb-inbox-append-race.md`](../debts/fb-inbox-append-race.md) |
@@ -300,6 +309,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gate-exit-7-unprobed` | With `onFailure: block`, a timeout refused the call (measured in the 2026-10-12 incident). | [`debts/gate-exit-7-unprobed.md`](../debts/gate-exit-7-unprobed.md) |
 | `gate-own-errors-fail-open` | Errors a gate catches itself fail open. | [`debts/gate-own-errors-fail-open.md`](../debts/gate-own-errors-fail-open.md) |
 | `gate-remedy-needs-bash` | The remedy names `sh install.sh`. | [`debts/gate-remedy-needs-bash.md`](../debts/gate-remedy-needs-bash.md) |
+| `ghlock-no-compare-and-swap` | The GitHub API cannot move or delete a ref "only if it is still X". | [`debts/ghlock-no-compare-and-swap.md`](../debts/ghlock-no-compare-and-swap.md) |
 | `git-env-glued-block` | If a glued PowerShell block opener is followed by a group, the guard does not read the group. | [`debts/git-env-glued-block.md`](../debts/git-env-glued-block.md) |
 | `git-env-lower-case-fold` | Lower-case names fold to the rule, so `git_dir=x cmd` is denied too. | [`debts/git-env-lower-case-fold.md`](../debts/git-env-lower-case-fold.md) |
 | `git-env-set-false-alarms` | False alarms on the safe side. | [`debts/git-env-set-false-alarms.md`](../debts/git-env-set-false-alarms.md) |
@@ -398,13 +408,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-slug-piped-body-unread` | A piped body, such as `echo ... \| gh pr create -F -`, is not read. | [`debts/lane-slug-piped-body-unread.md`](../debts/lane-slug-piped-body-unread.md) |
 | `lane-slug-tag-messages-unchecked` | Tag messages are out of scope. | [`debts/lane-slug-tag-messages-unchecked.md`](../debts/lane-slug-tag-messages-unchecked.md) |
 | `lane-slug-tilde-fence-refused` | A tilde fence (`~~~`) is not blanked. | [`debts/lane-slug-tilde-fence-refused.md`](../debts/lane-slug-tilde-fence-refused.md) |
+| `late-workflow-reads-green` | The merge wait reads the checks and the workflow runs of the head, and reads again after a settle pause. | [`debts/late-workflow-reads-green.md`](../debts/late-workflow-reads-green.md) |
 | `live-pin-first-move-gap` | The first move from a plain `<clone>-live` directory renames that directory to `<clone>-live-<commit>`. | [`debts/live-pin-first-move-gap.md`](../debts/live-pin-first-move-gap.md) |
 | `liveness-windows-arm-unproven` | The repository has no Windows machine to run the Windows arm on. | [`debts/liveness-windows-arm-unproven.md`](../debts/liveness-windows-arm-unproven.md) |
 | `local-time-hard-coded-dst` | The rule is the US rule in force since 2007, and it is coded in `hooks/local_time.py`. | [`debts/local-time-hard-coded-dst.md`](../debts/local-time-hard-coded-dst.md) |
 | `local-time-line-cost-unmeasured` | The token cost of one line per prompt is unmeasured. | [`debts/local-time-line-cost-unmeasured.md`](../debts/local-time-line-cost-unmeasured.md) |
-| `lock-delete-retry-window` | When `GhLock.acquire` finds an expired lock, it deletes it. | [`debts/lock-delete-retry-window.md`](../debts/lock-delete-retry-window.md) |
 | `lock-read-error-never-expires` | When `GhLock.read` cannot read the lock commit for a reason that is not a network or rate error, it returns an expiry of infinity. | [`debts/lock-read-error-never-expires.md`](../debts/lock-read-error-never-expires.md) |
-| `lock-ttl-rate-wait` | Every `GhLock` call retries a rate limit up to 3 times with a 60 s wait, so one call can wait 180 s. | [`debts/lock-ttl-rate-wait.md`](../debts/lock-ttl-rate-wait.md) |
 | `marker-writeback-loses-deletion` | A failed remove leaves `claude-removal-started` in the tree's admin dir, on an intact tree. | [`debts/marker-writeback-loses-deletion.md`](../debts/marker-writeback-loses-deletion.md) |
 | `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
 | `merge-head-any-check-licenses` | Any passing check licenses a skipped required job, not only `scope`. | [`debts/merge-head-any-check-licenses.md`](../debts/merge-head-any-check-licenses.md) |
@@ -434,6 +443,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-session-board-timer-margins` | `mods/session-board/session-board.test.mjs` has two real-timer margins, about lines 709-718 and 928-940. | [`debts/mods-session-board-timer-margins.md`](../debts/mods-session-board-timer-margins.md) |
 | `mods-step-order-unpinned` | No test pins that the mod test step is last. | [`debts/mods-step-order-unpinned.md`](../debts/mods-step-order-unpinned.md) |
 | `mods-tests-glob-too-narrow` | The glob reaches only root-level `mods/<name>/*.test.mjs`. | [`debts/mods-tests-glob-too-narrow.md`](../debts/mods-tests-glob-too-narrow.md) |
+| `moved-kind-path-forgets-numbers` | After a kind's folder or file is moved, the claim does not see the numbers that records used under the old path. | [`debts/moved-kind-path-forgets-numbers.md`](../debts/moved-kind-path-forgets-numbers.md) |
 | `mutant-crash-audit-missing` | The fix colocates `guard.py` for `watch` mutants only. | [`debts/mutant-crash-audit-missing.md`](../debts/mutant-crash-audit-missing.md) |
 | `nesting-risk-unrecorded` | The rule `roles-workers-never-spawn` said a repo that needs nesting raises depth in its settings and records the risk. | [`debts/nesting-risk-unrecorded.md`](../debts/nesting-risk-unrecorded.md) |
 | `net-error-colon-http-refusal` | `NET_ERROR` matches `: HTTP 5xx (url)` at a line end. | [`debts/net-error-colon-http-refusal.md`](../debts/net-error-colon-http-refusal.md) |
@@ -455,6 +465,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-quoted-path-label` | A quoted path with an emoji shows a wrong label, so no turn note matches it. | [`debts/plain-diff-quoted-path-label.md`](../debts/plain-diff-quoted-path-label.md) |
 | `plain-diff-secret-file-names` | Some secret file names are not caught by name. | [`debts/plain-diff-secret-file-names.md`](../debts/plain-diff-secret-file-names.md) |
 | `plain-diff-trimnote-regex` | The table-row regex in `trimNote` was quadratic only on absurd input. | [`debts/plain-diff-trimnote-regex.md`](../debts/plain-diff-trimnote-regex.md) |
+| `pointer-detach-false-alarm` | The pointer guard refuses `checkout --detach main` in the live install checkout, but `hooks/session_start.sh` counts a checkout detached at main's commit as on main. | [`debts/pointer-detach-false-alarm.md`](../debts/pointer-detach-false-alarm.md) |
 | `pr-checks-watch-unmeasured` | The guard still allows `gh pr checks --watch` in the background. | [`debts/pr-checks-watch-unmeasured.md`](../debts/pr-checks-watch-unmeasured.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
 | `printf-quote-walk-bandaid` | `discards_output` cuts each `$( )` out of the segment, reads the rest again, and fails closed when the cut is too deep. | [`debts/printf-quote-walk-bandaid.md`](../debts/printf-quote-walk-bandaid.md) |
@@ -477,7 +488,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
 | `question-problem-line-forms` | `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as Problem lines. | [`debts/question-problem-line-forms.md`](../debts/question-problem-line-forms.md) |
-| `rate-retry-budget-short` | The merge tool retries a rate limit 3 times with a 60 s wait. | [`debts/rate-retry-budget-short.md`](../debts/rate-retry-budget-short.md) |
+| `rate-wait-outside-ttl-budget` | A rate wait moves the lock's expiry to now + wait + 300 s, and only when that is later than the expiry. | [`debts/rate-wait-outside-ttl-budget.md`](../debts/rate-wait-outside-ttl-budget.md) |
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
@@ -581,6 +592,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-rewrite-unchecked-lands` | The STE fixer rewrites the text, then the lint cannot run. | [`debts/ste-rewrite-unchecked-lands.md`](../debts/ste-rewrite-unchecked-lands.md) |
 | `ste-rule-awaits-prose-lint` | Its gate judges only writes of .md and UI files. | [`debts/ste-rule-awaits-prose-lint.md`](../debts/ste-rule-awaits-prose-lint.md) |
 | `subagent-workflow-model-unasked` | The guard asks on a write of `CLAUDE_CODE_SUBAGENT_MODEL` or its `_FORCE` form only. | [`debts/subagent-workflow-model-unasked.md`](../debts/subagent-workflow-model-unasked.md) |
+| `swap1sh-windows-flake` | On Windows the copy-mode install case swap1sh failed once with `mv: cannot move guard.py.cs-new` (run 39015490144). | [`debts/swap1sh-windows-flake.md`](../debts/swap1sh-windows-flake.md) |
 | `sweep-anchor-first-match` | `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. | [`debts/sweep-anchor-first-match.md`](../debts/sweep-anchor-first-match.md) |
 | `sweep-no-deadline-many-trees` | The SessionEnd run starts no phase and no tree read at or past its deadline, `JUDGE_BUDGET_SECONDS` (12 s) after it starts. | [`debts/sweep-no-deadline-many-trees.md`](../debts/sweep-no-deadline-many-trees.md) |
 | `sweep-test-symlink-privilege` | On a Windows host with no symlink right, two tests in `janitor/test_sweep.py` stop with WinError 1314. | [`debts/sweep-test-symlink-privilege.md`](../debts/sweep-test-symlink-privilege.md) |

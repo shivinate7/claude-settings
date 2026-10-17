@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
+"""The shared merge tool, git half. The flow is `confirm` in merge/merge.py.
 
   merge <pr>              preview: what it would claim and merge, and the silent-undo check on the head. Presses
                           nothing. A draft is previewed too; a dropped line exits 1.
@@ -10,7 +10,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, contextlib, json, math, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
@@ -94,7 +94,7 @@ RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-RATE_WAIT_CAP = 60  # seconds: a real gh call shows no Retry-After header, and a GitHub secondary limit needs about a minute; 3 retries bound the wait at 180 s
+RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (owner ruling 2026-10-16: 3 retries stay). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
@@ -128,22 +128,54 @@ def is_net(c, out):
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
 
-def net_wait(out):
-    """Seconds to wait before a retry: RATE_WAIT_CAP on a rate-limit text, else NET_PAUSE."""
-    return RATE_WAIT_CAP if RATE_LIMIT.search(out) else NET_PAUSE
+_HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*(?:\n(.*?\r?\n)?\r?\n|\n?.*\Z)", re.S)  # what `gh api -i` prints first: the status line, the headers, a blank line. An empty body leaves no blank line: the block then runs to the end
 
-def retry_net(call, pause, retries=NET_RETRIES, what="the call"):
-    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(out))` while it fails with a network error, up to `retries` times.
-    Before a rate wait it prints one line that names `what`, so a 60 s wait never looks like a hang."""
+def split_headers(out):
+    """-> (headers, body). A reply that starts with a status line has a header block: its names are lower case in `headers`, and `body` has no block.
+    A header-like line anywhere else is text, and the body is the whole reply."""
+    m = _HEAD_BLOCK.match(out)
+    if not m:
+        return {}, out
+    pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
+    return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+def _seconds(value):
+    """A header value as whole seconds, or None when it is not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+def rate_wait(headers, n, now):
+    """Whole seconds to wait before retry n of a rate limit. `Retry-After` always counts. `X-Ratelimit-Reset` (an epoch) counts only while
+    `X-Ratelimit-Remaining` is 0, as GitHub documents. A header that is missing, unreadable or not in the future gives the ladder rung. Capped at the last rung."""
+    after = _seconds(headers.get("retry-after"))
+    reset = _seconds(headers.get("x-ratelimit-reset"))
+    if after is None or after <= 0:
+        after = reset - now if reset is not None and headers.get("x-ratelimit-remaining") == "0" else 0
+    return min(math.ceil(after) if after > 0 else RATE_LADDER[min(n, len(RATE_LADDER)) - 1], RATE_LADDER[-1])  # whole seconds, rounded up
+
+def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, before_wait=None):
+    """-> (code, output, retries used). The output has no `gh api -i` header block. Runs `call` again after `pause(wait)` while it fails with a network
+    error, up to `retries` times. The wait is NET_PAUSE, or on a rate limit rate_wait(). Before a rate wait it prints one line that names `what`.
+    `before_wait(wait)` runs before each rate wait. It extends the merge lock past the wait, or raises NetStop: then the call stops in place of the wait."""
     n = 0
     while True:
         c, out = call()
+        headers, out = split_headers(out)
         if n >= retries or not is_net(c, out):
             return c, out, n
         n += 1
-        wait = net_wait(out)
-        if RATE_LIMIT.search(out):
-            say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
+        if not RATE_LIMIT.search(out):
+            pause(NET_PAUSE)
+            continue
+        wait = rate_wait(headers, n, now())
+        if before_wait:
+            try:
+                before_wait(wait)
+            except NetStop as e:
+                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first. {e}\n{out}") from None
+        say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
         pause(wait)
 
 UNDO_MEMO = {}
@@ -209,6 +241,8 @@ def say(*lines):
 # refs/merge-lock/<defaultBranch>. Two backends, one interface: acquire, release, unlock.
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
+LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
+LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (owner ruling 2026-10-17: a rate wait is the exception to the 600 s cap)
 
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
@@ -268,20 +302,49 @@ def holder_text(b, held, now):
 
 class Lock:
     """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
-    until = holder = None  # holder: set by confirm before acquire; a dict of pr, branch, session
+    until = holder = began = tree = message = None  # holder: set by confirm before acquire; a dict of pr, branch, session. until: the published expiry, set once the lock is held
+    mine = frozenset()  # the lock commits this run made: the take, then one per extension, added before its push or PATCH
+
+    def _take(self, b, sha, tree, message, now):
+        """The one place a take is recorded. The expiry is read back from the published text, so `until` and the text cannot differ."""
+        self.base, self.sha, self.tree, self.message, self.began = b, sha, tree, message, now
+        self.mine, self.until = frozenset({sha}), expiry_of(message)
+
+    def extend_for(self, wait):
+        """Before a rate wait of `wait` s: publish an expiry that covers now + wait + LOCK_MARGIN, then return. NetStop when the lock cannot be
+        extended (rate limit, the ref moved) or the hard bound LOCK_MAX_HOLD would pass: the run never waits on a lock that could expire.
+        No-op while no lock is held."""
+        if self.until is None:
+            return
+        now = self.now()
+        if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
+            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now. Run again.")
+        need = int(now + wait + LOCK_MARGIN)
+        if need <= self.until:
+            return
+        if need > self.began + LOCK_MAX_HOLD:
+            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take. Run again.")
+        msg = re.sub(r"^expires: \d+$", f"expires: {need}", self.message, flags=re.M)
+        try:
+            sha = self.swap(self.base, msg)
+        except Stop as e:
+            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire. Run again. {e}") from e
+        self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
     def release(self, b, token):
         left = f" It expires in {max(0, self.until - self.now()):.0f}s." if self.until else ""
         try:
             cur = self.read(b)
-            if not cur or cur[0] != token:
+            if not cur or (cur[0] != token and not {token, cur[0]} <= self.mine):  # owned: the ref holds the token, or a later commit of this run (an extension) and the token is this run's too
                 say(f"merge: the lock on {b} was not this run's any more. Someone removed it during the run. Left as is.")
                 return
-            c, why = self.delete(b, token)
+            c, why = self.delete(b, cur[0])
             if not c:
                 return
         except Exception as e:
             why = str(e)
+        finally:
+            self.until = None  # no lock is held after this: a later rate wait extends nothing
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
 class GitLock(Lock):
@@ -307,8 +370,9 @@ class GitLock(Lock):
         if cur and cur[1] > self.now():
             raise Held(holder_text(b, cur, self.now()))
         tree = git(self.root, "mktree", input="")[1]
-        c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost",
-                     "commit-tree", tree, "-m", lock_message(ttl, self.now(), self.holder))
+        now = self.now()  # read once: the text and `until` come from this one value
+        msg = lock_message(ttl, now, self.holder)
+        c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-m", msg)
         if c:
             raise Stop("cannot make the lock commit: " + sha)
         # --force-with-lease with an empty expect creates only. With a sha it swaps only that
@@ -317,7 +381,19 @@ class GitLock(Lock):
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
             raise Held("another run took the merge lock first")
-        self.until = self.now() + ttl
+        self._take(b, sha, tree, msg, now)
+        return sha
+
+    def swap(self, b, msg):
+        """A new lock commit with the text `msg`, swapped in only while the ref still holds this run's last commit. -> its sha, or Stop."""
+        ref = f"refs/merge-lock/{b}"
+        c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
+        if c:
+            raise Stop("cannot make the lock commit: " + sha)
+        self.mine |= {sha}  # this run's before the push: a push that lands with a lost reply still leaves a lock release can delete
+        c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{self.sha}", "origin", f"{sha}:{ref}")
+        if c:
+            raise Stop("the lock ref moved, or the push failed: " + out)
         return sha
 
     def delete(self, b, token):
@@ -335,12 +411,15 @@ class GhLock(Lock):
     def __init__(self, now=time.time, pause=time.sleep):
         self.now, self.pause = now, pause
 
-    def api(self, *a):
+    def api(self, *a, once=False):
         """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
-        (RATE_WAIT_CAP on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
-        ponytail: no retry inside `shared_deadline`, as in Host.gh. Long rate waits can outlast the lock TTL spare (debt lock-ttl-rate-wait)."""
+        (the ladder or GitHub's reset time on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
+        Every call asks for the headers (-i), and retry_net drops the block. Once this run holds the lock, extend_for pushes the expiry past each rate wait.
+        `once`: no retry and no wait at all. The extension calls and the delete of an expired lock use it: a retry could land after another run's take.
+        ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
-        c, out, _ = retry_net(lambda: sh(["gh", "api", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"the lock call {path}")
+        retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a]), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
         return c, out
 
     def read(self, b):
@@ -361,13 +440,16 @@ class GhLock(Lock):
         if cur and cur[1] > self.now():
             raise Held(holder_text(b, cur, self.now()))
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
-            self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+            c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
+            if c and not self.gone(out):
+                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
             raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch: " + tree)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={lock_message(ttl, self.now(), self.holder)}",
-                          "-f", f"tree={tree}", "--jq", ".sha")
+        now = self.now()  # read once: the text and `until` come from this one value
+        msg = lock_message(ttl, now, self.holder)
+        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
             raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/merge-lock/{b}", "-f", f"sha={sha}")
@@ -377,8 +459,24 @@ class GhLock(Lock):
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
                 raise Stop("cannot take the merge lock: " + out)
             raise Held("another run took the merge lock first")
-        self.until = self.now() + ttl
+        self._take(b, sha, tree, msg, now)
         return sha
+
+    def swap(self, b, msg):
+        """A new lock commit with the text `msg`, then the ref moved to it. -> its sha, or Stop. No retry, no wait (api once).
+        ponytail: the ref update is not compare-and-swap. Window: the read of the ref to the PATCH. The API has no lease; a backend with compare-and-swap closes it."""
+        ref = f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}"
+        c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha", once=True)
+        if c or cur.strip() != self.sha:
+            raise Stop("the lock is not this run's any more" if not c else "cannot read the lock: " + cur)
+        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
+        if c:
+            raise Stop("cannot make the lock commit: " + sha)
+        self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
+        c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
+        if c:
+            raise Stop("cannot move the lock: " + out)
+        return sha.strip()
 
     @staticmethod
     def gone(out):
@@ -411,11 +509,13 @@ class Host:
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
 
+    before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
+
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`")
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, out
@@ -1015,6 +1115,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
+    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (owner ruling 2026-10-17); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)

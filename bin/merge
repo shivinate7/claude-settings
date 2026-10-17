@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Shim for the merge tool. Finds the claude-settings checkout and starts merge/launch.py there.
-# No merge logic lives here. Plan: plans/shared-merge-tool.md, "How the command finds claude-settings".
+# No merge logic lives here. README: "The `merge` command".
 import os, re, shutil, stat, subprocess, sys, tempfile
 OK = r"(https://github\.com/|git@github\.com:)shivinate7/claude-settings(\.git)?/?"
 def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy of this
