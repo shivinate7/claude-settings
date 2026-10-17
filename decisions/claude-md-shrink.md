@@ -13,6 +13,11 @@ Owner ruling, 2026-10-16 23:53 CDT. In short:
 - Re-kind an `unmechanized` rule to `judgment` when its reason already says no check can judge it.
 - Never reword a kept rule.
 
+Owner ruling, 2026-10-17 00:40 CDT:
+
+- `judgment` means that no exact check can judge the rule. A model hook that comments on a reply is not an exact check.
+- A reason that says no check reads the rule yet stays `unmechanized`. Only a reason that says no check can judge it moves to `judgment`.
+
 Precedent: `a-rule-with-no-gate-leaves-claude-md` (a rule the owner took off the gate leaves `CLAUDE.md` too).
 
 ## What landed, MEASURED on branch `claude-md-shrink` (a1655ad) against main
@@ -52,10 +57,8 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 3. The `unmechanized` line in the `lint/rule_audit.py` docstring still says "genuinely cannot be checked by a machine". That overlaps `judgment`. Debt: `unmech-doc-overlaps-judgment`, the docstring overlaps the new kind.
 4. These 23 rules stay as prose, each unsure: `outcomes-mechanize-rules`, `roles-sonnet-is-the-default`, `roles-opus-override-guarded`, `roles-workers-never-spawn`, `roles-third-try-steps-up`, `shared-trees-no-machine-wide-kill`, `git-wait-for-required-checks`, `git-never-discard-output`, `git-remedy-never-names-target`, `git-slug-then-claim-number`, `git-cite-by-id`, `git-draft-until-reviewed`, `verification-trust-guard-after-red`, `verification-cry-wolf-guard-is-spent`, `verification-recovery-not-gated-on-own-state`, `verification-report-unknown-reads`, `building-allow-list-is-the-constant`, `building-scanner-respects-strings`, `speak-cite-id-plus-gloss`, `output-write-in-ste`, `reports-order-of-labels`, `reports-done-format`, `reports-no-report-when-nothing-landed`.
 5. A move from `unmechanized` to `judgment` takes a rule off the list of rules that still wait for a check. Only the 8-word reason floor and the two pins in one commit stand in the way. Debt: `judgment-exits-debt-count`, a re-kind leaves the waiting list.
-6. The line between `unmechanized` and `judgment` is the reason's wording, not a stated test. Five rows read like the moved ones and stay `unmechanized`: `style-plain-words`, `style-full-detail-on-request`, `style-keep-critical-full`, `building-never-drop-item-silently`, `verification-verify-against-repo`. Debt: `judgment-line-unstated`, no test splits the two kinds.
-7. "No check can judge a reply's content" is unmeasured. `hooks/reply_judge.py` judges three reply rules with Haiku. The owner has not said whether `judgment` means that no check exists, or that no check exists that gives the same answer each run. Debt: `judgment-meaning-unruled`, the kind's meaning waits for the owner.
-8. A measured time table (deferred item measured-time-table) may let a check judge `style-no-unmeasured-estimate`. Debt: `estimate-rule-may-be-checkable`, the time table may give it a check.
-9. The 23 rules in hole 4 have no owner ruling yet. Debt: `shrink-unsure-rules-unruled`, 23 rules wait for a ruling.
+6. A measured time table (deferred item measured-time-table) may let a check judge `style-no-unmeasured-estimate`. Debt: `estimate-rule-may-be-checkable`, the time table may give it a check.
+7. The 23 rules in hole 4 have no owner ruling yet. Debt: `shrink-unsure-rules-unruled`, 23 rules wait for a ruling.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
