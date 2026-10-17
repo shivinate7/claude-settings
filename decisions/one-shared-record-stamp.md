@@ -7,8 +7,9 @@ that rule to the refusal in `actions/stamp/stamp.mjs` (`branchNumbered`). The me
 
 ## The stamp stays generic
 
-Owner ruling, 2026-09-28. The owner wants briefs that let each repo become compliant on its
-own. The owner does not want an exception carved out for each repo.
+Owner ruling, 2026-09-28. The owner said: "I think moreso you need to remain generic and
+provide me briefs that allow each of the repos to individually get compliant, rather than
+carving out exceptions for each repo."
 
 `actions/stamp` names no repo. It describes record shapes, config fields, and a contract.
 Each repo reads its own tree and writes its own config. The parent carves out no exception

@@ -222,7 +222,7 @@ place to name the shared tool. Its ruling does not change.
 
 q_max stamped after the merge through `stamp.yml`, mode `stamp`. It pinned `actions/stamp` at a
 claude-settings SHA. It moved in its own repo (lane 8, q_max#347), by its own session, per
-`record-stamp-stays-generic`, the stamp stays generic:
+`one-shared-record-stamp` (one shared parser, not four claim tools), the stamp stays generic:
 
 1. Add the `merge` block and move `regenerate` into the config.
 2. Merge through the command.
