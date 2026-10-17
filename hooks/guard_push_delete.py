@@ -61,20 +61,21 @@ def _push_bare_destination(cwd: str, overrides=None):
 def _push_default_branches(cwd: str, remote: str):
     """The default branch names, or None when git cannot be read at all.
 
-    `guard_core.read_default_base` answers for the PUSHED remote (owner's ruling 2026-10-16). Only
-    `<remote>/HEAD` names the branch. Any other answer, or none (a dangling or unset HEAD, a git
-    that did not answer), protects main AND master. No readable repository is unknown, and
-    unknown is never safe.
+    `guard_core.read_default_base` answers for the PUSHED remote (owner's ruling 2026-10-16). A
+    resolved `<remote>/HEAD` names the one branch. Any other answer (HEAD unset, dangling, or a
+    read that did not answer) protects main AND master, plus the name HEAD holds. No readable
+    repository is unknown, and unknown is never safe.
     """
     if not cwd or not os.path.isdir(cwd):
         return None
     repo = guard_core._git(cwd, "rev-parse", "--git-dir")
     if repo is None or repo.returncode != 0:
         return None
-    base, from_head = guard_core.read_default_base(cwd, remote)
-    if base is not None and from_head:
-        return (base[len(remote) + 1:],)
-    return DEFAULT_BRANCH_FALLBACK
+    base, head = guard_core.read_default_base(cwd, remote)
+    named = (head[len(remote) + 1:],) if head else ()
+    if base is not None and base == head:
+        return named
+    return DEFAULT_BRANCH_FALLBACK + named
 
 
 # A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted

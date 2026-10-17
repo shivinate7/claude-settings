@@ -1295,29 +1295,33 @@ def stash_stack(where: str):
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
 def read_default_base(where: str, remote: str = "origin"):
-    """Return (short ref name, True when `<remote>/HEAD` named it), or (None, False) when none answers.
+    """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
 
     Owner's ruling 2026-10-16: `<remote>/HEAD` when it resolves, then `<remote>/main`, then
     `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
-    rest are never tried. A dangling `<remote>/HEAD` falls through. A verify that git could not run
-    is (None, False): unreadable, never "does not exist". The push guard reads the PUSHED remote
-    here; the branch-delete rule and the sweep read `origin`.
+    rest are never tried. A dangling `<remote>/HEAD` falls through. The second value is the name
+    the symbolic ref holds, even when that branch does not verify or a later read failed; it is ""
+    when the ref is unset. A name is None when git could not run: unreadable, never "does not
+    exist". The push guard reads the PUSHED remote here; the branch-delete rule and the sweep
+    read `origin`.
     """
     candidates = [remote + "/main", remote + "/master", "main", "master"]
     named = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/" + remote + "/HEAD")
     if named is None:  # git could not run: unreadable
-        return None, False
+        return None, None
     head = named.stdout.strip() if named.returncode == 0 else ""
-    if head.startswith(remote + "/"):
+    if not head.startswith(remote + "/"):
+        head = ""
+    if head:
         candidates.insert(0, head)
     for name in candidates:
         full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
         live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None, False
+            return None, head
         if live.returncode == 0:
-            return name, name == head and candidates[0] == head
-    return None, False
+            return name, head
+    return None, head
 
 
 def resolve_default_base(where: str, remote: str = "origin"):

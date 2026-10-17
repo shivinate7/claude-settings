@@ -25,7 +25,7 @@ Owner, 2026-10-16: read in this order. The first ref that resolves wins.
 - One home: `resolve_default_base`, over `read_default_base`. The push guard calls
   `read_default_base`. Only a resolved `<remote>/HEAD` names one branch for it. Any other
   answer, or none (HEAD unset or dangling, an unreadable read), protects both `main` and
-  `master`.
+  `master`, and the name HEAD holds when it holds one.
 
 ## Why
 
