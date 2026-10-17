@@ -95,7 +95,7 @@ It asks one more question, and the question depends on the branch.
   taken, because the claim reads the highest number ever used from the history of the base
   ref. A kind that keeps a `RETIRED` list works as before (see "The retired-numbers list").
   Known gap: after a kind's folder or file is moved, numbers used under the old path are not
-  seen. Keep the old path in the kind's config, or check those numbers by hand.
+  seen. Check those numbers by hand.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
@@ -128,8 +128,7 @@ too. So is a branch that changes the slug of a numbered frontmatter record. A re
 frontmatter file with the same slug passes. An edit to a title passes in every shape.
 
 **A same-number swap.** A branch can delete a `file` heading record and write a different
-record with the same number. That is now the same as an edit in place, because the removal
-refusal catches each number that no record holds. The engine does not compare titles or
+record with the same number. The new record reads as a rename, and the rename is refused. The engine does not compare titles or
 content.
 
 ## The retired-numbers list
@@ -153,8 +152,7 @@ The rules:
   So a deleted top number is never given out again.
 - A number that is in the list and still held by a record is refused. Remove one of them.
 
-The heading format (`"format": "heading"`) does not read the list. A removal in that format
-stays refused, and the message says so.
+The heading format (`"format": "heading"`) does not read the list. A deleted heading record keeps its number through the history read only.
 
 ## The config file
 
@@ -340,7 +338,8 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    check refuses the config.
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
    after the local base branch moves. `merge.deleteBranch` is a boolean. When it is true, the
-   command deletes the head branch on origin and locally after the merge.
+   command deletes the head branch on origin after the merge. It deletes the local branch too,
+   unless a worktree holds it or it has local-only commits.
 
 ## Adoption checklist, the merge tool
 

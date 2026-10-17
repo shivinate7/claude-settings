@@ -124,7 +124,7 @@ merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default br
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
-`merge --help` lists every flag.
+`merge --help` lists every flag except `--dev`.
 
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
