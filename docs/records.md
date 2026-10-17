@@ -106,6 +106,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `claude-md-shrink` | Owner ruling, 2026-10-16 23:53 CDT. | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
 | `debts-have-their-own-store` | Every known gap is a debt. | [`decisions/debts-have-their-own-store.md`](../decisions/debts-have-their-own-store.md) |
 | `decision-watch-mod-limits` | Yes. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
+| `default-branch-read-order` | Owner, 2026-10-16: read in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
 | `design-skills` | Owner ruling, 2026-10-10. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
 | `draft-until-reviewed` | Owner rulings, 2026-10-10 and 2026-10-13. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
 | `drops-lines-trailer-exempt` | Owner, 2026-10-12: the `Drops-lines: <record path> -- <reason>` trailer is the one place a record path is allowed in a commit message. | [`decisions/drops-lines-trailer-exempt.md`](../decisions/drops-lines-trailer-exempt.md) |
@@ -251,6 +252,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ask-alone-tail-args-unchecked` | `harmless_tail` takes any arguments to `echo` and `Write-Host`. | [`debts/ask-alone-tail-args-unchecked.md`](../debts/ask-alone-tail-args-unchecked.md) |
 | `ask-alone-tail-test-gap` | `hooks/test_guard.py` has ask-alone rows for a quoted `#`, a quoted `/*` and a lone apostrophe. | [`debts/ask-alone-tail-test-gap.md`](../debts/ask-alone-tail-test-gap.md) |
 | `ask-step-hidden-in-script` | The guard does not see a settings write of the subagent model cap in some shapes. | [`debts/ask-step-hidden-in-script.md`](../debts/ask-step-hidden-in-script.md) |
+| `base-read-midway-untested` | If a later verify cannot run, `read_default_base` returns unknown. | [`debts/base-read-midway-untested.md`](../debts/base-read-midway-untested.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
 | `blind-git-fixtures-unaudited` | The entry does not audit every blind-command fixture in the repository for the PATH shim gap. | [`debts/blind-git-fixtures-unaudited.md`](../debts/blind-git-fixtures-unaudited.md) |
@@ -469,6 +471,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `purge-realpath-per-row` | `realpath` runs once per unexpired row, in preview too. | [`debts/purge-realpath-per-row.md`](../debts/purge-realpath-per-row.md) |
 | `purge-snapshot-race` | The set of unexpired rows is read once, at purge start. | [`debts/purge-snapshot-race.md`](../debts/purge-snapshot-race.md) |
 | `purge-update-ref-mutant-missing` | The harness has no mutant that drops only the commit argument of `update-ref -d`. | [`debts/purge-update-ref-mutant-missing.md`](../debts/purge-update-ref-mutant-missing.md) |
+| `push-head-tag-misread` | `symbolic-ref --short HEAD` prints `heads/<name>` when a tag has the branch's name, so a lease push of `HEAD` allows. | [`debts/push-head-tag-misread.md`](../debts/push-head-tag-misread.md) |
 | `pwsh-cmd-script-gaps` | These shapes are allowed on main and on this branch. | [`debts/pwsh-cmd-script-gaps.md`](../debts/pwsh-cmd-script-gaps.md) |
 | `question-goal-line-masks-order` | A decorated Goal line earlier in the question, such as `- goal: old`, masks a real Problem-first order. | [`debts/question-goal-line-masks-order.md`](../debts/question-goal-line-masks-order.md) |
 | `question-preface-punctuation` | A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. | [`debts/question-preface-punctuation.md`](../debts/question-preface-punctuation.md) |
@@ -477,6 +480,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reader-tree-kill-unproven` | On a reader timeout, the hook kills the process tree that it started. | [`debts/reader-tree-kill-unproven.md`](../debts/reader-tree-kill-unproven.md) |
 | `rebase-loss-before-base-unread` | After a rebase, the silent-undo window starts at the rebase base. | [`debts/rebase-loss-before-base-unread.md`](../debts/rebase-loss-before-base-unread.md) |
 | `receiver-state-reader-untested` | The SendMessage state tests now use a stub reader, so a slow runner cannot fail them. | [`debts/receiver-state-reader-untested.md`](../debts/receiver-state-reader-untested.md) |
+| `records-header-copy-unpinned` | `RECORDS_HEADER` in `hooks/guard_merge.py` is a copy of the first line of `RECORDS_INTRO` in `lint/hook_catalog.py`. | [`debts/records-header-copy-unpinned.md`](../debts/records-header-copy-unpinned.md) |
+| `records-page-colon-spec-alarm` | `_names_page` returns True for each pathspec that starts with `:`. | [`debts/records-page-colon-spec-alarm.md`](../debts/records-page-colon-spec-alarm.md) |
+| `records-page-first-adoption` | When the base has no `docs/records.md`, the guard `records-page` allows any lane commit of the page. | [`debts/records-page-first-adoption.md`](../debts/records-page-first-adoption.md) |
+| `records-page-gen-false-alarm` | One call can run the generator and then a `git commit` that holds the page. | [`debts/records-page-gen-false-alarm.md`](../debts/records-page-gen-false-alarm.md) |
+| `records-page-handwritten-header` | The guard `records-page` acts only when the base page opens with `# Records index`. | [`debts/records-page-handwritten-header.md`](../debts/records-page-handwritten-header.md) |
+| `records-page-reader-gaps` | The guard `records-page` reads `git add` and `git commit` calls only. | [`debts/records-page-reader-gaps.md`](../debts/records-page-reader-gaps.md) |
 | `reload-missing-file-unpinned` | Lane merge-guard-b removed `_damage_missing` and its two reload cases: a missing `guard_pointer.py` that comes back during the wait is allowed, and one that stays missing is refused. | [`debts/reload-missing-file-unpinned.md`](../debts/reload-missing-file-unpinned.md) |
 | `rule-audit-crashes-on-windows` | `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. | [`debts/rule-audit-crashes-on-windows.md`](../debts/rule-audit-crashes-on-windows.md) |
 | `rule-flag-not-enforced` | `bin/merge` prints a line for each changed rule file. | [`debts/rule-flag-not-enforced.md`](../debts/rule-flag-not-enforced.md) |

@@ -155,10 +155,8 @@ MUTATIONS = [
      '        if False:\n            return False\n    return True', "guard",
      'branch: a commit found nowhere else is the only copy, and the rule denies'),
     ("branch-delete: the base never falls back past origin/HEAD",
-     '    for name in ("main", "master"):\n        answer = _git(where, "rev-parse", "--verify", '
-     '"-q", "refs/heads/" + name)',
-     '    for name in ():\n        answer = _git(where, "rev-parse", "--verify", "-q", '
-     '"refs/heads/" + name)', "guard",
+     '    candidates = [remote + "/main", remote + "/master", "main", "master"]',
+     '    candidates = []', "guard",
      'branch: local main\'s fallback still denies an only-copy branch'),
 
     ("worktree-remove: --force is read as the path, missing the real target",
@@ -272,11 +270,11 @@ MUTATIONS = [
      '    if repo is None or repo.returncode != 0:\n        return None',
      '    if False:\n        return None', "guard", 'push: forced with a plus where git cannot be read asks'),
     ("force-push: origin/HEAD is ignored for the fallback names",
-     '        return (head.stdout.strip()[len(prefix):],)',
+     '        return named',
      '        return DEFAULT_BRANCH_FALLBACK', "guard", 'named by origin/HEAD, not by name'),
     ("force-push: the fallback forgets master",
-     '    return DEFAULT_BRANCH_FALLBACK\n\n\n# A quoted',
-     '    return ("main",)\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
+     '    return DEFAULT_BRANCH_FALLBACK + named\n\n\n# A quoted',
+     '    return ("main",) + named\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
     ("force-push: HEAD as a destination is not resolved",
      '        elif target in ("HEAD", "@"):',
      '        elif target in ("@",):', "guard", 'lease with includes, HEAD, on main'),

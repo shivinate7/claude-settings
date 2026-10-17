@@ -75,6 +75,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
+    "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the subagent model cap",
@@ -388,11 +389,25 @@ BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
 # guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
 # sits on `feat` with origin/HEAD naming trunk (so main is an ordinary branch there), PUSHNOHEAD
 # has no origin/HEAD at all (the main/master fallback), PUSHDETACHED has no current branch.
+# PUSHDANGLING sits on `feat`; its origin/HEAD names origin/gone, a ref that does not exist, and
+# origin/main does exist (owner's read order 2026-10-16: origin/HEAD when it resolves, then origin/main).
 PUSHFEAT = os.path.join(ROOT, "pushfeat")
 PUSHMAIN = os.path.join(ROOT, "pushmain")
 PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
+# PUSHTRUNKLOCAL is PUSHTRUNK plus a LOCAL branch named origin/trunk. There `git symbolic-ref --short`
+# prints the ambiguous `remotes/origin/trunk`, which once blanked the default branch's name.
+PUSHTRUNKLOCAL = os.path.join(ROOT, "pushtrunklocal")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+PUSHDANGLING = os.path.join(ROOT, "pushdangling")
+# Where origin/HEAD does not name the branch, main AND master stay protected. PUSHNOHEADMAIN has
+# origin/main and no origin/HEAD. PUSHONLYMASTER has origin/master and no origin/HEAD (local main
+# exists, as in any checkout). PUSHUPSTREAM has two remotes: origin/HEAD names develop,
+# upstream/HEAD names main, and `feat` tracks upstream/main with push.default upstream. A push
+# reads the PUSHED remote's default branch, never origin's.
+PUSHNOHEADMAIN = os.path.join(ROOT, "pushnoheadmain")
+PUSHONLYMASTER = os.path.join(ROOT, "pushonlymaster")
+PUSHUPSTREAM = os.path.join(ROOT, "pushupstream")
 # push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
 # named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
 PUSHUP = os.path.join(ROOT, "pushup")
@@ -1250,8 +1265,8 @@ def _build_push():
     materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
-                                (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
-                                (PUSHDETACHED, "main", None)):
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None)):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1264,6 +1279,62 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
+    if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
+            or run_vcs(PUSHTRUNKLOCAL, "symbolic-ref", "-q", "--short",
+                       "refs/remotes/origin/HEAD").stdout.strip() == "origin/trunk"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHTRUNKLOCAL needs a local branch "
+                 "origin/trunk that makes `symbolic-ref --short` print an ambiguous name")
+
+    # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
+    # order gives main as the default branch.
+    make_repo(PUSHDANGLING, {"base.txt": "base\n"})
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+    run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
+    if (run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/HEAD^{commit}").returncode == 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/main^{commit}").returncode != 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHDANGLING needs a dangling origin/HEAD "
+                 "and a live origin/main")
+
+    # origin/HEAD unset, one remote branch: origin/main (PUSHNOHEADMAIN) or origin/master (PUSHONLYMASTER).
+    for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
+                                         (PUSHONLYMASTER, "master", "main")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + remote_branch + "^{commit}").returncode != 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + absent + "^{commit}").returncode == 0):
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin/%s, no origin/%s and "
+                     "no origin/HEAD" % (where, remote_branch, absent))
+
+    # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
+    make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
+    for remote, default in (("origin", "develop"), ("upstream", "main")):
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
+        run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
+                "refs/remotes/%s/%s" % (remote, default))
+    run_vcs(PUSHUPSTREAM, "checkout", "-q", "-b", "feat")
+    run_vcs(PUSHUPSTREAM, "config", "push.default", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.remote", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.merge", "refs/heads/main")
+    if (run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip()
+            != "refs/remotes/origin/develop"
+            or run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/upstream/HEAD").stdout.strip()
+            != "refs/remotes/upstream/main"
+            or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
+                 "upstream/HEAD -> main and feat tracking upstream")
 
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
@@ -1435,8 +1506,8 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHUP, PUSHUPSELF, PUSHNOUP,
-              PUSHMATCH], _build_push)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -5308,6 +5379,12 @@ for form, tail in (
 push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
 push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
+# A local branch named origin/trunk must not hide the name origin/HEAD holds: the second case is the
+# same push where that branch is absent.
+push_case("forced to the default branch named by origin/HEAD asks", "--force origin trunk", "ask",
+          cwd=PUSHTRUNK)
+push_case("forced to the default branch asks when a local branch is named origin/trunk",
+          "--force origin trunk", "ask", cwd=PUSHTRUNKLOCAL)
 push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
           "ask", cwd=PUSHNOHEAD)
 push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
@@ -5332,6 +5409,36 @@ push_case("a delete refspec at the default branch asks", "origin :main", "ask")
 push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
 push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
 push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+# A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
+# forms below reach main and ask, exactly as they do where origin/HEAD resolves.
+push_case("a dangling origin/HEAD, a forced push to main asks",
+          "--force-with-lease --force-if-includes origin main", "ask", cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, a delete refspec at main asks", "origin :main", "ask",
+          cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, --delete after the remote at main asks", "origin --delete main", "ask",
+          cwd=PUSHDANGLING)
+# Where origin/HEAD does not name the branch (dangling, or unset), main AND master stay protected:
+# the read order finds origin/main, but a repository that has origin/main may still hold master.
+for why, fixture in (("a dangling origin/HEAD", PUSHDANGLING),
+                   ("no origin/HEAD, origin/main present", PUSHNOHEADMAIN)):
+    push_case(why + ", a forced push to master asks",
+              "--force-with-lease --force-if-includes origin master", "ask", cwd=fixture)
+    push_case(why + ", a delete refspec at master asks", "origin :master", "ask", cwd=fixture)
+    push_case(why + ", --delete at master asks", "origin --delete master", "ask", cwd=fixture)
+    push_case(why + ", a delete off the default names allows", "origin :feat", "allow", cwd=fixture)
+push_case("no origin/HEAD, only origin/master present, a delete refspec at main asks", "origin :main",
+          "ask", cwd=PUSHONLYMASTER)
+push_case("no origin/HEAD, only origin/master present, a delete off the default names allows",
+          "origin :feat", "allow", cwd=PUSHONLYMASTER)
+# A push reads the PUSHED remote's default branch (upstream/HEAD -> main), never origin's (develop).
+push_case("another remote, --delete at its default branch asks", "--delete upstream main", "ask",
+          cwd=PUSHUPSTREAM)
+push_case("another remote, --delete at the branch origin names as default allows, it is ordinary there",
+          "--delete upstream develop", "allow", cwd=PUSHUPSTREAM)
+push_case("another remote, a bare lease follows branch.feat.remote to its default branch asks",
+          LEASE.strip(), "ask", cwd=PUSHUPSTREAM)
+push_case("origin with its own origin/HEAD, --delete at its default branch asks", "--delete origin develop",
+          "ask", cwd=PUSHUPSTREAM)
 push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
 push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
 push_case("--no-force-if-includes cancels --force-if-includes",
@@ -6871,6 +6978,397 @@ for _name, _command in (
 sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
    "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+
+# =========================================================================== 5c. the records page
+FAMILY = "records-page"
+#
+# `records-page`. Owner ruling 2026-10-16 10:28 CDT ("Also add a guard"), decision records-index-at-merge.
+# The page docs/records.md is rebuilt only at merge, by the merge tool. A lane never commits a change
+# to it. Incident 2026-10-16: each lane rebuilt the page, and three batches conflicted on it. The guard
+# refuses a lane commit whose page differs from the page on the lane's base. A merge of the base into
+# the lane brings the base's page, so that commit is allowed.
+#
+# THE SEAM. The base is `resolve_default_base(root)` of guard_core (origin/HEAD, then local main, then
+# local master), read at its TIP. The fixture makes local `main` STALE (page v0) while `origin/main`
+# holds page v1, and every lane is cut from the stale `main`. So a guard that reads local `main`, or
+# the merge base, reads v0 and refuses the merge case. A commit is refused only when the page it would
+# hold differs from HEAD's page AND from the base tip's page. Any read that fails is no hit.
+#
+# BEYOND THE BRIEF'S FIVE CASES (named in "stage then commit"): the hook runs BEFORE the shell chain, so
+# `git add -A && git commit` and `git commit -am` stage the page after the hook has read the index.
+# Those are the usual way an agent commits the page it just rebuilt, so they are pinned here too.
+RECORDS_RULE = "records-page"
+RECORDS_SAYS = ("docs/records.md", "merge", ("drop", "Drop"))   # the rule named plainly, and the remedy
+RECORDS_NEVER = (VCS + " restore", VCS + " reset", VCS + " stash", VCS + " checkout")
+# The rule acts only when the base page opens with the generated header (RECORDS_HEADER of guard_merge),
+# so each fixture page starts with it.
+REC_V0 = "# Records index\nrecords page v0, as the lane was cut\n"
+REC_V1 = "# Records index\nrecords page v1, rebuilt on main\n"
+REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
+RECROOT = os.path.join(ROOT, "recpage")
+RECMAIN = os.path.join(RECROOT, "main")
+# One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
+# the index is per tree.
+REC_LANES = {name: os.path.join(RECROOT, "lane-" + name) for name in (
+    "staged", "staged-edit", "unstaged", "product", "merge", "merge-rebuilt", "copy-base")}
+REC_NOPAGE = os.path.join(RECROOT, "nopage")   # a repository that has no page at all
+REC_NOBASE = os.path.join(RECROOT, "nobase")   # a page change staged, and no origin, main or master
+
+
+def _rec_run(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the records-page fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rec_need(ok, what):
+    if not ok:
+        sys.exit("fixture setup failed in the records-page fixtures: " + what)
+
+
+def _rec_page(where):
+    return os.path.join(where, "docs", "records.md")
+
+
+def _build_records_page():
+    run, need, page = _rec_run, _rec_need, _rec_page
+
+    make_repo(RECMAIN, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(RECMAIN, "checkout", "-q", "-b", "advance")           # main's tip moves the page after the cut
+    write(page(RECMAIN), REC_V1)
+    run(RECMAIN, "commit", "-q", "-am", "main moves the page")
+    run(RECMAIN, "update-ref", "refs/remotes/origin/main", "advance")
+    run(RECMAIN, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(RECMAIN, "checkout", "-q", "main")                    # local main stays at the cut: stale
+    run(RECMAIN, "branch", "-q", "-D", "advance")
+    need(run(RECMAIN, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/main",
+         "origin/HEAD does not resolve to origin/main")
+    need(run(RECMAIN, "show", "origin/main:docs/records.md") == REC_V1.strip(), "origin/main page is not v1")
+    need(run(RECMAIN, "show", "main:docs/records.md") == REC_V0.strip(), "local main page is not v0")
+    for name, where in REC_LANES.items():
+        run(RECMAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+
+    def merged(name):
+        run(REC_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        need(run(REC_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD"),
+             "no merge is in progress in the lane %r" % name)
+
+    def stage(name, rel):
+        run(REC_LANES[name], "add", rel)
+
+    write(page(REC_LANES["staged"]), REC_LANE)           # rebuilt, then staged
+    stage("staged", "docs/records.md")
+    write(page(REC_LANES["staged-edit"]), REC_LANE)      # rebuilt and staged, then a product file edited
+    stage("staged-edit", "docs/records.md")
+    write(os.path.join(REC_LANES["staged-edit"], "src", "app.py"), "x = 3\n")
+    write(page(REC_LANES["unstaged"]), REC_LANE)         # rebuilt, nothing staged
+    write(os.path.join(REC_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    stage("product", "src/app.py")
+    merged("merge")                                      # origin/main merged in: the page is the base's
+    merged("merge-rebuilt")                              # the same merge, then the page rebuilt by hand
+    write(page(REC_LANES["merge-rebuilt"]), REC_LANE)
+    stage("merge-rebuilt", "docs/records.md")
+    write(page(REC_LANES["copy-base"]), REC_V1)          # the base's page copied over, no merge
+    stage("copy-base", "docs/records.md")
+    staged = lambda name: run(REC_LANES[name], "diff", "--cached", "--name-only")   # noqa: E731
+    need(run(REC_LANES["staged"], "show", ":docs/records.md") == REC_LANE.strip(), "staged page is not v2")
+    need(staged("unstaged") == "" and run(REC_LANES["unstaged"], "diff", "--name-only") == "docs/records.md",
+         "the unstaged lane is not 'page edited, nothing staged'")
+    need(staged("product") == "src/app.py", "the product lane stages more than src/app.py")
+    need(staged("staged-edit") == "docs/records.md"
+         and run(REC_LANES["staged-edit"], "diff", "--name-only") == "src/app.py",
+         "the staged-edit lane is not 'page staged, src/app.py edited and unstaged'")
+    need(run(REC_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip(), "the merged lane page is not v1")
+    need(run(REC_LANES["merge-rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
+         "the rebuilt merge lane page is not v2")
+    need(run(REC_LANES["copy-base"], "show", ":docs/records.md") == REC_V1.strip(), "the copy-base page is not v1")
+
+    make_repo(REC_NOPAGE, {"src/app.py": "x = 1\n"})
+    write(os.path.join(REC_NOPAGE, "src", "app.py"), "x = 2\n")
+    run(REC_NOPAGE, "add", "src/app.py")
+    os.makedirs(REC_NOBASE, exist_ok=True)
+    run(REC_NOBASE, "init", "-q", "-b", "trunk", ".")
+    write(page(REC_NOBASE), REC_V0)
+    run(REC_NOBASE, "add", "-A")
+    run(REC_NOBASE, "commit", "-q", "-m", "first")
+    write(page(REC_NOBASE), REC_LANE)
+    run(REC_NOBASE, "add", "docs/records.md")
+    need(run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/main").returncode != 0
+         and run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/master").returncode != 0
+         and not run(REC_NOBASE, "remote"), "the nobase repository has a base")
+
+
+lazy_fixture([RECMAIN, REC_NOPAGE, REC_NOBASE, *REC_LANES.values()], _build_records_page)
+
+# ---- review round 1 (coordinator): three more repositories. The base is a property of the repository
+# (origin/HEAD, local main, origin/main), so each needs its own, not a worktree of RECMAIN.
+RECMORE = os.path.join(ROOT, "recmore")
+# origin/HEAD names a ref that does not exist, so the base is local `main`, which lags origin/main:
+# local main holds v0, origin/main holds v1. The owner's resolve order stays as it is.
+REC_DANGLE = os.path.join(RECMORE, "dangle")
+REC_DANGLE_LANES = {name: os.path.join(RECMORE, "dangle-" + name) for name in ("merge", "fresh", "rebuilt")}
+# The page was added on main after the lane was cut: HEAD has no page, the base (origin/main) has v1.
+REC_NEW = os.path.join(RECMORE, "new")
+REC_NEW_LANE = os.path.join(RECMORE, "new-lane")
+# The base has no page at all: a lane that creates it is the first adoption.
+REC_ADOPT = os.path.join(RECMORE, "adopt")
+REC_ADOPT_LANE = os.path.join(RECMORE, "adopt-lane")
+# The base page is hand-written: it does not open with the generated header, so the rule is no hit.
+REC_PLAIN = os.path.join(RECMORE, "plain")
+REC_PLAIN_LANES = {name: os.path.join(RECMORE, "plain-" + name) for name in ("staged", "product")}
+
+
+def _build_records_more():
+    run, need, page = _rec_run, _rec_need, _rec_page
+
+    def advance(where, files, origin_head):
+        # origin/main moves on after the lane's cut; local main stays at the cut
+        run(where, "checkout", "-q", "-b", "advance")
+        for rel, text in files.items():
+            write(os.path.join(where, rel), text)
+        run(where, "add", "-A")
+        run(where, "commit", "-q", "-m", "main moves the page")
+        run(where, "update-ref", "refs/remotes/origin/main", "advance")
+        run(where, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head)
+        run(where, "checkout", "-q", "main")
+        run(where, "branch", "-q", "-D", "advance")
+
+    make_repo(REC_DANGLE, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_DANGLE, {"docs/records.md": REC_V1}, "refs/remotes/origin/gone")
+    need(run(REC_DANGLE, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/gone"
+         and run_vcs(REC_DANGLE, "rev-parse", "--verify", "-q", "origin/gone").returncode != 0,
+         "origin/HEAD in the dangle repository does not dangle")
+    need(run(REC_DANGLE, "show", "main:docs/records.md") == REC_V0.strip()
+         and run(REC_DANGLE, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the dangle repository is not 'local main v0, origin/main v1'")
+    for name, where in REC_DANGLE_LANES.items():
+        run(REC_DANGLE, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+    for name in ("merge", "rebuilt"):
+        run(REC_DANGLE_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        need(run(REC_DANGLE_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD"),
+             "no merge is in progress in the dangle lane %r" % name)
+    write(page(REC_DANGLE_LANES["rebuilt"]), REC_LANE)
+    run(REC_DANGLE_LANES["rebuilt"], "add", "docs/records.md")
+    need(run(REC_DANGLE_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip()
+         and run(REC_DANGLE_LANES["rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
+         "the dangle merge lanes hold the wrong staged pages")
+
+    make_repo(REC_NEW, {"src/app.py": "x = 1\n"})
+    advance(REC_NEW, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")
+    run(REC_NEW, "worktree", "add", "-q", "-b", "lane-new", REC_NEW_LANE, "main")
+    write(page(REC_NEW_LANE), REC_LANE)                   # the generator wrote a page: untracked
+    write(os.path.join(REC_NEW_LANE, "src", "app.py"), "x = 2\n")   # and a tracked edit, unstaged
+    need(run(REC_NEW_LANE, "ls-tree", "HEAD", "--", "docs/records.md") == ""
+         and run(REC_NEW_LANE, "ls-files", "--others", "--exclude-standard") == "docs/records.md"
+         and run(REC_NEW_LANE, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the new lane is not 'no page at HEAD, an untracked page, base has v1'")
+
+    make_repo(REC_ADOPT, {"src/app.py": "x = 1\n"})
+    run(REC_ADOPT, "worktree", "add", "-q", "-b", "lane-adopt", REC_ADOPT_LANE, "main")
+    write(page(REC_ADOPT_LANE), REC_LANE)
+    run(REC_ADOPT_LANE, "add", "docs/records.md")
+    need(run(REC_ADOPT_LANE, "ls-tree", "main", "--", "docs/records.md") == ""
+         and run(REC_ADOPT_LANE, "diff", "--cached", "--name-only") == "docs/records.md",
+         "the adopt lane is not 'base has no page, page staged as new'")
+
+    make_repo(REC_PLAIN, {"docs/records.md": "hand-written page v0\n", "src/app.py": "x = 1\n"})
+    advance(REC_PLAIN, {"docs/records.md": "hand-written page v1\n"}, "refs/remotes/origin/main")
+    for name, where in REC_PLAIN_LANES.items():
+        run(REC_PLAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+    write(page(REC_PLAIN_LANES["staged"]), "hand-written page v2\n")    # a staged edit of the page
+    run(REC_PLAIN_LANES["staged"], "add", "docs/records.md")
+    write(os.path.join(REC_PLAIN_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    run(REC_PLAIN_LANES["product"], "add", "src/app.py")
+    need(not run(REC_PLAIN, "show", "origin/main:docs/records.md").startswith("# Records index")
+         and run(REC_PLAIN_LANES["staged"], "diff", "--cached", "--name-only") == "docs/records.md"
+         and run(REC_PLAIN_LANES["product"], "diff", "--cached", "--name-only") == "src/app.py",
+         "the plain lanes are not 'base page has no header; page staged / product file staged'")
+
+
+lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
+              REC_ADOPT_LANE, *REC_PLAIN_LANES.values()], _build_records_more)
+
+
+def records_deny(name, command, lane, **kw):
+    sh("records-page: %s is refused" % name, command, "deny", RECORDS_RULE, cwd=REC_LANES.get(lane, lane),
+       carries=RECORDS_SAYS, lacks=RECORDS_NEVER, **kw)
+
+
+def records_allow(name, command, cwd, **kw):
+    sh("records-page: %s is allowed" % name, command, "allow", cwd=cwd, **kw)
+
+
+# 1. A staged page that is not the base's page: refused, under Bash and PowerShell, and for a builder.
+records_deny("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
+records_deny("a lane commit of a staged page that differs from the base's, under PowerShell",
+             VCS + " commit -m x", "staged", tool="PowerShell")
+records_deny("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
+             "staged", agent_id="bld1", agent_type="builder")
+# A merge commit is no exemption: only the base's own page rides in on a merge.
+records_deny("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
+# Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
+records_deny("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
+records_deny("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
+             "unstaged", tool="PowerShell")
+records_deny("stage then commit: add -A and commit with an edited page",
+             VCS + " add -A && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add -A and commit with an edited page, under PowerShell",
+             VCS + " add -A; " + VCS + " commit -m x", "unstaged", tool="PowerShell")
+records_deny("stage then commit: add . and commit with an edited page",
+             VCS + " add . && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add of the page and commit with an edited page",
+             VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
+
+# 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
+records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
+              REC_LANES["product"])
+records_allow("a commit that stages no page change, under PowerShell", VCS + " commit -m x",
+              REC_LANES["product"], tool="PowerShell")
+# The page edited and left unstaged is no commit of the page. A guard that refuses every commit after
+# a lint run is a false alarm.
+records_allow("a plain commit with an edited page left unstaged", VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("a commit of a product file added alone, with an edited page left unstaged",
+              VCS + " add src/app.py && " + VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("an add of the page, with no commit", VCS + " add docs/records.md", REC_LANES["unstaged"])
+
+# 3. The base's own page: allowed, as a merge of the base into the lane, or as a copy of its page.
+records_allow("a merge commit that brings the base's page", VCS + " commit -m x", REC_LANES["merge"])
+records_allow("a merge commit that brings the base's page, under PowerShell", VCS + " commit -m x",
+              REC_LANES["merge"], tool="PowerShell")
+records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
+# The stage-then-commit forms must hold the same line. A guard that refuses whenever the page on disk
+# differs from HEAD's, with no look at the base, refuses the merge and the remedy: both false alarms.
+for _lane in ("merge", "copy-base"):
+    records_allow("stage then commit: commit -am with the base's page, lane %s" % _lane, VCS + " commit -am x",
+                  REC_LANES[_lane])
+    records_allow("stage then commit: add -A and commit with the base's page, lane %s" % _lane,
+                  VCS + " add -A && " + VCS + " commit -m x", REC_LANES[_lane])
+records_allow("stage then commit: add -A and commit with the base's page, under PowerShell",
+              VCS + " add -A; " + VCS + " commit -m x", REC_LANES["copy-base"], tool="PowerShell")
+
+# 4. Nothing to compare, or git cannot be read: no hit.
+records_allow("a commit in a repository with no page", VCS + " commit -m x", REC_NOPAGE)
+records_allow("a commit of a staged page when the base cannot be read", VCS + " commit -m x", REC_NOBASE)
+records_allow("a commit in a directory that is no repository", VCS + " commit -m x", NOGIT)
+if os.name != "nt":
+    records_allow("a commit of a staged page when git cannot answer", VCS + " commit -m x",
+                  REC_LANES["staged"], env_path=GITBLIND)
+else:
+    skip_case("records-page: a commit of a staged page when git cannot answer is allowed", NO_STAND_IN)
+
+# 5. Text that only names the page is no commit of it.
+for _name, _command in (
+    ("a message that names the page", VCS + ' commit -m "docs/records.md is rebuilt only at merge"'),
+    ("a message that names the page, in a -F heredoc",
+     VCS + " commit -F - <<'EOF'\nthe page docs/records.md is not mine to rebuild\nEOF"),
+    ("an echo of a commit of the page", "echo '" + VCS + " commit -m x docs/records.md'"),
+    ("a log of the page", VCS + " log --oneline -- docs/records.md"),
+    ("a show of the page", VCS + " show origin/main:docs/records.md"),
+    ("a read of the page", "cat docs/records.md"),
+):
+    records_allow(_name, _command, REC_LANES["product"])
+
+# ---- the same two readings of a lone quote, a multi-line quoted message and a comment opener in a
+# string, building-scanner-respects-strings: the guard reads the command for a commit, so a quote or an
+# opener inside a message must neither hide a commit of the page nor invent one.
+records_deny("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
+             "staged")
+records_deny("a commit of a staged page after a comment opener inside a string",
+             'echo "# note // /* x"\n' + VCS + " commit -m x", "staged")
+records_deny("a commit of a staged page with a multi-line quoted message",
+             VCS + ' commit -m "first line\nsecond line"', "staged")
+records_allow("an echo of a commit inside a multi-line quoted string, with a staged page",
+              'echo "first\n' + VCS + ' commit -m x\nlast"', REC_LANES["staged"])
+
+# ---- review round 1 (coordinator). Each group says what the first guard missed.
+GEN, ADD_A, COMMIT_X = "python3 lint/hook_catalog.py", VCS + " add -A", VCS + " commit -m x"
+# One chain runs the generator, then stages and commits. The hook reads before the chain runs, so the
+# page on disk still equals HEAD's: the generator is what rewrites it. The generator is named by its
+# script, alone, with --records-only, or by a path. `--check` writes nothing.
+for _name, _command, _kw in (
+    ("--records-only", GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, {}),
+    ("no flag", GEN + " && " + ADD_A + " && " + COMMIT_X, {}),
+    ("a path", "python3 /home/dev/claude-settings/lint/hook_catalog.py --records-only && " + ADD_A + " && "
+     + COMMIT_X, {}),
+    ("--records-only, under PowerShell", GEN + " --records-only; " + ADD_A + "; " + COMMIT_X,
+     {"tool": "PowerShell"}),
+):
+    records_deny("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
+                 % _name, _command, "product", **_kw)
+records_allow("a chain that runs the generator with --check, then add -A and commit",
+              GEN + " --check && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain whose commit message names the generator",
+              ADD_A + " && " + VCS + ' commit -m "ran python3 lint/hook_catalog.py --records-only"',
+              REC_LANES["product"])
+records_allow("a chain that only echoes the generator",
+              'echo "' + GEN + ' --records-only" && ' + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+
+# The base is a stale local `main` (origin/HEAD dangles), and the lane merged origin/main: its page is
+# v1, which is origin/main's page, so it is allowed. A page that equals HEAD's, the base's or
+# origin/<base>'s page passes. A hand-rebuilt page is still refused. The chain form from a clean lane is
+# judged before the merge runs, so it is a pin, not a red.
+_dl = REC_DANGLE_LANES
+records_allow("a merge commit that brings origin/main's page when origin/HEAD dangles", COMMIT_X, _dl["merge"])
+records_allow("a merge commit that brings origin/main's page when origin/HEAD dangles, under PowerShell",
+              COMMIT_X, _dl["merge"], tool="PowerShell")
+records_allow("commit -am after a merge of origin/main when origin/HEAD dangles", VCS + " commit -am x",
+              _dl["merge"])
+records_allow("add -A and commit after a merge of origin/main when origin/HEAD dangles",
+              ADD_A + " && " + COMMIT_X, _dl["merge"])
+records_allow("a merge --no-commit of origin/main and a commit in one chain, origin/HEAD dangling",
+              VCS + " merge --no-commit origin/main && " + COMMIT_X, _dl["fresh"])
+records_deny("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
+
+# The page is untracked at HEAD (the base added it after the lane was cut). `commit -a` never stages an
+# untracked file, so it commits no page. `add -A` and an add of the page do.
+records_allow("commit -am when the page is untracked at HEAD", VCS + " commit -am x", REC_NEW_LANE)
+records_allow("commit -am when the page is untracked at HEAD, under PowerShell", VCS + " commit -am x",
+              REC_NEW_LANE, tool="PowerShell")
+records_allow("a plain commit when the page is untracked at HEAD", COMMIT_X, REC_NEW_LANE)
+records_deny("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
+records_deny("add of the page and commit when the page is untracked at HEAD",
+             VCS + " add docs/records.md && " + COMMIT_X, REC_NEW_LANE)
+
+# A commit that names its paths (`--` or --only) commits those paths and ignores the other staged
+# entries, so a page staged earlier rides in on no such commit. Naming the page itself still refuses.
+records_allow("a commit of src/app.py by path, with the page staged earlier", COMMIT_X + " -- src/app.py",
+              REC_LANES["staged-edit"])
+records_allow("a commit with --only of src/app.py, with the page staged earlier",
+              VCS + " commit --only -m x src/app.py", REC_LANES["staged-edit"])
+records_deny("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
+records_deny("a commit by path that names the page, with the page staged earlier",
+             COMMIT_X + " -- src/app.py docs/records.md", "staged-edit")
+
+# First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
+# page as no hit). A limit, named in the decision's holes.
+records_allow("a lane that creates the page where the base has none", COMMIT_X, REC_ADOPT_LANE)
+records_allow("a chain that runs the generator, then add -A and commit, where the base has no page",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_ADOPT_LANE)
+
+# The generator is read by its command word (or the script of a python interpreter), never by a token that
+# only names it. A reader, a linter, a log and a `--print` run write no page. A tool that runs it as its
+# command word, by a path or through `env`, does.
+records_allow("a chain that lints the generator, then add -A and commit",
+              "ruff check lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that reads the generator with cat, then add -A and commit",
+              "cat lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that logs the generator's history, then add -A and commit",
+              VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --print, then add -A and commit",
+              GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_deny("a chain that runs the generator as its own command word, then add -A and commit",
+             "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator through env, then add -A and commit",
+             "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+
+# The rule acts only when the base page opens with the generated header. A hand-written base page is no
+# hit: a staged edit of it, and a generator chain over it, pass.
+records_allow("a commit of a staged page edit where the base page is hand-written", COMMIT_X,
+              REC_PLAIN_LANES["staged"])
+records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
