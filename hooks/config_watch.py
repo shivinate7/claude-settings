@@ -368,7 +368,7 @@ def reading_text(reading) -> str:
 # keeps this watch the ONLY reader of it: MEASURED, `guard._cap_reading('"_subagentCapUntil": "..."')`
 # returns `{}`, so the PreToolUse ask never fires on this field alone.
 
-_MODEL_KEY = "CLAUDE_CODE_SUBAGENT_MODEL"
+_MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = "_subagentCapUntil"
 EXPIRY_MAX_AHEAD_HOURS = 24
 
@@ -380,10 +380,8 @@ def cap_lift_value(reading) -> bool:
     unread)") counts as a lift too. The expiry rule would rather ask for a deadline that turns
     out unneeded than stay silent on a value it cannot confirm is Sonnet.
     """
-    if _MODEL_KEY not in reading:
-        return False
-    value = (reading.get(_MODEL_KEY) or "").strip().lower()
-    return value != "sonnet"
+    return any((reading.get(key) or "").strip().lower() != "sonnet"
+               for key in _MODEL_KEYS if key in reading)
 
 
 def next_prior(reading, was, baseline):

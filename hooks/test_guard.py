@@ -399,6 +399,9 @@ PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
 PUSHTRUNKLOCAL = os.path.join(ROOT, "pushtrunklocal")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# PUSHSAMETAG sits on main and holds a TAG named main. There the short symbolic-ref read of HEAD
+# prints the ambiguous `heads/main`, which once hid the default branch from a lease push of HEAD.
+PUSHSAMETAG = os.path.join(ROOT, "pushsametag")
 PUSHDANGLING = os.path.join(ROOT, "pushdangling")
 # Where origin/HEAD does not name the branch, main AND master stay protected. PUSHNOHEADMAIN has
 # origin/main and no origin/HEAD. PUSHONLYMASTER has origin/master and no origin/HEAD (local main
@@ -1266,7 +1269,8 @@ def _build_push():
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
-                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None)):
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
+                                (PUSHSAMETAG, "main", "main")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1279,6 +1283,11 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    run_vcs(PUSHSAMETAG, "tag", "main")
+    if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHSAMETAG needs a tag named main that "
+                 "makes the short read of HEAD print an ambiguous name")
 
     run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
     if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
@@ -1506,7 +1515,7 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHDANGLING, PUSHNOHEADMAIN,
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -2347,6 +2356,12 @@ sh("heredoc: a body fed to a shell stays under inspection",
 sh("heredoc: a stash push in a python body still denies, in one command",
    "python3 - <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
+# An interpreter word that ends a name (`ts-node`, `node.cmd`) keeps its body in view too: INTERPRETER_HEREDOC
+# reads the word after `-` and before `.cmd`. The impeccable rule reads only shell bodies, so a stash is the probe.
+for _header in ("ts-node -", "babel-node -", "git-bash.exe -c", "node.cmd -"):
+    sh("heredoc: a stash push in a %s body still denies" % _header.split()[0],
+       _header + " <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
+       carries="stash stack")
 sh("heredoc: a python heredoc with the delimiter E-F, then a stash push, still denies",
    "python3 - <<E-F\nx = 1\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
@@ -4490,6 +4505,8 @@ sh("wsl: the wsl.exe launcher by path, through sh",
 sh("wsl: a distro launcher run id", "ubuntu.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a versioned distro launcher run id", "ubuntu2204.exe run id", "deny", rule=WSL_RULE,
    cwd=NOGIT)
+sh("wsl: a debian distro launcher run id", "debian.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a kali distro launcher run id", "kali.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a bare bash -c is Git bash and keeps its verdict", "bash -c x", "allow", cwd=NOGIT)
 sh("wsl: WSLENV exported in an earlier statement",
    "export WSLENV=PATH/p; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
@@ -5390,6 +5407,11 @@ push_case("forced to master when no origin/HEAD is read asks (fallback)", "--for
           "ask", cwd=PUSHNOHEAD)
 push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
           "ask", cwd=PUSHNOHEAD)
+# A tag named main makes the short read of HEAD print `heads/main`. The guard must still read main.
+push_case("a tag named like the branch, a lease push of HEAD on main asks",
+          LEASE.strip() + " origin HEAD", "ask", cwd=PUSHSAMETAG)
+push_case("a tag named like the branch, a bare lease push on main asks", LEASE.strip(), "ask",
+          cwd=PUSHSAMETAG)
 push_case("forced from a detached HEAD, no current branch to resolve, asks",
           "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
 push_case("forced where git cannot be read asks",
@@ -6494,7 +6516,7 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 
 # =========================================================================== 5b. the merge gate
 #
-# `git-wait-for-required-checks`. A merge made outside the merge tool is refused while the head has
+# Decision `merge-waits-on-every-check`. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
 
@@ -6602,6 +6624,7 @@ STAMPNOBLOCK = os.path.join(ROOT, "stamp_noblock")   # stamp.json, valid, no mer
 STAMPBAD = os.path.join(ROOT, "stamp_bad")           # stamp.json that is not JSON, but holds the word "merge"
 STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: it cannot be read
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
+STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
 
 
 def _build_stamp_repos():
@@ -6613,9 +6636,13 @@ def _build_stamp_repos():
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
     make_repo(STAMPDIR, {".github/stamp.json/keep": "x\n"})
     make_repo(STAMPLIST, {".github/stamp.json": '["merge"]\n'})
+    if LINKS_MADE:
+        os.makedirs(os.path.dirname(STAMPLINK), exist_ok=True)
+        os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST], _build_stamp_repos)
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK],
+             _build_stamp_repos)
 
 _BARE_GATE = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -6633,6 +6660,10 @@ sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
    **_BARE_GATE)
 sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
    "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+# A cwd that links from outside the repo into it is read where it really is, not where it is spelled.
+if LINKS_MADE:
+    sh("bare-merge: a cwd that is a symlink into a subfolder of the repo asks",
+       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GATE)
 # building-scanner-respects-strings: text in the call's own arguments hides no merge.
 sh("bare-merge: comment openers inside a quoted argument hide no merge",
    'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
@@ -8055,6 +8086,11 @@ add("cap: MultiEdit reaching an opus model asks", "ask", "subagent-model-cap", t
     carries=(OPUS,))
 add("cap: a managed settings file is a settings file", "ask", "subagent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
+# The workflow subagent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
+for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
+    add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
+        "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+        content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
 
 # THE EDIT LIST IS READ WHOLE. An earlier version read the first 200 edits, and the review MEASURED
 # the boundary that bought: 199 no-op edits ahead of the lift asked, 200 allowed. This case pins the

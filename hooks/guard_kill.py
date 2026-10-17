@@ -21,9 +21,9 @@ from guard_env import _substitutions
 
 # ------------------------------------------------------------------ a machine-wide kill
 #
-# CLAUDE.md: "Never kill a process you did not start. Treat `pkill -f` and `lsof -t` as
-# machine-wide." A kill BY NAME or BY PATTERN reaches every matching process on the machine,
-# including another agent's dev server, another person's worker, and the editor itself.
+# Rule `shared-trees-no-machine-wide-kill`: never kill a process you did not start. A kill BY NAME
+# or BY PATTERN reaches every matching process on the machine, including another agent's dev
+# server, another person's worker, and the editor itself.
 #
 # A KILL BY PID NAMES ONE PROCESS, so the name rules below pass it. It is judged by OWNERSHIP
 # instead: see `foreign_pid_kill`. `taskkill /PID` and `Stop-Process -Id` are the same act under
@@ -257,9 +257,8 @@ KILL_REASON = (
 # MEASURED 2026-09-23 on macOS: a subagent ran a background job inside a subshell,
 # `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at
 # once, pid 1 adopted the server, the harness never tracked it, and no pid was kept. Rule 2
-# above then correctly refused `pkill -f` and `lsof -t`, but its own remedy asks for "one
-# process id that this session started" and gives no way to get one, so the agent left the
-# server running. This rule closes that gap: it denies the LAUNCH, before a session can ever
+# above then correctly refused `pkill -f` and `lsof -t`, but its remedy asked for a process id
+# that this session started and gave no way to get one, so the agent left the server running. This rule closes that gap: it denies the LAUNCH, before a session can ever
 # reach a machine-wide kill trying to clean one up.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
