@@ -90,8 +90,4 @@ Home: mods/session-board/hooks/lib.mjs
 
 ## Holes, named
 
-Debts: `sb-pane-untested`, `sb-prompt-turn-end`, `sb-hook-order-unproven`, `sb-auto-approve-unseen`,
-`sb-host-calls-unbounded`, `sb-ghost-row-race`, `sb-safe-stop-origin`, `sb-config-folder-guess`,
-`sb-backoff-cap`, `sb-glob-path-names`, `sb-agents-json-cost`, `sb-filter-driver-runs`,
-`sb-store-not-shared`, `sb-process-desktop-unknown`, `sb-command-turn-unknown`,
-`plain-diff-secret-file-names`.
+Debts: `sb-pane-untested`, `sb-auto-approve-unseen`, `sb-store-not-shared`, `sb-process-desktop-unknown`, `sb-command-turn-unknown`.

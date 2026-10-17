@@ -124,5 +124,4 @@ Home: lint/check_silent_undo.py
 
 ## Holes, named
 
-Debts: `rebase-loss-before-base-unread`, `off-line-fork-reads-pre-cut`, `inplace-edit-under-0-9-flagged`,
-`undo-scan-cr-nul-false-alarm`.
+Debts: `inplace-edit-under-0-9-flagged`.

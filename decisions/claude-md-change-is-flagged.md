@@ -14,7 +14,7 @@ Why: the clone's `CLAUDE.md` is the install source. It reaches main only by a PR
 
 ## Holes, named
 
-Debt `rule-flag-not-enforced` (the bold flag is not enforced). A crash between the merge and the print loses the flag. A merge made with `gh pr merge` or the web page is not flagged.
+The bold flag is not enforced. A crash between the merge and the print loses the flag. A merge made with `gh pr merge` or the web page is not flagged.
 
 Kind: build
 Plan: decisions/claude-md-change-is-flagged.md#the-ruling (all)

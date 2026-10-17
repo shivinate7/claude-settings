@@ -2109,8 +2109,8 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 def impeccable_command_hit(raw: str) -> str:
     """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
     and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits are debts impeccable-python-body (a Python, Node, Perl or Ruby
-    body is not read) and impeccable-piped-shell-body."""
+    backticks it runs. The limits: a Python, Node, Perl or Ruby
+    body is not read, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):

@@ -15,7 +15,7 @@ Protected by `install-no-gap.test.ps1` (a reader loop over 20 install runs fails
 
 ## Holes, named
 
-Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand). Guard-set and pin-move holes are in `merge-reinstalls-from-main`.
+Guard-set and pin-move holes are in `merge-reinstalls-from-main`.
 
 Limit: a file that the installer cannot replace keeps its old stamp, so the guard denies every call until an install succeeds. The installer prints each such file and exits non-zero. The remedy is to run the installer from a terminal, which the guard does not gate.
 

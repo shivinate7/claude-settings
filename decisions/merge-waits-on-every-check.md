@@ -21,7 +21,7 @@ Home: merge/merge.py
 
 ## Holes, named
 
-- A workflow that GitHub has not created yet still reads as green. Debt `late-workflow-reads-green`.
+- A workflow that GitHub has not created yet still reads as green.
 
 ## Related
 

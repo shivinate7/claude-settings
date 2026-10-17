@@ -198,9 +198,7 @@ Home: settings.json
 
 ## Holes, named
 
-Debts: `skill-rows-fence-indent`, `skill-rows-test-gaps`, `skill-rows-posix-only-test`,
-`sendmessage-judge-blind-recvs`, `sendmessage-judge-dup-names`, `sendmessage-wording-judge-always`,
-`override-removal-unreminded` (removing the override file before its expiry has no check).
+Debts: `sendmessage-judge-blind-recvs`.
 
 ## What stays uncovered, on purpose
 

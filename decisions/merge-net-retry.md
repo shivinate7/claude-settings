@@ -49,16 +49,13 @@ Code: `merge/merge.py`.
   - MERGED at another head: stop, no revert.
   - Unreadable state: NetStop, no revert.
   - Lost reply and state OPEN: NetStop, no revert.
-  - Proven refusal: revert. `merge-net-open-reverts` names one case that also reverts.
+  - Proven refusal: revert.
 
 Reason: a 429 on the lock commit failed merge tries; a retried, bounded wait keeps a healthy merge from stopping.
 
 ## Holes, named
 
-Debts: `merge-net-open-reverts`, `merge-net-stop-may-have-merged`, `merge-net-no-retry-in-deadline`,
-`net-error-colon-http-refusal`, `lock-read-error-never-expires`, `rate-wait-outside-ttl-budget`,
-`ghlock-no-compare-and-swap`, `dead-run-extended-lock-blocks`, `expired-delete-net-error-stops`.
-Lane `merge-net-holes` takes `merge-net-open-reverts`.
+Debt: `dead-run-extended-lock-blocks`.
 
 ## Platforms
 

@@ -15,7 +15,7 @@ Why: one `gh run watch` made 131 API calls in 60 s, about 7,900 an hour. The cor
 - The secondary limit is separate: a per-minute cap on REST calls that several sessions' watchers can pass together. That watchers cause it is unmeasured. The merge tool waits 60, 300 and 900 s on a rate limit (`merge-net-retry`, what bin/merge does on a network error or a rate limit).
 - `ci_wake.wait_for` lists the head's runs again, at most once per 30 s, until a run that ran is judged. A skipped draft run counts as no run. A real run that starts after a judged one is never judged. Debt `ci-wake-lists-runs-once` (a later run is not judged).
 - A head whose only runs are skipped wakes the session with "unknown: no run yet" at the deadline, about 55 min after `gh pr ready`. Same debt.
-- A background `gh pr checks --watch` is still allowed, because the ruling names only `gh run watch`. Debt `pr-checks-watch-unmeasured` (the background checks watch is unmeasured).
+- A background `gh pr checks --watch` is still allowed, because the ruling names only `gh run watch`. The background checks watch is unmeasured.
 - The guard does not read a watch wrapped in `bash -c`, `cmd /c` or `pwsh -Command`, or a captured one such as `x=$(gh run watch 7)`. Guards stop Claude's mistakes, not an attacker (`guard-guards-mistakes-only`). Same debt.
 - A merge wait reads the checks and runs every 30 s, about 6 calls a minute. Unmeasured on a real run.
 

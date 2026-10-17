@@ -13,7 +13,7 @@
 # install.sh makes it) renames that directory to <clone>-live-<its commit> first; between the two
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
-# writes the files one at a time (debt pin-switch-in-place-mix, a live reader can see a mix there).
+# writes the files one at a time (a live reader can see a mix there).
 # The run tests for link rights before it moves anything, so a host without them never loses the
 # pin path.
 # The run takes the install lock the installers take (owner ruling 2026-10-15, install-set): one

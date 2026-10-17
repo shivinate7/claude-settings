@@ -25,9 +25,7 @@ Home: merge/merge.py
 
 ## Holes, named
 
-Debts: `merge-head-race-remains` (the push-to-ready race stays), `merge-head-any-check-licenses`,
-`merge-head-neutral-split`, `merge-head-wait-no-remedy`, `merge-head-preview-wrong`,
-`merge-head-shared-name-slot`, `merge-head-empty-reads-green`.
+Debts: `merge-head-race-remains` (the push-to-ready race stays).
 
 ## Named limits
 

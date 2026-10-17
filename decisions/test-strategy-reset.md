@@ -23,7 +23,3 @@ Reason: many guard cases each start a Python process, fixed sleeps cost time, so
 
 Kind: process
 Home: .github/workflows/gates.yml
-
-## Holes, named
-
-A merge of look-alike tests dropped three rows that each alone pinned a guard part. Debts: `split-paren-pkill-unpinned`, `split-quoted-hash-unpinned`, `reload-missing-file-unpinned`.

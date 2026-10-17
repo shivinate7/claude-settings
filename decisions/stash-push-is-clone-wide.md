@@ -25,4 +25,4 @@ Home: hooks/guard_shared_tree.py
 
 ## Holes, named
 
-Debts: `stash-create-false-refusal`, `stash-reminder-text-outside-repo`, `stash-read-to-run-race`.
+Debts: `stash-reminder-text-outside-repo`.

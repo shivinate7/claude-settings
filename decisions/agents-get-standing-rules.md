@@ -20,10 +20,6 @@ Why: a brief that forgot one line let an agent stash, or push in the wrong form.
 
 Protected by `hooks/test_agent_brief.py`, run in `gates`, `gates-macos` and `gates-windows-rest`, with a REQUIRED entry in `lint/test_windows_split.py`.
 
-## Holes, named
-
-Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no check reads the copy), `agent-plan-scope-line-general` (Plan and claude-code-guide get the general scope), `agent-brief-crash-silent` (a crashed hook leaves no visible trace), `agent-brief-no-matcher` (every agent type gets the context, because the hook has no matcher).
-
 Kind: build
 Plan: decisions/agents-get-standing-rules.md#the-ruling (all)
 Home: hooks/agent_brief.py

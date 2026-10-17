@@ -85,8 +85,3 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 - The gate checks that items exist and are homed. It does not check that the work is done.
 - `!` is not the opener: in the Claude Code terminal a leading `!` runs a shell command.
 
-## Holes, named
-
-Debts, in order of harm: `inbox-midturn-prompt-untested`, `inbox-path-drop-silent`, `inbox-done-forms`,
-`fb-judge-marker-race`, `fb-inbox-append-race`, `inbox-partial-write-fence`, `inbox-unreadable-drops-ids`,
-`fb-done-unclosed-fence`, `fb-done-forms-unpinned`.

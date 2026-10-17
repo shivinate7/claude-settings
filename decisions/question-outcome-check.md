@@ -89,7 +89,3 @@ Home: hooks/question_outcome.py
 characters off that text. A style file with no such line above an anchor would lose 2 characters from
 that rule. Not reachable today: both rule bullets start with "- ".
 
-## Holes, named
-
-Debts: `question-goal-line-masks-order`, `question-problem-line-forms`, `judge-fence-lookalikes`,
-`judge-cut-mark-reserve-over`, `model-clip-unmeasured`, `question-preface-punctuation`.

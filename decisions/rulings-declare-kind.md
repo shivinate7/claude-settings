@@ -74,5 +74,4 @@ Home: lint/check_ruling_kind.py
 - `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/`. It has no `--dir`. The guard
   reads the same `DIRS`, so a message that cites a `debts/` record by path is refused by cite-by-id
   (`git-cite-by-id`). That is intended.
-- Both slug lints skip an absolute file argument and a `.MD` name. CI cannot reach either. Debt:
-  `slug-lint-skips-abs-and-md`.
+- Both slug lints skip an absolute file argument and a `.MD` name. CI cannot reach either.

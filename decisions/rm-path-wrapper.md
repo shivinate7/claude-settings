@@ -36,10 +36,10 @@ Home: bin/rm
 
 ## Holes, named
 
-- The call must reach the shim. `/bin/rm`, `command rm`, `env -i rm`, a shell with no rc PATH line, and `find -delete` skip it. Debt `rm-shim-bypass-forms`.
-- Windows has no shim. `bin/rm` is posix only, and `install.ps1` skips it in its landing loop and in the post-merge hook it writes. Debt `rm-shim-windows`.
-- A cloud install adds no PATH line, so the shim is off there. Debt `rm-shim-cloud-path`.
-- The shell expands globs first. `rm -rf *` in the cwd arrives as a list of children, so it passes. Debt `rm-shim-glob-passes`.
-- Flags are read anywhere before `--`. On macOS `rm dir -rf` treats `-rf` as a file name, so the shim refuses a call that BSD `rm` would not run as recursive. GNU abbreviations such as `--rec` are not read as recursive, so such a call passes unjudged. Debt `rm-shim-flag-order`.
-- A recursive call pays one Python start (about 40 ms). The marker search reads the real `rm`'s first line byte by byte. Debt `rm-shim-call-cost`.
-- `rm -r link` is refused when `link` is a symlink to home, the cwd or a parent of the cwd. The real `rm` removes only the link. Debt `rm-shim-link-refused`.
+- The call must reach the shim. `/bin/rm`, `command rm`, `env -i rm`, a shell with no rc PATH line, and `find -delete` skip it.
+- Windows has no shim. `bin/rm` is posix only, and `install.ps1` skips it in its landing loop and in the post-merge hook it writes.
+- A cloud install adds no PATH line, so the shim is off there.
+- The shell expands globs first. `rm -rf *` in the cwd arrives as a list of children, so it passes.
+- Flags are read anywhere before `--`. On macOS `rm dir -rf` treats `-rf` as a file name, so the shim refuses a call that BSD `rm` would not run as recursive. GNU abbreviations such as `--rec` are not read as recursive, so such a call passes unjudged.
+- A recursive call pays one Python start (about 40 ms). The marker search reads the real `rm`'s first line byte by byte.
+- `rm -r link` is refused when `link` is a symlink to home, the cwd or a parent of the cwd. The real `rm` removes only the link.

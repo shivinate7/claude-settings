@@ -16,8 +16,6 @@ Protected by `mods/decision-watch/decision-watch.test.mjs`.
 
 ## Holes, named
 
-Debts: `dw-slash-cache-hit-reads-clean` (a /dw cache hit reads like a clean turn, and Stops seen caps at 500), `dw-log-write-failures-silent` (a lost log write is silent), `dw-slot-timers-unmeasured` (the slot timers are computed, not measured), `dw-log-keeps-model-text` (the log keeps model text that may hold a secret), `dw-where-exe-both-phases` (pickPython runs where.exe in both phases), `dw-stop-row-unproven` (the Stop row drop is unproven live), `dw-busy-stop-skipped` (a Stop during a judge is never judged), `dw-notice-lead-space-lost` (the log drops a notice's leading whitespace).
-
 Unverified:
 
 - Whether `classic.Stop` reaches a mod in the desktop app.

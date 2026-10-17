@@ -19,7 +19,7 @@ Why: a dangling `origin/HEAD` hid the default branch, and a repository with `ori
 
 ## Holes, named
 
-Debt: `base-read-midway-untested` (a verify that cannot run after an earlier "no" has no test; the code fails safe).
+A verify that cannot run after an earlier "no" has no test; the code fails safe.
 
 Kind: process
 Home: hooks/guard_core.py

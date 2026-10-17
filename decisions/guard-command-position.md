@@ -15,7 +15,7 @@ Why: each wrapper moved the command word off the slot the rules read, so a refus
 
 ## Holes, named
 
-Debts: `guard-substitution-in-token` (a substitution inside a token is not read). `env-split-string-wsl-only` (only the WSL rule reads `env -S`). `guard-wrapper-lists-closed` (an unlisted wrapper or value flag hides the command word). `guard-split-ignores-backslash` (no guard test denies the `\'` and `\"` forms). `cmd-c-script-skips-kill` (a `cmd /c` script is not read for a kill). `pwsh-cmd-script-gaps` (five pwsh or cmd script shapes pass). `in-throwaway-reads-paths-only` (`in_throwaway` reads paths only). `guard-cd-walk-extra-reading` (the second reading shows a cd that bash never runs). `guard-timeout-fails-open` (a long command can run unjudged). `guard-lone-quote-overdeny` (a lone quote can deny a clean commit). `guard-redirect-paren-heredoc` (three command shapes hide a kill). `guard-split-heredocs-here-string` (a here-string is read as a heredoc). `guard-interp-heredoc-lone-quote` (a lone quote in an interpreter heredoc hides a later command). `ps-script-block-not-read` (a PowerShell script block is not cut out as text). `cmd-c-quote-count-bash-reader` (the bash reader counts a cmd /c quote differently from cmd). `printf-quote-walk-bandaid` (the printf cut is a bandaid; the quote walk is the cause). `discards-output-slow-path` (the silent-write check re-walks each segment per redirect; unmeasured).
+Debts: `cmd-c-script-skips-kill` (a `cmd /c` script is not read for a kill). `guard-timeout-fails-open` (a long command can run unjudged).
 
 Kind: process
 Home: hooks/guard_core.py

@@ -25,7 +25,7 @@ not nag. Reason: a deny sends the writer back for another write.
   STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not run). md_sweep writes
   one Stop `deny` line per blocked run. The line format is in `guard-log-read-weekly`. A write with no
   fix, deny, fallback or unchecked outcome writes no line. A write with advisory findings only writes no
-  line (debt `advisory-note-not-logged`).
+  line.
 
 Files: `lint/ste_gate.py` (`autofix`, `run_autofix`, `rewrite_output`) and `lint/ste_lint.py`
 (`apply_fixes`). Logging: `lint/_transcript.py` (`guard_logger`).
@@ -38,7 +38,5 @@ Home: lint/ste_gate.py
 
 ## Holes, named
 
-Debts: `ste-edit-fence-blind`, `ste-hook-timeout-fails-open`, `ste-comment-gt-mask-early`,
-`ste-eg-in-fence-reported`, `ste-autofix-tests-linux-only`, `ste-macos-child-route-unverified`,
-`kept-bloat-rows-unaudited`. A rewrite of a bloat phrase can change meaning in a sentence that no test
+Debts: `ste-edit-fence-blind`, `ste-comment-gt-mask-early`. A rewrite of a bloat phrase can change meaning in a sentence that no test
 holds. How often a deny led to a retry is unmeasured.

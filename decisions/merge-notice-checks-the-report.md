@@ -26,5 +26,4 @@ Home: hooks/decision_watch.py
 
 ## Holes, named
 
-Debts: `merge-notice-unrelated-number` (a digit in the reply can suppress a real merge notice).
 A turn that merges and writes no report still fires the notice. That is the safe side.

@@ -25,16 +25,12 @@ The hook agrees with `hooks/guard.py` rule 6 (`merge-main`). `gh pr merge` runs 
 local ref. The next `git pull` moves local main to a commit origin already has, and the hook allows
 that. The hook refuses a ff, reset, `branch -f`, `update-ref` or delete that lands on a commit origin lacks.
 
-`gates.yml` runs the six tests. It does not call the templates. The nightly alarm is not enabled.
+`gates.yml` runs the six tests. It does not call the templates. CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
 The gate and the alarm are proved on their scripts, not on a hosted runner. The `action.yml` wrappers
 are unmeasured on a real run.
 
 Each template ships a test that goes red on its defect (`test_action.sh`, `test_readme_links.py`,
 `test_hook.sh`, `skip-locally-fail-in-ci.test.mjs`).
-
-## Holes, named
-
-Debt `ste-exclude-star-crosses-dir` (an STE-lint exclude star can skip files in deeper folders).
 
 Kind: process
 Home: rule:building-one-home-per-capability

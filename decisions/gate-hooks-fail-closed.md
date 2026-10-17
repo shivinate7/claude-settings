@@ -20,7 +20,7 @@ Protected by `hooks/test_wrappers.py`: each gate wrapper exits 2 with the remedy
 
 ## Holes, named
 
-Debts: `guard-timeout-fails-open` (a guard that times out lets the call through), `gate-remedy-needs-bash` (the remedy names `sh install.sh`, which Bash cannot run while the guard is missing), `install-sh-no-python-warning` (a Mac without python3 gets no warning), `prompt-hooks-fail-open` (a failed prompt hook lets the call through), `gate-own-errors-fail-open` (a gate's own internal errors exit 0), `gate-exit-7-unprobed` (exit 7 under onFailure block is not probed), `alias-skip-misses-case-forms` (mixed-case and backslash alias paths are not skipped), `install-ps1-counts-store-alias` (install.ps1 passes with only the Store python), `janitor-loop-no-alias-skip` (bin/claude-janitor keeps the old loop with no skip).
+Debts: `guard-timeout-fails-open` (a guard that times out lets the call through), `prompt-hooks-fail-open` (a failed prompt hook lets the call through).
 
 Limit: on PermissionRequest, exit 2 leaves the permission flow unchanged and discards stderr. A missing `rm_prompt_answer.py` shows the normal prompt with no remedy line. This is safe: the gate can only allow, so a prompt is the closed state. `test_wrappers.py` pins exit 2.
 
