@@ -73,6 +73,16 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("design-review"),
     os.path.normcase("impeccable"),
 )
+# THE LIVE PINNED CHECKOUT IS FROZEN (decision merge-reinstalls-from-main, ruling 1: no work runs in
+# the pinned checkout; owner ruling 2026-10-17 11:40 CDT). The links in the config directory load
+# from it, so a write there changes what every session runs. The pin is `<clone>-live`, and each
+# move leaves a stamped worktree `<clone>-live-<12 hex>`. This suffix is the one copy in Python.
+# merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay equal to it.
+# A folder counts as a pin only when the clone sits beside it, told by the two marker files below,
+# so an unrelated `something-live` folder stays editable.
+LIVE_PIN_SUFFIX = "-live"
+_LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?:-[0-9a-f]{12})?")
+_CLONE_MARKERS = ("settings.json", "install.ps1")
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 
@@ -96,8 +106,23 @@ def _literal_resolved(path: str, cwd: str) -> str:
     return os.path.normcase(os.path.normpath(_expanded(path, cwd)))
 
 
+def _in_live_pin(target: str) -> bool:
+    """True when the path is the pinned checkout or sits inside it (itself or a stamped one)."""
+    while True:
+        parent, name = os.path.split(target)
+        found = _LIVE_PIN.fullmatch(name)
+        if found:
+            clone = os.path.join(parent, found["clone"])
+            if all(os.path.isfile(os.path.join(clone, marker)) for marker in _CLONE_MARKERS):
+                return True
+        if not name or parent == target:
+            return False
+        target = parent
+
+
 def is_frozen(path: str, cwd: str) -> bool:
-    """True when the path is part of the harness configuration under the config directory.
+    """True when the path is part of the harness configuration under the config directory, or is
+    the live pinned checkout (`_in_live_pin`).
 
     A path is frozen when EITHER its literal spelling (no symlink followed) OR its fully
     resolved spelling (every symlink followed) sits under the config directory. The literal
@@ -120,6 +145,8 @@ def is_frozen(path: str, cwd: str) -> bool:
         resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))
     except Exception:
         return False
+    if _in_live_pin(literal) or _in_live_pin(resolved):
+        return True
     for target, root in ((literal, literal_root), (resolved, resolved_root)):
         if not target.startswith(root + os.sep):
             continue
@@ -151,9 +178,10 @@ def is_project_config(path: str, cwd: str) -> bool:
     return PROJECT_FROZEN_DIR in posix
 
 
-# Commands that change a file named in their arguments. `cp` and `mv` stay on the list even when the
-# frozen path is their source rather than their target, because guessing wrong on `mv` loses the
-# file. Deliberate over-blocking, narrow in scope.
+# Commands that change a file named in their arguments. `mv` stays on the list even when the frozen
+# path is its source, because guessing wrong on `mv` loses the file. `cp` FROM a frozen path to a
+# path outside the frozen set only reads it, and is allowed (`_copy_reads`, owner ruling 2026-10-17
+# 11:40 CDT). Deliberate over-blocking elsewhere, narrow in scope.
 #
 # MEASURED in q_max on 2026-09-09 with a POSIX-only list: `Set-Content`, `Out-File`, `Add-Content`
 # and `Remove-Item` each wrote a frozen path unrefused. Matching folds case, as PowerShell does.
@@ -393,6 +421,51 @@ def _runs_stored_text(segment: str, words, plain: str) -> bool:
     return _name(command) == "printf" and any(word.startswith("-v") for word in words)
 
 
+# COPY-OUT. `cp SRC... DEST` writes only DEST. Only plain POSIX flags are read (a PowerShell
+# `-Destination` fails closed to a deny), and a DEST built from a variable, a glob or a brace fails
+# closed too. DEST also counts as hit when it is a directory the predicate hits (`DEST/_`), so a
+# frozen file copied into a frozen folder stays denied.
+_CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxlsTS]+|--[a-z][a-z-]*(?:=.*)?|--")
+_CP_TARGET = re.compile(r"-[RrfiaHLPpnvuxlsTS]*t|--target-directory")
+_CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
+
+
+def _copy_reads(raw, predicate, cwd):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
+    words = [_unquoted(word) for word in raw]
+    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    if _name(raw[start] if start < len(raw) else "") != "cp":
+        return set()
+    operands, target, index = [], None, start + 1
+    while index < len(words):
+        word = words[index]
+        if _CP_TARGET.fullmatch(word):
+            target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
+            if target is None:
+                return set()
+            continue
+        if word.startswith("--target-directory="):
+            target = word.split("=", 1)[1]
+        elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
+            target = word[2:]
+        elif _CP_FLAGS.fullmatch(word):
+            pass
+        elif word.startswith("-") or ">" in word or "<" in word:
+            return set()
+        else:
+            operands.append(index)
+        index += 1
+    if target is None:
+        if len(operands) < 2:
+            return set()
+        target = words[operands.pop()]
+    if not operands or not target or _CP_DEST_UNSAFE.search(target):
+        return set()
+    if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
+        return set()
+    return set(operands)
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
     cmd = _resolve_vars(cmd)
@@ -405,7 +478,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
-        data = ()
+        data = set() if closed else _copy_reads(raw, predicate, cwd)
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -414,11 +487,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
             runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
-                data = _data_words(kinds[number], raw)
+                data = data | _data_words(kinds[number], raw)
         words = []
         for index, word in enumerate(raw):
             if index in data:
-                words.append('""')   # data: no redirect or `tee` in it runs
+                words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
             else:
                 words.extend(_words_of(word) if "'" in word or '"' in word else [word])
         text = " ".join(words)

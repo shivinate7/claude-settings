@@ -21,10 +21,16 @@ deny it. It passes, and the invariant is restored. See the rule list and the
 pointer-head rule in the `hooks/guard.py` docstring.
 
 **The clone is not frozen.** Rule 7 freezes `hooks`, `lint`, `agents`, and
-`state` under the config directory, and denies a session's own write there. The
-clone of claude-settings on disk is a separate, unfrozen path. A hook that
-breaks after landing can still be fixed at its source and reinstalled. See
-`hooks/guard.py:1636`, "THE CLONE ITSELF IS NOT FROZEN."
+`state` under the config directory, and denies a session's own write there. Owner
+ruling 2026-10-17 11:40 CDT adds the live pinned checkout `<clone>-live` and its
+stamped worktrees `<clone>-live-<12 hex>`, where a clone sits beside them (decision
+merge-reinstalls-from-main, ruling 1: no work runs in the pinned checkout). The
+same ruling lets `cp` copy a frozen file OUT to a path outside the frozen set, since
+that only reads it. The clone of claude-settings on disk is a separate, unfrozen
+path. A hook that breaks after landing can still be fixed at its source and
+reinstalled. Running `bash merge/install_from_main.sh` or `python3 bin/merge N
+--confirm` stays allowed, from the clone and from the pin. See
+`hooks/guard_frozen.py`, "THE CLONE ITSELF IS NOT FROZEN."
 
 ## The outside measurement
 
