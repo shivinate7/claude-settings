@@ -12,15 +12,15 @@ worktree remove?
 Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the
 untracked link).
 
-## Measured facts
+## Counted facts
 
-18 shared-tree asks sit in `~/.claude/guard.log` since 2026-09-16. The
+18 shared-tree asks sit in `~/.claude/guard.log` since 2026-09-16 (a lower bound, one machine). The
 owner reports the prompt is frequent in agent-heavy repos. There, it
 carries nothing to judge. The lane is the agent's own. The agent's
 commits already sit on its own branch. They sit in its own reflog too,
 before any discard runs.
 
-MEASURED in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11: 26
+Counted in guard.log (a lower bound, one machine), this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11: 26
 `shared-tree` asks, about one a day (decision guard-log-read-weekly, the guard log read by a
 note). The ask writes a line there; it is the transcript that holds none.
 
