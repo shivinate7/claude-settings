@@ -1170,6 +1170,16 @@ def run_write_gate(text, name="t.md"):
     return run, out
 
 
+def note_text(run):
+    """The note a hook printed, as one string: systemMessage and additionalContext. "" when it
+    printed none. Either field shows the note to the reader, so a case does not pick one."""
+    if not run.stdout.strip():
+        return ""
+    out = json.loads(run.stdout)
+    parts = (out.get("systemMessage"), (out.get("hookSpecificOutput") or {}).get("additionalContext"))
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
 class OneSentenceBudgetTests(unittest.TestCase):
     """Owner ruling 2026-10-17: one sentence budget of 30 words, procedural or descriptive.
     The procedural limit of 20 and the descriptive limit of 25 are gone."""
@@ -1280,13 +1290,17 @@ class AdvisoryCodesTests(unittest.TestCase):
                 self.assertEqual(data["summary"]["error"], 0, data["findings"])
                 self.assertEqual(rc, 0)
 
-    def test_a02_the_gate_neither_denies_nor_rewrites_an_advisory_code(self):
+    def test_a02_the_gate_notes_an_advisory_code_and_neither_denies_nor_rewrites(self):
+        # Owner's nudge ruling (orchestrator call 4): an advisory must be seen. The write goes
+        # ahead, unchanged, with a note that names the code.
         for code, text in ADVISORY_SAMPLES.items():
             with self.subTest(code=code):
                 run, out = run_write_gate(text)
                 self.assertEqual(run.returncode, 0, run.stderr)
-                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn(out.get("permissionDecision"), ("deny", "ask"), out)
                 self.assertNotIn("updatedInput", out)
+                self.assertNotIn("decision", json.loads(run.stdout) if run.stdout.strip() else {})
+                self.assertIn(code, note_text(run), "no note for %s: %r" % (code, run.stdout))
 
     def test_a03_all_six_in_one_file_still_pass_the_cli_and_the_gate(self):
         text = "\n".join(ADVISORY_SAMPLES.values())
@@ -1296,6 +1310,51 @@ class AdvisoryCodesTests(unittest.TestCase):
         run, out = run_write_gate(text)
         self.assertNotEqual(out.get("permissionDecision"), "deny", out)
         self.assertNotIn("updatedInput", out)
+        for code in ADVISORY_CODES:
+            with self.subTest(code=code):
+                self.assertIn(code, note_text(run))
+
+    def test_a05_a_clean_write_prints_nothing(self):
+        # Guard: green before and after. A note on clean text is a guard that cries wolf.
+        run, out = run_write_gate("This is a short clean sentence.\n")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_a06_a_fix_and_an_advisory_in_one_write_show_both(self):
+        # "in order to" is a kept bloat fix. The advisory must not be lost when a fix lands.
+        run, out = run_write_gate("Close the valve in order to stop the pump.\n\n"
+                                  "They'd finished the work.\n")
+        self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+        self.assertIn("Close the valve to stop the pump.", json.dumps(out.get("updatedInput", {})))
+        self.assertIn("STE008", note_text(run))
+
+    def test_a07_an_edit_notes_only_the_changed_block(self):
+        head = "They'd finished the work.\n\nThis is a short clean sentence.\n"
+        rows = [
+            # Catches: an advisory in an untouched block is noted again on every edit.
+            ("This is a short clean sentence.\n", "This is one more short clean sentence.\n", False),
+            # Catches: an advisory the edit adds is not noted.
+            ("This is a short clean sentence.\n", "Send the report via email.\n", True),
+        ]
+        for old, new, noted in rows:
+            with self.subTest(noted=noted):
+                with tempfile.TemporaryDirectory() as d:
+                    target = os.path.join(d, "t.md")
+                    with open(target, "w", encoding="utf-8") as f:
+                        f.write(head)
+                    run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                                              "tool_input": {"file_path": target, "old_string": old,
+                                                             "new_string": new}})
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout).get("hookSpecificOutput", {}) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
+                note = note_text(run)
+                self.assertNotIn("STE008", note, "an advisory outside the edit was noted")
+                if noted:
+                    self.assertIn("STE007", note)
+                else:
+                    self.assertEqual(note, "")
 
     def test_a04_the_advisory_samples_are_what_they_say(self):
         # The samples above hold their code and no error code, so the cases are not vacuous.
@@ -1456,14 +1515,44 @@ class MdSweepTests(unittest.TestCase):
                 self.assert_blocks(run, name)
                 self.assertIn("STE013", json.loads(run.stdout).get("reason", ""))
 
-    def test_25b_advisory_findings_never_block_the_sweep(self):
+    def test_25b_advisory_findings_never_block_the_sweep_but_are_reported(self):
         # Owner ruling 2026-10-17: STE003, STE007, STE008, STE009, STE015 and STE017 are warnings.
-        # The sweep lints at error severity, so a file holding only these does not block.
+        # A file holding only these does not block, and the sweep names the code in a note
+        # (orchestrator call 4: an advisory must be seen).
         for code, text in ADVISORY_SAMPLES.items():
             with self.subTest(code=code):
                 self._fresh_root()
                 self._write_md("notes.md", text)
-                self.assert_no_block(self.run_sweep())
+                run = self.run_sweep()
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn(code, note_text(run), "no note for %s: %r" % (code, run.stdout))
+                self.assertIn("notes.md", note_text(run))
+
+    def test_25c_the_sweep_note_follows_the_changed_block_only(self):
+        head = "They'd finished the work.\n\nThis is a short clean sentence.\n"
+        rows = [
+            # Catches: an advisory in an untouched block is noted again on every turn.
+            ("This is a short clean sentence.\n", "This is one more short clean sentence.\n", False),
+            # Catches: an advisory in the changed block is not noted in a git work tree.
+            ("They'd finished the work.\n", "They'd finished the job.\n", True),
+        ]
+        for old, new, noted in rows:
+            with self.subTest(noted=noted):
+                self._fresh_root()
+                self._init_git()
+                self._write_md("notes.md", head)
+                self._git_commit_all()
+                self._write_md("notes.md", head.replace(old, new))
+                run = self.run_sweep()
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout) if run.stdout.strip() else {}
+                self.assertNotEqual(out.get("decision"), "block", out)
+                if noted:
+                    self.assertIn("STE008", note_text(run))
+                else:
+                    self.assertEqual(note_text(run), "")
 
     def test_26_new_clean_markdown_no_block(self):
         rows = [

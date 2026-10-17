@@ -5,9 +5,11 @@ The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed tex
 PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
 Owner ruling 2026-10-17 (turn the STE lint into a plain-prose lint): the fixer keeps only the
-fixed bloat phrases of STE011, minus the three the debt ste-fix-changes-meaning names (in between,
-in terms of, it would appear that). Every Latin (STE007), contraction (STE008) and nominalization
-(STE003) fix is gone, and no fix changes the case of the text it swaps. The sentence budget is one
+fixed bloat phrases of STE011, minus eight rows. The orchestrator's calls of the same day: the three
+the debt ste-fix-changes-meaning names (in between, in terms of, it would appear that) leave the
+table entirely, and five borderline rows (in a timely manner, along the lines of, close down, of major
+importance, except when) stay errors with no fix. Every Latin (STE007), contraction (STE008) and
+nominalization (STE003) fix is gone, and no fix changes the case of the text it swaps. The sentence budget is one
 number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs, condition order
 and omitted "that" are advisory warnings: reported, never a deny, never a rewrite.
 
@@ -536,6 +538,94 @@ class RemovedFixesGateTests(_GateCase):
             with self.subTest(family=name):
                 out = self._assert_not_rewritten("\n".join(t for _, t in rows))
                 self.assertNotEqual(out.get("permissionDecision"), "deny")
+
+
+# ------------------------------------------------------------------ eight STE011 rows without a fix
+
+# Five borderline rows (orchestrator's call 2, 2026-10-17): the phrase is still an error, and no
+# rewrite is applied. The swap changes meaning or tone in some contexts.
+BORDERLINE_BLOAT = [
+    ("in_a_timely_manner", "Send the report in a timely manner.\n"),
+    ("along_the_lines_of", "The design is along the lines of the old one.\n"),
+    ("close_down", "Operators close down the plant at night.\n"),
+    ("of_major_importance", "This task is of major importance to the crew.\n"),
+    ("except_when", "Do not run it except when the gauge reads zero.\n"),
+]
+# The three debt phrases (orchestrator's call 3): out of the STE011 table, so the linter says
+# nothing and the gate neither denies nor rewrites.
+DROPPED_BLOAT = [row for row in DEBT_EXAMPLES
+                 if row[0] in ("in_between", "in_terms_of", "it_would_appear_that")]
+
+
+def _findings(text):
+    return ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)
+
+
+class BorderlineBloatTests(_GateCase):
+    """The five borderline rows stay STE011 errors and are never rewritten."""
+
+    def test_o01_still_an_error_in_the_linter(self):
+        # Guard: green before and after. The row is kept, only its fix goes.
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                hits = [f for f in _findings(text) if f.code == "STE011"]
+                self.assertTrue(hits)
+                self.assertEqual({f.severity for f in hits}, {"error"})
+
+    def test_o02_apply_fixes_leaves_the_text(self):
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+
+    def test_o03_write_is_denied_for_the_phrase_and_never_rewritten(self):
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("STE011", out["permissionDecisionReason"])
+                self.assertNotIn("updatedInput", out)
+
+    def test_o04_edit_is_denied_for_the_phrase_and_never_rewritten(self):
+        target = self._write("e.md", "Intro.\n")
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                             "new_string": text}))
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("STE011", out["permissionDecisionReason"])
+                self.assertNotIn("updatedInput", out)
+
+
+class DroppedBloatTests(_GateCase):
+    """The three debt phrases are not rules any more: no finding, no deny, no rewrite."""
+
+    def test_o05_the_linter_reports_no_ste011(self):
+        for rid, text in DROPPED_BLOAT:
+            with self.subTest(phrase=rid):
+                self.assertEqual([f.code for f in _findings(text) if f.code == "STE011"], [])
+
+    def test_o06_write_is_neither_denied_nor_rewritten(self):
+        for rid, text in DROPPED_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
+
+    def test_o07_edit_is_neither_denied_nor_rewritten(self):
+        target = self._write("e.md", "Intro.\n")
+        for rid, text in DROPPED_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                             "new_string": text}))
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
+
+    def test_o08_the_kept_rows_still_get_their_fix(self):
+        # Guard: green before and after. Dropping eight rows must not drop the rest.
+        self.assertEqual(ste_lint.apply_fixes("Prior to startup, check the oil.\n")[0],
+                         "Before startup, check the oil.\n")
+        self.assertEqual(ste_lint.apply_fixes("Close it in order to stop the pump.\n")[0],
+                         "Close it to stop the pump.\n")
 
 
 # ------------------------------------------------------------------ UI files: no rewrite
