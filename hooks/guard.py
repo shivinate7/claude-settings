@@ -50,7 +50,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
-                       (which-start-shapes-outlive-the-agent-on-windows)
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   background-end       deny. A background command with no end note. (background-needs-end-note)
@@ -323,8 +322,7 @@ def __getattr__(name):
 # landing are both gone, together, always.
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
 
-# Gap roster, 2026-10-03. Banchi's scripts/silent-write-guard.py refused these shapes and this
-# shared guard missed them. Each one moves a ref or lands a merge, so each is a write when its
+# Gap roster. Each one moves a ref or lands a merge, so each is a write when its
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
@@ -1190,7 +1188,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     return ""
 
 
-# ---- a message that names a lane by its session number (owner ruling 2026-10-13)
+# ---- a message that names a lane by its session number
 LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
 LANE_QUOTED = re.compile(
     r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
@@ -1621,9 +1619,7 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
-# ASK ALONE (owner rulings 2026-10-14 10:52 and 13:18; incident 2026-10-14 10:51 CDT, an optional
-# `git worktree prune` chained with two more steps sent the whole command to the owner as one
-# permission prompt). A step that would ASK is held, not printed, while the other rules run, so a
+# ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
 # `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
 # harmless lead or tail (harmless_steps, below). The deny
@@ -1679,7 +1675,7 @@ def count_steps(text: str) -> int:
     return steps
 
 
-# THE HARMLESS ADDITIONS (owner ruling 2026-10-15, decision ask-steps-run-alone). Two forms are no
+# THE HARMLESS ADDITIONS (decision ask-steps-run-alone). Two forms are no
 # extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
