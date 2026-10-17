@@ -11,26 +11,7 @@ No running session judges a call with a missing, short or mixed set of hook file
 
 Why: a post-merge hook that copied in place gave every session's Bash call guard-crash for a few seconds (arbiter rulings 2026-10-14 03:41 and 03:50 CDT).
 
-Protected by `install-no-gap.test.ps1` (a reader loop over 20 install runs fails on a missing path, a short read, or a mixed `INSTALL_ID` that outlasts the guard's wait) and `hooks/test_guard.py`, family `reload-stamp` (a truncated module, a missing module and a mismatched stamp, each fixed during the wait and never fixed).
-
-## Holes, named
-
-Guard-set and pin-move holes are in `merge-reinstalls-from-main`.
-
-Limit: a file that the installer cannot replace keeps its old stamp, so the guard denies every call until an install succeeds. The installer prints each such file and exits non-zero. The remedy is to run the installer from a terminal, which the guard does not gate.
-
-## Build plan
-
-Code in `install.ps1`, `install.sh` and `hooks/guard.py`.
-
-### windows
-
-`install.ps1` and the post-merge hook it writes. CI runs `install-no-gap.test.ps1` on windows-latest.
-
-### macos
-
-`install.sh` links the hooks in local mode, so no copy runs. Its cloud mode copies, with the same temp-then-rename.
-
-Kind: build
-Plan: decisions/install-hooks-whole.md#windows (windows)
-Plan: decisions/install-hooks-whole.md#macos (macos)
+Kind: process
+Home: install.sh
+Home: install.ps1
+Home: hooks/guard.py
