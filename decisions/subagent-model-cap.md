@@ -1,15 +1,24 @@
 # Subagent model cap
 
 CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry
-records how the worker-model rule is mechanized after
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. The owner dropped it. That is settled
-and this entry does not reopen it.
+records how the worker-model rule is mechanized. The owner dropped
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. That is settled and this entry does not reopen it.
 
-The short answer: each agent role has its own pinned model and effort, by owner ruling
-2026-10-07 (see "The model per role"). Sonnet is the default. Haiku runs only in the
-roles the owner named. Opus runs only for Plan, the advisor, the builder's third try by standing word (2026-10-12), and a spawn the owner names.
-`CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
-expiry both stay, because both key on the model variable and never on the force flag.
+Each agent role has its own model and effort, by owner ruling 2026-10-07 (see "The model
+per role"). Sonnet is the default. Haiku runs only in the roles the owner named. Opus runs
+only for Plan, the advisor, the builder's third try by standing word (2026-10-12), and a
+spawn the owner names.
+
+Where each part lives:
+
+- The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`, and
+  `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it. `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`
+  is 1. `hooks/test_wrappers.py` checks all three.
+- The floor: guard rule `subagent-model-floor`.
+- The step-up: guard rule `roles-third-try-steps-up`.
+- A write that sets the fallback: guard rule `subagent-model-cap`, always an ask. Its expiry:
+  `hooks/config_watch.py`.
+- The ceiling: prose only.
 
 ## The model per role, ruled 2026-10-07, 2026-10-10, 2026-10-12 and 2026-10-13
 
@@ -85,38 +94,60 @@ Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence).
 ## The ceiling
 
 Sonnet is the ceiling for every role but three standing exceptions, by owner rulings
-2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner
-watches its cost. A reviewer's round 3 may run Opus on the owner's word for that spawn
-(owner, 2026-10-12). A permission prompt cannot time out in Claude Code, so the guard allows
-Opus at round 3 and the owner's word stays prose. Round 2 stays Sonnet only. Any other agent runs Opus only on the owner's word, for the spawn the
-owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
-it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
+2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The
+builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner watches its
+cost. A reviewer's round 3 may run Opus on the owner's word for that spawn (owner, 2026-10-12).
+A permission prompt cannot time out in Claude Code, so the guard allows Opus at round 3 and the
+owner's word stays prose. Round 2 stays Sonnet only. Any other agent runs Opus only on the
+owner's word, for the spawn the owner names.
+
+Prose alone enforces the ceiling, and no forcing returns (owner, 2026-09-28). A hook cannot
+hold it. Claude Code emits no rank over models, so a rank in a hook copies a list
+(`building-allow-list-is-the-constant`) and goes stale the day a model ships. CLAUDE.md
+`roles-sonnet-is-the-ceiling` states the ceiling, and `lint/rule_mechanisms.json` records it as
+`unmechanized`.
 
 ## The floor
 
 Haiku runs only in Explore, claude-code-guide, test-author, reviewer and record-writer. Every
-other role
-has Sonnet as the floor. These places enforce it.
+other role has Sonnet as the floor. Two places enforce it. Both read one list, `HAIKU_ROLES` in
+`hooks/guard.py`.
 
-- Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task` call
-  whose `model` holds "haiku", unless its `subagent_type` is one of the Haiku roles.
-- The same guard rule reads a `Workflow` script. It denies an `agent()` call that names a
-  Haiku model outside the Haiku roles. It also denies a `start_session` that names Haiku.
+- Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task` call whose
+  `model` holds "haiku", unless its `subagent_type` is a Haiku role. It reads a `Workflow` script
+  too: it denies an `agent()` call that names a Haiku model outside the Haiku roles. It also
+  denies a `start_session` that names Haiku.
 - `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an
-  `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file
-  is one of the Haiku roles.
+  `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file is one
+  of the Haiku roles.
 
-Both read one list of Haiku roles, `HAIKU_ROLES` in `hooks/guard.py`. The Workflow
-check reads string literals in each `agent(` call. It does not see a model or role built at
-run time. Examples: a variable, a spread, an alias, a concatenation, a ternary, a computed
-key, a template `${}`. A regex literal that holds a quote also hides the call that follows it. Known limit: a built-in agent with no file here picks
-its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
-ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
+The floor has no CLAUDE.md anchor (decision `claude-md-shrink`, guard and gate rules leave the
+prose).
 
-The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 reviewer runs on Sonnet, its ceiling. A round 3 reviewer runs Sonnet, or Opus on the owner's word. A try 3 builder needs Opus.
+The Workflow check reads string literals in each `agent(` call. It does not see a model or role
+built at run time. Examples: a variable, a spread, an alias, a concatenation, a ternary, a
+computed key, a template `${}`. A regex literal that holds a quote also hides the call that
+follows it. Known limit: a built-in agent with no file here picks its own model and never puts
+it in the tool input. Measured 2026-10-07: the built-in Plan ran Opus 5.5 and general-purpose
+ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
-Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
-argument. This ruling overrides them.
+## The step-up
+
+Guard rule `roles-third-try-steps-up` in `hooks/guard.py` reads the `Round N of 3` or
+`Try N of 3` line in the brief of an `Agent` or `Task` call. A round 2 reviewer runs on Sonnet,
+its ceiling. A round 3 reviewer runs Sonnet, or Opus on the owner's word. A try 3 builder needs
+Opus. The Agent prompt hook in `settings.json` does not hold this check.
+
+Named limits:
+
+- Only a line that starts with `Round N of 3` or `Try N of 3` counts. `Round 2/3`,
+  `- Round 2 of 3`, `**Round 2 of 3**` and `# Round 2 of 3` pass unseen.
+- The role compare is exact, so a plugin type such as `x:reviewer` is not checked.
+- A `Workflow` script `agent()` call is not checked.
+- The reviewer test is a substring match on "sonnet". A made-up model such as `opus-sonnet`
+  passes. No real model id holds both names.
+- A round 1 reviewer brief with a prose line that starts `Round 2 of 3` is denied. The refusal
+  names the fix.
 
 ## The record-writer boundary, ruled 2026-10-10
 
@@ -132,10 +163,9 @@ Known limit: `agents/*.md`, `skills/*/SKILL.md` and output styles are `.md` but 
 The ruling names CLAUDE.md-style docs, so they stay in scope. `lint/check_agent_models.py` still
 catches a Haiku `model:` pin written into one.
 
-## The precedence, corrected
+## The precedence
 
-The sub-agents documentation gives this order. The first entry that names a model
-wins.
+The sub-agents documentation gives this order. The first entry that names a model wins.
 
 1. The per-invocation `model` parameter.
 2. The subagent definition's `model` frontmatter. A value of `inherit` means that the
@@ -153,316 +183,106 @@ Four dated behaviour changes bound any reasoning about this order.
 - In v2.1.211, a per-invocation model started to survive a subagent resume.
 - In v2.1.257, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` arrived.
 
-## A pin is not a ceiling
+## No pin, no per-spawn gate
 
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses the whole order onto entry 3. Every
-other entry is dropped before the tool call runs. That is a pin, not a ceiling. It
-held Opus back exactly as hard as it held Haiku back. The owner wants both halves
-held, but the ceiling by prose alone, with no pin. The floor blocks Haiku by its own
-rule.
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses the whole order onto entry 3. That is a pin, not
+a ceiling: it holds Opus back exactly as hard as Haiku. The owner wants both halves held, the
+ceiling by prose alone. A pin cannot match a tier to a lane in either direction. With the flag
+gone:
 
-The earlier version of this entry called the pin a cap. That word was wrong, and the
-wrong word hid the cost. The rule the owner wants is about matching a tier to a lane.
-A pin cannot express that rule in either direction.
+- The variable is a true fallback. At entry 3 it decides only the spawns that name no model and
+  whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
+  spawn reads the fallback.
+- A per-call model reaches the tool payload, so a `PreToolUse` hook on `Agent` can read the
+  model a spawn names.
+- A spawn that names nothing still runs Sonnet.
 
-## What dropping the force flag changes
+No per-spawn gate guards the ceiling. Three reasons, in order of weight:
 
-Three things change, and each one matters to a question below.
+- An ask blocks the dispatch. A fan-out of four lanes stalls at the first ask until the owner
+  returns. The gate costs parallelism, not tokens.
+- A gate fires on over-provisioning, which costs 2.5 times the tokens of one lane. It is blind
+  to under-provisioning, which costs a rework cycle: a lane runs 25 to 60 minutes, and a retry
+  re-sends the full context. A cheaper model that fails more often costs more per solved task.
+- A gate covers by shape. An `Agent` call shows its model. A `Workflow` script that computes
+  `model` in a variable, a fork, and a skill run in a subagent with `model: inherit` show none.
+  A gate silent where model freedom is greatest gives false confidence.
+  `guard-that-cries-wolf-is-spent` names the opposite failure.
 
-The variable becomes a true fallback. At entry 3 it decides only the spawns that name
-no model and whose definition names no model. MEASURED 2026-09-22: neither
-`~/.claude/agents/builder.md` nor `~/.claude/agents/reviewer.md` carries a `model:`
-key. Both roles therefore read the fallback. The default has a real subject.
+A justification line is the wrong mechanism. The reason is written after the model is chosen, so
+it defends the choice and does not change it. Sources:
 
-A per-call model reaches the tool payload again. Under the pin, the harness dropped
-that field before the permission layer saw it, so no hook could read it. Entry 1 is
-live again. A `PreToolUse` hook on `Agent` can now read the model a spawn names.
+- Lerner and Tetlock, 1999, Psychological Bulletin 125: 255-275.
+- Hoffmann, Gaissmaier and von Helversen, 2017, Judgment and Decision Making 12: 627-641.
 
-Nothing shifts by default. The fallback value stays `sonnet`, so a spawn that names
-nothing still runs Sonnet, exactly as it did under the pin.
+A gate that reads a model id from a payload it cannot always resolve needs a new shape test for
+each gap. Each test adds a false ask. The one line before dispatch (`roles-opus-shaped-say-so`)
+fits the evidence. It names the reason before the choice, to an audience whose view is unknown.
 
-## The outcome evidence
+One gate stays: guard rule `subagent-model-cap` asks on a write that changes the fallback. A
+write is a standing change, not a dispatch, so the ask stalls nothing mid-fan-out.
 
-Gathered 2026-09-22. It points one way on tiering and the other way on pinning.
+## The grant
 
-For tiering down (superseded by the floor, kept as evidence). Anthropic's multi-agent research reports a 90.2 percent gain over a
-single-agent Opus run, by distributing work to Sonnet subagents with isolated
-context. The Opus 4.5 system card shows an Opus orchestrator with Sonnet 4.5
-subagents at 85.4 percent. Subagent choice moves end-to-end results. Routing guides
-report a 5 to 10 times cost reduction with Haiku subagents on retrieval and pattern
-work. No public benchmark covers the tasks Haiku is actually recommended for, so the
-SWE-bench gap probably overstates the difference on those tasks.
-
-Against any static pin. The metric is cost per solved task. A cheaper model that
-fails more often costs more once retries are counted. A retry re-sends the full
-context, so two retries can triple a session's cost. A June 2026 preprint catalogued
-63 budget-overrun incidents across 21 orchestration frameworks, with retry loops as a
-named failure class. Static routing breaks when task complexity varies inside one
-role.
-
-Observed in this repository, same day. Lanes vary. Two lanes were
-mechanical. Two needed real diagnosis, and both caught errors their brief did not
-anticipate. A lane runs 25 to 60 minutes of wall-clock time. A rework cycle therefore
-costs far more than over-provisioning one lane by 2.5 times the tokens.
-
-The error costs are asymmetric. Under-provisioning costs a rework cycle.
-Over-provisioning costs 2.5 times the tokens of one lane. The cheap error is the one
-the pin was built to prevent.
-
-## Question 1. The expiry machinery
-
-It is not dead code, and it needs no edit.
-
-The whole apparatus keys on the model variable alone. `cap_lift_value` in
-`hooks/config_watch.py` reads `CLAUDE_CODE_SUBAGENT_MODEL` and returns true for any
-value other than `sonnet`. The force flag never enters that test. Guard rule 8 in
-`hooks/guard.py` matches the model key with an optional `_FORCE` group beside it.
-Drop the flag and the optional group simply stops matching.
-
-What the expiry guards is still there. A project file that writes
-`CLAUDE_CODE_SUBAGENT_MODEL: opus` no longer pins anything. It still raises the
-default for every spawn in that repository that names no model. That is a standing,
-session-wide change that outlives the turn that wrote it. An approved raise that
-stays raised forever is the exact outcome `roles-remove-override-file` named as
-ungoverned. A clock still protects it better than a person's memory.
-
-So the machinery changes subject, not shape. It stops guarding the lift of a pin. It
-guards the raise of a default. Both CLAUDE.md anchors survive with new words.
-`hooks/config_watch.py` and its 28-case suite in `hooks/test_config_watch.py` stay
-byte-for-byte. The force flag appears in those fixtures as file content. It is never
-a behaviour the suite asserts. The fixtures keep passing, and they keep exercising
-the optional group.
-
-Keep the optional `_FORCE` group in the guard pattern. It costs one group. It keeps
-the ask firing on a stale file, or on another repository, that still sets the flag.
-
-## Question 2. How a gate would know what is above Sonnet
-
-There is no constant to point at. Claude Code emits no rank over models. The names in
-play today are Fable 5.1, Opus 5, Sonnet 5 and Haiku 4.5, each with full ids and
-aliases beside it. A rank written into a hook is a copy of that list. CLAUDE.md says
-a gate's allow list must point at the constant the code emits, never a copy of it. A
-copied rank is also stale on the day a model ships.
-
-A ceiling therefore does not belong in a hook. The owner ruled the same on
-2026-09-28: the ceiling is prose only, and no forcing returns.
-
-One constant does exist, and the repository already points at it. The fallback value
-in `settings.json` is what the harness reads at entry 3. Guard rule 8 already keys on
-that variable by name. Any test of the form "this write changes the fallback" needs
-no rank at all.
-
-## Question 3. The shape problem
-
-Still unsolved. It no longer needs solving.
-
-For an `Agent` call the model is now readable, because dropping the pin restores
-entry 1 and the field survives to the payload. For a `Workflow` script that computes
-`model` in a variable, a hook sees the script text and not the value the script will
-produce. For a fork there is no model field to read. For a skill run in a subagent
-with `model: inherit` there is none either. Both of those run the main conversation's
-model and would escape any subagent gate, exactly as they escaped the pin.
-
-A gate covering only the `Agent` shape would go quiet on the shapes that carry the
-most model freedom. This repository already records that a guard people learn to
-scroll past is spent, in `guard-that-cries-wolf-is-spent`. A guard that is silent
-where it matters buys the same false confidence by the opposite route. Partial cover
-here is not worth having.
-
-## Question 4. Whether a gate is needed at all
-
-No per-spawn gate. Three reasons, in order of weight.
-
-An ask blocks the dispatch. CLAUDE.md says that once an objective is underway, nobody
-reads until the owner returns. A fan-out of four lanes would stall on the first ask
-and stay stalled for hours. The gate does not cost tokens. It costs the parallelism
-the whole lane model exists to buy.
-
-The gate prevents the cheap error. It fires on over-provisioning, which costs 2.5
-times one lane. It is blind to under-provisioning, which costs a rework cycle of 25
-to 60 minutes. Spending a blocking prompt on the smaller of two error costs is
-backwards.
-
-Coverage is partial by shape, per Question 3.
-
-What a gate would catch that the alternatives miss: the spend before it happens. The
-Stop guardrail reads the transcript after the turn, when a 40-minute lane has already
-run and the tokens are gone. That is a real gap, and this entry accepts it. The spend
-it lets through is one lane at 2.5 times cost.
-
-What prose, the report and the guardrail catch that a gate misses: every shape,
-including forks and workflow variables. The whole-session pattern, rather than one
-call. And the choice to under-provision, which a ceiling gate never sees at all.
-
-One gate stays. The settings-write ask, guard rule 8, fires on a write that changes
-the fallback. A write is a standing change, not a dispatch. Asking there stalls
-nothing mid-fan-out, and the owner is the person doing the write.
-
-## Question 5. The default, and the shape of the rule
-
-The default stays `sonnet`. Sonnet is the floor and the ceiling, and the ceiling is
-prose only (see "The ceiling, ruled 2026-09-28"). The words in CLAUDE.md now read:
-
-> Every agent runs Sonnet, and that needs no word. Sonnet is the floor: no agent runs
-> Haiku. Sonnet is the ceiling: an agent runs Opus, or any model above Sonnet, only on
-> my word, for the spawn I name.
-
-The anchor `roles-workers-run-sonnet` stated the repealed pin. A stale anchor is a
-lie that a future reader will grep. Three anchors replace it, because the parts
-mechanize differently. `roles-sonnet-is-the-default` is a gate on `settings.json`.
-`roles-sonnet-is-the-floor` is a guard on rule `subagent-model-floor`.
-`roles-sonnet-is-the-ceiling` is unmechanized, by owner ruling.
-
-## Question 6. What the orchestrator owes at dispatch time
-
-The one line before dispatch is the right shape and the right order. The reason comes
-before the choice, to an audience whose view is unknown. That is the condition Lerner
-and Tetlock found to work, and it is the condition the deleted gate failed. Keep it.
-
-It is not sufficient, for two reasons.
-
-It names only the up direction. With the floor, no departure below Sonnet exists, so
-the line is owed for a departure up. The line asks; the owner's word decides.
-
-Nothing after the fact can read which tier ran. The report names every dispatch, but
-not the model. A Done line for a lane should name the tier when the tier was not
-Sonnet. That is a report-format change, and `lint/report_gate.py` cannot check it,
-because nothing tells the gate what model a lane actually ran.
-
-## Why a justification is still the wrong mechanism
-
-This reasoning is unchanged, and it is why any replacement only asks.
-
-`hooks/model_gate.py` ran as a `PreToolUse` hook on `Agent` and `Workflow` calls. It
-read the model from the tool payload. Above Sonnet, it looked for a
-`MODEL-JUSTIFICATION:` line in the prompt. With no line it denied the call. With a
-line it asked the owner and quoted the reason.
-
-The gate read the reason after the orchestrator had already chosen the model. A
-reason written at that point does not change the choice. It defends the choice.
-Lerner and Tetlock showed this in 1999 ("Accounting for the Effects of
-Accountability", Psychological Bulletin 125, 255-275). When a person expects to
-justify a decision that is already made, the reasons they give are defensive
-bolstering, not reconsideration. Accountability improves judgement only when it comes
-before the decision, and only when the audience's view is unknown. A 2017 study of
-process accountability (Hoffmann, Gaissmaier and von Helversen, Judgment and Decision
-Making 12(6), 627-641) found the same shape. A demand to justify the process changed
-neither accuracy nor strategy. The gate asked for the wrong thing at the wrong time.
-It produced one line of text and no better choice.
-
-The gate also had a structural cost. It had to read a model id out of a payload it
-could not always resolve. Each gap needed a new shape test, and each shape test added
-a false ask. The four commits that built it each closed a bypass and opened a new
-edge. Question 3 records that this cost is unchanged.
-
-## The grant, after the drop
-
-An Opus worker is enabled for one repository, on the owner's word in chat. The
-orchestrator writes `.claude/settings.local.json`:
+An Opus worker is enabled for one repository, on the owner's word in chat. The orchestrator
+writes `.claude/settings.local.json`:
 
 ```json
 {
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "opus"
   },
-  "_subagentCapUntil": "2026-09-23T00:00:00Z"
+  "_subagentCapUntil": "<ISO-8601 time, at most 24 hours ahead>"
 }
 ```
 
-The force key is gone from this file and from `settings.json`. The earlier argument
-for setting both keys, which covered either merge rule for `env`, has no subject
-left.
+The grant raises the fallback. It does not pin. An orchestrator that wants one Opus lane passes
+the model on that one call, on the owner's word: narrower and cheaper than a repository-wide
+raise. The grant is for several lanes in a row.
 
-The grant is weaker than it was, and that is correct. It raises the fallback. It does
-not pin. An orchestrator that wants one Opus lane says so. On the owner's word, it can pass the
-model on that one call instead. That is cheaper and narrower than a repository-wide
-raise. The grant is for
-the case where several lanes in a row need the higher tier.
+The raise is a standing change. Every spawn in that repository that names no model reads it, and
+it outlives the turn that wrote it. Two parts guard it. Both key on the model variable alone.
 
-That write triggers guard rule 8. The ask names the model and the file, so the raise
-never lands in silence. `_subagentCapUntil` sits outside the `env` block, is read
-only by `hooks/config_watch.py`, and must be no more than 24 hours ahead. A deadline
-that is missing, unparseable, passed, or too far out gets the file reverted to the
-`prior` content the watch holds. With no `prior` on record the watch reports the file
-as UNKNOWN and asks the owner to read it by hand.
+- Guard rule `subagent-model-cap` asks on the write. The ask names the model and the file. The
+  rule matches the model key with an optional `_FORCE` group. The group stays, so the ask still
+  fires on a stale file, or another repository, that sets the flag.
+- `hooks/config_watch.py` judges the override on every sweep. `cap_lift_value` returns true for
+  any value of `CLAUDE_CODE_SUBAGENT_MODEL` other than `sonnet`. `_subagentCapUntil` sits outside
+  `env`, only the watch reads it, and it must be no more than 24 hours ahead. A deadline that is
+  missing, unparseable, passed or too far out gets the file reverted to the `prior` content the
+  watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner to read
+  the file by hand.
 
 ## What was measured
 
-The findings below stand. Only their subject has narrowed.
-
-A project-local `.claude/settings.local.json` overrides the user-settings value for
-`CLAUDE_CODE_SUBAGENT_MODEL`, in a fresh process. The check ran `claude -p` from a
-new terminal tab, with the grant file already in place. That process spawned a
-subagent whose own `printenv` printed `opus`, twice, independently. The user settings
-hold the default at `sonnet`, so only the project file could produce that reading.
-
-A written grant does not apply to a session already running. A second subagent in the
-same session still read `sonnet`. The grant needs a fresh session.
-
-Guard rule 8 fires on the documented payload. Fed the exact write call, it returned
-an ask naming the model and the file.
-
-The force flag never appeared in a subagent's own shell under `printenv`. The harness
-consumed it internally. That reading is now history rather than a live property.
-
-MEASURED, on the expiry field's isolation: a cap reading taken over a line that holds
-only `_subagentCapUntil` returns an empty mapping. The `PreToolUse` ask stays silent
-on a write that touches only the deadline.
-
-## What this changes
-
-`settings.json`. Remove `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` from the `env` block. Keep
-`CLAUDE_CODE_SUBAGENT_MODEL` at `sonnet`. Keep
-`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` at 1.
-
-`CLAUDE.md`. Replace the ceiling sentence with the Sonnet floor-and-ceiling words in
-Question 5, under three anchors in place of `roles-workers-run-sonnet`. Drop the force key from the
-grant JSON in `roles-opus-override-guarded`. Reword `roles-opus-override-guarded` and
-`roles-override-carries-expiry` from lifting a pin to raising a default, keeping both
-anchors. Make `roles-opus-shaped-say-so` and the raise rules the only path to Opus, and only on
-the owner's word.
-
-`hooks/`. `hooks/guard.py` keeps rule 8 and keeps the optional `_FORCE` group, and adds
-rule 9, `subagent-model-floor`. `hooks/config_watch.py` and
-`hooks/test_config_watch.py` are untouched. No new hook file is added.
-
-`lint/rule_mechanisms.json`. Drop the `roles-workers-run-sonnet` key. Add
-`roles-sonnet-is-the-default`, as a gate on `settings.json` with the needle
-`CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-sonnet-is-the-ceiling`, as `unmechanized`, with the
-owner's ruling as reason. The entry for `roles-opus-override-guarded` points at guard rule `subagent-model-cap`.
-The floor, the expiry and the file removal left CLAUDE.md (decision claude-md-shrink, guard and
-gate rules leave the prose). Guard rule `subagent-model-floor` enforces the floor, and
-`hooks/config_watch.py` enforces the expiry. Removal before expiry has no check.
+- A project-local `.claude/settings.local.json` overrides the user-settings value of
+  `CLAUDE_CODE_SUBAGENT_MODEL` in a fresh process. `claude -p` from a new terminal tab, with the
+  grant file in place, spawned a subagent whose own `printenv` printed `opus`, twice,
+  independently. The user settings hold `sonnet`.
+- A written grant does not apply to a session already running. A second subagent in the same
+  session still read `sonnet`. The grant needs a fresh session.
+- Guard rule `subagent-model-cap` fires on the documented payload. Fed the exact write call, it
+  returned an ask naming the model and the file.
+- A cap reading over a line that holds only `_subagentCapUntil` returns an empty mapping. The
+  ask stays silent on a write that touches only the deadline.
 
 ## What stays uncovered, on purpose
 
-A fork runs the main conversation's model, and so does a skill run in a subagent with
-`model: inherit`. Nothing here touches either. The prose rule is the only guard on
-them.
-
-Over-provisioning of one lane, a spawn above Sonnet with no word from the owner,
-passes without a prompt. Only prose forbids it, by owner ruling. The Stop guardrail
-reads it after the turn. Question 4 accepts that gap and prices it.
-
-Under-provisioning is caught by nothing before the rework cycle, except the step-up.
-The step-up covers a round 2 or 3 reviewer below Sonnet, and a try 3 builder below Opus.
-Elsewhere that was also true before the pin was dropped, and it is true again under the
-floor, which forbids Haiku outright.
-
-The step-up check has named limits, from review rounds 2 and 3:
-
-- Only a line that starts with `Round N of 3` or `Try N of 3` counts. `Round 2/3`,
-  `- Round 2 of 3`, `**Round 2 of 3**` and `# Round 2 of 3` pass unseen.
-- The role compare is exact, so a plugin type such as `x:reviewer` is not checked.
-- A `Workflow` script `agent()` call is not checked.
-- The reviewer test is a substring match on "sonnet". A made-up model such as
-  `opus-sonnet` passes. No real model id holds both names.
-- A round 1 reviewer brief with a prose line that starts `Round 2 of 3` is denied. The
-  refusal names the fix.
+- A fork runs the main conversation's model, and so does a skill run in a subagent with
+  `model: inherit`. Only the prose rule guards them.
+- A spawn above Sonnet with no word from the owner passes without a prompt. Only prose forbids
+  it, by owner ruling. Nothing reads it after the turn: the Stop guardrail judges on-disk
+  changes only. The spend it lets through is one lane at 2.5 times cost. This entry accepts that.
+- Under-provisioning is caught by nothing before the rework cycle, except the step-up and the
+  floor.
+- No check reads which tier a lane ran, so a report need not name it. `lint/report_gate.py`
+  cannot see the model.
+- Removing the override file before its expiry has no check (debt `override-removal-unreminded`).
 
 ## Where this lives
 
-This file keeps its slug name. No number is claimed on a branch.
+Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from
+them. Before a rename or a move, find every reader: search for `subagent-model-cap`.
 
 Kind: process
 Home: lint/check_agent_models.py
