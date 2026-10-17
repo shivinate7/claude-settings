@@ -37,7 +37,7 @@ stash, or push in the wrong form. Found 2026-10-12 while reading the hooks refer
 
 ## What protects it
 
-`hooks/test_agent_brief.py`: 55 cases for the output shape, each rule, the per-type scope
+`hooks/test_agent_brief.py`: 45 cases for the output shape, each rule, the per-type scope
 line, the general line, and exit 0 on junk input. CI steps in `gates`, `gates-macos` and
 `gates-windows-rest`; a REQUIRED entry in `lint/test_windows_split.py`.
 

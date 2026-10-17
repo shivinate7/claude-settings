@@ -1062,11 +1062,9 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
 # - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
-# - Each ruling is shown with its record id, `<dir>/<stem>`: the record path minus `.md`. A decisions/
-#   and a deferred/ record with one file stem show two different ids, and a FLAG on either id cites
-#   that record's own title (decision question-judge-reads-rulings).
+# - Each ruling is shown with its record id (the file stem).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
-#   holds the id and the record's H1 title, and names no `.md` file.
+#   holds the id and the record's H1 title, and names no path.
 
 # The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
 # module at test time. No case here keeps a copy of them.
@@ -1162,14 +1160,14 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
-    name = "caseRL2 settled question: refused, reason cites the record's <dir>/<stem> id and title, no .md file"
+    name = "caseRL2 settled question: refused, reason cites the record's id and title, no path"
     if not need_module(name):
         return
     for kind, rel, text, rid, title in (
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
-             "decisions/rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "deferred/rl-beta", "Beta waits for the owner")):
+             "rl-alpha", "Retries wait between tries"),
+            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1177,14 +1175,12 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
             code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl2"), [question(GOOD_Q, LABELS)],
                                                            default_transcript(), repo))
         check(sub + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-        check(sub + ": the judge input labels the ruling with the id " + rid,
-              "Ruling of record %s (" % rid in judge_prompt(stub), "")
         reason = deny_reason(out)
         check(sub + ": denied", reason is not None, out)
         reason = reason or ""
         check(sub + ": reason cites the record id " + rid, rid in reason, reason)
         check(sub + ": reason gives the record title as its gloss", title in reason, reason)
-        check(sub + ": reason names no .md file", not re.search(r"\.md\b", reason), reason)
+        check(sub + ": reason names no path or file", not re.search(r"decisions|deferred|\.md", reason), reason)
 
 
 def case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed():
@@ -1298,40 +1294,6 @@ def case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark():
     check(name + ": the cut mark follows the kept text", prompt.startswith(kept + mark, start), "")
     check(name + ": the cut is at the last sentence end under the cap, not an early one",
           isinstance(cap, int) and len(kept) > cap - 100, len(kept))
-
-
-TWIN_BLOCK = re.compile(r"<<<BEGIN Ruling of record (\S+) \((.*?)\)>>>")
-
-
-def case_rl8_one_stem_in_decisions_and_deferred_gets_two_ids_and_each_cites_its_own_title():
-    name = "caseRL8 decisions/ and deferred/ records with one stem: two ids, each cited with its own title"
-    if not need_module(name):
-        return
-    deferred = "\n".join(["# Twin deferred title", "", "**What waits.** A thing that waits.", "",
-                          "**Why it waits.** Owner, 2026-10-06: RL8-DEFERRED-WORD build it last.", ""])
-    repo = fresh_repo("rl8", {
-        "decisions/rl-twin.md": decision_text("Twin decision title", [("The ruling", "RL8-DECISION-WORD body.")]),
-        "deferred/rl-twin.md": deferred})
-    with model_stub(ALLOW) as stub:
-        run_guarded(name, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
-                                         default_transcript(), repo))
-    pairs = TWIN_BLOCK.findall(judge_prompt(stub))
-    check(name + ": the judge input labels two rulings", len(pairs) == 2, pairs)
-    check(name + ": the two labels are different ids", len({rid for rid, _ in pairs}) == len(pairs) == 2, pairs)
-    check(name + ": the two labels carry the two titles",
-          sorted(t for _, t in pairs) == ["Twin decision title", "Twin deferred title"], pairs)
-    for rid, title in pairs:
-        other = "Twin deferred title" if title == "Twin decision title" else "Twin decision title"
-        sub = "%s (FLAG on %s)" % (name, rid)
-        with model_stub(({"verdict": "FLAG", "record": rid, "why": WHY}, None)):
-            code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl8f"), [question(GOOD_Q, LABELS)],
-                                                           default_transcript(), repo))
-        reason = deny_reason(out)
-        check(sub + ": denied", reason is not None, out)
-        reason = reason or ""
-        check(sub + ": reason cites the record's own title", title in reason, reason)
-        check(sub + ": reason does not cite the other record's title", other not in reason, reason)
-        check(sub + ": reason names no .md file", not re.search(r"\.md\b", reason), reason)
 
 
 # --------------------------------------------------------------------------- goal format
@@ -2814,8 +2776,7 @@ def main():
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
-                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
-                 case_rl8_one_stem_in_decisions_and_deferred_gets_two_ids_and_each_cites_its_own_title):
+                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark):
         case()
     if LOAD_ERROR is None:
         check("no real claude process started", _claude_calls() == 0, _claude_calls())

@@ -54,7 +54,7 @@ Debts: `stall-message-repeats-every-stop` (the message fires at every Stop). `st
 
 ## Tests
 
-`hooks/test_stall_watch_stop.py` has 34 cases. Two steps named "Stall watch stop suite" in
+`hooks/test_stall_watch_stop.py` has 22 cases. Two steps named "Stall watch stop suite" in
 `.github/workflows/gates.yml` run it, one on Linux and one on Windows.
 
 Kind: process
