@@ -1,13 +1,6 @@
 # The merge waits on every check, before and after the claim
 
-## The question
-
-Which checks must be done, and in what order, before the merge tool pushes a claim and before
-it merges?
-
 ## The ruling
-
-Settled by the owner, written down 2026-10-01.
 
 1. **Check first, then claim.** Before `--confirm` pushes a claim, it reads the head's own
    checks with the same wait. Red or cancelled: nothing is claimed or pushed, and the lock is
@@ -19,26 +12,20 @@ Settled by the owner, written down 2026-10-01.
    counts, and one red entry ends the wait. A repo may list `merge.ignoreChecks`, each entry
    with a reason.
 
+Reason: a claim push cancelled a run whose failure was already there, so the claim was reverted
+twice (ruling 1). A merge ran while a non-required check was pending, and it went red after (ruling 2).
+
 Kind: build
 Plan: decisions/merge-waits-on-every-check.md#the-ruling (all)
 Home: merge/merge.py
 
-## Why
-
-- Banchi #595: a claim push cancelled a run whose failure was already there, and the claim
-  was reverted twice. Ruling 1 follows.
-- Banchi #604: the merge ran while a non-required check was pending, and the check went red
-  after the merge. Ruling 2 follows.
-
 ## Holes, named
 
-- One window stays: a workflow that GitHub has not created yet still reads as green. The runs
-  read and the settle read close most of it. Debt `late-workflow-reads-green` (a workflow
-  created after the settle read is not seen).
+- A workflow that GitHub has not created yet still reads as green. Debt `late-workflow-reads-green`.
 
 ## Related
 
-- Decision merge-needs-a-proven-head (a head with only skipped checks is unproven).
-- Decision ci-wait-reads-run-status (the wait reads status, never `gh run watch`).
-- Decision merge-config-defaults (the `merge.ignoreChecks` shape).
-- Decision records-index-at-merge (the wait after a records-page heal).
+- merge-needs-a-proven-head (a head with only skipped checks is unproven).
+- ci-wait-reads-run-status (the wait reads status, never `gh run watch`).
+- merge-config-defaults (the `merge.ignoreChecks` shape).
+- records-index-at-merge (the wait after a records-page heal).
