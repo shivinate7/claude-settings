@@ -6583,6 +6583,79 @@ sh("merge-checks: a heredoc body that names a merge is data",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 
 
+# =========================================================================== 5c. a bare merge in a repo that uses the merge tool
+#
+# A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
+# tool: no claim, and the local main stays behind (incident claude-sharables 2026-10-06, four merges
+# left the local main four commits behind origin). The guard ASKS, never denies: a broken merge tool
+# leaves a bare merge as the only way out (`verification-recovery-not-gated-on-own-state`; owner
+# ruling, orchestrator call, lane bare-gh-merge-ask). Every other repo state allows, silently: no
+# stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp. The head is green in
+# every case, so merge-checks (5b) says nothing and only this rule can ask. BARE_MERGE is the rule id
+# the ask prints; one edit re-points every case below.
+BARE_MERGE = "bare-merge"
+BARE_SAYS = (("--confirm", "merge tool"),)   # any-of: the ask points at the tool it skips
+STAMPREPO = os.path.join(ROOT, "stamp_merge")        # stamp.json with a merge block
+STAMPNONE = os.path.join(ROOT, "stamp_none")         # a .github folder and no stamp.json
+STAMPNOBLOCK = os.path.join(ROOT, "stamp_noblock")   # stamp.json, valid, no merge block
+STAMPBAD = os.path.join(ROOT, "stamp_bad")           # stamp.json that is not JSON, but holds the word "merge"
+STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: it cannot be read
+STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
+
+
+def _build_stamp_repos():
+    stamp = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": ["gates"], "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n"})
+    make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n"})
+    make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
+    make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
+    make_repo(STAMPDIR, {".github/stamp.json/keep": "x\n"})
+    make_repo(STAMPLIST, {".github/stamp.json": '["merge"]\n'})
+
+
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST], _build_stamp_repos)
+
+_BARE_GATE = dict(env_path=GREEN_ON, config=MERGECFG)
+# ASK: the repo uses the merge tool, and the call skips it.
+sh("bare-merge: gh pr merge in a repo with a merge block asks",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a URL for the pull request asks",
+   "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a cd into the repo names the repo that is read",
+   "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=NOGIT, **_BARE_GATE)
+# building-scanner-respects-strings: text in the call's own arguments hides no merge.
+sh("bare-merge: comment openers inside a quoted argument hide no merge",
+   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a lone quote in an argument hides no merge",
+   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
+   'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
+   **_BARE_GATE)
+# ALLOW: no merge block to read, or no merge made.
+for _name, _where in (
+    ("a repo with no stamp.json", STAMPNONE),
+    ("a stamp.json with no merge block", STAMPNOBLOCK),
+    ("a stamp.json that is not valid JSON", STAMPBAD),
+    ("a stamp.json that cannot be read", STAMPDIR),
+    ("a stamp.json that is JSON but not an object", STAMPLIST),
+):
+    sh("bare-merge: %s allows" % _name, "gh pr merge 12 --squash", "allow", silent=True,
+       cwd=_where, **_BARE_GATE)
+sh("bare-merge: reading a pull request in a repo with a merge block allows",
+   "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: the merge tool in a repo with a merge block allows",
+   "python3 bin/merge 12 --confirm", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: quoted text that names a merge is text", "echo 'gh pr merge'", "allow",
+   silent=True, cwd=STAMPREPO)
+sh("bare-merge: a heredoc body that names a merge is data",
+   "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
+   silent=True, cwd=STAMPREPO)
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
