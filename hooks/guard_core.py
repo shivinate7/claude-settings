@@ -1280,8 +1280,8 @@ def stash_stack(where: str):
 # working-tree read at all: the subject is the WORK the branch names, and the question is whether
 # that work exists anywhere else.
 #
-# Resolve the base in this order: `origin/HEAD`, then local `main`, then local `master` (owner's
-# ruling, this plan). None answering is UNREADABLE, never a silent pass and never a silent deny:
+# Resolve the base in this order: `origin/HEAD` when it resolves, then `origin/main`, `origin/master`,
+# local `main`, local `master` (owner's ruling 2026-10-16). None answering is UNREADABLE, never a silent pass and never a silent deny:
 # a repository with no default branch this rule can find is one this rule cannot judge.
 #
 # THREE TESTS, ANY ONE PASSING PROVES THE WORK SURVIVES the branch:
@@ -1294,25 +1294,42 @@ def stash_stack(where: str):
 #                  clone elsewhere holds the same commit.
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
-def resolve_default_base(where: str):
-    """Return the ref name of the repository's default branch, or None when none answers.
+def read_default_base(where: str, remote: str = "origin"):
+    """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
 
-    `origin/HEAD` first, then local `main`, then local `master` (owner's ruling). A branch is
-    read against whichever one resolves; the others are never tried once one does.
+    Owner's ruling 2026-10-16: `<remote>/HEAD` when it resolves, then `<remote>/main`, then
+    `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
+    rest are never tried. A dangling `<remote>/HEAD` falls through. The second value is the name
+    the symbolic ref holds, even when that branch does not verify or a later read failed; it is ""
+    when the ref is unset. A name is None when git could not run: unreadable, never "does not
+    exist". The push guard reads the PUSHED remote here; the branch-delete rule and the sweep
+    read `origin`.
     """
-    origin_head = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
-    if origin_head is not None and origin_head.returncode == 0 and origin_head.stdout.strip():
-        ref = origin_head.stdout.strip()
-        live = _git(where, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    candidates = [remote + "/main", remote + "/master", "main", "master"]
+    # No --short: a local branch or tag named `<remote>/<default>` makes git print the ambiguous
+    # `remotes/<remote>/<default>`. The full ref strips to the name with no such ambiguity.
+    named = _git(where, "symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD")
+    if named is None:  # git could not run: unreadable
+        return None, None
+    full_head = named.stdout.strip() if named.returncode == 0 else ""
+    head = full_head.removeprefix("refs/remotes/")
+    if head == full_head or not head.startswith(remote + "/"):
+        head = ""
+    if head:
+        candidates.insert(0, head)
+    for name in candidates:
+        full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
+        live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None
-        if live.returncode == 0:  # a dangling origin/HEAD (git answered no) falls through
-            return ref
-    for name in ("main", "master"):
-        answer = _git(where, "rev-parse", "--verify", "-q", "refs/heads/" + name)
-        if answer is not None and answer.returncode == 0:
-            return name
-    return None
+            return None, head
+        if live.returncode == 0:
+            return name, head
+    return None, head
+
+
+def resolve_default_base(where: str, remote: str = "origin"):
+    """The short ref name of the default branch, or None when none answers (`read_default_base`)."""
+    return read_default_base(where, remote)[0]
 
 
 def branch_is_ancestor(where: str, base: str, branch: str):

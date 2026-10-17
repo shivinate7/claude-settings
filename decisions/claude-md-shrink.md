@@ -18,6 +18,8 @@ Owner ruling, 2026-10-17 00:40 CDT:
 - `judgment` means that no exact check can judge the rule. A model hook that comments on a reply is not an exact check.
 - A reason that says no check reads the rule yet stays `unmechanized`. Only a reason that says no check can judge it moves to `judgment`.
 
+Owner, 2026-10-17 02:28 CDT: "Merge it." The second lane scored zero net value at review round 3. Its one opened hole (hole 14) comes from the deleted rules themselves.
+
 Owner interview, 2026-10-17 (00:44 to 01:55 CDT), on the 23 rules left by the first lane:
 
 - `roles-sonnet-is-the-default`: delete only the sentence "An unlisted agent runs Sonnet, and that needs no word." Re-kind the row to `unmechanized`.
@@ -52,11 +54,11 @@ The interview lane, MEASURED on branch `claude-md-shrink-2` against main (93a416
 - Three rows move to `unmechanized`: `roles-sonnet-is-the-default`, `verification-recovery-not-gated-on-own-state` and `reports-no-report-when-nothing-landed`. `UNMECHANIZED_EXPECTED` is 57. `RULE_FLOOR` is 98.
 - `CLAUDE.md` falls from 16292 to 15636 bytes.
 
-## Why only 6 of 30
+## Why not all 30
 
-On main, 30 rules in the root `CLAUDE.md` name a guard or gate. 6 are deleted, 1 shrinks, and 23 stay.
+On main, 30 rules in the root `CLAUDE.md` named a guard or gate. After both lanes, 9 are deleted, 3 shrink, and 18 stay.
 `CLAUDE.md` loads in every repo. A gate that is only a test or a CI step in this repo enforces nothing in another repo.
-Several guards cover only part of their sentence. Those 23 rules went to the owner for a ruling on each. See the interview ruling.
+Several guards cover only part of their sentence. The first lane sent 23 rules to the owner for a ruling on each. See the interview ruling.
 `RULE_FLOOR` in `lint/rule_audit.py` is the anchor count: 101 after the first lane, 98 after the interview. Its own comment says to update it when a rule is removed on purpose.
 
 ## The outcome, and what protects it now
@@ -68,10 +70,10 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 - Refusal hook installed: `settings.json` wires `hooks/guard.py` under `PreToolUse`.
 - No waiter loop: the `waiter` guard rule.
 - Memory never the only home: `hooks/ruling_home.py`.
-- Unlisted agents run Sonnet: the setting `env.CLAUDE_CODE_SUBAGENT_MODEL` in `settings.json`.
-- Workers never spawn: the setting `MAX_SPAWN_DEPTH` (`env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`) in `settings.json`. See hole 7.
-- Wait for required checks: the `merge-checks` guard rule.
-- Open every PR as a draft: the `draft-pr` guard rule.
+- Unlisted agents run Sonnet: the setting `env.CLAUDE_CODE_SUBAGENT_MODEL` in `settings.json`, checked by `hooks/test_wrappers.py`.
+- Workers never spawn: the setting `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` in `settings.json`. Checked by `hooks/test_wrappers.py`. See hole 11.
+- Wait for required checks: the `merge-checks` guard rule refuses a merge while a check is pending or red. Nothing makes a session wait after a push before it reports.
+- Open every PR as a draft: the `draft-pr` guard rule, for the create command only. See hole 12.
 
 ## Holes, named
 
@@ -84,7 +86,12 @@ Each deleted rule protected one act. A guard or gate still refuses or checks it:
 7. A repo that raises spawn depth gets no prompt to record the risk. Debt: `nesting-risk-unrecorded`, no prompt to record the risk.
 8. `report_gate` checks only `D<n>`-style ids, so a slug id passes with no gloss check. Debt: `slug-cite-gloss-unchecked`, slug cites have no gloss check.
 9. `report_gate` returns early when nothing landed, so it cannot see a report on that turn. Debt: `report-on-empty-turn-unchecked`, no check sees a report on an empty turn.
-10. `output-write-in-ste` waits for its own lane.
+10. `output-write-in-ste` waits for its own lane, the plain-prose lint. Debt: `ste-rule-awaits-prose-lint`, the STE rule waits for its lane.
+11. The two deleted rules took their gate rows, which checked the agent model and spawn depth in `settings.json`. Two cases in `hooks/test_wrappers.py` now check that the model is "sonnet" and the depth is "1", so no check is lost.
+12. No guard reads a command that marks a PR ready. The kept rule `git-integration-branch-merge` still says only the integration PR goes ready. The clause "only after review" has no text. Debt: `pr-ready-unguarded`, nothing guards marking a PR ready.
+13. Nothing makes a session wait for checks after a push before it reports. `hooks/ci_wake.py` starts no wait on a push. Debt: `push-report-before-checks`, no wait after a push.
+14. The map no longer ties the `merge-checks`, `draft-pr` and `pointer-head` guard rules to a rule. A guard deleted together with its tests now passes `lint/rule_audit.py`. Debt: `guard-untied-from-rule-map`, three guards have no row.
+15. Two comments still cite deleted text: a case comment in `hooks/test_guard.py` names `git-wait-for-required-checks`, and `hooks/guard_kill.py` quotes the dropped `pkill -f` sentence. Debt: `shrink-stale-code-comments`, two comments cite deleted rules.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
