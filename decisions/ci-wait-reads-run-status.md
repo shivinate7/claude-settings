@@ -62,10 +62,8 @@ another repo on the same account several times.
   an hour for that PR. `bin/merge` judges a merge on its own. Same debt.
 - A merge wait now reads the checks and runs every 30 s, not every 60 s: about 6 calls a
   minute. Unmeasured on a real run.
-- One failed status read ends a CI-wake wait as unknown, with no retry. The session is then
-  told "unknown", never green. Debt `ci-wake-read-no-retry` (a failed read is not retried).
-- The test stub models only `in_progress`. A change that stops at a `queued` run would wake
-  early with an unknown line, and no case catches it. It cannot read green. Same debt.
+- A failed status read gets one retry after the 30 s pause, never past the deadline. A second
+  failure ends the wait as unknown, never green. The test stub also models `queued`.
 - A background `gh pr checks --watch` is still allowed, because the ruling names only
   `gh run watch`. Its API cost is unmeasured. Debt `pr-checks-watch-unmeasured` (the
   background checks watch is unmeasured).

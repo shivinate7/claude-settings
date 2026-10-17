@@ -264,7 +264,7 @@ def closed_by_notice(text):
     ids = []
     for note in text.split("<task-notification>")[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip() in TERMINAL:
+        if tid and st and st.group(1).strip().lower() in TERMINAL:
             ids.append(tid.group(1).strip())
     return ids
 
@@ -298,7 +298,7 @@ def stop():
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
             try:
                 idle = now - os.stat(real).st_mtime
-            except (OSError, TypeError):  # TypeError: no path recorded
+            except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
                 rows.append("%s: unknown, output file not found: %s%s" % (job, path or "(path not recorded)", until))
                 continue
             if idle >= quiet:

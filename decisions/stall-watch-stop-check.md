@@ -50,7 +50,7 @@ false alarm before the check counted it.
 
 ## Holes, named
 
-Debts: `stall-message-repeats-every-stop` (the message fires at every Stop). `stall-open-job-no-age-ceiling` (an old open job reads as running). `stall-closes-on-quoted-notice` (a quoted notice closes a running job). `stall-macos-no-stop-suite` (the macOS jobs run no stop suite). `stall-message-delivery-unproven` (no run shows the Stop message reaches the model). `stall-status-case-sensitive` (the status match ignores case). `stall-list-result-first-block` (a list result closes from its first block). `stall-nul-path-drops-run` (a NUL byte in a path drops the run). `stall-windows-ci-unknown` (the Windows CI result is unknown).
+Debts: `stall-message-repeats-every-stop` (the message fires at every Stop). `stall-open-job-no-age-ceiling` (an old open job reads as running). `stall-closes-on-quoted-notice` (a quoted notice closes a running job). `stall-macos-no-stop-suite` (the macOS jobs run no stop suite). `stall-message-delivery-unproven` (no run shows the Stop message reaches the model). `stall-list-result-first-block` (a list result closes from its first block). `stall-windows-ci-unknown` (the Windows CI result is unknown).
 
 ## Tests
 
