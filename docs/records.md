@@ -190,6 +190,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plain-diff-mod-limits` | The mod sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `prune-cases-skip-without-symlink-privilege` | Prune cases skip when this account cannot make a real symlink | [`decisions/prune-cases-skip-without-symlink-privilege.md`](../decisions/prune-cases-skip-without-symlink-privilege.md) |
 | `records-index-at-merge` | Owner ruling, 2026-10-14 10:59 and 13:18 CDT. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
+| `rm-path-wrapper` | Owner, 2026-10-11 ("Yes, only for Claude sessions"): `bin/rm` sits ahead of the real `rm` on PATH. | [`decisions/rm-path-wrapper.md`](../decisions/rm-path-wrapper.md) |
 | `session-board-mod-limits` | Owner intent: stop typing "status?" into many sessions. | [`decisions/session-board-mod-limits.md`](../decisions/session-board-mod-limits.md) |
 | `split-segments-comment-rule` | `hooks/guard.py:split_segments` tracked single and double quotes. | [`decisions/split-segments-comment-rule.md`](../decisions/split-segments-comment-rule.md) |
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "Never run `git stash` ... | [`decisions/stash-stack-is-a-shared-subject.md`](../decisions/stash-stack-is-a-shared-subject.md) |
@@ -509,6 +510,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `records-page-reader-gaps` | The guard `records-page` reads `git add` and `git commit` calls only. | [`debts/records-page-reader-gaps.md`](../debts/records-page-reader-gaps.md) |
 | `reload-missing-file-unpinned` | Lane merge-guard-b removed `_damage_missing` and its two reload cases: a missing `guard_pointer.py` that comes back during the wait is allowed, and one that stays missing is refused. | [`debts/reload-missing-file-unpinned.md`](../debts/reload-missing-file-unpinned.md) |
 | `report-on-empty-turn-unchecked` | The report gate returns early when nothing landed, so it cannot see a report written on such a turn. | [`debts/report-on-empty-turn-unchecked.md`](../debts/report-on-empty-turn-unchecked.md) |
+| `rm-shim-bypass-forms` | The shim runs only when the shell finds it on PATH. | [`debts/rm-shim-bypass-forms.md`](../debts/rm-shim-bypass-forms.md) |
+| `rm-shim-call-cost` | A recursive `rm` under a Claude session costs about 40 ms. | [`debts/rm-shim-call-cost.md`](../debts/rm-shim-call-cost.md) |
+| `rm-shim-cloud-path` | The PATH step in `install.sh` skips cloud mode, so the shim is off in cloud sessions. | [`debts/rm-shim-cloud-path.md`](../debts/rm-shim-cloud-path.md) |
+| `rm-shim-flag-order` | On macOS `rm dir -rf` treats `-rf` as a file name. | [`debts/rm-shim-flag-order.md`](../debts/rm-shim-flag-order.md) |
+| `rm-shim-glob-passes` | The shell expands `*` before the shim runs, so `rm -rf *` in the cwd arrives as a list of children and passes. | [`debts/rm-shim-glob-passes.md`](../debts/rm-shim-glob-passes.md) |
+| `rm-shim-link-refused` | `bin/rm` resolves each operand before it judges it. | [`debts/rm-shim-link-refused.md`](../debts/rm-shim-link-refused.md) |
+| `rm-shim-windows` | `install.ps1` lands no `rm` shim, and `bin/rm` is posix only. | [`debts/rm-shim-windows.md`](../debts/rm-shim-windows.md) |
 | `rule-flag-not-enforced` | `bin/merge` prints a line for each changed rule file. | [`debts/rule-flag-not-enforced.md`](../debts/rule-flag-not-enforced.md) |
 | `ruling-home-isabs-unproven` | `value_resolves` refuses each absolute `home:` value. | [`debts/ruling-home-isabs-unproven.md`](../debts/ruling-home-isabs-unproven.md) |
 | `ruling-kind-dir-equals-open` | `lint/check_ruling_kind.py` reads `--dir=x`, or any other unknown option, as a file name. | [`debts/ruling-kind-dir-equals-open.md`](../debts/ruling-kind-dir-equals-open.md) |
@@ -634,7 +642,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `playwright-rows-measure` | A measure of the Playwright guard rows | [`deferred/playwright-rows-measure.md`](../deferred/playwright-rows-measure.md) |
 | `push-head-mismatch-trap` | A push of HEAD to a branch of another name is not guarded yet | [`deferred/push-head-mismatch-trap.md`](../deferred/push-head-mismatch-trap.md) |
 | `refusal-route-around-guard` | No guard stops an agent that routes around a refusal | [`deferred/refusal-route-around-guard.md`](../deferred/refusal-route-around-guard.md) |
-| `rm-path-wrapper` | An rm wrapper on PATH, active only in Claude sessions | [`deferred/rm-path-wrapper.md`](../deferred/rm-path-wrapper.md) |
 | `sharables-adopts-the-stamp` | claude-sharables adopts the stamp, not a claim-command setting | [`deferred/sharables-adopts-the-stamp.md`](../deferred/sharables-adopts-the-stamp.md) |
 | `stamp-shallow-depth-two` | The stamp check does not read a shallow checkout | [`deferred/stamp-shallow-depth-two.md`](../deferred/stamp-shallow-depth-two.md) |
 | `ste-into-agent-briefs` | The STE writing standard moves into agent briefs | [`deferred/ste-into-agent-briefs.md`](../deferred/ste-into-agent-briefs.md) |
