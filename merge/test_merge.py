@@ -1315,6 +1315,11 @@ def stamp_marker(env):
         p.start(); env.addCleanup(p.stop)
     return mark
 
+class LongLockHost(merge.Host):
+    """A Host told that the lock has hours left. confirm hands a host the end of the lock's 600 s spare (LockExpiryReachesHost), so a real run cannot
+    fit the whole ladder (60 + 300 + 900 = 1260 s). This host takes that bound and keeps a far one, as a lock with a long spare would."""
+    until = property(lambda self: self.now() + 10**6, lambda self, bound: None)
+
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
     def setUp(self):
@@ -1339,7 +1344,7 @@ class GhHalf(Env):
         p = pathlib.Path(self.state, "calls.log")
         return p.read_text() if p.exists() else ""  # a case that makes no gh call leaves no log
 
-    def gh_host(self, required=("gates",), pause=None, ignore=None):
+    def gh_host(self, required=("gates",), pause=None, ignore=None, cls=merge.Host):
         def tick(s):
             self.ticks += 1
             self.paused.append(s)
@@ -1347,7 +1352,7 @@ class GhHalf(Env):
             self.now += s
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick, ignore=ignore)
+        return cls(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
@@ -1570,26 +1575,32 @@ class GhHalf(Env):
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def required_read_fails_after_the_claim(self, msg):
-        """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert."""
+    def required_read_fails_after_the_claim(self, msg, lock=False):
+        """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert.
+        `lock`: msg is a rate limit, and the run stops at the third wait (see rate_stops_at_the_lock)."""
         self.set(contexts=["gates"], api_fail={"msg": msg, "after_checks": 1})
         rc, out = self.go(required="protection")
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.gh_state("api_failed"), 4, out)  # one try and three retries
+        self.assertEqual(self.gh_state("api_failed"), 3 if lock else 4, out)  # one try and three retries; or one try and two retries, then the lock stop
+        if lock:
+            self.rate_stops_at_the_lock(out)
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
     def test_a_required_check_read_with_gh_server_error_502_stops_without_a_revert(self):
         self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
 
-    def merge_reply_is_retried_then_stops(self, msg):
-        """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert."""
+    def merge_reply_is_retried_then_stops(self, msg, lock=False):
+        """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert.
+        `lock`: msg is a rate limit, and the run stops at the third wait (see rate_stops_at_the_lock)."""
         self.set(merge_replies=[[msg, False]])
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 4, out)  # one try and three retries
+        self.assertEqual(self.calls().count("pr merge"), 3 if lock else 4, out)  # one try and three retries; or one try and two retries, then the lock stop
+        if lock:
+            self.rate_stops_at_the_lock(out)
         self.assertIn("state,mergeCommit", self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
@@ -1641,15 +1652,25 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
-    def run_list_fails_wrapped(self, msg):
-        """Every check is green and `gh run list` fails with the wrapped line `msg`: a network error, retried 3 times, then a stop. Nothing is claimed."""
+    def rate_stops_at_the_lock(self, out):
+        """A rate limit under the lock: a run holds the lock's 600 s spare, so after the 60 s and 300 s waits the 900 s wait would pass it. The run stops
+        with a NetStop that names the lock, in place of the third wait (lane merge-rate-wait). The caller counts the gh calls: 3, not 4."""
+        self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER[:2], out)  # the 900 s wait never starts. A settle pause is no rate wait.
+        self.assertRegex(out, r"(?i)\block\b")
+
+    def run_list_fails_wrapped(self, msg, lock=False, **go_kw):
+        """Every check is green and `gh run list` fails with the wrapped line `msg`: a network error, retried 3 times, then a stop. Nothing is claimed.
+        `lock`: msg is a rate limit, and the run stops at the third wait (see rate_stops_at_the_lock). `go_kw`: for self.go."""
         self.set(runs_fail=msg)
         before = self.head()
-        rc, out = self.go()
+        rc, out = self.go(**go_kw)
         self.assertNotIn("not green", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
-        self.assertIn("network", out.lower())
+        self.assertEqual(self.calls().count("run list"), 3 if lock else 4, out)  # one try and three retries; or one try and two retries, then the lock stop
+        if lock:
+            self.rate_stops_at_the_lock(out)
+        else:
+            self.assertIn("network", out.lower())
         self.assertNotIn("pr merge", self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
@@ -1659,18 +1680,19 @@ class GhHalf(Env):
         self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)  # a plain network error waits the normal pause
 
     def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
-        self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
-        self.assertEqual(self.paused, RATE_LADDER)  # a 429 is a rate limit: the cap
+        self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)", lock=True)  # a 429 is a rate limit: the ladder, then the lock stop
 
     # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge-net-retry): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
 
     def test_a_run_list_rate_limit_403_is_a_network_error_retried_then_stopped(self):
-        self.run_list_fails_wrapped(RATE_403)  # the incident text: 4 calls, a network stop, never "not green"
-        self.assertEqual(self.paused, RATE_LADDER)  # a rate limit waits the cap. Its request timestamp is no reset time.
+        self.run_list_fails_wrapped(RATE_403, lock=True)  # the incident text: 3 calls, a lock stop after the 300 s wait, never "not green". Its request timestamp is no reset time.
 
     def test_a_run_list_secondary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
-        self.run_list_fails_wrapped(RATE_SECONDARY_403)
-        self.assertEqual(self.paused, RATE_LADDER)
+        self.run_list_fails_wrapped(RATE_SECONDARY_403, lock=True)
+
+    def test_a_rate_limit_with_a_long_lock_left_waits_the_whole_ladder_then_stops_as_a_network_error(self):  # lane merge-rate-wait; the 9 cases above hold the 600 s spare
+        self.run_list_fails_wrapped(RATE_403, cls=LongLockHost)  # one try and three retries: 4 calls, and the "network" stop
+        self.assertEqual(self.paused, RATE_LADDER)  # 60, 300, 900: no wait cut short, none past the cap
 
     def test_a_run_list_rate_limit_403_that_clears_on_the_retry_lets_the_merge_go_on(self):
         self.set(runs_fail_first=[RATE_403])
@@ -1688,30 +1710,31 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
-    def checks_read_fails(self, msg, n=99):
-        """Every check is green and `gh pr checks` fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed."""
+    def checks_read_fails(self, msg, n=99, lock=False):
+        """Every check is green and `gh pr checks` fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed.
+        `lock`: msg is a rate limit, and the run stops at the third wait (see rate_stops_at_the_lock)."""
         self.set(checks_fail={"n": n, "msg": msg})
         before = self.head()
         rc, out = self.go()
         self.assertNotIn("not green", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.gh_state("checks_failed"), 4, out)  # one try and three retries
-        self.assertIn("network", out.lower())
+        self.assertEqual(self.gh_state("checks_failed"), 3 if lock else 4, out)  # one try and three retries; or one try and two retries, then the lock stop
+        if lock:
+            self.rate_stops_at_the_lock(out)
+        else:
+            self.assertIn("network", out.lower())
         self.assertNotIn("pr merge", self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
     def test_a_pr_checks_http_429_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails("HTTP 429: Too Many Requests (https://api.github.com/graphql)")
-        self.assertEqual(self.paused, RATE_LADDER)  # a 429 is a rate limit: the cap
+        self.checks_read_fails("HTTP 429: Too Many Requests (https://api.github.com/graphql)", lock=True)  # a 429 is a rate limit: the ladder, then the lock stop
 
     def test_a_pr_checks_rate_limit_403_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails(RATE_GQL_403)
-        self.assertEqual(self.paused, RATE_LADDER)
+        self.checks_read_fails(RATE_GQL_403, lock=True)
 
     def test_a_pr_checks_graphql_rate_limit_already_exceeded_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails(RATE_GQL_ALREADY)  # owner's word: it retries like the 403
-        self.assertEqual(self.paused, RATE_LADDER)
+        self.checks_read_fails(RATE_GQL_ALREADY, lock=True)  # owner's word: it retries like the 403
 
     def test_a_retry_after_on_a_pr_checks_429_never_changes_the_rate_wait(self):
         self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\nHTTP 429: Too Many Requests (https://api.github.com/graphql)"})
@@ -1721,13 +1744,13 @@ class GhHalf(Env):
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
     def test_a_required_check_read_with_a_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_403)  # `gh api` form: the claim stays, 4 tries
+        self.required_read_fails_after_the_claim(RATE_API_403, lock=True)  # `gh api` form: the claim stays, 3 tries, then the lock stop
 
     def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403)
+        self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403, lock=True)
 
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
-        self.merge_reply_is_retried_then_stops(RATE_GQL_403)
+        self.merge_reply_is_retried_then_stops(RATE_GQL_403, lock=True)
 
     def test_a_rate_wait_that_would_pass_the_lock_expiry_stops_the_run_and_keeps_the_claim(self):  # lane merge-rate-wait
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock lasts (3 * 1 + 10) * 60 = 780 s: 180 s of checks waits and a 600 s spare
