@@ -926,8 +926,6 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # whether `cd` was preceded by `^`, `;`, `&`, or `|` in the raw text — true for both, despite the
 # `cd` in each case never running. `split_segments` (quote- and comment-aware) plus
 # `segment_tokens` (shlex) are the readers already used elsewhere in this file for the same
-# reason. Lifted from `~/Developer/banchi/scripts/shell_parse.py`, which paid this debt first
-# by reading `cd` and `git -C` off tokens instead of a raw-text regex.
 # `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
 # applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
 # `git --work-tree=B status --porcelain` reported B's modified file and B's untracked file. The

@@ -432,8 +432,6 @@ def discards_output(segment: str) -> bool:
     return any(unquoted_at(outer, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(outer))
 
 
-# PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
-# away through the pipe's LAST command, and the rule judged only the write's own segment.
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
 # `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
 # `bash -c '...'` stays unparsed, a known gap the owner left.
@@ -1228,10 +1226,8 @@ TEST_BASENAME = re.compile(
     # Shell/PowerShell test suites (incident 2026-10-03): `test_*.sh`, `*_test.sh`, `*.test.ps1`,
     # `*.Tests.ps1` (match runs on the lowercased basename, so `.Tests.ps1` arrives as `.tests.ps1`).
     r"|test_.*\.sh|.*_test\.sh|.*\.tests?\.ps1"
-    # 2026-10-07: test_stamp.mjs was refused to a test-author and open to a builder: `test_*.{js,mjs,cjs,ts,jsx,tsx}`.
     r"|test_.*\.(?:[cm]js|[jt]sx?))$")
 # SELF-TEST files (`*-selftest.*`, `*_selftest.*`, `selftest_*.*`) are test paths, except .md notes.
-# Incident 2026-10-02: Banchi self-test files had the role split inverted (builder edited them).
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
