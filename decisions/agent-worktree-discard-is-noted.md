@@ -10,7 +10,7 @@ a person? When a command names only files? What does the guard say to a
 worktree remove?
 
 Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the
-untracked link).
+untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands).
 
 ## Counted facts
 
@@ -29,13 +29,19 @@ note). The ask writes a line there; it is the transcript that holds none.
 Take a linked worktree. Its resolved path sits under
 `<main repo root>/.claude/worktrees/`. Call that an agent-owned
 worktree. Inside it, a discard is ALLOWED. It is logged as a note, with
-no prompt. A linked worktree anywhere else keeps "ask". The main
+no prompt. A linked worktree anywhere else keeps "ask", except a named-file discard (see Named
+files). The main
 checkout keeps "deny". Four things stay unchanged: branch-delete deny,
 worktree-remove deny, worktree-prune ask, and every stash deny.
 
 The ask protects a person's own uncommitted work in a worktree they made
-by hand. There, a discard has no other copy. So the ask stays for every
-worktree outside `.claude/worktrees/`. Inside an agent's own worktree,
+by hand. The owner makes no worktree by hand (owner, 2026-10-17 11:40 CDT).
+Claude sessions make them, or the desktop app's worktree checkbox does. So
+the per-file allow outside `.claude/worktrees/` stands. Whole-tree discards
+there keep the ask. Measured 2026-10-17 in this clone: agent trees under
+`.claude/worktrees/` are locked "claude agent". Two detached "claude-settings
+live pin" trees sit beside the repo. The desktop checkbox's path is unmeasured
+here. Inside an agent's own worktree,
 the agent's commits are the copy. They sit on the agent's own branch and
 in its own reflog. A discard there loses nothing the clone does not
 already hold elsewhere.
