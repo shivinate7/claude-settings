@@ -21,9 +21,9 @@ Owner answers, 2026-10-17 12:14 CDT:
 
 Owner answers, 2026-10-17 12:53 CDT:
 
-- (a) A lane may reword a line when the result has fewer lines and words than before and keeps the current reason. Why: a trim that cannot reword leaves long lines in the tree.
-- (b) Delete the decision on the Bash tool's PATH snapshot. Why: it held a claim and a measurement, with no ruling in force.
-- (c) A delete-only change opens no hole unless it removes a guard, gate or check, which round 1 must judge (`hold-unsafe-after-round-3`). Why: deleting prose or a record cannot let an act through.
+- (a) A lane may reword a line when the result has fewer lines and words than before and keeps the current reason. The owner gave no other reason.
+- (b) Delete the decision on the Bash tool's PATH snapshot. The owner gave no reason. The file held a measured claim about a tool this repo cannot change.
+- (c) A delete-only change opens no hole unless it removes a guard, gate or check, which round 1 must judge (`hold-unsafe-after-round-3`). The owner gave no other reason.
 
 ## Why
 
