@@ -74,7 +74,7 @@ SEARCH_BYTES = 16 * 1024 * 1024  # how far back from the end the owner's 3rd-las
 SPAN_BUDGET = 20000
 # The whole prompt, fixed text and question included, sent on stdin (no command-line cap). It fits
 # well inside the model's context and limits cost and latency. Its fit to MODEL_TIMEOUT is
-# unmeasured: debt model-clip-unmeasured.
+# unmeasured.
 PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
 # Chars of one option's label, description or preview; a longer part is cut and ends in OPTION_CUT.

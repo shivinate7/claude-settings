@@ -32,5 +32,4 @@ Home: hooks/question_outcome.py
 
 ## Holes, named
 
-Debts: `judge-cap-drops-old-rulings`, `judge-cuts-long-ruling`, `judge-uncommitted-order`,
-`judge-skips-other-headings`, `judge-heading-false-match`.
+Debts: `judge-cap-drops-old-rulings`.

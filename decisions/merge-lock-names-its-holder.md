@@ -23,8 +23,7 @@ Home: merge/merge.py
 
 ## Holes, named
 
-- The expired-lock delete can remove a live lock. Debt `expired-lock-delete-race` (two runs can hold the lock).
-- Debts on the same path: `lock-delete-retry-window`, `lock-ttl-rate-wait`, `lock-read-error-never-expires`.
+- The expired-lock delete can remove a live lock (two runs can hold the lock).
 
 ## Related
 

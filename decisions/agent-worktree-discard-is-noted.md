@@ -104,10 +104,6 @@ never on a "worktrees" segment in its spelling. A hit logs
 the existing ask. The named-files allow is `names_only_files` and `one_place`
 in `hooks/guard_shared_tree.py`.
 
-## Holes, named
-
-Debts: `guard-first-c-reads-wrong-tree` (other rules read the first -C target). `guard-shell-wrap-discard-unread` (a discard inside sh -c, eval or substitution). `stash-allow-any-linked-worktree` (any linked worktree passes the allow).
-
 ## Named limits
 
 - A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny. An ask reaches the owner. The cost is one prompt.

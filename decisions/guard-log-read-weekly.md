@@ -25,7 +25,7 @@ Why: the table is the outcome meter for the two owner concerns, prompts the owne
 
 ## Holes, named
 
-Debts: `guard-log-extra-ci` (an edit to the reader selects the Windows merge and guard suites), `guard-log-install-skew` (a six-field core and an old reader drop each other's lines), `guard-log-one-reader-gaps` (the one-reader test misses other split forms), `guard-log-session-id-fence` (a pipe or backtick in a session id breaks the table), `guard-log-tool-field-tab` (a tab in the tool field can add a seventh field), `guard-log-off-silent` (STE logging is disabled with no marker), `guard-log-lines-lost` (a guard.log line can be lost on Windows), `ste-rewrite-unchecked-lands` (an unchecked rewrite still lands), `ste-gate-closed-pipe-no-log` (a closed stdout pipe ends the STE gate with no log line), `guard-timeout-fails-open` (a stalled or slow guard lets the call through).
+Debts: `guard-timeout-fails-open` (a stalled or slow guard lets the call through).
 
 Limits:
 

@@ -24,4 +24,4 @@ Home: hooks/test_install_src.sh
 
 ## Holes, named
 
-Debt `prune-symlink-positive-unproven`: the probe and the early-return guard are proven only on the negative branch.
+The probe and the early-return guard are proven only on the negative branch.

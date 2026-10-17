@@ -150,7 +150,6 @@ merge --dev ...         run the checkout's own tree, not origin main
   * ci-wait-reads-run-status (the wait reads status, never `gh run watch`)
   * merge-net-retry (retry a network error or a rate limit, then stop)
   * records-index-at-merge (the merge rebuilds the records page)
-  * deleted-record-keeps-its-number (a deleted record keeps its number; the claim reads the history)
 
 Exit codes:
 

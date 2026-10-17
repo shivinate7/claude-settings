@@ -41,12 +41,5 @@ Home: lint/ste_lint.py
 
 ## Holes, named
 
-- Debt `advisory-note-not-logged`: the advisory note leaves no log line.
-- Debt `sweep-note-delivery-unmeasured`: the sweep note may reach the user only.
-- Debt `one-term-per-meaning-unchecked`: no check reads "one term per meaning".
-- Debt `plain-prose-writes-only`: the gate and the sweep read file writes only. Replies, briefs and agent messages are unchecked.
-- Debt `kept-bloat-rows-unaudited`: 97 kept fix rows are not read against a corpus.
-- Debt `ste-eg-in-fence-reported`: the lint still reports `e.g.` in a pre block and a blockquote fence, now as a warning.
-- Debt `dropped-bloat-phrases-silent`: three dropped filler phrases pass with no note.
 - Debt `ste-gate-fixes-not-nags`: a denied write shows no advisory note. The writer sees advisories only after the errors clear.
 - `load_config` in `lint/ste_lint.py` prints a notice on stderr for `max_words_procedural` and `max_words_descriptive` in a config.

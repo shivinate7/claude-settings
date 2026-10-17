@@ -807,7 +807,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 # as main read it, and keeps a line when either walk keeps it: every drop, the unconditional one too, sees what main saw,
 # also for two heredocs where main's early close at a line of the second body leaves its payload outside every body.
 # The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
-# Retire it when each run path reads its body (debt heredoc-run-other-path).
+# Retire it when each run path reads its body.
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 

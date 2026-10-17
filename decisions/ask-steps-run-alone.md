@@ -22,4 +22,4 @@ Home: hooks/guard.py
 
 ## Holes, named
 
-Debts: `split-reader-misses-cd-forms` (`cd ~-`, `Set-Location -` and `Set-Location +` count as harmless leads with an unknown target, so a shared-tree deny can become an ask). `ask-alone-tail-args-unchecked` (tail arguments are unchecked, so the lane turns a main deny into an ask). `ask-alone-echo-amp-overdeny` (`<`, `>` or `&` in quoted text counts as a step). `ask-alone-empty-segment-denies` (a trailing newline or `;` after a harmless tail stops the tail count). `ask-alone-ps-backslash-denies` (a quoted PowerShell path ending in a backslash counts as a step). `ask-alone-tail-test-gap` (no row puts a quoted `#`, `/*` or lone apostrophe in a harmless tail). `ask-alone-sl-chdir-denies` (`sl`, `chdir` and `Push-Location` are not named leads, pending the owner's choice).
+Debts: `split-reader-misses-cd-forms` (`cd ~-`, `Set-Location -` and `Set-Location +` count as harmless leads with an unknown target, so a shared-tree deny can become an ask).

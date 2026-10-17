@@ -17,8 +17,6 @@ Protected by `hooks/test_local_time.py` (hard-coded DST instants, a child with n
 
 ## Holes, named
 
-Debts: `local-time-hard-coded-dst` (the US DST rule is coded in the hook, and the zoneinfo upgrade is not built), `local-time-line-cost-unmeasured` (the token cost of one line per prompt is unmeasured).
-
 Limits:
 
 - Nothing forces the model to use the line.

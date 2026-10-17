@@ -28,8 +28,5 @@ Home: janitor/sweep.py
 
 ## Holes, named
 
-Debts: `purge-bad-row-key-raises`, `purge-git-trace-missing-ref`, `purge-snapshot-race`,
-`purge-realpath-per-row`, `purge-update-ref-mutant-missing`, `purge-confirm-total-wrong`,
-`purge-orphan-ref-kept`.
 Unverified: `realpath` on mapped or `subst` drives; stderr text on other git versions; older Python
 versions, for `realpath` errors.

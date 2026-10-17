@@ -38,4 +38,4 @@ Home: hooks/guard.py
 
 ## Holes, named
 
-Debts: `split-reader-misses-cd-forms` (the token reader misses some cd forms), `split-comment-shapes-unmeasured` (the comment rule is unmeasured on quoting shapes).
+Debts: `split-reader-misses-cd-forms` (the token reader misses some cd forms).

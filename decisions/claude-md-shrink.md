@@ -8,7 +8,7 @@ Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT:
 - Keep a reminder of 3 words or fewer where agents hit the guard often.
 - Never reword a kept rule.
 - Re-kind an `unmechanized` rule to `judgment` when its reason already says no check can judge it. `judgment` means no exact check can judge the rule. A model hook that comments on a reply is not an exact check. A reason that says no check reads the rule yet stays `unmechanized`.
-- Owner, 2026-10-17 02:28 CDT, "Merge it": the second lane scored zero net value at review round 3. Its one opened hole (debt `guard-untied-from-rule-map`) comes from the deleted rules themselves.
+- Owner, 2026-10-17 02:28 CDT, "Merge it": the second lane scored zero net value at review round 3. Its one opened hole comes from the deleted rules themselves.
 
 Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 
@@ -18,7 +18,6 @@ Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 - `verification-recovery-not-gated-on-own-state` and `reports-no-report-when-nothing-landed`: keep the text. Row kind `unmechanized`.
 - `speak-cite-id-plus-gloss`: keep.
 - `output-write-in-ste`: separate lane.
-- Kept as prose: `outcomes-mechanize-rules`, `roles-opus-override-guarded`, `roles-third-try-steps-up`, `git-never-discard-output`, `git-remedy-never-names-target`, `git-slug-then-claim-number`, `git-cite-by-id`, `verification-trust-guard-after-red`, `verification-cry-wolf-guard-is-spent`, `verification-report-unknown-reads`, `building-allow-list-is-the-constant`, `building-scanner-respects-strings`, `reports-order-of-labels`, `reports-done-format`.
 
 Precedent: `a-rule-with-no-gate-leaves-claude-md`.
 
@@ -37,7 +36,7 @@ What still protects each deleted rule:
 
 ## Holes, named
 
-Debts: `override-removal-unreminded` (no early-removal reminder for the cap override file), `cap-until-field-taught-late` (an agent meets `_subagentCapUntil` only in the revoke message), `judgment-exits-debt-count` (a re-kind leaves the waiting list), `estimate-rule-may-be-checkable` (the time table may give `style-no-unmeasured-estimate` a check), `nesting-risk-unrecorded` (no prompt to record the risk of a raised spawn depth), `slug-cite-gloss-unchecked` (slug cites have no gloss check), `report-on-empty-turn-unchecked` (no check sees a report on an empty turn), `plain-prose-writes-only` (replies and briefs are unchecked by the plain-prose rule, `plain-prose-lint`), `pr-ready-unguarded` (nothing guards marking a PR ready), `push-report-before-checks` (no wait after a push), `guard-untied-from-rule-map` (the `merge-checks`, `draft-pr` and `pointer-head` guard rules have no row).
+Debts: `slug-cite-gloss-unchecked` (slug cites have no gloss check), `report-on-empty-turn-unchecked` (no check sees a report on an empty turn), `pr-ready-unguarded` (nothing guards marking a PR ready), `push-report-before-checks` (no wait after a push).
 
 Kind: process
 Home: rule:outcomes-mechanize-rules

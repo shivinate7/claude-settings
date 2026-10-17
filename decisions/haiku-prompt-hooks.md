@@ -66,10 +66,6 @@ cannot exit on a field in code.
   and `output-never-paste-passing-output`. They stay `unmechanized` in
   `lint/rule_mechanisms.json` until the hook catches a real defect.
 
-## Holes, named
-
-Debts: `haiku-counter-files-not-purged` (old counter files are not removed). `haiku-counter-lost-updates` (parallel calls lose counter updates). `haiku-session-key-copied` (the session key line is copied). `haiku-stop-no-reply-uncounted` (a Stop with no reply text is not counted).
-
 ## Judge model
 
 The five judges stay on Sonnet for now, by owner ruling 2026-10-12. A prompt hook takes no effort

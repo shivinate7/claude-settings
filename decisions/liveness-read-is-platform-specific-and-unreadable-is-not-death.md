@@ -17,10 +17,6 @@ Why: on Windows, `ps -o lstart= -p <pid>` never answers, so every liveness read 
 
 Proof: `worktree_live_session_two_spellings_case`, `worktree_live_session_path_unresolvable_case` and `session_is_live_backwards_clock_step_case` in `hooks/test_guard.py` drive the fallbacks at the seam, with `_path_identity` stubbed. They prove the fallback wiring, not that `os.stat` agrees on every Windows build.
 
-## Holes, named
-
-Debt: `liveness-windows-arm-unproven` (the Windows arm is proven only with a stubbed `ctypes.windll`, and the Windows CI job that proves it lands in a parallel change).
-
 Kind: build
 Plan: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md#the-ruling (all)
 Home: hooks/guard.py

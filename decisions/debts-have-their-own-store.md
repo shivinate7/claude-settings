@@ -12,10 +12,6 @@ The rule is `roles-holes-are-debts`, placed after `roles-review-cap-three` (the 
 
 Why: a likely gap stays findable in one list after its decision moves on. Only a likely gap costs a debt file.
 
-## Holes, named
-
-Debts: `debts-no-check-reads-parts` (no check reads the four parts of a debt file). `debt-decision-link-unchecked` (no check confirms that a debt's decision still names its gap).
-
 Kind: process
 Home: rule:roles-holes-are-debts
 Home: debts/README.md
