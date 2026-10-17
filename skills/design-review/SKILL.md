@@ -59,5 +59,6 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 - A skill update does not change a look by itself. Each source stays at its pin.
 - A change gets at most three review rounds (`roles-review-cap-three`). A round is steps 2 to
   5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
-  is still open goes on the owner's list (step 6) and becomes a debt (`roles-holes-are-debts`).
+  is still open goes under "Holes, named" in the change's decision record and becomes a debt
+  (`roles-review-cap-three`, `roles-holes-are-debts`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.

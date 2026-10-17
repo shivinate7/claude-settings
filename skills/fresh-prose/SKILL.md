@@ -18,8 +18,9 @@ For each claim, take the first rung that holds.
    example a deploy, gets a short note that says why.
 5. **Check it.** CI fails if a claimed path, link, or reference does not resolve. For links,
    adopt claude-settings' `actions/readme-links`. A cite to a record in a wrong wrapper, such
-   as ``D`slug` ``, never resolves and no rewrite fixes it. For cites, adopt the near-miss check
-   of claude-settings' `actions/stamp`.
+   as ``D`slug` ``, is a near-miss. The stamp rewrite never matches it, so the cite stays dead
+   text until someone writes the cite form. For cites, adopt the near-miss check of
+   claude-settings' `actions/stamp`. It names the cite form to write.
 
 Use the tools the repo already has: its language, its test runner, its CI. Add a dependency
 only if a small script cannot do the job, and name each dependency you add, with the reason.

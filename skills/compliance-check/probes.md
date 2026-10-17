@@ -38,7 +38,7 @@ session transcripts, not a repo.
 | Git | `check_silent_undo.py --history` | no lost lines |
 | Verification | `ci-hygiene` skill on `.github/workflows/` | no top finding |
 | Verification | list the screens, if any, and the sizes and themes they ship in | a check per screen |
-| Verification | `grep -rnE -B4 "\bsleep\b" .github/ scripts/`; count a hit only when a `while`, `until` or `for` line is in the 4 lines above it | no waiter loop. A `sleep` outside a loop is not a waiter |
+| Verification | `grep -rn "sleep" .github/ scripts/`; read each hit in its file and judge it | no waiter loop. A loop that sleeps to wait on a condition is a waiter. A lone delay is not |
 | Tokens | none: session practice | `n/a (session)` |
 | Building | `git ls-files '*test*'` against product files | each product module has a test |
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
