@@ -5334,6 +5334,34 @@ class DanglingDefaultBaseTests(unittest.TestCase):
                 "origin/main is not strictly ahead of local main")
         self.assertEqual(guard.resolve_default_base(root), "origin/main")
 
+    def _drop_ref(self, root, ref):
+        gone = run_vcs(root, "update-ref", "-d", ref)
+        require(gone.returncode == 0, "dropping %s failed: %s" % (ref, gone.stderr.strip()))
+        require(run_vcs(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode != 0,
+                "%s still resolves" % ref)
+
+    def test_dangling_origin_head_and_no_origin_main_reads_origin_master_before_local_main(self):
+        """Owner's order 2026-10-16: origin/HEAD, origin/main, then origin/master, then local main.
+        Local main exists here and is still skipped for origin/master."""
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        self._drop_ref(root, "refs/remotes/origin/main")
+        made = run_vcs(root, "update-ref", "refs/remotes/origin/master", "main")
+        require(made.returncode == 0, "making origin/master failed: %s" % made.stderr.strip())
+        require(run_vcs(root, "rev-parse", "--verify", "-q", "refs/heads/main").returncode == 0,
+                "local main is gone, so the case does not prove origin/master precedes it")
+        self.assertEqual(guard.resolve_default_base(root), "origin/master")
+
+    def test_dangling_origin_head_and_no_origin_branch_reads_local_master_when_local_main_is_gone(self):
+        root, _ = self._squash_lane("refs/remotes/origin/gone")
+        self._drop_ref(root, "refs/remotes/origin/main")
+        renamed = run_vcs(root, "branch", "-m", "main", "master")
+        require(renamed.returncode == 0, "renaming main to master failed: %s" % renamed.stderr.strip())
+        for ref in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
+                    "refs/heads/main"):
+            require(run_vcs(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode != 0,
+                    "%s resolves, so the case does not reach local master" % ref)
+        self.assertEqual(guard.resolve_default_base(root), "master")
+
     def test_resolving_origin_head_stays_first_even_when_origin_main_exists(self):
         root, _ = self._squash_lane("refs/remotes/origin/main")
         made = run_vcs(root, "update-ref", "refs/remotes/origin/trunk", "refs/remotes/origin/main")
