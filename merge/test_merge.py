@@ -5043,10 +5043,14 @@ class LockApi:
     and (added by the test's pause) every pause. A call named by GhLockRateRetry.step_of answers the next reply queued for that step by `limit`
     ((code, text) or (code, text, headers)), else what a working API answers. The ref moves only when a PATCH or a POST says so."""
     def __init__(self):
-        self.ref, self.commits, self.log, self.queued, self.n = None, {}, [], {}, 0
+        self.ref, self.commits, self.log, self.queued, self.n, self.lost = None, {}, [], {}, 0, {}
 
     def limit(self, step, *replies):
         self.queued.setdefault(step, []).extend(replies)
+
+    def lose_reply(self, step, reply):
+        """The next call of `step` takes effect (the ref moves), then answers `reply` (code, text): the reply is lost on the way back."""
+        self.lost[step] = reply
 
     def steps(self, since=0):
         return [e[0] for e in self.log[since:]]
@@ -5062,7 +5066,11 @@ class LockApi:
                 key, _, value = pair.partition("=")
                 fields[key] = value
         self.log.append((step, fields))
-        ent = self.queued[step].pop(0) if self.queued.get(step) else self.answer(step, rest[0], fields)
+        if step in self.lost:
+            self.answer(step, rest[0], fields)
+            ent = self.lost.pop(step)
+        else:
+            ent = self.queued[step].pop(0) if self.queued.get(step) else self.answer(step, rest[0], fields)
         c, out = ent[0], ent[1]
         return c, gh_i(200 if not c else http_code_of(out), out, **(ent[2] if len(ent) > 2 else {}))
 
@@ -5208,11 +5216,62 @@ class LockExtendsForRateWaits(unittest.TestCase):
         self.assertEqual(self.lock.until, self.NOW + self.MAX_HOLD)
 
     def test_a_wait_that_needs_exactly_six_hours_from_the_take_is_extended(self):  # the bound is "past": a hold of exactly 6 h is allowed
-        self.held(1000)
+        self.held(self.MAX_HOLD - 600)  # re-pointed (review round 2, F1): the lock is live at the read, 600 s left. It was held(1000), expired for hours by then
         self.clock.t = self.NOW + self.MAX_HOLD - 900 - self.MARGIN
         self.rate_limited_read(900)
         self.assertEqual(self.pauses()[0]["published"], self.NOW + self.MAX_HOLD)
         self.assertEqual(self.lock.until, self.NOW + self.MAX_HOLD)
+
+    # review round 2, F1: a lock whose expiry has passed is not extended. A rival may already have broken it (acquire treats expiry <= now as free), so two runs would both hold it
+    def expired_stops_the_run(self, at):
+        """The lock expires at 1200. The clock reads `at`. The rate-limited read must stop the run: no write, no wait, no second try."""
+        self.held(200)
+        self.clock.t = at
+        with self.assertRaises(merge.NetStop) as cm:
+            self.rate_limited_read(100)
+        self.assertRegex(str(cm.exception), r"(?i)merge lock")
+        self.assertRegex(str(cm.exception), r"Run again")
+        steps = self.api.steps(self.taken)
+        self.assertNotIn("ref-patch", steps)
+        self.assertNotIn("lock-commit-post", steps)
+        self.assertNotIn("pause", steps)
+        self.assertEqual(steps.count("lock-commit-read"), 1, steps)  # no second try of the read
+        self.assertEqual(self.api.ref, self.token)  # the lock on the ref is not touched
+        self.assertEqual(self.lock.until, 1200)
+
+    def test_a_rate_wait_on_an_expired_lock_stops_the_run_before_any_write(self):
+        self.expired_stops_the_run(1300)  # 100 s past the expiry
+
+    def test_a_rate_wait_on_a_lock_that_expires_this_second_stops_the_run(self):  # the boundary: acquire frees a lock at expiry <= now, so extend_for must not extend it
+        self.expired_stops_the_run(1200)
+
+    def test_a_rate_wait_on_a_lock_with_one_second_left_is_still_extended(self):  # control: green on d47105b. It kills a guard that stops too early
+        self.held(200)
+        self.clock.t = 1199
+        self.rate_limited_read(100)
+        self.assertEqual(self.api.steps(self.taken).count("ref-patch"), 1)
+        self.assertEqual(self.pauses(), [{"wait": 100, "until": 1599, "published": 1599}])
+
+    def test_extend_for_on_an_expired_lock_names_the_merge_lock_and_says_run_again(self):  # direct: retry_net wraps every extend_for stop in a text that already says "merge lock"
+        self.held(200)
+        self.clock.t = 1300
+        with self.assertRaises(merge.NetStop) as cm:
+            self.lock.extend_for(100)
+        self.assertRegex(str(cm.exception), r"(?i)merge lock")
+        self.assertRegex(str(cm.exception), r"Run again")
+        self.assertNotIn("ref-patch", self.api.steps(self.taken))
+        self.assertNotIn("lock-commit-post", self.api.steps(self.taken))
+
+    # review round 2, F3: the new commit is this run's before the PATCH is sent. A PATCH that lands with a lost reply must still leave a lock that release can delete
+    def test_a_release_after_a_patch_whose_reply_was_lost_deletes_the_lock(self):
+        self.held(200)
+        self.api.lose_reply("ref-patch", (1, '{"message":"Server Error"}gh: Server Error (HTTP 502)'))
+        with self.assertRaises(merge.NetStop):
+            self.rate_limited_read(100)
+        self.assertNotEqual(self.api.ref, self.token, "the PATCH did not land: this case tests nothing")
+        self.assertEqual(release_out(self, self.lock, self.token), "")
+        self.assertIsNone(self.api.ref)
+        self.assertEqual(self.api.steps().count("delete"), 1)
 
     # (c) one value: the expiry the lock holds is the expiry it published, after the take and after each extension, on a clock that moves between reads
     def test_the_published_expiry_is_the_one_the_lock_holds_after_the_take_and_after_each_extension(self):
@@ -5292,10 +5351,15 @@ class GitLockExtendsForRateWaits(Env):
             self.clock.pause(seconds)
         self.glock = merge.GitLock(self.co, now=self.clock.now, pause=pause)
         self.token = self.glock.acquire("main", ttl)
-        self.gh_calls, self.gh = 0, [(0, "[]")]
+        self.gh_calls, self.gh, self.cmds, self.lose_push = 0, [(0, "[]")], [], False  # cmds: every non-gh command after the take
         real = merge.sh
         def fake_sh(args, cwd=None, input=None, env=None):
             if args[0] != "gh":
+                self.cmds.append(list(args))
+                if self.lose_push and "push" in args and not args[-1].startswith(":"):  # the next ref update lands on origin, and its reply is lost
+                    self.lose_push = False
+                    real(args, cwd=cwd, input=input, env=env)
+                    return 128, NET_HOST
                 return real(args, cwd=cwd, input=input, env=env)
             self.gh_calls += 1
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
@@ -5345,6 +5409,45 @@ class GitLockExtendsForRateWaits(Env):
             self.assertEqual(until, published, self.seen)
         self.assertLess(self.seen[0][2], self.seen[1][2])
         self.assertEqual(self.glock.until, self.published())
+
+    # review round 2, F1: a lock whose expiry has passed is not extended (a rival may already have broken it)
+    def expired_stops_the_run(self, at):
+        """The lock expires at 1030. The clock reads `at`. The rate-limited call must stop the run: no push, no commit, no wait, no second try."""
+        host = self.held(30)
+        self.clock.t = at
+        self.gh = [(1, RATE_403), (0, "[]")]
+        with self.assertRaises(merge.NetStop) as cm:
+            host.gh(["run", "list"])
+        self.assertRegex(str(cm.exception), r"(?i)merge lock")
+        self.assertRegex(str(cm.exception), r"Run again")
+        self.assertEqual((self.seen, self.gh_calls), ([], 1))
+        self.assertEqual([c for c in self.cmds if "push" in c or "commit-tree" in c], [], "the run wrote a lock commit or pushed on an expired lock")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token)  # the lock on origin is not touched
+        self.assertEqual(self.glock.until, 1030)
+
+    def test_a_rate_wait_on_an_expired_lock_stops_the_run_before_any_write(self):
+        self.expired_stops_the_run(1100)
+
+    def test_a_rate_wait_on_a_lock_that_expires_this_second_stops_the_run(self):  # the boundary: acquire frees a lock at expiry <= now
+        self.expired_stops_the_run(1030)
+
+    def test_a_rate_wait_on_a_lock_with_one_second_left_is_still_extended(self):  # control: green on d47105b. It kills a guard that stops too early
+        host = self.held(30)
+        self.clock.t = 1029
+        self.gh = [(1, RATE_403), (0, "[]")]
+        self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
+        self.assertEqual(self.seen, [(60, 1389, 1389)])
+
+    # review round 2, F3: a push that lands with a lost reply must still leave a lock that release can delete
+    def test_a_release_after_a_push_whose_reply_was_lost_deletes_the_lock(self):
+        host = self.held(30)
+        self.lose_push = True
+        self.gh = [(1, RATE_403), (0, "[]")]
+        with self.assertRaises(merge.NetStop):
+            host.gh(["run", "list"])
+        self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token, "the push did not land: this case tests nothing")
+        self.assertEqual(release_out(self, self.glock, self.token), "")
+        self.assertFalse(self.lock_ref())
 
     def extended(self):
         host = self.held(30)
