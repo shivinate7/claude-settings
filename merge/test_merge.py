@@ -893,7 +893,7 @@ class Stopped(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 class BaseAware(Env):
-    """Plan "The flow" and "Settled by the owner" item 12: the pull request's own base drives every
+    """Decision merge-follows-the-prs-base: the pull request's own base drives every
     step. Cause: q_max #497 merged into claude/speed-wave-2 and claimed D-720 against main."""
     BASE = "integ"
 

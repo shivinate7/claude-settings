@@ -67,24 +67,3 @@ Banchi then calls the tool from `make merge`, and runs mode `check` in `check.ym
 `scripts/merge-pr.py` and the claim path of `scripts/claim-ids.py`. It deletes the matching
 arms of `claim-selftest.py` and `merge-selftest.sh`. That closes DEBT78. D140 is rewritten in
 place to name the shared tool. Its ruling does not change.
-
-## Cited by code
-
-Bandaid. Code comments cite these four headings. Delete each heading when its cite names the
-real home.
-
-### The flow
-
-`confirm` in `merge/merge.py`.
-
-### The fresh-code guard
-
-`merge/launch.py`, and the README, "The `merge` command".
-
-### How the command finds claude-settings
-
-`bin/merge`, and the README, "The `merge` command".
-
-### Settled by the owner
-
-Decisions merge-follows-the-prs-base, merge-waits-on-every-check and merge-lock-names-its-holder.
