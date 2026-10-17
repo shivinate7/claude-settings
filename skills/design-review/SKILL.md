@@ -60,7 +60,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 - A change gets at most three review rounds (`roles-review-cap-three`). A change that only
   deletes and adds nothing gets one round. A round is steps 2 to
   5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
-  is still open goes under "Holes, named" in the change's decision record and becomes a debt,
-  or a note when Claude is unlikely to hit it in normal work (`roles-review-cap-three`,
+  is still open goes under "Holes, named" in the change's decision record. It becomes a debt if Claude
+  is likely to hit it in normal work. Otherwise it becomes a note (`roles-review-cap-three`,
   `roles-holes-are-debts`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.
