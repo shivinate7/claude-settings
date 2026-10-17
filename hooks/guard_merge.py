@@ -230,10 +230,11 @@ def undrafted_pr_create(segment: str) -> bool:
 # the base's page, so it passes. The base is `resolve_default_base`, read at its TIP.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
-# the index. A commit that names paths (`--`, --only) holds only those paths. A segment that runs
-# `lint/hook_catalog.py` without `--check` rewrites the page, so a later commit that reaches the page
-# is refused with no id read. Any read that fails is no hit. Limits: a `sh -c` script is not read, and
-# `commit --include` is judged as `commit <paths>`.
+# the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
+# command word is `hook_catalog.py`, or a python interpreter whose script is `hook_catalog.py`, rewrites
+# the page unless it has `--check` or `--print`. A later commit that reaches the page is then refused
+# with no page id compared, while the base has a page. Any read that fails is no hit. Limits: a
+# `sh -c` script and `python -m` are not read, and `commit --include` is judged as `commit <paths>`.
 RECORDS_PAGE = "docs/records.md"
 RECORDS_PAGE_REASON = (
     "Rule (Git): this commit changes docs/records.md. The page is rebuilt only at merge, by the "
@@ -318,11 +319,36 @@ def _page_tracked(top):
     return done is not None and done.returncode == 0 and bool(done.stdout.strip())
 
 
+_GENERATOR = "hook_catalog.py"
+_GENERATOR_READS = {"--check", "--print"}   # the two modes that write no page
+_PYTHON_VALUE_FLAGS = {"-X", "-W"}
+
+
+def _is_python(word):
+    word = word.lower()
+    word = word[:-4] if word.endswith(".exe") else word
+    return word in ("py", "python") or (word.startswith("python") and word[6:].replace(".", "").isdigit())
+
+
 def _runs_generator(segment):
-    """True when the segment runs lint/hook_catalog.py in any form but `--check`."""
-    tokens = segment_tokens(segment) or []
-    return (any(os.path.basename(t) == "hook_catalog.py" for t in tokens) and "--check" not in tokens
-            and tokens[0] != "echo")
+    """True when the segment's command word is lint/hook_catalog.py, or a python interpreter whose
+    script argument is it, and it has neither `--check` nor `--print`. The caller passes no git call."""
+    tokens = list(segment_tokens(segment) or [])
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return False
+    word, rest = basename(tokens[index]), tokens[index + 1:]
+    if _is_python(word):
+        while rest and rest[0].startswith("-"):
+            flag = rest.pop(0)
+            if flag in ("-c", "-m", "-"):
+                return False
+            if flag in _PYTHON_VALUE_FLAGS and rest:
+                rest.pop(0)
+        if not rest:
+            return False
+        word, rest = basename(rest[0]), rest[1:]
+    return word == _GENERATOR and not _GENERATOR_READS & set(rest)
 
 
 def _commit_page_id(top, working):
@@ -348,7 +374,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] not in ("add", "commit"):
-            generated = generated or (bool(segment.strip()) and _runs_generator(segment))
+            generated = generated or (call is None and bool(segment.strip()) and _runs_generator(segment))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
@@ -367,14 +393,14 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         working = _names_page(specs, where, top) if specs else staged or (all_flag and _page_tracked(top))
         if specs and not working:
             continue
-        if generated and working:
-            return "git commit " + RECORDS_PAGE
         base = resolve_default_base(top)
         if base is None:
             continue
         head_id, base_id, origin_id = _page_ids(top, base)
-        if head_id is None or not base_id:   # a failed read, or a base with no page: no hit
+        if head_id is None or not base_id:   # a failed read, or a base with no page (first adoption): no hit
             continue
+        if generated and working:
+            return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
             return "git commit " + RECORDS_PAGE

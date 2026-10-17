@@ -71,8 +71,9 @@ one fixed order, and the first match wins.
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied, `--auto` too.
     draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
-    records-page       a `git commit` whose docs/records.md differs from HEAD's page and from the
-                       base tip's page. A merge of the base brings the base's page, so it passes.
+    records-page       a `git commit` whose docs/records.md differs from HEAD's page, the base
+                       tip's page and origin/<base>'s page. A merge of the base brings the base's
+                       page, so it passes.
                        Denied. A read that fails is no hit.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
