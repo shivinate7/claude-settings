@@ -1,8 +1,7 @@
 # Haiku prompt hooks
 
 The owner ruled on 2026-10-07 which hooks may call a model. On 2026-10-12 the owner ruled
-on the model for the prompt hooks. The blocking judges stay. They work well and can still
-improve.
+on the model for the prompt hooks.
 
 The model and effort of each hook named here are rows of the model table (decision
 `subagent-model-cap`, the model per role). This entry holds no copy. Cost is why
@@ -10,8 +9,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 ## Five prompt hooks
 
-Five `type: prompt` hooks judge rules that no script can parse. Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. They stay.
-A prompt hook cannot warn: it answers `ok` and shows nothing, or
+Five `type: prompt` hooks judge rules that no script can parse. Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. A prompt hook cannot warn: it answers `ok` and shows nothing, or
 blocks with a reason.
 
 | Hook on | Rules it judges |
@@ -104,3 +102,9 @@ Limits, named:
 
 Kind: process
 Home: hooks/reply_judge.py
+Home: settings.json
+
+## Ruling
+
+Owner ruling, 2026-10-17 11:33 CDT, the trial review: the blocking judges stay. They work
+well and can still improve.
