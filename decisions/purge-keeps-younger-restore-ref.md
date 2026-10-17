@@ -45,7 +45,7 @@ Which branches reach the log is set by `a-branch-is-redundant-by-patch-not-by-an
 
 ## Holes, named
 
-Debts: `purge-key-case-folds` (branch names compare with exact case), `purge-bad-row-key-raises` (a list or dict key stops the purge), `purge-git-trace-missing-ref` (a missing ref reads as an error while git tracing is on), `purge-snapshot-race` (unexpired rows are read once, at purge start), `purge-realpath-per-row` (realpath runs once per unexpired row), `purge-update-ref-mutant-missing` (no mutant drops only the commit argument of `update-ref -d`), `purge-confirm-total-wrong` (the confirm total counts kept refs), `purge-orphan-ref-kept` (a ref no log entry names is kept forever).
+Debts: `purge-bad-row-key-raises` (a list or dict key stops the purge), `purge-git-trace-missing-ref` (a missing ref reads as an error while git tracing is on), `purge-snapshot-race` (unexpired rows are read once, at purge start), `purge-realpath-per-row` (realpath runs once per unexpired row), `purge-update-ref-mutant-missing` (no mutant drops only the commit argument of `update-ref -d`), `purge-confirm-total-wrong` (the confirm total counts kept refs), `purge-orphan-ref-kept` (a ref no log entry names is kept forever).
 
 ## Unverified
 

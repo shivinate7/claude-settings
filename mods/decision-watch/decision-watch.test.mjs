@@ -98,6 +98,13 @@ await test('source: the host reads $.model.complete( and the event names as lite
   assert.ok(text.includes('"command.run"'), 'missing the "command.run" literal')
 })
 
+// Debt dw-ffff-regex-literal. A raw U+FFFF (a noncharacter) in the file can be dropped or mangled by an editor
+// or a transfer, and then the asciiJson range end changes with no sign. The escape \uFFFF is plain ASCII.
+// This is a character-presence check, not a scan of strings and comments, so it needs no opener cases.
+await test('source: hooks/register.mjs holds no raw U+FFFF character, the asciiJson range end is an escape', () => {
+  assert.ok(!readFileSync(REGISTER, 'utf8').includes('\uFFFF'), 'a raw U+FFFF character is in hooks/register.mjs')
+})
+
 // Item 1. The validator rejects a $ noun read as a value. $.fs.write makes folders, so there is no mkdir.
 // Code only: a comment that names the call is not a use.
 await test('source: no $.noun.method is read without a call in the mod code, so $.fs.mkdir is not there even as typeof', () => {
@@ -370,6 +377,20 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   const endData = await judged(h)
   assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
+})
+
+// Debt dw-text-of-drops-reason. An aborted call returns no text and a reason. The reply still goes to python
+// as --model-error (a reason is not a verdict reply), and the error and the log name the reason.
+await test('model error: an aborted reply with a reason and no text goes as --model-error, and the log names the reason', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: false, reason: 'aborted by user', usage: {} }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  const argv = pyCalls(h)[1].argv
+  assert.ok(argv.includes('--model-error'), 'phase 2 has --model-error')
+  assert.ok(!argv.includes('--model-text'), 'phase 2 has no --model-text: the reason is not a reply')
+  assert.ok(String(argv[argv.indexOf('--model-error') + 1]).includes('aborted by user'), 'the error names the reason')
+  assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
+  assert.match(endData, /aborted by user/, 'log does not name the reason')
 })
 
 // ---- HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
@@ -648,7 +669,8 @@ await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, 
 
 await test('stdin: the JSON sent to python is ASCII-only, and a non-ASCII path round-trips', async () => {
   const cwd = '/work/café/repo'
-  const transcript = REAL_CFG + '/projects/café/' + SID + '.jsonl'
+  // U+FFFF is the top of the escaped range (debt dw-ffff-regex-literal): it must escape, and round-trip.
+  const transcript = REAL_CFG + '/projects/café\uFFFF/' + SID + '.jsonl'
   const h = await load(host())
   await fire(h, 'classic.Stop', stopEvent({ cwd, transcript_path: transcript }), {})
   await judged(h)
