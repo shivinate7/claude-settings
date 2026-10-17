@@ -14,7 +14,10 @@ Owner, 2026-10-11, owner, 2026-10-15 (the pinned checkout), and owner, 2026-10-1
 
 1. The links in `~/.claude` point at one pinned checkout. It is a worktree of the clone that
    holds main's commit on a detached HEAD, and no branch. No lane, review or merge work runs
-   in it.
+   in it. The frozen-path guard enforces part of this (owner, 2026-10-17 11:40 CDT): it refuses
+   a file write or a shell write (redirect, `tee`, `sed -i`, `cp`, `mv`, `rm`) into the pin and
+   into the stamped worktree the pin link points at. It does not read git commands, so
+   `git -C <pin> reset --hard origin/main` is allowed.
 2. This repo's `merge.afterMerge` runs `merge/install_from_main.sh` after each merge. The
    script moves the pinned checkout to the new local `main`, then runs the install from it.
    It never installs from the checkout that ran the merge, because that is often a temporary
