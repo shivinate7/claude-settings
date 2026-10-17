@@ -72,6 +72,11 @@ git accepts (`--mess <msg>`). A glued value (`-mfoo`, `--message=x`) takes nothi
 more. A word after `--` is a push. `export` and `import` are known action words and
 keep the stack side. Lane stash-pathspec fixed these reads.
 
+Owner ruling, 2026-10-17 11:40 CDT. `git stash -h` and `git stash --help` are allowed over a
+dirty shared tree: they print usage and read no stack and no tree. The allow holds only when the
+help flag is the sole argument after `stash`. `git stash -h list`, `stash push -h`, `stash -u -h`
+and every other form keep the verdict they had.
+
 ## The conflict this keeps hitting
 
 The harness injects a worktree reminder into every worktree session. In substance it tells the worker to prefer a temporary WIP commit. If the worker
@@ -91,7 +96,7 @@ instead, which is the only half of the conflict this repository controls.
 
 ## Holes, named
 
-Debts: `unknown-stash-word-tree-only` (an unknown stash word is judged on the tree side only). `stash-create-false-refusal` (create is denied over a non-empty stack). `stash-read-to-run-race` (a stack entry pushed after the read is missed). `stash-all-ignored-tree-passes` (stash -a passes a tree with ignored files). `stash-help-flag-refused-as-push` (stash -h and --help are refused as a push). `stash-export-comment-stale` (a test comment is stale).
+Debts: `unknown-stash-word-tree-only` (an unknown stash word is judged on the tree side only). `stash-create-false-refusal` (create is denied over a non-empty stack). `stash-read-to-run-race` (a stack entry pushed after the read is missed). `stash-all-ignored-tree-passes` (stash -a passes a tree with ignored files). `stash-export-comment-stale` (a test comment is stale).
 
 ## Build plan
 
