@@ -184,6 +184,10 @@ jobs:
       - name: Scope detector fixture suite
         run: python3 lint/test_harness_scope.py
 
+      - name: rm shim fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_rm_shim.py
+
       - name: Mutation verdict fixture suite
         run: python3 hooks/test_mutate_shared.py
 
@@ -422,6 +426,10 @@ jobs:
       - name: Guard fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
+
+      - name: rm shim fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_rm_shim.py
 
       # No Guard mutation harness here: it runs on the gates job (Linux) only. Accepted risk: a
       # macOS-only mutation regression is not caught. No mutant is marked macOS-only.

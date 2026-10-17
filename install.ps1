@@ -303,6 +303,7 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
   for f in "`$repo/`$sub"/*; do
     [ -f "`$f" ] || continue
     case "`$(basename "`$f")" in guard.py|guard_*.py) [ "`$gset" = 1 ] && continue ;; esac
+    [ "`$sub" = bin ] && [ "`$(basename "`$f")" = rm ] && continue
     d="`$cfg/`$sub/`$(basename "`$f")"
     [ -L "`$d" ] || { put "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
@@ -621,6 +622,8 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     }
 
     $srcFiles = @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)
+    # bin/rm is a posix sh shim; no Windows half lands it (debt rm-shim-windows).
+    if ($sub -eq 'bin') { $srcFiles = @($srcFiles | Where-Object { $_.Name -ne 'rm' }) }
     # Guard set: guard.py goes first, the landing that switches; see the comment above Install-GuardSet.
     if ($GuardSetMode -and $sub -eq 'hooks') { $srcFiles = @($srcFiles | Sort-Object @{ Expression = { $_.Name -cne 'guard.py' } }, Name) }
     foreach ($src in $srcFiles) {
