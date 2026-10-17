@@ -1062,9 +1062,9 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
 # - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
-# - Each ruling is shown with its record id (the file stem).
+# - Each ruling is shown with its record id, <folder>/<stem> (owner ruling 2026-10-17).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
-#   holds the id and the record's H1 title, and names no path.
+#   holds the id and the record's H1 title, and names no absolute path.
 
 # The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
 # module at test time. No case here keeps a copy of them.
