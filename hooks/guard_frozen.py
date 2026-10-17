@@ -79,9 +79,11 @@ CONFIG_FROZEN_SKILLS = (
 # move leaves a stamped worktree `<clone>-live-<12 hex>`. This suffix is the one copy in Python.
 # merge/install_from_main.sh builds the same name (`pin="$clone-live"`) and must stay equal to it.
 # A folder counts as a pin only when the clone sits beside it, told by the two marker files below,
-# so an unrelated `something-live` folder stays editable.
+# so an unrelated `something-live` folder stays editable. Either marker is enough.
+# A stamped worktree is frozen only while the pin link resolves to it: the install tells a person
+# to move an older one aside, and prunes them, so those stay writable.
 LIVE_PIN_SUFFIX = "-live"
-_LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?:-[0-9a-f]{12})?")
+_LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
 _CLONE_MARKERS = ("settings.json", "install.ps1")
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
@@ -107,14 +109,19 @@ def _literal_resolved(path: str, cwd: str) -> str:
 
 
 def _in_live_pin(target: str) -> bool:
-    """True when the path is the pinned checkout or sits inside it (itself or a stamped one)."""
+    """True when the path is the pinned checkout, or sits inside it or inside the stamped worktree
+    the pin link points at now."""
     while True:
         parent, name = os.path.split(target)
         found = _LIVE_PIN.fullmatch(name)
         if found:
             clone = os.path.join(parent, found["clone"])
-            if all(os.path.isfile(os.path.join(clone, marker)) for marker in _CLONE_MARKERS):
-                return True
+            if any(os.path.isfile(os.path.join(clone, marker)) for marker in _CLONE_MARKERS):
+                if not found["stamp"]:
+                    return True
+                pin = os.path.realpath(clone + LIVE_PIN_SUFFIX)
+                if os.path.normcase(pin) == os.path.normcase(os.path.realpath(target)):
+                    return True
         if not name or parent == target:
             return False
         target = parent
@@ -425,8 +432,14 @@ def _runs_stored_text(segment: str, words, plain: str) -> bool:
 # `-Destination` fails closed to a deny), and a DEST built from a variable, a glob or a brace fails
 # closed too. DEST also counts as hit when it is a directory the predicate hits (`DEST/_`), so a
 # frozen file copied into a frozen folder stays denied.
-_CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxlsTS]+|--[a-z][a-z-]*(?:=.*)?|--")
-_CP_TARGET = re.compile(r"-[RrfiaHLPpnvuxlsTS]*t|--target-directory")
+# `l` and `s` (and the long `--link`, `--symbolic-link`, even cut short) make a link, not a copy: a
+# later write to the new name writes the frozen file, so those flags are never read as a copy.
+_CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxTS]+|--[a-z][a-z-]*(?:=.*)?|--")
+_CP_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t|--target-directory")
+_CP_LINK_LONG = ("link", "symbolic-link")
+# A redirect to the null device or onto another descriptor writes no file.
+_NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>&\d+-?", re.IGNORECASE)
+_OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
 
@@ -439,6 +452,16 @@ def _copy_reads(raw, predicate, cwd):
     operands, target, index = [], None, start + 1
     while index < len(words):
         word = words[index]
+        if _NULL_REDIRECT.fullmatch(word):
+            index += 1
+            continue
+        if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
+                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(r"&\d+-?", words[index + 1])):
+            index += 2
+            continue
+        if word != "--" and word.startswith("--") and any(
+                name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
+            return set()
         if _CP_TARGET.fullmatch(word):
             target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
             if target is None:
