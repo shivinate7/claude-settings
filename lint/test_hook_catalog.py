@@ -1046,6 +1046,15 @@ class RecordsPage(Tree):
             with self.subTest(name):
                 self.assertEqual(got.get("r%d" % i), gist)
 
+    def test_a16_the_notes_file_in_debts_is_no_record(self):
+        # Owner ruling 2026-10-17 11:56 CDT: a finding too unlikely to hit is one line in the notes file, not a debt.
+        # Red on 26cfc87f: the notes file has no **What.** line, so the page is refused (PR 497 merge).
+        notes = "# Notes\n\n- A finding too unlikely to hit. Decision: none.\n"
+        root = self.tree(with_records({"debts/notes.md": notes}))
+        code, out, err = generator(root)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(listed(records_rows(self.records_text(root)))["Debts"], ["gap-one"])
+
 
 class RecordsStale(Tree):
     def published(self, extra=None):
