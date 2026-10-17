@@ -1,5 +1,7 @@
 # Standing merge grant for this repo
 
+## The ruling
+
 Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in
 claude-settings. This is the repo grant that `git-main-only-by-pr` names.
 
