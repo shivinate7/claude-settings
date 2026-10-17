@@ -3,19 +3,32 @@
 Kind: process
 Home: install.sh
 
-`put_file` in `install.sh` renames `DEST.cs-new` over `DEST`. It now retries the rename 25 times,
-0.1 s apart. This is the budget of `Move-OverFile` in `install.ps1`. After the last try it prints
-"could not replace" and sets `INSTALL_FAILED`. It also prints the stderr of the last `mv`.
+`put_file` in `install.sh` renames `DEST.cs-new` over `DEST`. It now makes up to 25 attempts, 0.1 s
+apart, so a failure costs about 2.4 s. This is the budget of `Move-OverFile` in `install.ps1`. After
+the last attempt it prints the stderr of that `mv`, then "could not replace", and sets
+`INSTALL_FAILED`.
 
-MEASURED, CI history: the Windows test `swap1sh` (`hooks/test_install_src.sh`) failed in 3 of 24
-runs (12.5%). The error was `mv: cannot move '...guard.py.cs-new' to '...hooks/guard.py': Device or
-resource busy`. A running `python3 guard.py` holds the file open. Windows refuses a rename over an
-open file. The old code ran `mv -f` once. Unmeasured: the failure rate after the retry. CI settles it.
+MEASURED, CI history (Explore run, `gh api` job logs, 2026-10-17): the Windows test `swap1sh`
+(`hooks/test_install_src.sh`) failed in 3 of 24 runs (12.5%). Each failure was `mv: cannot move
+'...guard.py.cs-new' to '...hooks/guard.py': Device or resource busy`. The old code ran `mv -f` once.
+Unmeasured: which process held the file. The test runs `python3 guard.py` in a loop during the
+install, so a running guard is the likely holder. Unmeasured: the failure rate after the retry.
 
 Governing record: `install-hooks-whole` (an install never shows a session a half-copied hook). It
 says a rename held up by an open reader is retried briefly.
 
+The test shim `make_swap_bin` now pauses only once. Without that, a failed and retried `mv` at the
+pause point pauses twice, and swap1sh fails. The test-author showed this red with a forced failed
+`mv`, then green.
+
 ## Holes, named
 
-None. The `mv` shim in `hooks/test_install_src.sh` may pause twice when the real `mv` fails and is
-retried. A test-author owns that edit.
+1. `install.sh` retries every `mv` error. `install.ps1` retries only Win32 codes 5 and 32. A
+   permission or missing-path failure now takes about 2.4 s per file before it fails. Orchestrator's
+   call: a failed install already fails, and sh cannot read the error code. Debt:
+   `install-sh-retries-every-error`, the sh retry does not filter by error.
+2. Two other renames have no retry: the first-run backup of a person's own file and the
+   `settings.json` backup. Debt: `install-sh-other-renames-no-retry`, two install renames are tried
+   once.
+3. No test drives the retry success path or the exhaustion path. Debt: `install-sh-retry-untested`,
+   the mv retry has no test.
