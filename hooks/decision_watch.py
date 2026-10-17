@@ -614,10 +614,7 @@ JUDGE_INSTRUCTIONS = (
 # disable every plugin, MCP server, hook, skill and custom command for the session, which
 # `--tools` alone does not claim to reach.
 #
-# build the child's environment by copying `os.environ` and overriding one key, so every
-# other variable passed through unfiltered: `CLAUDE_CODE_MESSAGING_SOCKET` and
-# `CLAUDE_CODE_MESSAGING_TOKEN` (the host IPC channel), `CLAUDE_CODE_HOST_SESSION_ID`,
-# `CLAUDE_CODE_OAUTH_SCOPES`, and `ANTHROPIC_API_KEY` when set. Copy-then-subtract cannot
+# Copying `os.environ` and subtracting names cannot
 # be complete, the same shape `decisions/predicate-is-the-act.md` already names for a
 # shape list that can only grow. `JUDGE_ENV_ALLOWLIST` inverts it: the child's environment
 # holds only the named variables the runtime genuinely needs to execute and reach the API
