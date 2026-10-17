@@ -23,12 +23,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-orchestrator-never-builds` | Orchestrate: every other job. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-worker` | Each worker is one role: builder, reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-floor` | Haiku runs only in the roles that table names. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the advisor, and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Only on my word, write the repo's `.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to `opus`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-override-carries-expiry` | The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-remove-override-file` | Remove the file when the raise is no longer needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-workers-never-spawn` | Workers never spawn: nested reports misroute (Sept 2026). | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -40,13 +37,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-mid-task-talk` | Never let lanes talk mid-task. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the claim. | [`CLAUDE.md`](../CLAUDE.md) |
-| `shared-trees-no-destructive-git` | Never run `git stash`, `git reset`, `git checkout <path>`, or `git restore` in a shared checkout. | [`CLAUDE.md`](../CLAUDE.md) |
+| `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-machine-wide-kill` | A stash entry belongs to no branch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-one-checkout-per-agent` | Give one checkout to each concurrent agent. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-own-ports-data` | A branch switch is a whole-tree act. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-confirm-before-write` | Confirm which checkout and branch you stand in before any git write or merge. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
-| `shared-trees-install-refusal-hook` | On first use, install a hook that refuses these commands. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-wait-for-required-checks` | Wait for required checks after every push. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -66,7 +62,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verification-green-proves-only-its-fixtures` | A green check proves only its platform and the states its fixtures build. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-recovery-not-gated-on-own-state` | A recovery control must not depend on the state it recovers, or it fails on the one day it is needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-verify-against-repo` | Verify long work against the repo, not your status line. | [`CLAUDE.md`](../CLAUDE.md) |
-| `verification-never-waiter-loop` | Never write a waiter loop. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-never-dry-run-blocklist` | Never dry-run a block-list. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-bump-first-fix-version` | Bump a dependency to the first version fixing the problem, never the latest. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -86,7 +81,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `building-fix-cause-not-symptom` | Fix the cause, not the symptom. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-scanner-respects-strings` | Scan source code with the language's own parser or tokenizer when the repo has one. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-land-design-or-abandon` | A capability no user can reach is not built. | [`CLAUDE.md`](../CLAUDE.md) |
-| `building-memory-never-only-home` | A memory entry may point to a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-memory-is-short-term` | Memory stays on, as short-term notes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-cite-id-plus-gloss` | Cite a record by id plus a short gloss, like "D12, short titles for records". | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-never-explain-in-paragraph` | Never explain a rule in a paragraph. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -109,6 +103,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ask-steps-run-alone` | Owner ruling, 2026-10-14. | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
 | `background-needs-end-note` | Owner ruling, 2026-10-13 23:41 CDT: "End condition at start." | [`decisions/background-needs-end-note.md`](../decisions/background-needs-end-note.md) |
 | `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
+| `claude-md-shrink` | Owner ruling, 2026-10-16 23:53 CDT. | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
 | `debts-have-their-own-store` | Every known gap is a debt. | [`decisions/debts-have-their-own-store.md`](../decisions/debts-have-their-own-store.md) |
 | `decision-watch-mod-limits` | Yes. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
 | `design-skills` | Owner ruling, 2026-10-10. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
@@ -120,12 +115,14 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-command-position` | One resolver finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
 | `guard-guards-mistakes-only` | Owner ruling, 2026-10-15 15:47 CDT. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
 | `guard-log-read-weekly` | `hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
+| `guard-trims-from-the-audit` | The owner approved these trims from an audit of `~/.claude/guard.log`: 2,713 lines, 2026-09-16 to 2026-10-02. | [`decisions/guard-trims-from-the-audit.md`](../decisions/guard-trims-from-the-audit.md) |
 | `haiku-prompt-hooks` | The owner ruled on 2026-10-07 which hooks may call a model. | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
 | `hold-unsafe-after-round-3` | Owner ruling, 2026-10-15 12:00 CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
 | `janitor-dirty-test-stays` | Owner word, 2026-10-13 15:56 CDT: option A. | [`decisions/janitor-dirty-test-stays.md`](../decisions/janitor-dirty-test-stays.md) |
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | Three suites drive a blind `git` stand-in through a directory placed first on `PATH`. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
 | `local-time-central` | Owner, 2026-10-12: US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
+| `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-needs-a-proven-head` | Owner, 2026-10-12: "Fix both now, one lane." | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
 | `mods-deferred-table` | Owner word, 2026-10-13 21:00 CDT: leave these as deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
@@ -204,11 +201,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `fewest-words-mandate` | On 2026-09-28 the owner asked for a verbiage mandate. | [`decisions/fewest-words-mandate.md`](../decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Rule 7 resolves shell variables before it matches a write target | [`decisions/frozen-path-resolves-shell-vars.md`](../decisions/frozen-path-resolves-shell-vars.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry records the missing half, and the two false alarms that made the half worth writing down. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
-| `guard-trims-from-the-audit` | The owner approved these trims from an audit of `~/.claude/guard.log`: 2,713 lines, 2026-09-16 to 2026-10-02. | [`decisions/guard-trims-from-the-audit.md`](../decisions/guard-trims-from-the-audit.md) |
 | `hooks-share-the-transcript-reader` | Four hooks each carried their own copy of the same transcript readers. | [`decisions/hooks-share-the-transcript-reader.md`](../decisions/hooks-share-the-transcript-reader.md) |
 | `known-bad-input-proves-the-gate` | A `gate` row cites a `test` id (`path::name`, `path::Class.name`) or a `setting` value. | [`decisions/known-bad-input-proves-the-gate.md`](../decisions/known-bad-input-proves-the-gate.md) |
 | `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
-| `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
 | `one-shared-record-stamp` | **Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
@@ -260,6 +255,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bg-end-roster-gaps` | The roster is a closed list. | [`debts/bg-end-roster-gaps.md`](../debts/bg-end-roster-gaps.md) |
 | `blind-git-fixtures-unaudited` | The entry does not audit every blind-command fixture in the repository for the PATH shim gap. | [`debts/blind-git-fixtures-unaudited.md`](../debts/blind-git-fixtures-unaudited.md) |
 | `cap-basename-false-alarm` | A heredoc that writes a fixture named like a settings file (`fixtures/settings.json`) with the cap key asks, though no real settings file changes. | [`debts/cap-basename-false-alarm.md`](../debts/cap-basename-false-alarm.md) |
+| `cap-until-field-taught-late` | The override file needs `_subagentCapUntil` outside `env`, an ISO-8601 time at most 24 hours ahead. | [`debts/cap-until-field-taught-late.md`](../debts/cap-until-field-taught-late.md) |
 | `cap-write-by-python-unseen` | A Python command that writes `CLAUDE_CODE_SUBAGENT_MODEL` into a settings file is allowed with no ask. | [`debts/cap-write-by-python-unseen.md`](../debts/cap-write-by-python-unseen.md) |
 | `catalog-mode-detect-flags` | The catalog finds a script's modes only from a `"$g" --flag` argument. | [`debts/catalog-mode-detect-flags.md`](../debts/catalog-mode-detect-flags.md) |
 | `catalog-root-needs-skills-dir` | `skill_names` lists `skills/` with no check that the folder exists. | [`debts/catalog-root-needs-skills-dir.md`](../debts/catalog-root-needs-skills-dir.md) |
@@ -294,6 +290,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `env-grep-long-abbrev-unpinned` | `grep --regex=` style abbreviations of `--regexp`, `--expression` and `--source` are a hole. | [`debts/env-grep-long-abbrev-unpinned.md`](../debts/env-grep-long-abbrev-unpinned.md) |
 | `env-node-env-file-prints` | `node --env-file=.env -e 'console.log(process.env)'` prints the file through the runner. | [`debts/env-node-env-file-prints.md`](../debts/env-node-env-file-prints.md) |
 | `env-split-string-wsl-only` | `env -S 'cmd'` runs `cmd`. | [`debts/env-split-string-wsl-only.md`](../debts/env-split-string-wsl-only.md) |
+| `estimate-rule-may-be-checkable` | The deferred measured time table may let a check compare a stated time with a measured range. | [`debts/estimate-rule-may-be-checkable.md`](../debts/estimate-rule-may-be-checkable.md) |
 | `fb-done-forms-unpinned` | The tests check only a plain last line `fb done`. | [`debts/fb-done-forms-unpinned.md`](../debts/fb-done-forms-unpinned.md) |
 | `fb-done-unclosed-fence` | The close rule reads only the last line of a message. | [`debts/fb-done-unclosed-fence.md`](../debts/fb-done-unclosed-fence.md) |
 | `fb-inbox-append-race` | On Windows, two processes that append with `open(..., "ab")` at the same time lost 406 of 8000 lines in a stress test. | [`debts/fb-inbox-append-race.md`](../debts/fb-inbox-append-race.md) |
@@ -392,6 +389,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `judge-skips-other-headings` | Rulings under another heading are not read. | [`debts/judge-skips-other-headings.md`](../debts/judge-skips-other-headings.md) |
 | `judge-title-stem-collision` | A `decisions/` record and a `deferred/` record with the same file stem collide in the rulings titles, because the title names the stem only. | [`debts/judge-title-stem-collision.md`](../debts/judge-title-stem-collision.md) |
 | `judge-uncommitted-order` | A record git does not list (new and not committed) is ordered by file mtime, after the listed ones. | [`debts/judge-uncommitted-order.md`](../debts/judge-uncommitted-order.md) |
+| `judgment-exits-debt-count` | An `unmechanized` rule waits for a check. | [`debts/judgment-exits-debt-count.md`](../debts/judgment-exits-debt-count.md) |
 | `lane-slug-gh-m-flag-passes` | In gh, `-m` is a milestone or merge flag, never a message. | [`debts/lane-slug-gh-m-flag-passes.md`](../debts/lane-slug-gh-m-flag-passes.md) |
 | `lane-slug-header-count-shift` | An unquoted `<<word` in an interpreter-fed heredoc body, such as `x = 1 << y`, or a `case` `)` inside `$(`, shifts the header count. | [`debts/lane-slug-header-count-shift.md`](../debts/lane-slug-header-count-shift.md) |
 | `lane-slug-heredoc-untested` | No test pins a `#` inside a string, a lone apostrophe in a comment, or multi-line quoted text before a header. | [`debts/lane-slug-heredoc-untested.md`](../debts/lane-slug-heredoc-untested.md) |
@@ -442,6 +440,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `node-file-server-unchecked` | `node <file>` under `run_in_background` is not refused without an `until:` note. | [`debts/node-file-server-unchecked.md`](../debts/node-file-server-unchecked.md) |
 | `off-line-fork-reads-pre-cut` | A branch can be cut from a PR branch that merged later. | [`debts/off-line-fork-reads-pre-cut.md`](../debts/off-line-fork-reads-pre-cut.md) |
 | `old-before-was-flags-history` | The rule flags `was:` when the word `old` comes earlier in the same block. | [`debts/old-before-was-flags-history.md`](../debts/old-before-was-flags-history.md) |
+| `override-removal-unreminded` | The watch reverts a raised subagent cap only when `_subagentCapUntil` passes. | [`debts/override-removal-unreminded.md`](../debts/override-removal-unreminded.md) |
 | `own-tree-reason-names-remover` | The hook's row for the ending agent's own tree says "left for the delayed remover", and comments name lane wt-reap-delay. | [`debts/own-tree-reason-names-remover.md`](../debts/own-tree-reason-names-remover.md) |
 | `page-excuse-trailer-only` | In a repo whose upstream has no `lint/hook_catalog.py`, a standalone run of the check has no generator, so the page excuse never passes. | [`debts/page-excuse-trailer-only.md`](../debts/page-excuse-trailer-only.md) |
 | `pin-switch-in-place-mix` | A host can have no symlink rights. | [`debts/pin-switch-in-place-mix.md`](../debts/pin-switch-in-place-mix.md) |
@@ -514,6 +513,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-write-miss-sort-output` | `sort -o P` writes P, but `sort` is not in `MUTATING_COMMAND` and `-o` is not a redirect, so the write is not seen. | [`debts/shell-write-miss-sort-output.md`](../debts/shell-write-miss-sort-output.md) |
 | `shell-write-miss-spaced-target` | `cat > "dir with space/.claude/settings.json"` writes the settings file, but the reader splits the quoted path on its space, and no fragment of it follows the `>`. | [`debts/shell-write-miss-spaced-target.md`](../debts/shell-write-miss-spaced-target.md) |
 | `shell-write-miss-subshell` | A write inside a subshell, `( ... > P)`, is not seen: the closing parenthesis stays glued to the path word, so the path never matches. | [`debts/shell-write-miss-subshell.md`](../debts/shell-write-miss-subshell.md) |
+| `shrink-unsure-rules-unruled` | Their prose stays in CLAUDE.md. | [`debts/shrink-unsure-rules-unruled.md`](../debts/shrink-unsure-rules-unruled.md) |
 | `silent-undo-oracle-hides-cause` | When the records page generator fails, is missing, or reports a problem, the silent-undo check reports only "hunk reversed" for `docs/records.md` and discards the generator's stderr. | [`debts/silent-undo-oracle-hides-cause.md`](../debts/silent-undo-oracle-hides-cause.md) |
 | `sim-boot-check-xcodebuild` | The ruling 5 boot check runs only after `simctl boot` and MCP `launch`. | [`debts/sim-boot-check-xcodebuild.md`](../debts/sim-boot-check-xcodebuild.md) |
 | `skill-rows-dir-named-skill-md` | A directory named `SKILL.md` counts as a skill. | [`debts/skill-rows-dir-named-skill-md.md`](../debts/skill-rows-dir-named-skill-md.md) |
@@ -580,6 +580,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `undo-scan-cr-nul-false-alarm` | The scan reads `git log -p` as text. | [`debts/undo-scan-cr-nul-false-alarm.md`](../debts/undo-scan-cr-nul-false-alarm.md) |
 | `unknown-reads-nonbool-skips` | The check prints PASS for True, FAIL for False, and SKIP for any other answer. | [`debts/unknown-reads-nonbool-skips.md`](../debts/unknown-reads-nonbool-skips.md) |
 | `unknown-stash-word-tree-only` | An unknown stash word is read as a push, so the guard judges it on the working tree only. | [`debts/unknown-stash-word-tree-only.md`](../debts/unknown-stash-word-tree-only.md) |
+| `unmech-doc-overlaps-judgment` | The module docstring of `lint/rule_audit.py` says an `unmechanized` rule "genuinely cannot be checked by a machine". | [`debts/unmech-doc-overlaps-judgment.md`](../debts/unmech-doc-overlaps-judgment.md) |
 | `until-note-unjudged` | The `background-end` rule accepts any non-empty `until:` text, such as `until: n/a`. | [`debts/until-note-unjudged.md`](../debts/until-note-unjudged.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
 | `walk-curly-quotes-plain` | PowerShell can take the curly quotes U+2018 to U+201E as quote marks. | [`debts/walk-curly-quotes-plain.md`](../debts/walk-curly-quotes-plain.md) |
@@ -601,6 +602,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `install-copies-from-main` | Install copies from main, not links into the clone | [`deferred/install-copies-from-main.md`](../deferred/install-copies-from-main.md) |
 | `measured-time-table` | A measured-time table for machine steps | [`deferred/measured-time-table.md`](../deferred/measured-time-table.md) |
 | `merge-retarget-before-merge` | A base change just before the merge command is not caught | [`deferred/merge-retarget-before-merge.md`](../deferred/merge-retarget-before-merge.md) |
+| `playwright-rows-measure` | A measure of the Playwright guard rows | [`deferred/playwright-rows-measure.md`](../deferred/playwright-rows-measure.md) |
 | `push-head-mismatch-trap` | A push of HEAD to a branch of another name is not guarded yet | [`deferred/push-head-mismatch-trap.md`](../deferred/push-head-mismatch-trap.md) |
 | `refusal-route-around-guard` | No guard stops an agent that routes around a refusal | [`deferred/refusal-route-around-guard.md`](../deferred/refusal-route-around-guard.md) |
 | `rm-path-wrapper` | An rm wrapper on PATH, active only in Claude sessions | [`deferred/rm-path-wrapper.md`](../deferred/rm-path-wrapper.md) |
@@ -610,6 +612,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `undo-check-rename-alarm` | The silent-undo check flags a rename that main edited | [`deferred/undo-check-rename-alarm.md`](../deferred/undo-check-rename-alarm.md) |
 | `undo-trailer-hint` | The silent-undo refusal does not say where the trailer goes | [`deferred/undo-trailer-hint.md`](../deferred/undo-trailer-hint.md) |
 | `verdict-cmd-untested` | The Windows launcher bin/verdict.cmd has no test | [`deferred/verdict-cmd-untested.md`](../deferred/verdict-cmd-untested.md) |
+| `windows-temp-sweep` | A sweep of idle session temp folders on Windows | [`deferred/windows-temp-sweep.md`](../deferred/windows-temp-sweep.md) |
 
 ## Plans
 

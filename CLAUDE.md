@@ -21,7 +21,7 @@ any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table. An
-unlisted agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Haiku runs only in the roles that table names. Sonnet is the floor for every other agent.<!-- rule:roles-sonnet-is-the-floor --> Sonnet is
+unlisted agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
 the ceiling, except Plan, the advisor, and a builder's third try
 (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
@@ -29,10 +29,7 @@ autonomous work), say so in one line before you dispatch, name why, and offer th
 wait for my word.<!-- rule:roles-opus-shaped-say-so --> Only on my word, write the repo's
 `.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to
 `opus`. The raise moves the default. It does not pin every spawn to it. The guard asks before
-that write lands.<!-- rule:roles-opus-override-guarded -->
-The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
-watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
-Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
+that write lands.<!-- rule:roles-opus-override-guarded --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, governing rulings, failure classes from
 `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
 specifies a report cap in lines sized to the decision it
@@ -50,15 +47,13 @@ Give an isolated workstream its own lane and orchestrator, briefed once.<!-- rul
 talk mid-task. Message a peer only when a branch must hear something that changes its
 work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism -->
 
-**Shared trees.** Never run `git stash`, `git reset`, `git checkout <path>`, or `git
-restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Set work
-aside with a commit on your own branch, never a stash.<!-- rule:shared-trees-no-destructive-git --> A stash entry belongs to
+**Shared trees.** No destructive git.<!-- rule:shared-trees-no-destructive-git --> A stash entry belongs to
 no branch. It outlives no session that holds its tag. Never kill a
 process you did not start. Never restart another person's server. Treat `pkill -f` and
 `lsof -t` as machine-wide.<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout
 and branch you stand in before any git write or merge.<!-- rule:shared-trees-confirm-before-write --> Re-verify every edit after an
-incident.<!-- rule:shared-trees-reverify-after-incident --> On first use, install a hook that refuses these commands.<!-- rule:shared-trees-install-refusal-hook -->
+incident.<!-- rule:shared-trees-reverify-after-incident -->
 
 **Git, if this repo uses pull requests.** Move main only by pull request, merged only
 when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wait for required checks after every push.<!-- rule:git-wait-for-required-checks -->
@@ -75,8 +70,7 @@ a window or a screen capture lands on my screen, say so in one line.<!-- rule:ve
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
-on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
-a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
+on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
 published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
 rely on it, a document's own claims too. Report a read that could not run as unknown,
@@ -98,7 +92,7 @@ only against a named incident or a measured risk. Cite it in the rule's record. 
 enforces a rule in this file needs no other incident.<!-- rule:building-guard-needs-incident --> Fix the cause, not the symptom. Name a
 bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.<!-- rule:building-scanner-respects-strings --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
-the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
+the design abandoned.<!-- rule:building-land-design-or-abandon --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
 file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
