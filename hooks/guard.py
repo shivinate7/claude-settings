@@ -27,6 +27,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff, author-diff, writer-diff, role-diff-*
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
                        The diff it would send is logged for the reviewer. Never blocks.
+                       SubagentStop (`judge_stop`) logs the same names for the whole diff, and
+                       also role-diff-nocwd, role-diff-main-checkout, role-diff-unresolved and
+                       role-diff-unread.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-denied)
@@ -77,9 +80,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
 Other tools, in `judge` order:
-  simulator-boot-cap, simulator-boot-twin
-                       deny. A simulator boot past the cap, or one that duplicates an idle device.
-                       (sweep-shuts-down-idle-simulators)
   worktree-home        deny. A call from a subagent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
@@ -89,9 +89,14 @@ Other tools, in `judge` order:
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys in each `agent()` call. A model set through a variable,
                        a spread, an alias, a concatenation, a ternary, a computed key or a
-                       shorthand key is not seen. (subagent-model-cap)
+                       shorthand key is not seen. A regex literal after `)`, `return` or
+                       `typeof` that holds a quote can hide an `agent()` call.
+                       (subagent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-cap, simulator-boot-twin
+                       deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, subagent-model-cap
