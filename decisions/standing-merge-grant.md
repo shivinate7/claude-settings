@@ -10,3 +10,6 @@ claude-settings. This is the repo grant that `git-main-only-by-pr` names.
 - Batch lanes into one integration PR, the only PR that goes ready and runs CI
   (`git-integration-branch-merge`).
 - The grant covers this repo only. Other repos need their own grant.
+
+Kind: process
+Home: merge/merge.py
