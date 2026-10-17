@@ -5,7 +5,7 @@
 #   the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA. decisions/docs-only-prs-skip-code-suites.md.
+# BASE_SHA.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
 ALL="$JOBS code mods guard sweep"

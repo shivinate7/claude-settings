@@ -648,7 +648,7 @@ jobs:
         shell: bash
         run: sh hooks/test_install_src.sh
 
-  # The mutation harness for the guard, moved off `gates` by cut F (decisions/ci-wall-time-cuts.md) so it runs in parallel.
+  # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope

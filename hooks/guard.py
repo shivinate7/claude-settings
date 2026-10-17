@@ -113,7 +113,7 @@ ask names the requested value and the file, which is not an exception to the rem
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
 value and the path are cleaned of control characters and cut at a bound.
 
-A merge into main is allowed and never logged by the guard (guard-trims-from-the-audit).
+A merge into main is allowed and never logged by the guard.
 `hooks/decision_watch.py` names each merge from the transcript at turn end. A `git checkout`
 with `--ours`, `--theirs` or `--merge` during an unresolved merge, rebase, cherry-pick or revert
 picks a conflict side. It discards no work, so `shared-tree` passes it.
@@ -2214,7 +2214,7 @@ def judge(payload) -> None:
         return
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
     # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
-    # and a frozen path stays readable (decisions/guard-trims-from-the-audit.md).
+    # and a frozen path stays readable.
     if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
