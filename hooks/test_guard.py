@@ -3927,6 +3927,34 @@ for _name, _command in (
 sh("stream: grep for the text tail -f in a file is no follow", "grep 'tail -f' notes.txt", "allow",
    cwd=NOGIT)
 
+# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies each of these, because it
+# scans every token; 914a2e7 allows them. The wrapper has options or a subcommand before the real
+# command (`docker run --rm alpine`, `compose -f x.yml exec web`, `--context x exec c`, `kubectl run
+# x --image=a --`), or it is a wrapper with no skip rule at all (gtimeout, watch, uv run).
+# RED on 914a2e7.
+for _name, _command in (
+    ("behind docker run with an option", "docker run --rm alpine tail -f /dev/null"),
+    ("behind docker-compose exec", "docker-compose exec web tail -f log"),
+    ("behind docker compose run", "docker compose run web tail -f log"),
+    ("behind docker compose -f exec", "docker compose -f x.yml exec web tail -f log"),
+    ("behind docker --context exec", "docker --context x exec c tail -f x"),
+    ("behind kubectl run and --", "kubectl run x --image=a -- tail -f /dev/null"),
+    ("behind kubectl exec without --", "kubectl exec pod tail -f x"),
+    ("behind gtimeout", "gtimeout 5 tail -f x"),
+    ("behind watch", "watch tail -f x"),
+    ("behind uv run", "uv run tail -f x"),
+):
+    sh("stream: tail -f " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# PINS, green on 914a2e7 and after: a wrapper around a bounded command, and text that names the
+# follow, are no follow.
+for _name, _command in (
+    ("an echo that names the follow", "echo 'tail -f log'"),
+    ("docker run around a bounded command", "docker run --rm alpine ls"),
+    ("uv run around a bounded command", "uv run pytest"),
+    ("kubectl exec around a bounded command", "kubectl exec pod -- cat log"),
+):
+    sh("stream: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
+
 # SCANNER PINS (rule building-scanner-respects-strings) for the fallback that reads a segment shlex
 # cannot parse, word by word (guard_stream.py, live_stream_hit). Three constructs a scanner can
 # get wrong: a comment opener inside quotes, a quoted string over several lines, and a lone
@@ -5759,6 +5787,23 @@ for _name, _command in (
 ):
     sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
        cwd=NOGIT)
+
+# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies both, because it scans the
+# raw text; 914a2e7 allows them. `docker run --rm alpine` and `docker-compose exec web` have options
+# or a hyphenated name ahead of the real command. RED on 914a2e7.
+for _name, _command in (
+    ("behind docker run with an option", "docker run --rm alpine rm -rf /"),
+    ("behind docker-compose exec", "docker-compose exec web rm -rf /"),
+):
+    sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
+       cwd=NOGIT)
+# PINS, green on 914a2e7 and after: a commit message that names the form, and a wrapper around a
+# bounded command, delete nothing wide.
+for _name, _command in (
+    ("a commit message that names the root form", VCS + ' commit -m "stop rm -rf / mistakes"'),
+    ("docker run around a bounded command", "docker run --rm alpine ls"),
+):
+    sh("delete: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
 
 # TWO WIDE-TARGET SETS DISAGREE. A segment shlex can parse is read by `_rm_args_wide`, against
 # RM_WIDE_TARGET, which takes a trailing slash and a glob on a root or home. A segment it cannot
