@@ -48,8 +48,8 @@ another repo on the same account several times.
 - The secondary limit is a separate limit. GitHub's docs give it a per-minute cap on REST
   calls, which watchers from several sessions can pass together. On 2026-10-16 06:51 UTC a
   call got "API rate limit exceeded" while core had 4,560 of 5,000 left. That watchers cause
-  it is unmeasured. Debt `rate-retry-budget-short` (3 x 60 s is too short for GitHub's write
-  limit).
+  it is unmeasured. The merge tool waits 60, 300 and 900 s on a rate limit (decision
+  merge-net-retry, what bin/merge does on a network error or a rate limit).
 - `ci_wake.wait_for` lists the head's runs again, at most once per 30 s, until a run that ran
   is judged. A skipped draft run counts as no run (lane ci-wake-draft-run, after the false
   "CI red" on PRs 452 and 453). A real run that starts after a judged one is never judged.
