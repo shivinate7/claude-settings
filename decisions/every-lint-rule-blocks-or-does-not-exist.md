@@ -27,7 +27,7 @@ Every one of the 32 tracked Markdown files in this repository, already
 accepted into it, ran through `lint/ste_lint.py` at every severity. The
 number beside each rule is the share of those 32 files it hit.
 
-Promoted to `error`. STE003, STE009, STE015 and STE017 are advisory now. Each
+Promoted when ruled. STE003, STE009, STE015 and STE017 are advisory now. STE018 is deleted. Each
 one is a binary lookup: a fixed phrase, a fixed pronoun set, a missing
 conjunction, a word order. No judgment call sits
 between the text and the finding.
