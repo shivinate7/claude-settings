@@ -1491,7 +1491,6 @@ PROSE = "alpha beta gamma delta "
 FILLER = "Check each question and option against the brief it cites. " * 18  # a judge body, over 1000 chars
 JUDGE_KEY = "Judge this AskUserQuestion call: $ARGUMENTS"
 JUDGE_PROMPT = JUDGE_KEY + "\n" + FILLER + "Block only on a clear breach of the brief."
-SPAN_TEXT = "ab `" + "c" * 350 + " | " + "d" * 350 + "` " + PROSE * 20  # one code span with a pipe, open at any cap under 700
 
 
 def cell_cap():
@@ -1526,12 +1525,24 @@ class CellCap(Tree):
     def render_skill(self, text):
         return self.render(files(extra={"skills/alpha/SKILL.md": skill_md("description: " + text)}))
 
-    def assert_cut(self, cell, source):
+    def assert_cut(self, cell, source, floor=True):
+        """The cell ends in the ellipsis, keeps the start of the source, and fits the cap. floor=False when the
+        cut must fall before a span longer than the cap, so the cell may be short."""
         self.assertTrue(cell.endswith(ELLIPSIS), "not cut: %d chars, and no ellipsis at the end" % len(cell))
         self.assertTrue(" ".join(source.split()).startswith(cell[:-1]), "the cut rewords the source: %r" % cell)
         cap = cell_cap()
         self.assertLessEqual(len(cell), cap, "%d chars, over the cap of %d" % (len(cell), cap))
-        self.assertGreater(len(cell), cap // 2, "the cut keeps too little: %d chars at a cap of %d" % (len(cell), cap))
+        if floor:
+            self.assertGreater(len(cell), cap // 2, "the cut keeps too little: %d chars at a cap of %d" % (len(cell), cap))
+
+    def assert_span_cut(self, out, key, source, floor=True):
+        """A cut that would split a backtick span falls before the span: the cell has no backtick, and the row keeps its cells."""
+        cell = what_of(out, key)
+        self.assert_cut(cell, source, floor)
+        self.assertNotIn("`", cell, "the cut keeps or opens a backtick span: %r" % cell[-30:])
+        rows = [line for line in out.split("\n") if line.startswith("| `%s`" % key)]
+        self.assertEqual(len(rows), 1, out)
+        self.assertEqual(len(split_cells(rows[0])), len(COLUMNS), "the cut leaves an unbalanced pipe: " + rows[0])
 
     def test_e1_the_cap_is_one_named_positive_integer_in_the_generator(self):
         cap = cell_cap()
@@ -1564,38 +1575,38 @@ class CellCap(Tree):
         self.assertTrue(cell.endswith(ELLIPSIS), "%d chars at the cap plus one: no ellipsis" % len(cell))
         self.assertLessEqual(len(cell), cap)
 
-    def test_e7_a_cut_never_splits_a_backtick_span_and_every_row_keeps_its_cells(self):
-        out = self.render_skill(SPAN_TEXT)
-        cell = what_of(out, "skills/alpha")
-        self.assert_cut(cell, SPAN_TEXT)
-        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
-        rows = [line for line in out.split("\n") if line.startswith("| `skills/alpha`")]
-        self.assertEqual(len(rows), 1, out)
-        self.assertEqual(len(split_cells(rows[0])), len(COLUMNS), "the cut leaves an unbalanced pipe: " + rows[0])
+    def test_e7_a_span_longer_than_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = "ab `" + "c" * cap + " | " + "d" * 60 + "` " + PROSE * 20  # the span runs past the cap
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text, floor=False)
 
+    def test_e12_a_short_span_that_straddles_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = prose(cap - 40) + " `" + "c" * 60 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
 
     def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):
         # Scanner rule (building-scanner-respects-strings): #, // and /* inside a code span are text.
-        text = "ab `" + "x" * 150 + " // # /* opener " + "y" * 150 + "` " + PROSE * 20
+        cap = cell_cap()
+        text = prose(cap - 25) + " `" + "x" * 10 + " // # /* opener " + "y" * 60 + "` " + PROSE * 20  # openers at the cap
         out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md('description: "%s"' % text)}))
-        cell = what_of(out, "skills/alpha")
-        self.assert_cut(cell, text)
-        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
+        self.assert_span_cut(out, "skills/alpha", text)
 
     def test_e10_a_lone_backtick_in_plain_text_does_not_stop_the_cut(self):
-        text = "Use when a lone ` sits early in plain text, then " + prose(1000)
+        cap = cell_cap()
+        text = "Use when a lone ` sits early in plain text, then " + prose(cap * 3)
         cell = what_of(self.render_skill(text), "skills/alpha")
         self.assert_cut(cell, text)
         self.assertIn("a lone ` sits early", cell)
 
     def test_e11_a_code_span_that_a_folded_line_break_splits_is_one_span(self):
         # Scanner rule, the multi-line case: a folded frontmatter joins its two lines, so the span is one span.
-        folded = "description: >\n  ab `" + "c" * 150 + "\n  " + "d" * 150 + "` " + PROSE * 20
-        source = "ab `" + "c" * 150 + " " + "d" * 150 + "` " + PROSE * 20
+        cap = cell_cap()
+        lead = prose(cap - 100)
+        folded = "description: >\n  " + lead + " `" + "c" * 60 + "\n  " + "d" * 60 + "` " + PROSE * 20
+        source = lead + " `" + "c" * 60 + " " + "d" * 60 + "` " + PROSE * 20
         out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md(folded)}))
-        cell = what_of(out, "skills/alpha")
-        self.assert_cut(cell, source)
-        self.assertNotIn("`", re.sub(r"`[^`]*`", "", cell), "the cut leaves a backtick span open: %r" % cell[-30:])
+        self.assert_span_cut(out, "skills/alpha", source)
 
 
 class RealCellCap(unittest.TestCase):
