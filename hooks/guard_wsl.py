@@ -63,7 +63,8 @@ def _allowed(args) -> bool:
         return False
     prog, rest = args[1], args[2:]
     if prog == "node":
-        return rest[0] == "--test" and len(rest) > 1 and all(_test_path(p, NODE_TEST) for p in rest[1:])
+        files = rest[1:] if rest[0] == "--test" else rest
+        return bool(files) and all(_test_path(p, NODE_TEST) for p in files)
     if prog == "pwsh":
         return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _test_path(rest[2], PWSH_TEST)
     if prog == "python3":
