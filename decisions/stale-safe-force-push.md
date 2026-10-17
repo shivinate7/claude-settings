@@ -24,20 +24,18 @@ The remedy reads "retry with --force-with-lease --force-if-includes". It never n
 
 **Destination.**
 
-- A refspec `src:dst` goes to `dst`. A bare `src` goes to `src`. A leading `+` and a `refs/heads/` prefix
-  drop off. A quoted single-word refspec or remote is unquoted first.
-- `HEAD` resolves to the current branch. A detached HEAD has none, so the push asks.
+- A refspec `src:dst` goes to `dst`. A bare `src` goes to `src`. `HEAD` resolves to the current branch.
+  A detached HEAD has none, so the push asks.
 - No refspec: read `push.default` with `git config`. `simple`, `current` or unset: the current branch.
   `upstream`: the branch's `branch.<name>.merge`. Anything else (`matching`, `nothing`, no upstream, an
   unreadable config) asks.
-- `--repo=<remote>` or `--repo <remote>` names the remote. Every plain word is then a refspec.
 - A deletion (`--delete`, `-d`, `:dst`) at the default branch asks. A deletion elsewhere is allowed.
-- `--no-force-if-includes` and `--no-force-with-lease` cancel the flag before them. `-ofoo` and
-  `-o foo` are push options, never `-f`.
 - `--mirror` and `--all` reach every branch, so a forced one asks. `--mirror` forces by itself.
 - A glob destination asks.
+- `--no-force-if-includes` and `--no-force-with-lease` cancel the flag before them. `-ofoo` and
+  `-o foo` are push options, never `-f`.
 - The target is the push's own `git -C <dir>`, else the command's last `cd`, else the session's cwd. A
-  `-c key=value` on the call overrides config. A directory that is not there asks.
+  directory that is not there asks.
 
 **Default branch.**
 
@@ -48,21 +46,8 @@ The remedy reads "retry with --force-with-lease --force-if-includes". It never n
 Ask, not deny, at the default branch: a rewrite of the default branch is sometimes the intent. The prompt
 is the grant, and it names no target.
 
+A lease with a sha guards the one ref it names. This design accepts that for the sha form. Git's own
+lease plus `--force-if-includes` still protects the remote where the guard does not read a push.
+
 Kind: process
 Home: hooks/guard.py
-
-## Named limits
-
-- Git older than 2.30 lacks `--force-if-includes`, so the remedy fails there. Measured on git 2.54.0
-  only: unmeasured on older git.
-- A lease with a sha guards the one ref it names. A push of another ref beside it is not guarded. This
-  design accepts that for the sha form.
-- A push through a shell alias, a git alias, or `sh -c "..."` is not read. Quoted multi-word text is
-  blanked, so a push inside it is not read either. Shell variables and command substitution in a refspec
-  are not expanded. Several `-C` on one call and a `cd` inside a subshell are not followed.
-- A refspec `src:heads/main` (short form of the full ref) is not matched as the default branch.
-- `remote.<name>.push` config (for example `HEAD:main`) sets the refspec of a bare push and is not read.
-- The last two gaps are exotic. Git's own lease plus `--force-if-includes` still protects the remote.
-
-Checks: `hooks/test_guard.py` holds a case for each row above, and the false alarms. The mutants in
-`hooks/mutate_guard.py` named `force-push:` kill each branch of `push_verdict`.
