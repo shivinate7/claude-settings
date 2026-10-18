@@ -98,7 +98,7 @@ await test('source: the host reads $.model.complete( and the event names as lite
   assert.ok(text.includes('"command.run"'), 'missing the "command.run" literal')
 })
 
-// Debt dw-ffff-regex-literal. A raw U+FFFF (a noncharacter) in the file can be dropped or mangled by an editor
+// A raw U+FFFF (a noncharacter) in the file can be dropped or mangled by an editor
 // or a transfer, and then the asciiJson range end changes with no sign. The escape \uFFFF is plain ASCII.
 // This is a character-presence check, not a scan of strings and comments, so it needs no opener cases.
 await test('source: hooks/register.mjs holds no raw U+FFFF character, the asciiJson range end is an escape', () => {
@@ -379,7 +379,7 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
 })
 
-// Debt dw-text-of-drops-reason. An aborted call returns no text and a reason. The reply still goes to python
+// An aborted call returns no text and a reason. The reply still goes to python
 // as --model-error (a reason is not a verdict reply), and the error and the log name the reason.
 await test('model error: an aborted reply with a reason and no text goes as --model-error, and the log names the reason', async () => {
   const h = await load(host({ model: () => ({ isAnswered: false, reason: 'aborted by user', usage: {} }) }))
@@ -669,7 +669,7 @@ await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, 
 
 await test('stdin: the JSON sent to python is ASCII-only, and a non-ASCII path round-trips', async () => {
   const cwd = '/work/café/repo'
-  // U+FFFF is the top of the escaped range (debt dw-ffff-regex-literal): it must escape, and round-trip.
+  // U+FFFF is the top of the escaped range: it must escape, and round-trip.
   const transcript = REAL_CFG + '/projects/café\uFFFF/' + SID + '.jsonl'
   const h = await load(host())
   await fire(h, 'classic.Stop', stopEvent({ cwd, transcript_path: transcript }), {})
