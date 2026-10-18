@@ -4,7 +4,7 @@
 
 The Stop hooks read the transcript through one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`, `tool_uses`, `records_after_last_human`, `paragraph_blocks` and `format_finding`. `lint/md_sweep.py`, `lint/ste_gate.py` and `lint/report_gate.py` import it. So does the config report section of `hooks/decision_watch.py`.
 
-- The cheap Stop reads live there too. `last_human_epoch` and `read_turn` read only the tail of the transcript since the last human message. `landed_work` is the one early exit "nothing dirty, committed, or in the extra paths since that message". `lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py`, `hooks/config_report.py` and `hooks/ruling_home.py` call the tail readers.
+- The cheap Stop reads live there too. `last_human_epoch` and `read_turn` read only the tail of the transcript since the last human message. `landed_work` is the one early exit "nothing dirty, committed, or in the extra paths since that message". `lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py` (with its config report section) and `hooks/ruling_home.py` call the tail readers.
 - `hooks/config_watch.py` calls neither, because its expiry rule fires with no file change, so no such exit is safe there.
 - `building-allow-list-is-the-constant` does not govern it: a transcript helper is not a permit list.
 
@@ -16,7 +16,6 @@ Protection of the old outcome (one bad edit must mute one reporter, never all fo
 - A break in the shared module is loud. The import sits at the top of each hook file, above `main`, so the fail-open `try` and `except` in `main` never sees it. The hook exits 1 and prints a traceback.
 - The fail-open path still catches a bad transcript, a missing file or a parse error inside a running hook. Such a hook exits 0 and prints nothing.
 
-Accepted risk (owner): one bad edit to `lint/_transcript.py` that passes CI can break all four reporters at once. How often a bad edit passes CI is unmeasured. The `hooks/config_report.py` docstring claim that it avoids `lint/ste_gate.py` is a known error: it reaches it through `report_gate`.
-
+Accepted risk (owner): one bad edit to `lint/_transcript.py` that passes CI can break all four reporters at once. How often a bad edit passes CI is unmeasured.
 Kind: process
 Home: lint/_transcript.py

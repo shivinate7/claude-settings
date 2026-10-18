@@ -1,7 +1,7 @@
 """The guard's pointer family: the pointer checkout's HEAD.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re

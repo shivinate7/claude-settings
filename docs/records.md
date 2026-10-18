@@ -139,7 +139,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `local-time-central` | Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
 | `main-branch-protection` | `main` of shivinate7/claude-settings requires the ten checks that `.github/stamp.json` `merge.requiredChecks` names: scope, gates, gates-windows, gates-windows-guard, gates-mutate-guard, gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows. | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
-| `merge-net-retry` | What `bin/merge` does when a network error or a rate limit stops a `gh` or `git` call. | [`decisions/merge-net-retry.md`](../decisions/merge-net-retry.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
@@ -168,7 +167,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "A stash entry belongs to no branch." The guard reads `git stash` against the whole stack, not only the working tree. | [`decisions/stash-stack-is-a-shared-subject.md`](../decisions/stash-stack-is-a-shared-subject.md) |
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `stop-guardrail-became-a-command-hook` | The Stop guardrail is never a `type: agent` hook. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
-| `subagent-model-cap` | This entry mechanizes the worker-model rule. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
+| `subagent-model-cap` | Each agent role has its own model and effort, in the table below. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
 | `sweep-shuts-down-idle-simulators` | Sessions boot simulators. The sweep stops idle ones. | [`decisions/sweep-shuts-down-idle-simulators.md`](../decisions/sweep-shuts-down-idle-simulators.md) |
 | `test-strategy-reset` | A test must not fail on runner speed. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
 | `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch that holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
@@ -187,7 +186,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
 | `guard-reads-wrapped-commands` | The guards judge the command a wrapper runs, not the raw text. | [`decisions/guard-reads-wrapped-commands.md`](../decisions/guard-reads-wrapped-commands.md) |
-| `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`decisions/guard-split-by-family.md`](../decisions/guard-split-by-family.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
@@ -200,7 +198,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`debts/agent-end-log-loses-row.md`](../debts/agent-end-log-loses-row.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
-| `finished-agent-lock-holds-tree` | A finished agent's worktree can hold the lock `claude agent agent-<id> (pid N)`, with no start time. | [`debts/finished-agent-lock-holds-tree.md`](../debts/finished-agent-lock-holds-tree.md) |
+| `deferred-fold-unbuilt` | `debts/` is the one home for deferred work, but the repo still holds `deferred/`. | [`debts/deferred-fold-unbuilt.md`](../debts/deferred-fold-unbuilt.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
@@ -211,7 +209,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
-| `stall-open-job-no-age-ceiling` | Open jobs have no age ceiling. | [`debts/stall-open-job-no-age-ceiling.md`](../debts/stall-open-job-no-age-ceiling.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`debts/verdict-pipe-drops-line.md`](../debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
 

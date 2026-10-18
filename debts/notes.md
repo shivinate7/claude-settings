@@ -327,11 +327,11 @@
 - frozen folder name copied into the config root: `cp -r <src named hooks|lint> ~/.claude/` is allowed on main too (hooks/guard_frozen.py).
 - notes-file history check: no test pins that the history check runs on the notes file (lint/hook_catalog.py, lint/test_hook_catalog.py).
 - rule-audit-row-test-field-unread: lint/rule_audit.py does not read a guard row's row-level test field; such a check needs loop-built case-name support (lint/rule_audit.py)
-- prune-symlink-probe-negative-only: the SYMLINK_CAPABLE probe and early-return are proven only on the no-privilege branch Decision: prune-cases-skip-without-symlink-privilege
-- mutants-hidden-crashes: mutants other than the watch target are not audited for hidden crashes; the required-case-name field narrows it Decision: mutant-cause-of-death
-- merge-notice-no-report: a turn that merges and writes no report still fires the merge notice; the safe side Decision: merge-notice-checks-the-report
-- mod-step-unverified: zizmor on the Mod tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: mods-tests-run-in-gates
-- verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: verdict-reads-runner-markers
+- prune-symlink-probe-negative-only: the SYMLINK_CAPABLE probe and early-return are proven only on the no-privilege branch Decision: none
+- mutants-hidden-crashes: mutants other than the watch target are not audited for hidden crashes; the required-case-name field narrows it Decision: none
+- merge-notice-no-report: a turn that merges and writes no report still fires the merge notice; the safe side Decision: none
+- mod-step-unverified: zizmor on the Mod tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: none
+- verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: none
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
 - precompact-compaction-before-checkpoint-small-model: the hook reads autoCompactWindow from settings.json but cannot see the model's own window, so a smaller model can compact before a checkpoint
@@ -411,7 +411,7 @@
 - server-wrappers-unread: The background-end rule does not read uv run, poetry run, cross-env, concurrently, Start-Process, cmd /d /c, exec, x=$(...), yarn workspace dev or python -X utf8 -m (hooks/guard_stream.py). Decision: background-needs-end-note
 - node-file-server-unchecked: node <file> under run_in_background is not refused without an until: note, because the roster cannot tell a server script from a one-off script (hooks/guard_stream.py). Decision: background-needs-end-note
 - timeout-moved-server-unchecked: A foreground server the harness moves to background at its 120 s timeout is not checked, because the background-end rule reads the call at start (hooks/guard_stream.py). Decision: background-needs-end-note
-- dead-run-extended-lock-blocks: A run that dies after a lock extension leaves a lock held up to 1200 s. other runs wait until it expires, and merge --unlock clears it (merge/merge.py). Decision: merge-net-retry
+- dead-run-extended-lock-blocks: A run that dies after a lock extension leaves a lock held up to 1200 s. other runs wait until it expires, and merge --unlock clears it (merge/merge.py). Decision: none
 - judge-cap-drops-old-rulings: Measured 2026-10-14: 87 rulings, 100,887 chars. at the 60,000-char RULINGS_MAX cap, the 5 oldest are left out (hooks/question_outcome.py). Decision: question-judge-reads-rulings
 - stdin-python-read-as-code: Quoted cap keys or frozen paths piped into python, py or wrappers deny even when the text is data. only pure printers (echo, cat, grep, wc, jq) make it data (hooks/guard_frozen.py). Decision: frozen-path-resolves-shell-vars
 - split-reader-misses-cd-forms: split_segments misses $'...', $(...), backticks, cd "$DIR" and previous-folder forms (cd ~-, cd -, Set-Location +/-), so a hidden cd is skipped (hooks/guard.py, hooks/guard_core.py). Decision: none
@@ -431,7 +431,7 @@
 - done-line-tier-unchecked: no check reads which tier a lane ran, so a Done line need not name a tier above Sonnet. report_gate.py cannot see the model. Decision: subagent-model-cap
 - detached-launch-heredoc-blind: an & job inside bash <<EOF is not seen, because the rule drops each heredoc body first. Decision: agent-end-reap-stops-what-a-finished-agent-left
 - agent-end-resume-fails-after-removal: a resume of a finished agent fails once its worktree is gone after the idle limit. the last agent's tree waits for the session-end sweep. Decision: agent-end-reap-stops-what-a-finished-agent-left
-- merge-net-retry-linux-unmeasured: bin/merge proof on the Mac clone is not measured. Linux is unmeasured. Decision: merge-net-retry
+- merge-net-retry-linux-unmeasured: bin/merge proof on the Mac clone is not measured. Linux is unmeasured. Decision: none
 - stop-guardrail-tool-block-unknown: runtime blocking of tools in the isolated judge call is UNKNOWN, not PASS, because a raw subprocess in the sandbox cannot authenticate. Decision: stop-guardrail-became-a-command-hook
 - stamp-banchi-adoption-step: Banchi must retire its branch-side claim in make merge before running stamp --check, or the check refuses its own numbers. Decision: one-shared-record-stamp
 - rm-var-unseen-forms: rm-var rule does not see rm in script/heredoc/sh -c, exec/timeout/nice/find -exec rm, $S'/'*, ${S:-}/*, rm -rf $(pwd)/dist, ${D[0]}. bare ${HOME} brace forms not refused. escaped \$S/x false alarm. Decision: rm-on-a-variable-needs-a-guard
@@ -477,3 +477,11 @@
 - frozen-var-loose-token-match: the token match is loose. echo D=<frozen>, a commit message, URL or heredoc body counts as an assignment, so a later write to "$D" is refused. The owner accepted this false alarm. Decision: frozen-path-resolves-shell-vars
 - worktree-remove-quoted-link-name: a symlink whose name git quotes, such as one with a space or an accent, still counts as work when the guard judges a worktree remove. Decision: agent-worktree-discard-is-noted
 - ci-templates-wrappers-unmeasured: the all-jobs-passed and ci-alarm gates are proved on their scripts, not on a hosted runner. the action.yml wrappers are unmeasured on a real run. Decision: opt-in-ci-templates-composite
+- model-cap-alias-rows-merged: Alias, availableModels and /model picker rows in subagent-model-cap are one row now. the haiku 'follows Claude Code' wording is gone. Decision: subagent-model-cap
+- discard-fail-closed-list-in-code-only: The shape list that keeps the ask in a linked worktree now lives only in hooks/guard_shared_tree.py. Decision: agent-worktree-discard-is-noted
+- silent-undo-flag-print-no-cap-unrecorded: The 'print every flagged line, no cap' choice left the decision and is unverified in lint/check_silent_undo.py. Decision: silent-undo-check-design
+- janitor-ruling-over-judge-cap: the janitor and stop-guardrail rulings exceed the 800-char judge cap, so the judge sees only their first sentences. Decision: the-janitor-is-one-machine-wide-sweep
+- feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
+- finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
+- stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch-stop-check
+- guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/harness-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
