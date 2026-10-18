@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The owner types `override` as a whole prompt. The guard then lets a refusal or an ask through, once or for a time. The pass check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask. A valid pass logs `override <rule>` and prints nothing, so the normal permission flow runs.
+The owner types `override` as a whole prompt. The guard then lets a refusal or an ask through, once or for a time.
 
 Owner words, 2026-10-18 CDT:
 
@@ -21,6 +21,8 @@ Orchestrator's call, not an owner word:
 - `override off` ends any pass at once.
 - The keyword counts only as the whole owner prompt, in any case: `^override(\s+(off|\d+[mh]?))?$`. A longer message, a notice tag, tool output, a file or text from an agent grants nothing.
 - A pass file that is missing, unreadable or corrupt is no pass.
+- The pass check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask.
+- A valid pass writes one guard log line, `override <rule>`, and prints nothing, so the normal permission flow runs.
 
 ## Outside every pass
 
