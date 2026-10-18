@@ -220,14 +220,17 @@ def rewrite(command):
     return ui["command"], hso
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40):
-    """Run the rewritten command in the given shell. Return (rc or None, text, seconds, cmd)."""
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None):
+    """Run the rewritten command in the given shell. Return (rc or None, text, seconds, cmd).
+    The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
+    names. Text added to the command would change it, for one ending in a backslash."""
     cmd, _hso = rewrite(command)
+    mark = mark or new_mark()
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
     start = time.monotonic()
     with open(out_path, "wb") as out:
-        proc = subprocess.Popen([shell, "-c", cmd], cwd=d, stdin=subprocess.DEVNULL,
+        proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT)
         try:
             rc = proc.wait(timeout=timeout)
@@ -579,8 +582,8 @@ def job_problems(shell, template, pidfiles=()):
     Return a list of problems."""
     mark = new_mark()
     never = os.path.join(new_dir(), mark + ".b")
-    orig = template.replace("@MARK@", mark).replace("@NEVER@", never) + " # " + mark
-    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10)
+    orig = template.replace("@MARK@", mark).replace("@NEVER@", never)
+    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10, mark=mark)
     problems = stall_problems(rc, text, secs)
     problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
     listed = stall_pids(text)
