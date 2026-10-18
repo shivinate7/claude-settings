@@ -48,6 +48,8 @@ import sys
 import tempfile
 import time
 
+from case_runner_test import Skip, run_cases
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
@@ -63,10 +65,6 @@ NT_DRIVER = ("import json, os, runpy, shlex, shutil, subprocess, sys, tempfile, 
              "os.name = 'nt'\n"
              "sys.argv = [sys.argv[1], '--stop']\n"
              "runpy.run_path(sys.argv[0], run_name='__main__')\n")
-
-
-class Skip(Exception):
-    pass
 
 
 class Fail(Exception):
@@ -987,28 +985,5 @@ def table_taskstop_forms():
     return table_rows(TASKSTOP_ROWS)
 
 
-def main():
-    failed = skipped = 0
-    for fn in CASES:
-        name = (fn.__doc__ or fn.__name__).strip()
-        try:
-            problems = fn()
-        except Skip as s:
-            skipped += 1
-            print(f"SKIP {name}: {s}")
-            continue
-        except Exception as e:  # a missing module or a crash is a failed case, not a stop
-            problems = [str(e)]
-        if problems:
-            failed += 1
-            print(f"FAIL {name}")
-            for p in problems:
-                print(f"  - {p}")
-        else:
-            print(f"PASS {name}")
-    print(f"{len(CASES)} cases, {failed} failed, {skipped} skipped")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_cases(CASES))

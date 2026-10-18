@@ -18,6 +18,9 @@ import subprocess
 import sys
 import tempfile
 
+from test_decision_watch import (_git, assistant_record, human_record, make_repo, write,
+                                 write_transcript)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE_PATH = os.environ.get("RULING_HOME_UNDER_TEST") or os.path.join(HERE, "ruling_home.py")
 
@@ -41,47 +44,9 @@ def check(name, condition, detail=""):
         print("FAIL: %s  %s" % (name, detail))
 
 
-def _git(cwd, *args):
-    subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True, check=True)
-
-
-def make_repo(name):
-    repo = os.path.join(ROOT, name)
-    os.makedirs(repo, exist_ok=True)
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "user.name", "t")
-    return repo
-
-
 def commit_all(repo, msg="init"):
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", msg)
-
-
-def write(path, text):
-    d = os.path.dirname(path)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-
-
-def human_record(text, ts):
-    return {
-        "type": "user",
-        "timestamp": ts,
-        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-    }
-
-
-def assistant_record(text=None, tool_use=None):
-    content = []
-    if text is not None:
-        content.append({"type": "text", "text": text})
-    if tool_use is not None:
-        content.append(tool_use)
-    return {"type": "assistant", "message": {"role": "assistant", "content": content}}
 
 
 def write_tool_use(target_path):
@@ -90,14 +55,6 @@ def write_tool_use(target_path):
 
 def bash_tool_use(command):
     return {"type": "tool_use", "name": "Bash", "input": {"command": command}}
-
-
-def write_transcript(session_dir, records):
-    path = os.path.join(session_dir, "transcript.jsonl")
-    with open(path, "w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec) + "\n")
-    return path
 
 
 def _new_session_at(base, name):
