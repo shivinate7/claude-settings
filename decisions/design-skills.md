@@ -9,22 +9,19 @@ Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each
 - Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against the rules at a pinned URL, after the build.
 - `impeccable`: a pinned copy of its skill folder in `skills/impeccable`. No plugin. A second blind reviewer runs `/impeccable audit` and
   `/impeccable critique` only.
-- Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month, with release notes, and waits 14 days after a release
-  (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt` (the
-  `impeccable-sync` workflow copies the folder into the Renovate branch), the commit in the Vercel URL in `skills/design-review/SKILL.md`,
-  and the `anthropics/claude-code` ref in `settings.json`.
+- Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month and waits 14 days after a release
+  (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
+  commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`.
 - Exception to `verification-bump-first-fix-version`: these three sources bump to the newest release that has waited 14 days. The owner
   wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
   impeccable plugin: it installs hooks that run `impeccable hook` on SessionStart, PostToolUse and Stop in every session, and an agent with
   Write and Edit. The guard sees neither.
-- STE lint skips `skills/impeccable/` (path in `.ste-lint-exclude`): it is third-party prose (Apache 2.0), and third-party skills need not
-  follow our STE rules (owner, 2026-10-10). Nobody edits the copy by hand.
-- Guard rule `impeccable-review-only` (`hooks/guard.py`): the Skill tool loads impeccable only for `audit` or `critique`, and the name
-  `/impeccable` counts. In the shell, an impeccable call passes only for `detect ...` and `hooks status`. Every other subcommand is
-  refused, also a later one. The rule reads through `npx -y`, `npx -p <spec> impeccable`, `npx -c`, `sh -c`, `bash -c` and PowerShell's
-  `&`. `detect` may download the engine, and it trusts the release checksum (owner, 2026-10-10). Limits: `audit then polish` is allowed.
-  Other launchers (`pnpx`, `bun x`, `timeout N`, `cmd /c`, `powershell -Command`) are not read through.
+- STE lint skips `skills/impeccable/`: it is third-party prose (Apache 2.0), and third-party skills need not follow our STE rules (owner,
+  2026-10-10). Nobody edits the copy by hand.
+- Guard rule `impeccable-review-only` (`hooks/guard.py`): the Skill tool loads impeccable only for `audit` or `critique`. In the shell,
+  an impeccable call passes only for `detect ...` and `hooks status`. Every other subcommand is refused, also a later one. `detect` may
+  download the engine, and it trusts the release checksum (owner, 2026-10-10).
 - Blind, then compare: each design reviewer judges the rendered screens before it reads the repo's design spec, tokens or design
   decisions. The orchestrator reads those only after both findings exist. Findings on the changed pages are not limited to the diff
   (`agents/reviewer.md`). A finding that agrees with the repo, or is a plain defect (accessibility, broken layout, overflow), is fixed

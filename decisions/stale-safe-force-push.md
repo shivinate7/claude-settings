@@ -22,32 +22,12 @@ each `git push` call. Quoted text, heredocs and `git log --grep=--force` are not
 The remedy reads "retry with --force-with-lease --force-if-includes". It never names the target
 (`git-remedy-never-names-target`).
 
-**Destination.**
-
-- A refspec `src:dst` goes to `dst`. A bare `src` goes to `src`. `HEAD` resolves to the current branch.
-  A detached HEAD has none, so the push asks.
-- No refspec: read `push.default` with `git config`. `simple`, `current` or unset: the current branch.
-  `upstream`: the branch's `branch.<name>.merge`. Anything else (`matching`, `nothing`, no upstream, an
-  unreadable config) asks.
-- A deletion (`--delete`, `-d`, `:dst`) at the default branch asks. A deletion elsewhere is allowed.
-- `--mirror` and `--all` reach every branch, so a forced one asks. `--mirror` forces by itself.
-- A glob destination asks.
-- `--no-force-if-includes` and `--no-force-with-lease` cancel the flag before them. `-ofoo` and
-  `-o foo` are push options, never `-f`.
-- The target is the push's own `git -C <dir>`, else the command's last `cd`, else the session's cwd. A
-  directory that is not there asks.
-
-**Default branch.**
-
-1. `refs/remotes/<remote>/HEAD`, with the remote named in the push (`origin` when none).
-2. No such ref in a readable repository: `main` and `master`.
-3. No readable repository: unknown. Unknown is not safe, so the push asks.
-
-Ask, not deny, at the default branch: a rewrite of the default branch is sometimes the intent. The prompt
-is the grant, and it names no target.
-
-A lease with a sha guards the one ref it names. This design accepts that for the sha form. Git's own
-lease plus `--force-if-includes` still protects the remote where the guard does not read a push.
+- A deletion at the default branch asks. A deletion elsewhere is allowed.
+- `--mirror` and `--all` reach every branch, so a forced one asks.
+- The default branch is the one `refs/remotes/<remote>/HEAD` names. With no such ref, it is `main` and
+  `master`. With no readable repository it is unknown, and unknown is not safe, so the push asks.
+- Ask, not deny, at the default branch: a rewrite of the default branch is sometimes the intent. The prompt
+  is the grant, and it names no target.
 
 Kind: process
-Home: hooks/guard.py
+Home: hooks/guard_push_delete.py
