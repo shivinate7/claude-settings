@@ -6,7 +6,7 @@
 # Windows (MINGW, MSYS, CYGWIN) runs install.ps1; elsewhere install.sh.
 # A step that cannot move or install prints one stderr line naming the fix and exits 1.
 #
-# The move never exposes a mix. The new main is checked out
+# The move never exposes a mix (merge-reinstalls-from-main). The new main is checked out
 # in a fresh worktree <clone>-live-<commit>, and <clone>-live becomes a link to it by one rename of
 # the link. A reader that loads through the ~/.claude links sees the old tree or the new one. The
 # old worktree stays until the next move. The first move from a plain <clone>-live directory (as
@@ -16,7 +16,7 @@
 # writes the files one at a time (a live reader can see a mix there).
 # The run tests for link rights before it moves anything, so a host without them never loses the
 # pin path.
-# The run takes the install lock the installers take: one
+# The run takes the install lock the installers take (install-hooks-whole): one
 # install at a time. It reads main's commit only once it holds the lock, so a run that waited never
 # moves the pin back to an older main. It holds the lock through the installer, and hands the
 # installer its id as CLAUDE_SETTINGS_LOCK_TOKEN; the lock file holds that id, so the installer

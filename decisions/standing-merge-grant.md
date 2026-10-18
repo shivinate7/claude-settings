@@ -12,6 +12,9 @@ claude-settings. This is the repo grant that `git-main-only-by-pr` names.
 - Batch lanes into one integration PR, the only PR that goes ready and runs CI
   (`git-integration-branch-merge`).
 - The grant covers this repo only. Other repos need their own grant.
+- The merge tool retries a network error 3 times with a short pause (owner ruling 2026-10-13). A rate-limit wait follows a ladder of 60, 300 and 900 s, and 3 retries stay (owner ruling 2026-10-16).
+- A rate wait is the exception to the 600 s lock cap. `LOCK_MAX_HOLD`, 6 h from the take, bounds one run's hold (owner ruling 2026-10-17).
+- Only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN (owner ruling).
 
 Kind: process
 Home: merge/merge.py

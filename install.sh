@@ -227,7 +227,7 @@ put_file() {
 }
 
 # ---- one install at a time, one start line and one end line in the install log --------------------
-# The lock is a file made with noclobber, so only one run makes
+# Decision install-hooks-whole. The lock is a file made with noclobber, so only one run makes
 # it. install.ps1 and its post-merge hook take the same file, so the three paths wait on each other.
 # A run waits CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with
 # nothing written. A lock file older than 10 minutes is a dead run's: it is removed.
@@ -347,7 +347,7 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files.
+# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
 # A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
 # with this run's id, into DEST_HOOKS/guard.d/<id>/, where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its

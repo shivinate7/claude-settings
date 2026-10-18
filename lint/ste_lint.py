@@ -1178,7 +1178,7 @@ def source_prose_paragraphs(path: str, text: str) -> Optional[List[Paragraph]]:
 
 UI_SUFFIXES = {".tsx", ".jsx", ".html", ".vue"}
 UI_ATTRS = {"aria-label", "title", "placeholder", "alt", "label"}
-# A button, label or aria-label is capped at 4 words. A repo can
+# A button, label or aria-label is capped at 4 words (plain-prose-lint). A repo can
 # name other tags under the config key "label_tags" (see DEFAULT_CONFIG).
 LABEL_TAGS = LABEL_TAGS_DEFAULT
 LABEL_MAX_WORDS = 4
@@ -1191,7 +1191,7 @@ UI_NOCOUNT_TAGS = {"select", "option", "optgroup", "datalist", "textarea"}
 # A tag in this set does not end the sentence around it: "Click <b>here</b> now".
 UI_INLINE_TAGS = {"a", "abbr", "b", "bdi", "bdo", "cite", "data", "dfn", "em", "i",
                   "mark", "q", "s", "small", "span", "strong", "sub", "sup", "time", "u"}
-# A UI escape is line-level, and names a rule and a reason.
+# A UI escape is line-level, and names a rule and a reason (plain-prose-lint).
 UI_DISABLE = re.compile(r"ste-disable-(file|next-line|line)\b([^\n]*)")
 UI_DISABLE_OK = re.compile(r"^\s+(STE\d{3}(?:\s*,\s*STE\d{3})*)\s*:\s*\w")
 MUSTACHE = re.compile(r"\{\{.*?\}\}", re.S)
@@ -1593,7 +1593,7 @@ def ui_units(path: str, text: str) -> List[Tuple[str, set]]:
 def ui_suppressions(copy: _UICopy) -> Tuple[Dict[int, Optional[List[str]]], List[Tuple[int, str]]]:
     """Read `ste-disable-line` and `ste-disable-next-line` from the comments only.
 
-    Each escape names a rule and a reason, as in
+    Each escape names a rule and a reason (plain-prose-lint), as in
     `ste-disable-line STE020: brand name`. Return the suppressed lines, and
     the (line, directive) of each escape that is not valid.
     """

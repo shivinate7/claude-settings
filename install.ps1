@@ -63,7 +63,7 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
 }
 
 # ---- one install at a time, one start line and one end line in the install log -----------------------
-# The lock is a file made with CreateNew and held open with no
+# Decision install-hooks-whole. The lock is a file made with CreateNew and held open with no
 # sharing and delete-on-close, so it goes away when this run ends, even if it dies. install.sh and the
 # post-merge hook make the same file with noclobber, so the three paths wait on each other. A run waits
 # CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with nothing written.
@@ -530,7 +530,7 @@ function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) 
     }
     return $how
 }
-# Copy mode, the guard files. A guard run sees the old set or the
+# Copy mode, the guard files (install-hooks-whole). A guard run sees the old set or the
 # new set, never a mix. Step 1 (here) writes every guard file, stamped with this run's id, into
 # hooks\guard.d\<id>\, where no guard reads it yet. Step 2 is the landing loop below, which lands
 # guard.py first: the one landing that switches, because a stamped guard.py loads guard.d\<its id>\
