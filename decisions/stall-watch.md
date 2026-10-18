@@ -15,10 +15,11 @@ guard rule, so the watcher does the waiting and the session is told once.
 - The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
   still sees it. Allow rules still match a rewritten command.
 - The STALL line lists the job's shell and every process under it, parent first, so stopping them in line
-  order ends every shape (owner ruling, 2026-10-18). The shell gives the watcher the pid of `&`; in sh,
+  order ends the job (owner ruling, 2026-10-18). The shell gives the watcher the pid of `&`; in sh,
   bash and zsh a `{ }` group runs in a forked copy of the shell. The report reads the process table only
   and never scans the command text. A parent dies before it can start another child. A job with no child
-  (builtins only) lists its own pid. The table lists the same processes.
+  (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
+  init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
   running and the watcher never stops it.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child

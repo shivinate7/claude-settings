@@ -20,9 +20,11 @@ Hook: stall_watch.py --hook
 
 Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
   Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. After SECS (default
-  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. The STALL line lists the job's
-  shell and every process under it, parent first, so stopping them in that order ends the job.
-  When the job ends first, it exits 0.
+  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. The
+  STALL line lists the job's shell and every process under it, parent first. Stopping them in that
+  order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
+  not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
+  ends first, it exits 0.
 
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
@@ -321,7 +323,7 @@ def main(argv):
         return hook()
     if argv[:1] == ["--stop"]:
         return stop()
-    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None,}
+    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None}
     for i in range(0, len(argv) - 1, 2):
         if argv[i] in opts:
             opts[argv[i]] = argv[i + 1]
