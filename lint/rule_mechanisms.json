@@ -611,8 +611,9 @@
     },
     "building-comments-say-why": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check reads code comments yet; one would have to tell narration of history or review rounds from a comment that says what complex code does and why."
+        "kind": "gate",
+        "ref": "lint/check_comment_narration.py",
+        "test": "lint/test_check_comment_narration.py::FlagsAddedLines.test_each_pattern_flags_an_added_comment"
       }
     }
   }
