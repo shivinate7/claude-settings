@@ -8,7 +8,7 @@
 #   sh hooks/test_install_src.sh [case ...]   # names given: run only those cases
 #
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
-# never touched. SESSION_START_SH lets a case point at a different (e.g. pre-fix) copy of
+# never touched. SESSION_START_SH lets a case point at a different copy of
 # the hook, the same way GUARD_UNDER_TEST works in hooks/test_guard.py.
 
 set -u
@@ -596,7 +596,7 @@ case9() {
   name="case9: unrelated repo with its own CLAUDE.md stays silent (the banchi repro)"
   co="$work/case9-checkout"; pointer_co="$work/case9-pointer-checkout"; cfg="$work/case9-cfg"
   # $co is its own repo, a different origin than the pointer target, with its own,
-  # differing CLAUDE.md. This is the live defect: banchi is not a claude-settings clone.
+  # differing CLAUDE.md. banchi is not a claude-settings clone.
   make_checkout "$co" "# unrelated repo content" "https://github.com/someone/banchi.git"
   make_checkout "$pointer_co" "# global content, different"
   mkdir -p "$cfg"
@@ -943,8 +943,7 @@ caseF4() {
   # A failed fetch must never read as "up to date". It must say freshness is
   # unknown, per CLAUDE.md: "report a read that could not run as unknown,
   # never as clear or broken." Silence here would be indistinguishable from
-  # a clean check, which is the exact defect CI caught (caseF1 read as
-  # silent, identical to this case, when the fetch did not land).
+  # a clean check.
   name="caseF4: no reachable origin reports freshness unknown, no error, exit 0"
   co="$work/caseF4-checkout"; cfg="$work/caseF4-cfg"
   # A local path that does not exist: fails the same way a dead network host would
@@ -1021,8 +1020,8 @@ EOF
 
 # ---- skills case: a whole skill directory lands as one symlink, a pre-existing skill this
 # repo does not ship is left alone. A per-file loop (`for f in .../skills/*; do [ -f "$f" ] ||
-# continue`) skips every directory entry, so skills/fresh-prose/ never lands: this case is
-# the regression test for that defect.
+# continue`) skips every directory entry, so skills/fresh-prose/ never lands: this case pins
+# that.
 skills_case1() {
   name="skills1: a shipped skill lands as one whole-directory symlink, a person's own skill is untouched"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then
@@ -1095,14 +1094,13 @@ skills_case2() {
 }
 
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
-# across repeated runs. This is the exact fault measured 2026-10-03: Git Bash's `ln -sfn` on a
-# Windows account without symlink rights makes a real copy, so the next run sees a real
-# file/dir where land_dir()/land_skills_dir() expect a symlink, and backs it up before copying
-# again. Builds a stub `ln` first on PATH that always copies, so this reproduces without needing
-# a literal no-symlink-rights host.
-# Owner ruling 2026-10-11 re-points this case for settings.json: a repeat run backs up a plain
-# settings.json (superseding D: copy-mode-overwrites-no-backup for that file), and only the
-# newest settings.json.bak.* stays. Skill and agent copies still leave no .bak entries.
+# across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
+# real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
+# symlink, and backs it up before copying again. A stub `ln` first on PATH that always copies
+# reproduces this without a no-symlink-rights host.
+# settings.json is the exception to D: copy-mode-overwrites-no-backup: a repeat run backs up a plain
+# settings.json, and only the newest settings.json.bak.* stays. Skill and agent copies still leave
+# no .bak entries.
 make_fake_ln_bin() {
   stub_bin="$1"
   mkdir -p "$stub_bin"
@@ -1236,7 +1234,7 @@ backup_case2() {
   rm -rf "$h"
 }
 
-# ---- settings.json repeat-run cases (owner ruling 2026-10-11) -----------------------------------
+# ---- settings.json repeat-run cases -------------------------------------------------------------
 # On a repeat local install (the first-run marker exists), a plain settings.json is backed up
 # before the link replaces it, and only the newest settings.json.bak.* is kept. Backups of
 # other files are never touched. A settings.json that is already the link gets no backup.
@@ -1378,7 +1376,7 @@ settings_repeat_case4() {
   rm -rf "$h"
 }
 
-# ---- settings.json first-ever, clock and move cases (owner ruling, re-review of #328) ----------
+# ---- settings.json first-ever, clock and move cases ---------------------------------------------
 # The first local install moves a plain settings.json to settings.json.orig. Repeat installs back
 # it up to settings.json.bak.<stamp> and keep only the newest. A later install never prunes or
 # overwrites settings.json.orig. The stub bin below fixes the clock, so two runs share a stamp,
@@ -1906,14 +1904,13 @@ caseG7() {
 }
 
 # ---- Refuse-worktree: install.sh run from a linked git worktree stops before it writes ---------
-# Incident 2026-10-14: install.sh ran from a linked worktree, so ~/.claude/CLAUDE.md and the hooks
-# pointed at that temp checkout. From a linked worktree install.sh must exit non-zero, print a line
-# that names the main clone, and leave CLAUDE_CONFIG_DIR and HOME as they were. Red on origin/main:
-# it installs from the worktree and rewrites the pointer there.
+# From a linked worktree install.sh must exit non-zero, print a line that names the main clone, and
+# leave CLAUDE_CONFIG_DIR and HOME as they were. Otherwise ~/.claude/CLAUDE.md and the hooks would
+# point at that temp checkout.
 # keep_wt1 and keep_plain1 guard the other side: the main clone of a repo that has a linked worktree
 # still installs, and a plain folder copy with no .git still installs.
 
-# refuse_fixture NAME: a main clone with one detached linked worktree (as in the incident), a copy of
+# refuse_fixture NAME: a main clone with one detached linked worktree, a copy of
 # install.sh in the worktree, and a config dir seeded with a pointer to the main clone. Sets rw_h
 # (the fake HOME), rw_co, rw_wt, rw_cfg, rw_ptr (the seeded pointer) and rw_snap (the config dir
 # listing). Returns 1 when git cannot make the worktree.
@@ -1997,10 +1994,9 @@ keep_plain1() {
 }
 
 # ---- pinned_wt1: install.sh run from the pinned checkout is not refused -----------------------
-# Owner ruling 2026-10-15: the linked-worktree refusal allows exactly <clone>-live. The pinned
-# checkout is a linked worktree on a detached HEAD at main's commit, at that path. Red while the
-# guard refuses every linked worktree. refuse_wt1 keeps the other side: any other linked worktree
-# is still refused.
+# The linked-worktree refusal allows exactly <clone>-live. The pinned checkout is a linked
+# worktree on a detached HEAD at main's commit, at that path. refuse_wt1 keeps the other side: any
+# other linked worktree is still refused.
 pinned_wt1() {
   name="pinned_wt1: install.sh run from the pinned checkout <clone>-live is not refused"
   co="$work/pinned_wt1-main"; pin="$work/pinned_wt1-main-live"; cfg="$work/pinned_wt1-cfg"
@@ -2021,7 +2017,7 @@ pinned_wt1() {
 }
 
 # ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
-# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the ~/.claude links point at <clone>-live,
+# Decision merge-reinstalls-from-main: the ~/.claude links point at <clone>-live,
 # a detached worktree at main's commit. session_start.sh must not print an off-main line for that
 # checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
 # origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
@@ -2146,7 +2142,7 @@ pinoff3() {
   fi
 }
 
-# ---- install-set cases (owner ruling 2026-10-15 17:40): one install swaps every guard file at once,
+# ---- install-set cases: one install swaps every guard file at once,
 # and one install runs at a time. Copy mode is `install.sh --cloud`: only that path stamps each guard
 # file with its INSTALL_ID through put_file, so only that path can show a mix. install.sh has no
 # seam, so a `mv` shim first on PATH holds an install between two guard landings. That is the stall a
@@ -2320,7 +2316,7 @@ lock1sh() {
 }
 
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
-# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the path <clone>-live is not enough. A linked
+# Decision merge-reinstalls-from-main: the path <clone>-live is not enough. A linked
 # worktree at that path is allowed only when it is detached at the clone's local main commit.
 # pinlive1: a -live worktree on a lane branch is refused. pinlive2: a -live worktree detached at a
 # commit that is not main is refused. pinned_wt1 keeps the other side: detached at main passes.

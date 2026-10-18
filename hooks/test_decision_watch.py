@@ -213,9 +213,8 @@ def case_allow_approved():
 
 # --------------------------------------------------------------------------- case 3
 # No file changed at all, only an outbound SendMessage instructing a peer to delete a
-# rule that has not executed yet. Corrected by the independent audit: this shape alone
-# produced a false positive, so it must not gate a model call by itself. Silent, and the
-# model is never even called.
+# rule that has not executed yet. This shape alone is a false positive, so it must not gate
+# a model call by itself. Silent, and the model is never even called.
 
 def case_outbound_alone_no_disk_change():
     repo = make_repo("outbound_alone")
@@ -912,7 +911,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/question-outcome-check.md, ruling 2026-10-08).
+# The one-year token file (decisions/question-outcome-check.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this
@@ -1089,7 +1088,7 @@ def case_token_encodings_read_as_the_bare_token():
 # T10. A token file that exists but cannot be decoded: FF FE BOM plus an odd byte count.
 # invoke_model must return an error that says the token file could not be read, the error
 # must hold no file bytes, and no subprocess may start (no silent fall back to the expired
-# credentials copy). Red until the reader fails closed on a decode error.
+# credentials copy). The reader must fail closed on a decode error.
 def case_token_t10_undecodable_file_is_an_error():
     calls = []
 
@@ -1505,8 +1504,8 @@ def case_default_path_still_calls_claude_without_a_flag():
 # already recorded for this turn) must not read as silence. Silence after a reply is an ALLOW.
 
 def case_model_text_after_a_cached_verdict_says_verdict_lost():
-    # Red on e40df46. --model-text ALLOW records the verdict. A second reply on the same turn returns
-    # before the model step, and prints nothing today. That reads as a pass. It must read UNKNOWN.
+    # --model-text ALLOW records the verdict. A second reply on the same turn returns before the
+    # model step. Printing nothing would read as a pass. It must read UNKNOWN.
     name = "text_lost"
     with scratch_config(name):
         hook = _judged_hook(name)
@@ -1520,7 +1519,7 @@ def case_model_text_after_a_cached_verdict_says_verdict_lost():
 
 
 def case_model_error_after_a_cached_verdict_is_not_silent():
-    # Red on e40df46. The same early exit with --model-error prints nothing today. It must read UNKNOWN.
+    # The same early exit with --model-error must read UNKNOWN, not print nothing.
     name = "error_lost"
     with scratch_config(name):
         hook = _judged_hook(name)
@@ -1532,10 +1531,10 @@ def case_model_error_after_a_cached_verdict_is_not_silent():
 
 
 def case_split_output_carries_the_config_notice_apart_from_the_verdict():
-    # Red on c3326be, which prints only the joined systemMessage. Under a split flag (the mod's
-    # --emit-prompt), the script also prints `verdict` (the judgment's text alone) and `notices`
-    # (one string per kind of notice). A settings edit with no protected change is one notice and
-    # no verdict: `verdict` stays empty and does not carry the notice text.
+    # Under a split flag (the mod's --emit-prompt), the script prints `verdict` (the judgment's
+    # text alone) and `notices` (one string per kind of notice), besides the joined systemMessage.
+    # A settings edit with no protected change is one notice and no verdict: `verdict` stays empty
+    # and does not carry the notice text.
     name = "split_config_notice"
     repo = make_repo(name)
     write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
@@ -1570,7 +1569,7 @@ def case_split_output_carries_the_config_notice_apart_from_the_verdict():
 # --------------------------------------------------------------------------- dw-unread-dir (c)
 # Under the mod env, python gets CLAUDE_CONFIG_DIR = the mod's state folder and no DW_REAL_CONFIG_DIR. The unread
 # reader then falls back to the state folder, where guard.log is not, so the real folder's unread subject is lost.
-# The fallback must print a line that names DW_REAL_CONFIG_DIR, on stdout or stderr. Red on 2bba35a: it is silent.
+# The fallback must print a line that names DW_REAL_CONFIG_DIR, on stdout or stderr, not stay silent.
 # Guessed contract point: only the name DW_REAL_CONFIG_DIR is pinned, not the wording.
 def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
     name = "unread_fallback"
@@ -1605,7 +1604,7 @@ def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
     check("unread fallback: exit 0", result.returncode == 0, result.stderr[:300])
     check("unread fallback: a line names DW_REAL_CONFIG_DIR, so the fallback is not silent",
           "DW_REAL_CONFIG_DIR" in seen, seen[:300])
-    # Control, green on 2bba35a: with the real folder named, the same fixture shows the subject. So a red above is
+    # Control: with the real folder named, the same fixture shows the subject. So a red above is
     # the fallback, not a fixture that never produces the notice.
     control = emit(dict(env, DW_REAL_CONFIG_DIR=real))
     got = _json_or_none(control.stdout.strip())

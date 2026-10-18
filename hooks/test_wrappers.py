@@ -19,16 +19,15 @@ Contract, from decision gate-hooks-fail-closed:
   when their script is missing, and carry no `onFailure`.
 - CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL in `env`.
 - From decision subagent-model-cap, `env` holds CLAUDE_CODE_SUBAGENT_MODEL = "sonnet" and
-  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1", both as strings (they replace two rule_audit gate rows
-  that left with their rules).
+  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1", both as strings.
 - Python launcher: every command hook that runs a script through a `g="..."` assignment never
   execs a python candidate whose `command -v` path contains `/WindowsApps/`. The Microsoft Store
-  alias there hung the guard for 30 s (2026-10-12). A stub alias ahead of a real python must be
+  alias there hangs the guard for 30 s. A stub alias ahead of a real python must be
   skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
   the no-python remedy and an advisory hook exits 0.
 - The guard split: a copied guard.py takes split_segments from its
   own guard_core.py sibling, never the real one. With the sibling missing, a Bash call is refused with
-  the reinstall step named (audit-high, decision gate-hooks-fail-closed), and one fallback line naming
+  the reinstall step named (decision gate-hooks-fail-closed), and one fallback line naming
   guard_core goes to guard.log. Every name other
   files reach through `guard` still resolves.
 - The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
@@ -39,8 +38,7 @@ Each command string runs through `sh -c` (Git Bash on Windows). The no-python ca
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
 The shell is started by absolute path, so it still runs.
 
-Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST (used for the red run on
-main: `git show origin/main:settings.json > <scratch>/settings.json`).
+Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST.
 """
 import json
 import os
@@ -304,8 +302,8 @@ def check_alias_only_advisory():
     return (not bad and len(adv) > 0), "advisory checked %d; wrong: %s" % (len(adv), bad)
 
 
-# Guard split. guard.py stays the entry point; shared code moves to
-# guard_core.py beside it. The pins below are red on a guard.py that has no sibling yet.
+# Guard split. guard.py stays the entry point; shared code lives in
+# guard_core.py beside it. The pins below fail on a guard.py that has no sibling.
 GUARD_PY = os.path.join(HERE, "guard.py")
 SPLIT_LABEL = "split_segments: a comment starting a word"  # a test_guard.py log check
 # Built from parts, so this file cannot trip the guard it tests (as test_guard.py does).
@@ -403,7 +401,7 @@ def split_control_case():
 
 
 def missing_sibling_case():
-    """audit-high (owner ruling 2026-10-13, decision gate-hooks-fail-closed): a copied guard.py with
+    """Decision gate-hooks-fail-closed: a copied guard.py with
     no guard_core.py beside it refuses the call. Stdout carries a deny whose reason names the
     reinstall step and no file, the exit is 0 as for any other deny, and one fallback line naming
     guard_core goes to guard.log. The payload is a command the guard refuses when it can judge."""

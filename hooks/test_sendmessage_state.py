@@ -445,7 +445,7 @@ def case_reader_that_holds_the_pipe_returns_before_the_child_ends():
     # The reader's child holds the stdout pipe for HOLD_MS, then writes "done" as its last act. Order,
     # not speed: the hook has returned while done does not exist yet, so it did not wait on the pipe.
     # No wall-clock bound. If node did not start the child before the timeout, the case is NOT-RUN.
-    # Proven red on Windows only. On POSIX, subprocess.run's timeout path waits on the child only, so
+    # Only Windows tells a pipe wait from none. On POSIX, subprocess.run's timeout path waits on the child only, so
     # a run() read of the pipe returns early there; a Popen + communicate() read is unmeasured there.
     try:
         r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)

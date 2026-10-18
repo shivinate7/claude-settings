@@ -36,12 +36,9 @@ def _find_git_bash():
     does not help. It is a plain PATH scan. On this PATH order it returns the same
     stub.
 
-    MEASURED on this machine, and under the CI job's own PowerShell shell. A bare
-    "bash" printed "/mnt/c/Users/..." there, from the WSL stub. The full path to
-    Git's own bash.exe printed "C:/Users/..." instead, the real MINGW64 mount.
-    `.github\\workflows\\gates.yml`'s own `shell: bash` steps already report that
-    same Git bash.exe path, in their "Report the Windows environment" log line.
-    This is not a guess.
+    A bare "bash" prints "/mnt/c/Users/..." (the WSL stub). The full path to
+    Git's own bash.exe prints "C:/Users/..." (the real MINGW64 mount). The
+    `shell: bash` steps of `.github\\workflows\\gates.yml` already use that path.
     """
     if os.name != "nt":
         return shutil.which("bash") or "bash"
@@ -102,8 +99,7 @@ def to_python_literal_path(path):
     Bash's own double-quote rule turns `\\\\` into one `\\`. The surviving single
     backslash then starts a Python string escape, such as `\\U`. `\\U` demands eight
     hex digits next. "Users" fails that check. The inner python3 then raised a
-    SyntaxError. It wrote nothing. This bypass case measured a fixture that never ran
-    (MEASURED: CI's own "reverted but said nothing" line for this case).
+    SyntaxError and wrote nothing, so the case tested a fixture that never ran.
 
     `to_bash_path`'s MSYS form, "/c/Users/...", fixes the bash side. The inner
     python3 is native Windows Python. It has no "/c" drive. Forward slashes are the
@@ -304,9 +300,8 @@ def shell(project, command):
 
 # --------------------------------------------------------------------------- the bypass shapes
 #
-# One case per row of the table the design brief measured. Each one WRITES the cap lift for real
-# and then reads the file back. The five rows the brief measured as ALLOWED must lift the cap on
-# `main` and must be undone here.
+# One case per row of the bypass table. Each one WRITES the cap lift for real and then reads the
+# file back. The five rows the guard ALLOWS lift the cap, and the watch must undo them.
 
 
 def bypass(name, build):
@@ -334,9 +329,9 @@ bypass("mv from another file",
 bypass("sed -i in place",
        # `sed -i ''` is BSD syntax: GNU sed's `-i` takes its suffix only ATTACHED, so a
        # SEPARATE `''` is read as the script and `s/sonnet/opus/` as a missing filename (an
-       # error, not a write); the target is edited with an EMPTY script and no byte changes
-       # (MEASURED on gsed 4.10). `-i.bak` attaches a REAL suffix, which BSD and GNU parse the
-       # same way, so this edits in place identically on both.
+       # error, not a write); the target is edited with an EMPTY script and no byte changes.
+       # `-i.bak` attaches a REAL suffix, which BSD and GNU parse the same way, so this edits in
+       # place identically on both.
        lambda p: "sed -i.bak -e s/sonnet/opus/ .claude/settings.local.json "
                  "&& rm -f .claude/settings.local.json.bak")
 bypass("python3 -c writes the path",
@@ -348,7 +343,7 @@ bypass("python3 runs a script file",
 bypass("bash runs a script file",
        lambda p: "bash gen.sh")
 
-# The two indirection shapes the brief's table does not cover. Neither names the path in the
+# The two indirection shapes the table above does not cover. Neither names the path in the
 # command, so no shell reading can reach them, and both must be caught by the hash.
 bypass("a path held in a shell variable",
        lambda p: "f=.claude/settings.local.json; cp %s \"$f\""
