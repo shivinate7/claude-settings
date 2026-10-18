@@ -3,7 +3,9 @@
 ## The ruling
 
 A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`. It reads the
-owner's last messages from `transcript_path`. On a miss it denies the call. The reason goes back to the
+conversation from `transcript_path`, from the owner's 3rd-last message to the question. The 3 owner messages stay whole, with no
+per-message cap (owner ruling 2026-10-14 00:00 CDT). A relayed cross-session message is conversation text, labeled relayed and never
+the owner's (owner ruling 2026-10-13 22:21 CDT). On a miss it denies the call. The reason goes back to the
 session, which fixes the question before the owner sees it. Reason: a prompt hook sees only the question,
 never the chat, so it judges form alone (haiku-prompt-hooks).
 
@@ -23,8 +25,8 @@ never the chat, so it judges form alone (haiku-prompt-hooks).
 - **Presence and order.** A clarifying question (no options or one) passes. Any other question is denied
   with no model call when it has no `Goal:` line, no `Problem:` line, an empty one, or `Problem:` before
   `Goal:`. Only the question text counts, not option text.
-- **What the judge reads.** The conversation text from the owner's 3rd-last message to the question. It
-  reads no tool calls, results, task notices or reminders. The goal is read from owner records only:
+- **What the judge reads.** Owner messages, the assistant's text and relayed messages, each labeled by
+  source. It reads no tool calls, results, task notices or reminders. The goal is read from owner records only:
   human user records and the owner's answers in `AskUserQuestion` tool results. Task notifications, hook
   feedback, peer messages and other tool results are not the owner's. A relay sender cannot forge an
   Owner block.
