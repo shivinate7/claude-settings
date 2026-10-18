@@ -8,7 +8,7 @@ Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. `
 - A pid is owned when its own parent chain reaches that process, or when the process is already dead (`ps` exits 1 with no output). Any other `ps` failure is unknown. The `claude` process itself is not owned. Another session's process, and the owner's editor, do not descend from it.
 - Owner, 2026-10-10: a pid is also owned when all three hold. Its parent is init (PPID 1). Its cwd is inside `<primary>/.claude/worktrees/agent-<id>`. `agent-<id>.jsonl` exists in this session's subagent folder. A pid whose parent is alive stays foreign, also inside the agent worktree. Another session's agent worktree stays foreign.
 - The guard keeps no map of subagent ids. It reads the hook payload field `transcript_path` (`<session_id>.jsonl`), and the sibling folder `<session_id>/subagents/` holds `agent-<id>.jsonl` for each subagent of that session.
-- Without a pass, pids 0, 1 and -1 are always denied, also when the session root is unknown. A pid group (`-123`) is judged by its leader.
+- Pids 0, 1 and -1 are always denied, also under an owner override pass (owner, 2026-10-18 16:00 CDT) and also when the session root is unknown. A pid group (`-123`) is judged by its leader.
 - `kill $(pgrep ...)`, `kill $(pidof ...)` and `pgrep ... | xargs kill` name a target by pattern. They are denied as a kill by name, the same as `pkill`.
 - `CLAUDE_GUARD_ROOT_PID` (ASCII digits only) replaces the walk, for the test suite. A command cannot set it, because the harness sets the hook's environment. A `settings.json` `env` block can.
 

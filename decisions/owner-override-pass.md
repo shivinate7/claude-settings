@@ -27,6 +27,7 @@ Orchestrator's call, not an owner word:
 ## Outside every pass
 
 - Owner, 2026-10-18 15:34 CDT: a write to a frozen path (the guard files and the pass file), and a command that sets a git location variable (`git-env-set-denied`, a git-env-set command is denied).
+- Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
 - Orchestrator's call, because no pass check reaches them: the missing-module deny in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, and each other PreToolUse gate (`ste_gate`, `question_outcome`, `sendmessage_state`, the prompt judges).
 
 Why: the owner needs a way to force through a refusal that blocks real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
