@@ -538,8 +538,7 @@ def case_damaged_counter_fails_open():
 # --------------------------------------------------------------------------- case 13
 # A counter write that fails never blocks or crashes the Stop. The state folder is made a plain
 # file, so every write under it fails and so does every read. The finding still comes out as a
-# note, and the Stop is judged once. Green on main by construction: main writes no counter, so
-# this case guards the write the builder adds.
+# note, and the Stop is judged once.
 
 def case_counter_write_failure_never_blocks():
     config = sample_config("write-fails")
@@ -556,8 +555,8 @@ def case_counter_write_failure_never_blocks():
 
 
 # --------------------------------------------------------------------------- cases 14-16
-# Hole 1 (review round 1): a failed counter write froze the stored count at k. Every later Stop
-# read k, returned n = k + 1 and was skipped forever. Pin: the Stop after a failed write is judged.
+# A failed counter write must not freeze the stored count at k: every later Stop would read k,
+# return n = k + 1 and be skipped forever. The Stop after a failed write is judged.
 # Stop 1 writes a good count. From Stop 2 on, the stub's os.replace refuses every write. Stop 2
 # reads 1, so n = 2 and is skipped, and its write fails. Stops 3 to 9 must each be judged, since
 # every one of them follows a failed write. No Stop is skipped forever.
@@ -578,9 +577,8 @@ def case_failed_write_does_not_freeze_the_count():
           all(called[n] == 1 for n in range(3, 10)), called)
 
 
-# Hole 2 (review round 1): a Stop with no reply text was counted before the empty-reply return,
-# so an empty Stop 1 used the session's first sample slot. Pin: an empty Stop writes no counter
-# change and counts for nothing. Stops 1, 6 and 11 are counted among Stops that carry a reply.
+# An empty Stop (no reply text) writes no counter change and counts for nothing, so it never
+# uses a sample slot. Stops 1, 6 and 11 are counted among Stops that carry a reply.
 
 def counter_snapshot(config):
     snap = {}
@@ -630,9 +628,9 @@ def case_empty_stops_between_replies_do_not_shift_samples():
 
 
 # --------------------------------------------------------------------------- cases 17-20
-# Freeze defect: after a good read, a failed write removes the counter file. If that remove also
-# fails (a read-only file on Windows), the old count stays on disk, so every later Stop reads it
-# and is skipped. Pin: when the write and the remove both fail, the Stop is judged, as a damaged
+# After a good read, a failed write removes the counter file. If that remove also fails (a
+# read-only file on Windows), the old count stays on disk and every later Stop would read it and
+# be skipped. When the write and the remove both fail, the Stop is judged, as a damaged
 # counter is (n = 1). Stops 1 to 3 with good writes leave the stored count at 3, so Stop 4 reads 3.
 
 FREEZE_SETUP_JUDGED = [1]  # Stop 1 is judged; Stops 2 and 3 are skipped by sampling

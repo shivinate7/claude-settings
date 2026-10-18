@@ -1,7 +1,7 @@
 """The guard's env family: any read or write of an environment file.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import fnmatch
 import re

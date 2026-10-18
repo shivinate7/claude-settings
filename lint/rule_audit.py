@@ -24,7 +24,7 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
   - `gate`: a file, named by its path from the repo root, that exists on disk, plus the proof
     that the gate WORKS. A row carries `test`, `setting`, or both. `needle` (a substring
     that must appear in the file) is refused: a docstring or a label satisfies it while the
-    code under it does nothing (decisions/known-bad-input-proves-the-gate.md).
+    code under it does nothing.
       - `test`: a test id, `path::name` or `path::Class.name`, resolved by `citation_problem`.
         A `.py` id must name a `def` (a method of a unittest.TestCase class with no skip
         marker, or a case function that code which runs names), or a case registered by a

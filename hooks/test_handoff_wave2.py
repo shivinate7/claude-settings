@@ -832,7 +832,6 @@ def case_bad_stdin_and_live_control_per_mode():
             c.cleanup()
 
 
-# --------------------------------------------------------------------------- review round 2
 
 STALE_AGE = 400 * 86400  # seconds: no live session is this old
 

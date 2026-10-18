@@ -95,7 +95,7 @@ second script.
   Rows: Mandates in CLAUDE.md order, every other kind sorted by slug. A pipe in a gist is written \\|.
 - Rulings: Kind: process. Build designs: Kind: build. Unsorted decisions: no Kind line, or a Kind
   the generator does not know (that may instead be a problem naming the file). A Kind line counts
-  outside fenced text only: decisions/rulings-declare-kind.md holds a fenced example of both.
+  outside fenced text only: a fenced example of both kinds counts for neither (the FENCED_KINDS fixture).
 - Gist, one sentence, text flattened first (lines wrap). A sentence ends at ". ", "? " or "! ", or at
   the end of its block. Mandate: the first sentence of the rule's text, which runs from the paragraph
   start (a bold lead label dropped) or the marker before it, to its marker. Decision: the first block
@@ -901,7 +901,7 @@ GIST_CASES = [
      "**Changed in part on 2026-09-28** by `other-rule`, the rule stays."),
 ]
 
-# The real shape of decisions/rulings-declare-kind.md: a fenced example of both kinds, then one real line.
+# A record with a fenced example of both kinds, then one real line: only the unfenced Kind line counts.
 FENCED_KINDS = ("# T\n\n## The ruling\n\nIt is so.\n\n```\nKind: build\nPlan: <path>#<slug> (<platform>)\n\n"
                 "Kind: process\nHome: rule:<id>\n```\n\nKind: process\nHome: lint/x.py\n")
 
@@ -1048,6 +1048,15 @@ class RecordsPage(Tree):
         for i, (name, _q, _r, gist) in enumerate(cases):
             with self.subTest(name):
                 self.assertEqual(got.get("r%d" % i), gist)
+
+    def test_a16_the_notes_file_in_debts_is_no_record(self):
+        # Owner ruling 2026-10-17 11:56 CDT: a finding too unlikely to hit is one line in the notes file, not a debt.
+        # Red on 26cfc87f: the notes file has no **What.** line, so the page is refused (PR 497 merge).
+        notes = "# Notes\n\n- A finding too unlikely to hit. Decision: none.\n"
+        root = self.tree(with_records({"debts/notes.md": notes}))
+        code, out, err = generator(root)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(listed(records_rows(self.records_text(root)))["Debts"], ["gap-one"])
 
 
 class RecordsStale(Tree):
@@ -1405,7 +1414,10 @@ class RealRecords(unittest.TestCase):
                    ("deferred", ("Deferred",)), ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder)) if f.endswith(".md") and f != "README.md")
+            # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            # Compared by path: a decisions/notes.md is still a record and needs its row.
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
+                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
@@ -1434,7 +1446,7 @@ class RealRecords(unittest.TestCase):
         self.assertFalse(problems, "\n".join(problems))
 
     def test_r13_the_real_kind_lines_decide_the_group(self):
-        # decisions/rulings-declare-kind.md holds a fenced example of both kinds and one real process line.
+        # A record may fence an example of both kinds (the FENCED_KINDS fixture); only its unfenced Kind lines decide the group.
         got = {r["slug"]: r["section"] for r in self.rows() if r["section"] in ("Rulings", "Build designs", "Unsorted decisions")}
         problems = []
         for name in sorted(os.listdir(os.path.join(ROOT, "decisions"))):

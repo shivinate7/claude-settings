@@ -50,7 +50,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
-                       (which-start-shapes-outlive-the-agent-on-windows)
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   background-end       deny. A background command with no end note. (background-needs-end-note)
@@ -64,9 +63,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec denies. A push that reaches the default branch asks.
                        (stale-safe-force-push)
-  env-file             deny. Any read or write of an environment file. (env-file-wrappers)
+  env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, or the read
-                       could not run. `--auto` too. (merge-needs-a-proven-head)
+                       could not run. `--auto` too.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -114,7 +113,7 @@ ask names the requested value and the file, which is not an exception to the rem
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
 value and the path are cleaned of control characters and cut at a bound.
 
-A merge into main is allowed and never logged by the guard (guard-trims-from-the-audit).
+A merge into main is allowed and never logged by the guard.
 `hooks/decision_watch.py` names each merge from the transcript at turn end. A `git checkout`
 with `--ours`, `--theirs` or `--merge` during an unresolved merge, rebase, cherry-pick or revert
 picks a conflict side. It discards no work, so `shared-tree` passes it.
@@ -148,8 +147,7 @@ import sys
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
-# file (decision guard-split-by-family). This
-# file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
+# file. This file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
 _HERE = os.path.dirname(os.path.realpath(__file__))
 if sys.path[:1] != [_HERE]:
     sys.path.insert(0, _HERE)
@@ -323,8 +321,7 @@ def __getattr__(name):
 # landing are both gone, together, always.
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
 
-# Gap roster, 2026-10-03. Banchi's scripts/silent-write-guard.py refused these shapes and this
-# shared guard missed them. Each one moves a ref or lands a merge, so each is a write when its
+# Gap roster. Each one moves a ref or lands a merge, so each is a write when its
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
@@ -432,8 +429,6 @@ def discards_output(segment: str) -> bool:
     return any(unquoted_at(outer, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(outer))
 
 
-# PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
-# away through the pipe's LAST command, and the rule judged only the write's own segment.
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
 # `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
 # `bash -c '...'` stays unparsed, a known gap the owner left.
@@ -667,7 +662,7 @@ def agent_home_record_path(where: str, agent_id: str):
 def read_agent_home(where: str, agent_id: str):
     """Return the recorded home for `agent_id`, `''` when no record exists yet, or None when the
     record could not be read at all (no git, no common dir, an unreadable file). `None` is
-    UNKNOWN, never a hit: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md."""
+    UNKNOWN, never a hit."""
     path = agent_home_record_path(where, agent_id)
     if not path:
         return None
@@ -699,8 +694,7 @@ def agent_worktree_home(payload, cwd: str):
       "none"      no valid `agent_id` on the payload: the orchestrator, or a call this rule does
                   not judge at all.
       "unknown"   an `agent_id` is present, but the home record could not be read (no git, no
-                  common directory, an unreadable file). Allowed, never a hit (Decision:
-                  liveness-read-is-platform-specific-and-unreadable-is-not-death).
+                  common directory, an unreadable file). Allowed, never a hit.
       "no-record" the record reads clean and holds nothing, and this call's own `cwd` is not the
                   agent's worktree shape either: a non-isolated agent. Allow everything.
       "home"      `home` names the agent's recorded worktree, whether just written on this call
@@ -1192,7 +1186,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     return ""
 
 
-# ---- a message that names a lane by its session number (owner ruling 2026-10-13)
+# ---- a message that names a lane by its session number
 LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
 LANE_QUOTED = re.compile(
     r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
@@ -1228,10 +1222,8 @@ TEST_BASENAME = re.compile(
     # Shell/PowerShell test suites (incident 2026-10-03): `test_*.sh`, `*_test.sh`, `*.test.ps1`,
     # `*.Tests.ps1` (match runs on the lowercased basename, so `.Tests.ps1` arrives as `.tests.ps1`).
     r"|test_.*\.sh|.*_test\.sh|.*\.tests?\.ps1"
-    # 2026-10-07: test_stamp.mjs was refused to a test-author and open to a builder: `test_*.{js,mjs,cjs,ts,jsx,tsx}`.
     r"|test_.*\.(?:[cm]js|[jt]sx?))$")
 # SELF-TEST files (`*-selftest.*`, `*_selftest.*`, `selftest_*.*`) are test paths, except .md notes.
-# Incident 2026-10-02: Banchi self-test files had the role split inverted (builder edited them).
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
@@ -1625,9 +1617,7 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
-# ASK ALONE (owner rulings 2026-10-14 10:52 and 13:18; incident 2026-10-14 10:51 CDT, an optional
-# `git worktree prune` chained with two more steps sent the whole command to the owner as one
-# permission prompt). A step that would ASK is held, not printed, while the other rules run, so a
+# ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
 # `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
 # harmless lead or tail (harmless_steps, below). The deny
@@ -1683,7 +1673,7 @@ def count_steps(text: str) -> int:
     return steps
 
 
-# THE HARMLESS ADDITIONS (owner ruling 2026-10-15, decision ask-steps-run-alone). Two forms are no
+# THE HARMLESS ADDITIONS (decision ask-steps-run-alone). Two forms are no
 # extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
@@ -1805,7 +1795,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             state = False  # an unparsable segment: the paths read above are a guess, keep the ask
         if state is None:
             # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
-            # so a note protects nothing (owner ruling, decisions/guard-that-cries-wolf-is-spent.md).
+            # so a note protects nothing (owner ruling, agent-worktree-discard-is-noted).
             if subcommand != "worktree-remove" or worktree_remove_forced(args):
                 record(tool, "noted", "subject-unread", matched)
             continue
@@ -2117,8 +2107,8 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 def impeccable_command_hit(raw: str) -> str:
     """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
     and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits are debts impeccable-python-body (a Python, Node, Perl or Ruby
-    body is not read) and impeccable-piped-shell-body."""
+    backticks it runs. The limits: a Python, Node, Perl or Ruby
+    body is not read, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -2222,7 +2212,7 @@ def judge(payload) -> None:
         return
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
     # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
-    # and a frozen path stays readable (decisions/guard-trims-from-the-audit.md).
+    # and a frozen path stays readable.
     if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""

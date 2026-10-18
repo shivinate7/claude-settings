@@ -1,8 +1,8 @@
 """The guard's shared code: stream encoding, shell segments, heredoc bodies, git call parsing,
 command roots, tree and worktree reads, session liveness, the config folder, and the log.
 
-guard.py is the only entry point. It loads this module from its own folder (decision
-guard-split-by-family). Other files reach these names through `guard`. A test or the janitor
+guard.py is the only entry point. It loads this module from its own folder.
+Other files reach these names through `guard`. A test or the janitor
 that patches one of them patches it here, on the one object that every caller reads.
 """
 import errno
@@ -327,11 +327,10 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
 # environment layer below, so the two never drift into judging an assignment two different ways.
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# PowerShell's own assignment, `$name = value`, two tokens under shlex rather than one: `$sg`
-# then `=`. MEASURED against a real launch, `$sg = Start-Process npx ... -PassThru`, the exact
-# shape PowerShell's own remedy for rule 2b recommends. Before this, `resolve_command` read
-# `$sg` itself as the command word on that line, which matches no rule's tool name, so every
-# command-word rule silently missed the real command sitting right after it.
+# PowerShell's own assignment, `$name = value`, is two tokens under shlex: `$sg` then `=`. MEASURED
+# against a real launch, `$sg = Start-Process npx ... -PassThru`, the shape PowerShell's remedy for
+# rule 2b recommends. `resolve_command` skips it: `$sg` as the command word matches no rule's tool
+# name, so every command-word rule would miss the real command after it.
 POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 
 # A wrapper that runs another program in its place, so the CALLED program is a segment's real
@@ -596,9 +595,7 @@ def _walk_wrappers(tokens):
 # ------------------------------------------------------------------ heredoc bodies
 #
 # A heredoc body is DATA being written, not a command being run. A commit message that DISCUSSES a
-# refused command must not trip the guard. MEASURED in job-cost-reporting on 2026-08-20: a commit
-# message naming the protected folder was refused, and that was one of three false positives in the
-# guard's first week.
+# refused command must not trip the guard.
 #
 # The HEADER LINE is kept, so a redirect in the header still counts as a write:
 # `cat <<'EOF' > .claude/settings.json` writes the settings file.
@@ -802,16 +799,15 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     return _drop_heredoc_bodies(cmd)
 
 
-# BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). Before heredoc-one-step the
-# header pattern was this one. It finds no header at a word such as `'EOF-1'` or `\EOF`. At `EOF-1` or `"E"OF`
-# it reads a shorter word, which closes the body early at a line `EOF` or `E`. Either way main kept body lines
-# in view, so a run path that no rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line,
-# `| python3 -`) still denied. heredoc_delimiter reads those words right. So _drop_heredoc_bodies walks the
-# command twice, as the lane reads it and as main read it, and keeps a line when either walk keeps it: every
-# drop, the unconditional one too, sees what main saw. That holds for two heredocs in one command, where main's
-# early close at a line of the second body leaves its payload outside every body.
+# BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
+# pattern. At a word such as `'EOF-1'` or `\EOF` it finds no header; at `EOF-1` or `"E"OF` it reads a shorter
+# word and closes the body early at a line `EOF` or `E`. Main so kept body lines in view, and a run path no
+# rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line, `| python3 -`) still denied.
+# heredoc_delimiter reads those words right, so _drop_heredoc_bodies walks the command as the lane reads it and
+# as main read it, and keeps a line when either walk keeps it: every drop, the unconditional one too, sees what main saw,
+# also for two heredocs where main's early close at a line of the second body leaves its payload outside every body.
 # The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
-# Retire it when each run path reads its body (debt heredoc-run-other-path).
+# Retire it when each run path reads its body.
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
@@ -916,8 +912,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # the owner's editor and every other session, so a discard there earns a "deny".
 #
 # The directory is the last `cd <path>` in the command, or a `git -C <path>`, or the shell's own cwd.
-# MEASURED in job-cost-reporting on 2026-09-10: a gate that read the main checkout for every command
-# judged a worktree command against another branch.
+# Reading the main checkout for every command would judge a worktree command against another branch.
 #
 # READ OFF PARSED TOKENS, NOT THE RAW STRING. A regex over the raw text cannot tell a real `cd`
 # from one sitting inside a quoted argument or a `#` comment. MEASURED against this file before
@@ -925,9 +920,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # /elsewhere\n<destructive>` both resolved to `/elsewhere`, because the old `CD_RE` only asked
 # whether `cd` was preceded by `^`, `;`, `&`, or `|` in the raw text — true for both, despite the
 # `cd` in each case never running. `split_segments` (quote- and comment-aware) plus
-# `segment_tokens` (shlex) are the readers already used elsewhere in this file for the same
-# reason. Lifted from `~/Developer/banchi/scripts/shell_parse.py`, which paid this debt first
-# by reading `cd` and `git -C` off tokens instead of a raw-text regex.
+# `segment_tokens` (shlex) are the readers already used elsewhere in this file.
 # `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
 # applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
 # `git --work-tree=B status --porcelain` reported B's modified file and B's untracked file. The
@@ -1289,7 +1282,7 @@ def stash_stack(where: str):
 # that work exists anywhere else.
 #
 # Resolve the base in this order: `origin/HEAD` when it resolves, then `origin/main`, `origin/master`,
-# local `main`, local `master` (owner's ruling 2026-10-16). None answering is UNREADABLE, never a silent pass and never a silent deny:
+# local `main`, local `master`. None answering is UNREADABLE, never a silent pass and never a silent deny:
 # a repository with no default branch this rule can find is one this rule cannot judge.
 #
 # THREE TESTS, ANY ONE PASSING PROVES THE WORK SURVIVES the branch:
@@ -1452,8 +1445,7 @@ SESSION_LIVE_TOLERANCE_MS = 60000
 
 # `_process_start_ms` returns this sentinel, never `None`, when the read itself could not tell
 # whether the process is alive or dead. `None` stays reserved for a CONFIRMED dead pid, so a
-# caller can never coerce "I could not tell" into "it is dead." See
-# `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+# caller can never coerce "I could not tell" into "it is dead."
 PROCESS_START_UNREADABLE = object()
 
 
@@ -1528,8 +1520,7 @@ def _process_start_ms(pid: int):
     """Return a live process's start time in epoch milliseconds. Return `None` when the pid is
     CONFIRMED not running (dead). Return `PROCESS_START_UNREADABLE` when the read could not
     tell either way. A caller must never fold the third state into the second: an unreadable
-    read is not proof of death. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+    read is not proof of death.
 
     POSIX: `ps -o lstart=` prints the start time in THIS machine's own local clock, with no
     timezone marker at all. Read it with `time.mktime`. That call turns a naive `struct_time`
@@ -1656,8 +1647,7 @@ def worktree_live_session(target: str):
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
     confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
-    this read exists to avoid. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`."""
+    this read exists to avoid."""
     records = session_records()
     if records is None:
         return None
@@ -2001,7 +1991,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
 # `agent_id`; unmeasured, so it stays allowed) pass untouched. `test-author` is the inverse: it may
 # change ONLY test paths and test config, never product code (agents/test-author.md).
-# `record-writer` (owner ruling 2026-10-10) may change ONLY `*.md` files (case-insensitive
+# `record-writer` may change ONLY `*.md` files (case-insensitive
 # extension; agents/*.md and CLAUDE.md included), never anything else (agents/record-writer.md).
 #
 # A TEST PATH is read from the path's own parts, never from a substring: a basename shape
@@ -2012,7 +2002,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 # that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
 # dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
 # `contest.py` and `latest_results.md` match no shape.
-# Xcode/SPM (incident 2026-10-11, Degen): a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
+# Xcode/SPM: a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
@@ -2098,8 +2088,7 @@ def is_move_into(tool: str, command: str, cwd: str, home: str) -> bool:
 
 
 # A shell that runs its `-c` argument as a script. The script is judged by this same rule.
-# MEASURED 2026-09-26 on Windows (PR #144): `sh -c 'cmd &'` was allowed, and the server outlived
-# its call. The `&` sat inside one quoted token, where no per-segment read above can see it.
+# The `&` in `sh -c 'cmd &'` sits inside one quoted token, where no per-segment read above can see it.
 INLINE_SCRIPT_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "sh.exe", "bash.exe"}
 _C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 
@@ -2126,7 +2115,7 @@ REDIRECT = re.compile(r"(\d?>>?)")
 
 
 # A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
-# environment file. MEASURED in guard.log 2026-09-16 to 10-02: 65 false `env-file` denies.
+# environment file.
 ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
 
 

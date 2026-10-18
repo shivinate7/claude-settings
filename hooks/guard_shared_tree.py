@@ -1,7 +1,7 @@
 """The guard's shared-tree family: stash, reset, restore, checkout, clean and the subject read.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -289,7 +289,7 @@ def shared_tree_hit(segment: str) -> str:
 # The outcome this rule protects is the OTHER session's tree, so the reflog does not make the
 # named-commit form safe: it makes it whole for one tree only. `git reset --hard HEAD~1` therefore
 # keeps today's answer, deny in a shared checkout and ask in a worktree, whatever the tree holds.
-# (Owner's ruling, 2026-09-17. MEASURED on 1be660c in a pristine repository with an empty
+# (MEASURED on 1be660c in a pristine repository with an empty
 # porcelain: `git reset --hard HEAD` answered allow, and so did `git reset --hard HEAD~1`.)
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
 # `git reset` takes a value after this one. A pathspec form cannot carry `--hard` at all ("fatal:
