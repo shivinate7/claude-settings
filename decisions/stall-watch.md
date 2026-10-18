@@ -26,7 +26,8 @@ guard rule, so the watcher does the waiting and the session is told once.
     that runs the loop, because the loop starts each body command again. A process tree cannot tell a
     loop from a sequence, so the hook reads the command text with the stdlib shell tokenizer.
   - Limit: stopping a loop's copy leaves its current body command running. The report's process table
-    lists that command.
+    lists that command. The flag covers the whole command, so a command that runs after the loop ends
+    (`until curl ...; do sleep 1; done; npm start`) is named by its shell copy too, not by its own pid.
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
   running and the watcher never stops it.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
