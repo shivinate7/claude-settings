@@ -30,34 +30,26 @@ Home: <path>
 - A record has one Kind line. A second ruling in the same record needs its own record.
 - The lint has no "not a ruling" exemption. A record with no ruling still carries a Kind line, because
   the lint cannot tell the two apart.
-- Scope. The lint does not know which platforms a ruling needs. It checks each Plan line that is there,
-  and that a Home exists, not that the home enforces the ruling. Old records are not checked or
-  rewritten. Each one gets its Kind line when a later change touches it. Only pull requests run the
-  check. A push to main and the nightly run skip it, by design.
+- Old records are not checked or rewritten. Each one gets its Kind line when a later change touches it.
+  Only pull requests run the check. A push to main and the nightly run skip it, by design.
 - A message that cites a `debts/` record by path is refused by cite-by-id (`git-cite-by-id`). That is
   intended.
 
 `lint/check_ruling_kind.py` checks every record the pull request adds or changes. It runs in CI against
-the pull request base. A missing base ref reads as unknown: locally the lint exits 0, in CI it fails.
-`--dir <folder>` names the records folder, relative to the checkout. The default is `decisions`. Only
-`.md` files under it are checked. A `--dir` or `records-dir` that is empty, `.`, missing, wrongly cased,
-or not a folder makes the lint exit non-zero and name the folder (a gate fails closed;
-gate-hooks-fail-closed). It refuses a `--dir` of `..` or a leading `/`, and fails on any other unknown
-option.
+the pull request base. A missing base ref reads as unknown: locally the lint exits 0, in CI it fails. The
+default records folder is `decisions`. A bad `--dir` or `records-dir` makes the lint exit non-zero and
+name the folder (a gate fails closed; gate-hooks-fail-closed).
 
 **Two routes carry the check to the owner's other repos.**
 
 - CI lint. The opt-in composite action `actions/ruling-kind` runs the same lint on another repo's pull
   request, against its base. Adopt it with `uses: shivinate7/claude-settings/actions/ruling-kind@<full-sha>`
-  after `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read. Its input
-  `records-dir` names the records folder, relative to the caller's checkout. The default is `decisions`.
-  `actions/ruling-kind/check.sh` refuses `..` and a leading `/` in `records-dir`.
+  after `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read.
 - Write judge. The Write prompt judge in `settings.json` fires on any `decisions/` path. It refuses a
   record whose text has no `Kind: build` (with Plan lines) or `Kind: process` (with a Home line). The Edit
-  judge sees only the changed text, so its scope is narrower. It refuses an edit whose new text deletes a
-  `Kind:`, `Plan:` or `Home:` line. It also refuses an edit that adds a ruling section with no `Kind:`
-  line in the same text. Both run at write time, in any repo with these settings. The judge is a model
-  and can miss a case. Only the Write judge and the lint check a whole record.
+  judge sees only the changed text. It refuses an edit whose new text deletes a `Kind:`, `Plan:` or
+  `Home:` line, and an edit that adds a ruling section with no `Kind:` line in the same text. Both run at
+  write time, in any repo with these settings.
 
 Kind: process
 Home: lint/check_ruling_kind.py

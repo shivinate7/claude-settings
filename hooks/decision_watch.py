@@ -185,8 +185,8 @@ def _safe_why(text):
 # ------------------------------------------------------------------ transcript walking
 #
 # Copied from lint/md_sweep.py, not imported, so each Stop hook
-# stays readable as one file (decisions/a-gates-allow-list-is-the-constant.md names this
-# exact copy as one of the exceptions the rule does not govern).
+# stays readable as one file (rule building-allow-list-is-the-constant does not govern this copy:
+# a transcript helper is no permit list).
 
 def is_last_human(rec):
     if rec.get("type") != "user":

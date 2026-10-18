@@ -13,13 +13,7 @@ The window is the days since the stamp, the stamp day through the day before tod
 - an `STE-unchecked` line: the lint could not run, so those writes are unknown.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
 
-The STE gate and the Stop sweep (`lint/md_sweep.py`) write their own lines through `guard_logger` in `lint/_transcript.py`:
-
-- `fixed`: a Markdown rewrite landed. The rule is the sorted STE codes, capped at 40 characters, or `STE-wording` when there are none. Matched field: `<basename> fixed=N`. The reader counts `fixed` under noted.
-- `deny`: a refusal. Matched field: `<basename> denied=N`. A Stop `deny` line names one blocked sweep run: `<first basename> files=N`.
-- `noted` with rule `STE-fallback`: the fixer timed out, crashed, or skipped oversize text. Matched field: `<basename> fallback=timeout|oversize|crash`.
-- `noted` with rule `STE-unchecked`: the lint could not run. Matched field: `<basename> unchecked`.
-- A write with no fix, deny, fallback or unchecked outcome writes no line.
+The STE gate and the Stop sweep (`lint/md_sweep.py`) write their own lines through `guard_logger` in `lint/_transcript.py`: `fixed`, `deny`, and `noted` rows for `STE-fallback` and `STE-unchecked`. A write with no such outcome writes no line.
 
 Reason: the table is the outcome meter for the two owner concerns, prompts the owner did not need and agents refused with no allowed path. Judge a rule by its row here, not by its test count.
 

@@ -985,8 +985,7 @@ def host_default_branch(root):
 
 def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
-    No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops.
-    Decision merge-config-defaults, merge needs no config file."""
+    No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
     ref = f"origin/{base}"
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:

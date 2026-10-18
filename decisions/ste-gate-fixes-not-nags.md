@@ -18,7 +18,7 @@ not nag. Reason: a deny sends the writer back for another write.
   finds. The hook exits 0 on that path. The fixer adds no refusal of its own (`gate-hooks-fail-closed`).
 - Unsafe or ambiguous patterns stay unfixed. An unfixed error denies the write.
 - A fix changes words, never the line count. The gate reads stdin as UTF-8 bytes.
-- Each outcome writes one guard.log line (`guard-log-read-weekly` holds the format): `fixed`, `deny`, or
+- Each outcome writes one guard.log line (`lint/ste_gate.py` writes the format): `fixed`, `deny`, or
   `noted` with rule STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not run).
   A write with no such outcome, and a write with advisory findings only, writes no line.
 

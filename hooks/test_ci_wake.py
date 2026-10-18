@@ -34,7 +34,7 @@ line is `CI unknown`. A status that is not `completed` (in_progress, queued) mea
 
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
 A cancelled run beside a run of the same name that ran, on the same head, reads as the ran one,
-in either list order, completed or in progress (decision merge-needs-a-proven-head). A cancelled
+in either list order, completed or in progress (merge/merge.py Host.judge_runs). A cancelled
 run with no such twin reads cancelled.
 Unreadable gh: gh not on PATH, exit non-zero, or output that is not JSON. For a `gh pr ready`
 that could start a watch, exit 2 with one line `CI unknown on <sha>: <reason>`. Never a silent exit 0.

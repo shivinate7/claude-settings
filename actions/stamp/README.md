@@ -325,8 +325,8 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 
 1. One config file holds everything: `.github/stamp.json`. The command reads it from the pull
    request's base branch, never from the local checkout. A different path goes in `--config`.
-   The `merge` block is optional. Defaults and refusals: decision merge-config-defaults (merge
-   needs no config file).
+   The `merge` block is optional. Defaults and refusals: `load_config` in
+   `merge/merge.py`.
 2. `merge.method` is `merge`, `squash` or `rebase`. Read it from the repo's own merge history
    before you set it. `merge.deadlineMinutes` is the longest that one wait for checks may last.
 3. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
@@ -346,7 +346,7 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 Do each step in your own repo, from your own tree.
 
 The config file is optional for merge. With no `.github/stamp.json`, merge uses the defaults
-(decision merge-config-defaults, merge needs no config file) and claims no numbers. If the
+(`load_config` in `merge/merge.py`) and claims no numbers. If the
 repo has numbered records, or needs a non-default method, deadline, required checks or
 `afterMerge`, do the steps below.
 

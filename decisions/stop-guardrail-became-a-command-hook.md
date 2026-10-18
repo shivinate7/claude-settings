@@ -37,22 +37,18 @@ can land text in a diff or a message can reach. An injected instruction must not
   as UNKNOWN.
 
 **The `why` field is capped, cleaned, and attributed.** The model's `why` text is bounded to 300
-characters, cleaned the way `hooks/guard.py`'s own printed reasons are, and quoted as "the judge model
+characters, cleaned the way the guard's own printed reasons are, and quoted as "the judge model
 reported" rather than stated plainly.
 
-**Per-incident, per-session cap.** The hook hashes the protected paths plus their evidence into one
-incident key, and persists seen keys per session under `<config dir>/state/decision-watch/`. A finding
-already flagged this session, with unchanged evidence, stays quiet at the next Stop. A finding whose
-evidence moved further is a new incident and is reported once more. The cap never applies to an UNKNOWN
-read, which is always reported again (`guard-that-cries-wolf-is-spent`).
+**Per-incident, per-session cap.** A finding already flagged this session, with unchanged evidence, stays
+quiet at the next Stop. A finding whose evidence moved further is a new incident and is reported once
+more. The cap never applies to an UNKNOWN read, which is always reported again
+(`guard-that-cries-wolf-is-spent`).
 
-**The time budget is bounded by code.** A harness kill prints nothing, and silence reads as no change.
-So each git call has a timeout, and the `git diff` calls one Stop spends have a cap. The mod caps each
-python run and its model call with its own timers. A timeout reads as UNKNOWN, never ALLOW.
-
-**UNKNOWN, named on every failing read.** `transcript_path` can be missing. `git` can be unavailable or
-fail. The model subprocess can fail, time out, or answer something other than the asked JSON verdict.
-Each one prints a `systemMessage` that says UNKNOWN and names why. None collapses into silence or into a flag.
+**UNKNOWN, never silence.** A harness kill prints nothing, and silence reads as no change. So each git
+call has a timeout, and the mod caps each python run and its model call with its own timers. A timeout, a
+missing `transcript_path`, a git failure, and a model failure or odd answer each print a `systemMessage`
+that says UNKNOWN and names why. None collapses into silence, into ALLOW or into a flag.
 
 Kind: process
 Home: hooks/decision_watch.py
