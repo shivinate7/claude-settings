@@ -2852,7 +2852,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                       "the purge must not drop the younger entry's line")
 
     def test_an_expired_entry_keeps_the_ref_when_an_unexpired_entry_differs_only_by_case(self):
-        # NTFS ref names fold case: `Foo` and `foo` are one ref there. Debt purge-key-case-folds.
+        # NTFS ref names fold case: `Foo` and `foo` are one ref there.
         # The ref is written by hand so the case also runs on a case-folding checkout.
         repo = self.fresh_repo("case-fold")
         log = self.log_path("case-fold")
