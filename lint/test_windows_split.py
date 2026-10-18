@@ -572,7 +572,7 @@ class ModTestStep(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
     def test_the_step_fails_when_it_finds_no_test_or_find_errors(self):
-        """Red on main: `done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
+        """`done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
         steps = mod_steps(self.text)
         self.assertEqual(len(steps), 1, "no step runs the mod glob, so no mod test runs in CI")
         body = run_body(steps[0])

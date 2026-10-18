@@ -12,18 +12,19 @@ Hook: stall_watch.py --hook
   (no permissionDecision), with this command, run by the harness shell:
 
     { <original>
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --loop L;
+    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N;
     rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG; exit $rc
-
-  L is 1 when a loop keyword starts a command in the original (has_loop), else 0.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
 
-Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--loop 0|1]
+Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
   Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. After SECS (default
-  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. When
-  the job ends first, it exits 0.
+  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. The
+  STALL line lists the job's shell and every process under it, parent first. Stopping them in that
+  order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
+  not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
+  ends first, it exits 0.
 
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
@@ -82,50 +83,33 @@ def ended_state(state):
     return state == "" or state.startswith("Z")
 
 
-def job_tree(pid, loop=False):
-    """Return (roots, rows). roots lists the pids to stop to end the job. rows lists [pid, state,
-    elapsed, command] for each root and its descendants. The job's pid is the one `&` gave the
-    shell. A `{ }` group in sh or bash runs in a forked copy of the shell, which has its parent's
-    command line. A copy is replaced by the roots of its children: one child is the command it
-    runs, and several children are a pipeline's members. A copy with no child runs builtins and
-    is a root. When loop is true and no child of a copy is a copy, the copy is the root, because
-    the loop in it starts each child again."""
-    rows = {}
+def job_tree(pid):
+    """Return rows [pid, state, elapsed, command] for the job's shell and every process under it,
+    parent first. The job's pid is the one `&` gave the shell. Stopping the rows in order ends the
+    job: a parent dies before it can start another child."""
+    rows, kids = {}, {}
     for line in _run(["ps", "-axo", "pid=,ppid=,stat=,etime=,command="]).splitlines():
         p = line.split(None, 4)
         if len(p) >= 4:
             rows[p[0]] = p
-    kids = {}
-    for p in rows.values():
-        kids.setdefault(p[1], []).append(p[0])
-
-    def is_copy(cur):
-        return cur in rows and rows[cur][1] in rows and rows[cur][4:] == rows[rows[cur][1]][4:]
-
-    def roots_of(cur):
-        k = kids.get(cur, [])
-        if not is_copy(cur) or not k or (loop and not any(is_copy(c) for c in k)):
-            return [cur]
-        return [r for c in k for r in roots_of(c)]
-
-    roots = roots_of(str(pid))
-    found, stack = [], roots[::-1]
+            kids.setdefault(p[1], []).append(p[0])
+    found, stack = [], [str(pid)]
     while stack:
         cur = stack.pop()
         if cur in rows:
             p = rows[cur]
             found.append([p[0], p[2], p[3], p[4] if len(p) > 4 else ""])
-        stack.extend(kids.get(cur, []))
-    return [r for r in roots if r in rows], found
+            stack.extend(kids.get(cur, [])[::-1])
+    return found
 
 
-def report(pid, quiet, log, loop=False):
-    roots, rows = job_tree(pid, loop)
-    pid = ",".join(roots) or str(pid)
+def report(pid, quiet, log):
+    rows = job_tree(pid)
     pids = ",".join(r[0] for r in rows) or str(pid)
-    lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pid),
+    lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pids),
              "The job was not stopped, and the session cannot stop it: the job is not its child.",
-             "Diagnose it from this report. To stop pid=%s, ask the owner to stop it." % pid,
+             "Diagnose it from this report. To stop the job, ask the owner to stop pid=%s, in order."
+             % pids,
              "Processes (pid state elapsed command):"]
     lines += ["  " + " ".join(r) for r in rows] or ["  (none found)"]
     if shutil.which("lsof"):
@@ -146,7 +130,7 @@ def report(pid, quiet, log, loop=False):
     sys.stdout.flush()
 
 
-def watch(pid, log, quiet, loop=False):
+def watch(pid, log, quiet):
     last = time.monotonic()
     next_check = 0.0
     waited = 0
@@ -170,7 +154,7 @@ def watch(pid, log, quiet, loop=False):
             if ended:
                 return 0
             if time.monotonic() - last >= quiet:
-                report(pid, quiet, log, loop)
+                report(pid, quiet, log)
                 return STALL_EXIT
             time.sleep(0.2)
 
@@ -182,37 +166,6 @@ def eof_backslash_literal():
                               timeout=TOOL_TIMEOUT).stdout == "\\"
     except Exception:
         return False
-
-
-LOOP_WORDS = ("while", "until", "for")
-HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)(\w+)\1")
-COMMAND_START = ("\n", "{", "do", "then", "else", "!")
-
-
-def has_loop(command):
-    """True when a loop keyword (while, until or for) starts a command in command. The stdlib
-    shell tokenizer reads it, so a quoted word, a word in a comment and a line of a here-document
-    body do not count."""
-    # A sequence and a loop have one process shape (a shell copy with one child): only text tells.
-    lines, body = [], None
-    for line in command.split("\n"):
-        if body is not None:
-            body = None if line.strip() == body else body
-            continue
-        lines.append(line)
-        m = HEREDOC.search(line)
-        body = m.group(2) if m else None
-    lex = shlex.shlex("\n".join(lines), posix=True, punctuation_chars=True)
-    lex.whitespace, lex.commenters = " \t\r", ""  # keep each newline as a separator token
-    prev = ";"
-    try:
-        for tok in lex:
-            if tok in LOOP_WORDS and (prev in COMMAND_START or set(prev) <= set(";&|(")):
-                return True
-            prev = tok
-    except ValueError:  # an unclosed quote: lean toward a loop, since a missed loop is the worse report
-        return any(w in LOOP_WORDS for w in command.split())
-    return False
 
 
 def hook():
@@ -240,7 +193,7 @@ def hook():
         "{ " + original + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet)
-        + " --loop " + ("1" if has_loop(original) else "0") + "; rc=$?; "
+        + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + "; exit $rc"
     )
     print(json.dumps({"hookSpecificOutput": {
@@ -370,14 +323,14 @@ def main(argv):
         return hook()
     if argv[:1] == ["--stop"]:
         return stop()
-    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--loop": "0"}
+    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None}
     for i in range(0, len(argv) - 1, 2):
         if argv[i] in opts:
             opts[argv[i]] = argv[i + 1]
     if not opts["--watch-pid"] or not opts["--log"]:
         print(__doc__)
         return 2
-    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), opts["--loop"] == "1")
+    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]))
 
 
 if __name__ == "__main__":

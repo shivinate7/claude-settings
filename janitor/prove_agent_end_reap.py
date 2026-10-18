@@ -6,10 +6,10 @@
                                                     # it, sweep.py --confirm. Expect FAIL (red).
 
 Builds a throwaway repo with two agent worktrees, `.claude/worktrees/agent-<A>` and
-`agent-<B>`. Starts one server in each, and one in the primary checkout, with the shape
-MEASURED to outlive the agent on Windows (PR #144): `server &` then `echo started`, in one
-bash call that then exits. Fires a SubagentStop payload for agent A only. PASS needs the
-server in A gone, and the servers in B and in the primary checkout alive.
+`agent-<B>`. Starts one server in each, and one in the primary checkout, with the shape that
+outlives the agent on Windows: `server &` then `echo started`, in one bash call that then
+exits. Fires a SubagentStop payload for agent A only. PASS needs the server in A gone, and
+the servers in B and in the primary checkout alive.
 
 Stops every process it started by pid, in a `finally`, whatever the verdict.
 """

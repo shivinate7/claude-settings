@@ -266,10 +266,9 @@ try {
     Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
 }
 # ---- refusewt1 / keepwt1: a linked worktree stops install.ps1; the main clone still installs ----
-# Incident 2026-10-14: install.ps1 ran from a linked worktree, and ~\.claude pointed at that temp
-# checkout. From a linked worktree install.ps1 must exit non-zero, print a line that names the main
-# clone, and write nothing: the config dir and the fake USERPROFILE stay as they were. Red on
-# origin/main: it installs from the worktree and rewrites the pointer there. keepwt1 guards the other
+# An install from a linked worktree would point ~\.claude at that temp checkout. From a linked
+# worktree install.ps1 must exit non-zero, print a line that names the main clone, and write nothing:
+# the config dir and the fake USERPROFILE stay as they were. keepwt1 guards the other
 # side: the main clone of a repo that has a linked worktree still installs. Plain folder copies with
 # no .git are already covered by the copymode, settingsrepeat, firstinstall and envkey cases above.
 # Each child run gets its own fake USERPROFILE, CLAUDE_CONFIG_DIR and throwaway PATH key.
@@ -380,13 +379,12 @@ try {
     Remove-Item -Recurse -Force $KwRoot -ErrorAction SilentlyContinue
 }
 # ---- pinnedps1 / pinnedwt1: the pinned checkout at <clone>-live --------------------------------
-# Owner ruling 2026-10-15 (merge-reinstalls-from-main): the links in ~\.claude point at one pinned
+# Per merge-reinstalls-from-main, the links in ~\.claude point at one pinned
 # checkout, a worktree of the clone on a detached HEAD at main's commit, at the sibling path
 # <clone>-live. pinnedps1: with none present, install.ps1 run from the clone makes it at main's
 # commit, and the config CLAUDE.md pointer names it. pinnedwt1: the linked-worktree guard lets
 # install.ps1 run from that path, and from no other linked worktree (refusewt1 keeps that side).
-# Red now: the installer makes no pinned checkout, points the pointer at the clone, and refuses
-# every linked worktree. Each run is a child host with a fake USERPROFILE, a fake CLAUDE_CONFIG_DIR
+# Each run is a child host with a fake USERPROFILE, a fake CLAUDE_CONFIG_DIR
 # and the throwaway PATH key, as envkey1 does.
 
 # New-PinFixture ROOT: a git clone at ROOT\clone on branch main, with one commit that holds
@@ -458,7 +456,7 @@ try {
 }
 
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
-# Owner ruling 2026-10-15 (merge-reinstalls-from-main). install.ps1 allows a linked worktree only at
+# Per merge-reinstalls-from-main, install.ps1 allows a linked worktree only at
 # <clone>-live AND detached at the clone's local main commit. pinlivewt1: a -live worktree on a lane
 # branch is refused. pinlivewt2: a -live worktree detached at a commit that is not main is refused.
 # pinlivehook1: run from the pin, the post-merge hook still lands in the clone's .git\hooks. Only copy
@@ -595,15 +593,15 @@ try {
 }
 
 # ---- linkfallback1: a refused New-Item link falls back to mklink, and the link is made, not a copy ----
-# Measured 2026-10-15 15:20 CDT on the owner's machine, Windows PowerShell 5.1, not elevated: a
-# New-Item -ItemType SymbolicLink throws UnauthorizedAccessException (FullyQualifiedErrorId
+# On Windows PowerShell 5.1 without elevation, New-Item -ItemType SymbolicLink throws
+# UnauthorizedAccessException (FullyQualifiedErrorId
 # NewItemSymbolicLinkElevationRequired), and `cmd /c mklink` makes a SymbolicLink. This case needs
 # no admin and no product seam. It loads New-Link from install.ps1 and shadows New-Item in this
 # process, so the link call is refused every time, as it is for an account without the symlink
 # right. Every other New-Item call still reaches the cmdlet. Install-File copies only when New-Link
 # throws, so a link here is the link path. New-Link is the one home for every symlink try.
-# Red now: New-Link throws on the refused call, so Install-File would copy. A probe skips the case
-# when mklink cannot make a symlink on this account; that is unknown, never red.
+# Without the mklink fallback, New-Link throws on the refused call, so Install-File would copy. A probe
+# skips the case when mklink cannot make a symlink on this account; that is unknown, never red.
 $LfTmp  = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-linkfallback-" + [guid]::NewGuid().ToString('N'))
 $lfDDst = Join-Path $LfTmp 'dest-dir'
 $lfPrevForce = $env:CLAUDE_SETTINGS_FORCE_COPY
@@ -634,7 +632,7 @@ try {
         New-Item -ItemType Directory -Force -Path $lfDir | Out-Null
         $env:CLAUDE_SETTINGS_FORCE_COPY = $null   # New-Link must reach the New-Item call, not the forced-copy throw
 
-        # Refuse the link call the way the cmdlet does on a non-elevated account (measured above).
+        # Refuse the link call the way the cmdlet does on a non-elevated account (see above).
         function New-Item {
             if ("$args" -match 'SymbolicLink') {
                 throw [System.UnauthorizedAccessException]::new('Administrator privilege required for this operation.')

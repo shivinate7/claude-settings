@@ -7,9 +7,12 @@ Where the lint cannot judge meaning, it nudges and never blocks.
 
 Owner: a lint rule either blocks or does not exist. A rule nobody can see is not a rule. The six advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
 
+STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-only and has no mechanism. Neither raises a finding (owner ruling 2026-09-23).
+
 - A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may block. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
 - Errors stay for five codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat),
-  STE013 (double negative), STE020 (label length) and STE021 (bad escape).
+  STE013 (double negative), STE020 (label length: a button, label or aria-label is capped at 4 words, owner ruling) and STE021 (bad escape: a UI escape is line-level and names a rule and a reason, owner ruling).
+- STE020 reads its label tags from the per-repo config key `label_tags`. The default is `button` and `label` (owner ruling, undated).
 - Six codes are advisory and never block: STE003 (nominalization), STE007 (Latin abbreviation), STE008
   (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that"). The nudge is
   temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (note `ste-into-agent-briefs`).

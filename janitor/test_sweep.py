@@ -129,14 +129,12 @@ def this_process_start_ms():
 
 # --------------------------------------------------------------------------- listener fixtures
 #
-# Every fixture below is a REAL process this test file starts itself (never a process it did
-# not start -- CLAUDE.md: "Never kill a process you did not start"), that binds a REAL loopback
-# TCP listener and sleeps, so `sweep.list_listeners()` finds a real LISTEN row for it the same
-# way it would find the incident's own `python3 -m http.server`. Two shapes, per OS:
+# Every fixture below is a REAL process this file starts itself. It binds a REAL loopback TCP
+# listener and sleeps, so `sweep.list_listeners()` finds a real LISTEN row for it. Two shapes:
 #
 #   "plain"   -- a direct child, with THIS test process staying its real, live parent. Not
 #                orphaned. Proves `decide_listener`'s "not-orphaned" refusal.
-#   "orphan"  -- POSIX: a double fork (the brief's own incident shape: "pid 1 adopted it").
+#   "orphan"  -- POSIX: a double fork, so pid 1 adopts the listener.
 #                Windows: an intermediate process spawns a DETACHED grandchild and exits at
 #                once; Windows never re-parents, so "orphaned" there means exactly what
 #                `sweep._is_orphan_windows` checks -- the parent pid this grandchild still
@@ -289,14 +287,10 @@ def spawn_orphaned_listener(cwd):
     pid = int(pid_text)
     port = int(port_text)
 
-    # MEASURED, 2026-09-24, under `wsl -e python3 ...` invoked from Windows: WSL2's own
-    # "Relay" process sits between this fixture and real init, and it adopts the orphan
-    # itself (a genuine subreaper -- PR_SET_CHILD_SUBREAPER -- not a defect). The brief's own
-    # rule ("Do not treat a subreaper as orphaned, stricter is safe") means
-    # `sweep.is_orphan_linux` is RIGHT to answer "not orphaned" for that shape. This fixture
-    # cannot exercise the true-orphan path on an invocation like that, so it checks its own
-    # result independently of sweep.py (never trusting the code under test to grade itself)
-    # and skips with a named reason instead of asserting a false failure.
+    # Under `wsl -e python3 ...` from Windows, WSL2's own "Relay" process sits between this
+    # fixture and real init and adopts the orphan (a subreaper). `sweep.is_orphan_linux` rightly
+    # answers "not orphaned" for a subreaper, so this fixture cannot exercise the true-orphan
+    # path there. It checks its own result independently of sweep.py and skips with a named reason.
     real_ppid = _real_ppid_posix(pid)
     if real_ppid not in (1, None):
         os.kill(pid, signal.SIGKILL)
@@ -874,10 +868,9 @@ class StaleAgentLockTests(unittest.TestCase):
 
 
 class ListenerDecisionTests(unittest.TestCase):
-    """`sweep.find_swept_listeners` / `sweep.decide_listener`, this build's own subject. Every
-    listener here is a REAL process this suite starts itself (`spawn_plain_listener` /
-    `spawn_orphaned_listener`, defined above) -- never a mock, for the same reason
-    hooks/test_guard.py and this file's own git fixtures never mock git."""
+    """`sweep.find_swept_listeners` / `sweep.decide_listener`. Every listener here is a REAL
+    process this suite starts itself (`spawn_plain_listener` / `spawn_orphaned_listener`),
+    never a mock, as in this file's git fixtures."""
 
     @classmethod
     def setUpClass(cls):
@@ -1002,12 +995,11 @@ class ListenerDecisionTests(unittest.TestCase):
 
 
 class UnreadableListenerReadTests(unittest.TestCase):
-    """Coordinator parity note, 2026-09-24: a listener's cwd/orphan/owner read, refused on
-    THIS platform's OWN read path (`_platform_read_name`, above), must be kept and never
-    reaped -- the same outcome on POSIX and on Windows. One real, genuinely orphaned listener
-    with no live session is reused for every injection: unmodified, it reaps (see
-    `test_baseline_is_reaped`), so any one of these three injected failures is exactly what
-    must flip that outcome away from "reap"."""
+    """A listener's cwd, orphan or owner read, refused on THIS platform's own read path
+    (`_platform_read_name`, above), must be kept and never reaped, on POSIX and on Windows. One
+    real, genuinely orphaned listener with no live session is reused for every injection:
+    unmodified, it reaps (see `test_baseline_is_reaped`), so each injected failure must flip
+    that outcome away from "reap"."""
 
     @classmethod
     def setUpClass(cls):
@@ -1040,12 +1032,10 @@ class UnreadableListenerReadTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "orphaned-listener")
 
     def test_unreadable_cwd_read_means_never_matched_never_reaped(self):
-        """`find_swept_listeners` reads cwd BEFORE a listener can be matched to any checkout
-        at all -- a cwd this sweep cannot read cannot be told apart from a listener outside
-        every checkout, and this build's own docstring (`find_swept_listeners`) chooses the
-        same silent-drop direction for both, rather than name every unreadable system process
-        on the machine against every repository being swept. Either way, the outcome this
-        test pins is the one that matters: NEVER reaped."""
+        """`find_swept_listeners` reads cwd BEFORE a listener can be matched to any checkout.
+        A cwd it cannot read looks the same as a listener outside every checkout, and both are
+        dropped silently rather than named against every repository. This test pins the outcome
+        that matters: NEVER reaped."""
         with _BreakRead(_platform_read_name("cwd")):
             found = sweep.find_swept_listeners(self.checkout_paths)
         self.assertIsNotNone(found)
@@ -1069,10 +1059,9 @@ class UnreadableListenerReadTests(unittest.TestCase):
 
 
 class WorktreeProcessPreCheckTests(unittest.TestCase):
-    """`decide_worktree`'s pre-removal check (this build's brief, point 4): ANY process at
-    all, not only a listener, sitting inside a worktree must keep it, naming the pids. Reuses
-    `spawn_plain_listener` purely as a convenient real, long-lived process with a known cwd --
-    what it listens on is irrelevant to this check."""
+    """`decide_worktree`'s pre-removal check: ANY process at all, not only a listener, sitting
+    inside a worktree must keep it, naming the pids. Reuses `spawn_plain_listener` purely as a
+    real, long-lived process with a known cwd -- what it listens on is irrelevant."""
 
     @classmethod
     def setUpClass(cls):
@@ -1114,18 +1103,15 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "removable")
 
     def test_unreadable_pre_check_cwd_read_is_out_of_scope_not_a_keep(self):
-        """Coordinator parity note, 2026-09-24, resolved by measurement: a refused cwd read
-        for ONE pid during this pre-check does NOT keep the worktree, on POSIX or on Windows
-        (`decide_worktree` has no OS branch here at all -- both dispatch through the same
-        `process_cwd`). MEASURED, not the first guess: with EVERY pid's cwd read broken (this
-        test's own injection), a real Windows machine still has ~580 running processes, and
-        NONE of them can be told apart from "the one process actually inside this worktree"
-        -- so treating a single unreadable pid as a keep reason would make this pre-check
-        refuse to ever reap anything, on any real machine. That is a worse outcome than the
-        leak it exists to prevent, and the same direction the ORIGINAL brief already named
-        for a different read: "A single process ... that refuses access is out of scope.
-        Count it in the report, never act on it." Only the WHOLE enumeration failing (the
-        next test below) still means keep-everything."""
+        """A refused cwd read for ONE pid during this pre-check does NOT keep the worktree, on
+        POSIX or on Windows (`decide_worktree` has no OS branch here; both dispatch through the
+        same `process_cwd`). With EVERY pid's cwd read broken (this test's own injection), a
+        real Windows machine still runs hundreds of processes, and none can be told apart from
+        "the one process actually inside this worktree". Treating one unreadable pid as a keep
+        reason would make this pre-check refuse to reap anything on any real machine, a worse
+        outcome than the leak it prevents. A single process that refuses access is out of scope:
+        count it, never act on it. Only the WHOLE enumeration failing (the next test below)
+        means keep-everything."""
         if sys.platform == "darwin":
             # macOS reads every cwd in ONE lsof call: no per-pid read left to break. The analog
             # is a table that holds other processes only (lsof skipped the unreadable ones).
@@ -1138,9 +1124,9 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "removable")
 
     def test_unreadable_pid_enumeration_keeps_the_worktree(self):
-        """The OTHER half of the pre-check's own unreadable contract: the brief's own words,
-        "if the whole listing ... or the pre-check enumeration fails, KEEP everything and
-        remove no worktree" -- this is the whole PID listing itself failing, not one pid's cwd."""
+        """The OTHER half of the pre-check's unreadable contract: when the whole PID listing or
+        the pre-check enumeration fails, KEEP everything and remove no worktree. This is the
+        listing itself failing, not one pid's cwd."""
         name = "_all_cwds_macos" if sys.platform == "darwin" else "list_all_pids"
         with _Stub(name, lambda: None):
             decision = sweep.decide_worktree(self.root, self.entry_for(self.empty), attended=True)
@@ -1327,17 +1313,13 @@ class LooseProcessTests(unittest.TestCase):
 
 class PrimaryCheckoutExclusionTests(unittest.TestCase):
     """`sweep_repo` must never record a decision against the clone's one primary checkout, NO
-    MATTER WHICH WORKTREE PATH IT WAS CALLED WITH. An earlier version of this file compared
-    each worktree entry against the `root` argument alone, which is correct only when `root`
-    already names the primary checkout; called with a LINKED worktree's own path instead, the
-    real primary checkout used to fall through to `decide_worktree` like any other worktree and
-    could be labeled `REAP removable`. `git worktree remove` on it then failed only because git
-    itself refuses to remove a main working tree that way -- a refusal this suite must not lean
-    on (CLAUDE.md, "a recovery control must not depend on the state it recovers"). This class
-    calls `sweep_repo` with the LINKED worktree as `root`, the exact shape that exposed the
-    defect, and asserts no decision was ever RECORDED for the primary checkout's path -- not
-    that the directory still exists on disk, which git's own refusal could make true even with
-    the defect back in place."""
+    MATTER WHICH WORKTREE PATH IT WAS CALLED WITH. Compared against the `root` argument alone,
+    a call with a LINKED worktree's path would let the primary checkout fall through to
+    `decide_worktree` and be labeled `REAP removable`; `git worktree remove` would then fail
+    only because git itself refuses to remove a main working tree, a refusal this suite must
+    not lean on. This class calls `sweep_repo` with the LINKED worktree as `root` and asserts
+    no decision was RECORDED for the primary checkout's path -- not that the directory still
+    exists, which git's own refusal could make true even with the defect back."""
 
     # A FRESH fixture per test method, not shared via setUpClass: a `confirm=True` case in this
     # class really does remove the linked worktree it is pointed at (it is not the primary
@@ -1348,19 +1330,11 @@ class PrimaryCheckoutExclusionTests(unittest.TestCase):
     # to prove -- an empty-subject case exactly like the ones CLAUDE.md and this suite's own
     # module docstring warn against, just introduced from the test side this time.
     def setUp(self):
-        # A SHORT tag, not the full test method name. An earlier version used
-        # `self.id().rsplit(".", 1)[-1]` directly. This suite's method names are full
-        # sentences.
-
-        # MEASURED on a real Windows machine: git names its worktree admin directory after
-        # the worktree's own basename. Here that basename is
-        # `primary-checkout-linked-<full test name>`. The combined path tripped Windows' own
-        # path-length ceiling: "fatal: could not create directory of
-        # '.git/worktrees/...': Filename too long". The identical fixture shape works on
-        # POSIX, whose path limits are far looser.
-
-        # No production code builds a worktree name from a test's own description. This is a
-        # fixture-only defect. The fix hashes the id down to something short instead.
+        # A SHORT tag, not the full test method name, because this suite's method names are full
+        # sentences. Git names its worktree admin directory after the worktree's own basename,
+        # and `primary-checkout-linked-<full test name>` tripped Windows' path-length ceiling
+        # ("fatal: could not create directory of '.git/worktrees/...': Filename too long").
+        # POSIX path limits are far looser.
 
         tag = hashlib.md5(self.id().encode("utf-8")).hexdigest()[:12]
         self.tag = tag
@@ -1554,9 +1528,9 @@ class JanitorRootsSettingTests(unittest.TestCase):
                 self.assertIsNone(roots)
 
     def test_cli_refuses_to_discover_when_roots_is_malformed_and_no_root_given(self):
-        """Traces the caller path the brief names: no explicit ROOT, no --discover, and a
-        malformed janitor.roots. main() must refuse and say why. It never falls back to a
-        default. Uses --settings-path so the real repository settings.json is never touched."""
+        """No explicit ROOT, no --discover, and a malformed janitor.roots. main() must refuse and
+        say why, never fall back to a default. Uses --settings-path so the real repository
+        settings.json is never touched."""
         path = os.path.join(ROOT, "settings-roots-cli-malformed.json")
         write(path, json.dumps({"janitor": {"roots": [1, 2]}}))
         result = subprocess.run(
@@ -1648,9 +1622,9 @@ class OptOutTests(unittest.TestCase):
     # --------------------- a present key whose value is malformed refuses, not defaults ---------
 
     def test_sweep_string_false_refuses_the_whole_repository(self):
-        # The exact regression this build guards: `"sweep": "false"`, the STRING, must never be
-        # treated as truthy-and-swept. A malformed present value must refuse the repository the way
-        # an unreadable file does, not fall through to the permissive default. Rows, one input each:
+        # `"sweep": "false"`, the STRING, must never be treated as truthy-and-swept. A malformed
+        # present value must refuse the repository the way an unreadable file does, not fall
+        # through to the permissive default. Rows, one input each:
         # the string "false"; 0 (not a bool here); null; a bare string where protectedPrefixes is a list.
         rows = (
             ("optout-sweep-string-false", json.dumps({"sweep": "false"}), "x-str.log", "a non-boolean sweep value must not read as ok"),
@@ -1988,15 +1962,11 @@ class SingleTierModeTests(unittest.TestCase):
 
 # --------------------------------------------------------------------------- the --confirm gate
 #
-# Every OTHER confirm=False call in this file (BaseResolutionRefusalTests,
-# OptOutTests.test_sweep_false_..., OptOutTests.test_unparseable_file_...) hits a REFUSED
-# repository before either loop in sweep_repo ever runs, so none of them can prove anything about
-# the gate itself: a refused repository never reaches `if confirm and decision["action"] ==
-# "reap":` at all. This class is the one arm that puts a REAPABLE branch and a REMOVABLE worktree
-# in front of a confirm=False sweep and checks that preview leaves both alone. Its absence is a
-# MEASURED hole: janitor/mutate_sweep.py's `--confirm: reap branches for real with no --confirm
-# on the line` mutant (the `confirm and` dropped from that same line) passed all 31 cases in this
-# file before this class existed.
+# Every other confirm=False call in this file hits a REFUSED repository before either loop in
+# sweep_repo runs, so none reaches `if confirm and decision["action"] == "reap":`. This class
+# puts a REAPABLE branch and a REMOVABLE worktree in front of a confirm=False sweep and checks
+# that preview leaves both alone. It kills janitor/mutate_sweep.py's `--confirm: reap branches
+# for real with no --confirm on the line` mutant.
 class ConfirmGateTests(unittest.TestCase):
     def test_preview_names_reapable_subjects_but_touches_neither(self):
         root = os.path.join(ROOT, "confirm-gate-repo")
@@ -3125,9 +3095,9 @@ class PurgeRefOwnershipTests(unittest.TestCase):
 
 class AgentEndLogConcurrencyTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
-    one row to the shared payload log. Every row must survive and every line must parse. The
-    reviewer measured 13 of 120 rows lost at 3 writers on b0c87cb: one shared `.tmp` name and an
-    unlocked read-modify-write. Real writer processes, real file, no fake."""
+    one row to the shared payload log. Every row must survive and every line must parse. A
+    shared `.tmp` name and an unlocked read-modify-write lose rows. Real writer processes,
+    real file, no fake."""
 
     CHILD = (
         "import sys\n"
@@ -3167,7 +3137,7 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         self.assertEqual(lost, [], "%d of %d rows lost with %d writers" % (len(lost), rows, writers))
 
     def test_parallel_writers_lose_no_row(self):
-        # Rows: three writers (a measured run lost 13 of 120 rows at three) and twenty-four writers.
+        # Rows: three writers and twenty-four writers.
         for writers in (3, 24):
             with self.subTest(writers=writers):
                 self.run_writers(writers, 120)
@@ -3175,9 +3145,9 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
 
 class AgentEndReapBatchTests(unittest.TestCase):
     """janitor/agent_end_reap.py reads every process's cwd in ONE batch call, never one call per
-    pid. Owner ruling 2026-10-10: about 1,300 pids at 27 ms each overran the 60 s hook timeout,
-    12 times in one session. The fake table answers `lsof` only (macOS cwd read), and counts
-    every `lsof` call. A per-pid read carries `-p PID`, a batch read does not."""
+    pid: about 1,300 pids at 27 ms each overrun the 60 s hook timeout. The fake table answers
+    `lsof` only (macOS cwd read), and counts every `lsof` call. A per-pid read carries `-p PID`,
+    a batch read does not."""
 
     @classmethod
     def setUpClass(cls):
@@ -3356,8 +3326,8 @@ class AgentEndReapTests(unittest.TestCase):
             cleanup()
 
     def test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper(self):
-        # Owner ruling 2, 2026-09-27: no session record names a subagent, so the sweep
-        # skips every `.claude/worktrees/*` cwd, even a proven orphan.
+        # No session record names a subagent, so the sweep skips every `.claude/worktrees/*` cwd,
+        # even a proven orphan.
         pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapB"])
         try:
             found = sweep.find_swept_listeners([self.repo, self.wts["reapB"]])
@@ -3463,9 +3433,9 @@ class _AgentEndFixture(unittest.TestCase):
         return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
 
     def host_lock(self, name):
-        """The lock text `git worktree list --porcelain` shows now, MEASURED 2026-10-15 on six agent
-        trees: `claude agent agent-<id> (pid N)`, N the claude host, with no start time. N is this
-        test process, the host that fire_under_host names."""
+        """The lock text `git worktree list --porcelain` shows now on agent trees: `claude agent
+        agent-<id> (pid N)`, N the claude host, with no start time. N is this test process, the
+        host that fire_under_host names."""
         return "claude agent agent-%s (pid %d)" % (name, os.getpid())
 
     def fire_under_host(self, agent, path, cwd=None, check=True):
@@ -3500,8 +3470,8 @@ class _AgentEndFixture(unittest.TestCase):
         return None
 
     def assert_own_left(self, path):
-        """The hook kept the ending agent's own tree at PATH, and its row says it is kept for 30 idle min
-        (owner ruling 2026-10-15 23:01 CDT). The tree is still a git worktree on disk."""
+        """The hook kept the ending agent's own tree at PATH, and its row says it is kept for 30 idle min.
+        The tree is still a git worktree on disk."""
         row = self.row_for_tree(path)
         self.assertIsNotNone(row, "the hook wrote no decision row for the own tree")
         self.assertEqual(row.get("action"), "keep", "the own tree was not kept: %s" % row.get("reason"))
@@ -3542,13 +3512,12 @@ class _AgentEndFixture(unittest.TestCase):
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
-    """Owner ruling 2026-10-15 23:01 CDT: when an agent ends (SubagentStop), janitor/agent_end_reap.py
-    KEEPS the ending agent's OWN worktree under `.claude/worktrees/agent-*`, whatever its state. Its
-    row says it is kept for 30 idle min. The hook never stops a process whose parent is
-    live: the agent's own shells, the hook's wrapper and any host-started process survive. An orphan
-    (dead parent) inside the own tree keeps main's stop, and that is covered in AgentEndReapTests. The
-    removal of OTHER finished agents' trees idle 30 minutes or more is unchanged, and is covered in
-    AgentEndOtherWorktreeTests.
+    """When an agent ends (SubagentStop), janitor/agent_end_reap.py KEEPS the ending agent's OWN
+    worktree under `.claude/worktrees/agent-*`, whatever its state. Its row says it is kept for
+    30 idle min. The hook never stops a process whose parent is live: the agent's own shells, the
+    hook's wrapper and any host-started process survive. An orphan (dead parent) inside the own
+    tree keeps main's stop, covered in AgentEndReapTests. The removal of OTHER finished agents'
+    trees idle 30 minutes or more is covered in AgentEndOtherWorktreeTests.
 
     Each keep arm is checked by the own row's reason, not only by the tree still existing. Each keep arm
     runs beside another agent's clean, pushed tree idle 31 minutes that the same run must remove, so a
@@ -3567,8 +3536,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assert_own_left(subject)
 
     def test_subagent_stop_keeps_its_own_clean_pushed_worktree(self):
-        # Red on 8209120: the hook removes the own tree at agent end. Stop and WorktreeRemove name no
-        # worktree to end.
+        # The hook keeps the own tree at agent end. Stop and WorktreeRemove name no worktree to end.
         self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.primary}))
         own = self.add("trigger")
         self.assertIsNone(self.reap.target_worktree(
@@ -3577,7 +3545,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_a_stale_lock_does_not_change_the_own_worktree_keep(self):
-        # Red on 8209120: the stale lock lets the hook remove the own tree.
+        # A stale lock must not let the hook remove the own tree.
         gone = subprocess.Popen([sys.executable, "-c", "pass"])
         gone.wait()
         dead_pid = gone.pid
@@ -3603,8 +3571,8 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             run_vcs(p, "branch", "-r", "--contains", "HEAD").stdout.strip(), "", "HEAD is pushed"))
 
     def test_own_tree_locked_by_its_host_pid_is_kept(self):
-        # Red on 8209120: the host lock is lifted and the own tree removed. Nothing is asserted about the
-        # host lock itself: whether the hook leaves it is an open question (Input Needed).
+        # A host lock must not lift the keep of the own tree. Nothing is asserted about the host
+        # lock itself: whether the hook leaves it is an open question.
         own = self.add("hostlock")
         self.lock(own, self.host_lock("hostlock"))
         self.assertTrue(guard.worktree_locked(self.primary, own), "the fixture lock did not take")
@@ -3612,7 +3580,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_own_tree_locked_by_a_dead_pid_in_the_measured_form_is_kept(self):
-        # Red on 8209120: the dead-pid lock is lifted and the own tree removed.
+        # A dead-pid lock must not lift the keep of the own tree.
         gone = subprocess.Popen([sys.executable, "-c", "pass"])
         gone.wait()
         dead_pid = gone.pid
@@ -3653,8 +3621,8 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assert_own_left(subject)
 
     def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
-        # Guard, green on 2104e94: the exemption must cover the ending agent's own tree only. Every
-        # agent tree of one session carries the same host pid.
+        # Guard: the exemption must cover the ending agent's own tree only. Every agent tree of
+        # one session carries the same host pid.
         own, sibling = self.add("ownsib"), self.add("sibhost")
         control = self.control_tree("sibctl")
         self.lock(sibling, self.host_lock("sibhost"))
@@ -3672,9 +3640,8 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
 
     def test_a_host_started_process_inside_the_own_worktree_is_not_stopped(self):
-        # Owner ruling 2026-10-15 19:43 CDT, point 1, as narrowed by the 23:01 ruling: a live parent is
-        # never stopped, and the host is a live parent. Red on 8209120: the host-started shell is
-        # stopped, then the own tree removed.
+        # A live parent is never stopped, and the host is a live parent: the host-started shell
+        # survives, and the own tree is kept.
         control, subject = self.control_tree("proctwin"), self.add("proc")
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=subject,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -3691,9 +3658,9 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assert_own_left(subject)
 
     def test_a_fake_hook_process_and_a_fake_agent_shell_with_a_live_parent_survive(self):
-        # Coordinator correction 2026-10-15: the hook never stops a process with a live parent. Both
-        # fakes sit inside the own tree and are children of this test process (the host, alive). The
-        # wrapper's command line names the hook script, so it reads as the hook's own wrapper.
+        # The hook never stops a process with a live parent. Both fakes sit inside the own tree
+        # and are children of this test process (the host, alive). The wrapper's command line
+        # names the hook script, so it reads as the hook's own wrapper.
         own = self.add("survive")
         fake_hook_dir = os.path.join(self.root, "fake-hook")
         os.makedirs(fake_hook_dir)
@@ -3724,17 +3691,17 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_hook_run_from_inside_its_own_tree_keeps_it(self):
-        # Red on 8209120: the hook removes the own tree. The hook runs with its cwd inside the tree, as
-        # the harness runs it, and it must still exit 0 and keep the tree.
+        # The hook runs with its cwd inside the tree, as the harness runs it, and it must still
+        # exit 0 and keep the tree.
         own = self.add("inside")
         self.fire("inside", own, cwd=own)
         self.assert_own_left(own)
 
     def test_hook_never_signals_its_own_wrapper_chain(self):
-        # Red on 149921d: the wrapper has its cwd inside the own tree and its parent is CLAUDE_PID,
-        # the host. tree_root_orphaned reads that parent as a host start, so the wrapper is reaped
-        # and signalled while the hook is still its child. No removal is asserted here: a wrapper
-        # with its cwd inside the tree blocks the delete on Windows, and the hook cannot move it.
+        # The wrapper has its cwd inside the own tree and its parent is CLAUDE_PID, the host. It
+        # must not be reaped or signalled while the hook is still its child, so tree_root_orphaned
+        # must not read that parent as a host start. No removal is asserted here: a wrapper with
+        # its cwd inside the tree blocks the delete on Windows, and the hook cannot move it.
         own = self.add("wrapper")
         answer = self.fire_under_host("wrapper", own, cwd=own, check=False)
         reaped = [d for d in (self.last_row().get("decisions") or []) if d.get("action") == "reap"]
@@ -3745,9 +3712,9 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assertEqual(reaped, [], "the hook reaped its own wrapper chain: %r" % reaped)
 
     def test_stale_removal_marker_on_an_intact_tree_does_not_restore_an_unstaged_deletion(self):
-        # Review finding 2, red on 149921d: _restore_cut_short writes a deleted tracked file back from
-        # the index before the lock, session and process checks. Here the lock keeps the tree, so the
-        # user's unstaged deletion is undone on a tree that is kept. The marker is stale: a failed
+        # _restore_cut_short must not write a deleted tracked file back from the index before the
+        # lock, session and process checks. Here the lock keeps the tree, so the user's unstaged
+        # deletion must stay deleted on a tree that is kept. The marker is stale: a failed
         # earlier remove left it on a tree that is otherwise intact.
         subject = os.path.join(self.primary, ".claude", "worktrees", "agent-staledel")
 
@@ -3770,11 +3737,11 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
-    """Owner ruling 2026-10-15: the same SubagentStop run also removes ANOTHER finished agent's tree
-    under `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
-    ref, holds no live lock, and has been idle 30 minutes or more. A tree idle less than 30 minutes
-    stays. So does a worktree outside `agent-*`. Each tree is aged last, right before the hook runs,
-    so a git call earlier in the run cannot reset its idle time."""
+    """The same SubagentStop run also removes ANOTHER finished agent's tree under
+    `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
+    ref, holds no live lock, and has been idle 30 minutes or more. A tree idle less than 30
+    minutes stays. So does a worktree outside `agent-*`. Each tree is aged last, right before the
+    hook runs, so a git call earlier in the run cannot reset its idle time."""
 
     def test_an_other_agent_tree_idle_31_minutes_is_removed_and_29_minutes_is_kept(self):
         ending = self.add("endnow")
@@ -3804,13 +3771,12 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
 
 
 class AgentEndRulingTests(_AgentEndFixture):
-    """Owner rulings 2026-10-15 19:43 CDT and 23:01 CDT, from review round 1 of the agent-end stage. Each
-    case names its review point. Most cases run the hook in a subprocess (`fire`, `fire_under_host`). A
-    fault that must land inside the stage (a faked cwd read, a lock taken mid-stage, a killed git call)
-    runs `handle()` in this process instead: the same entry the hook's main calls. Real git and real
-    processes everywhere else. The own tree is always kept (23:01): a case about the removal race or the
-    unreadable-pid gate runs on ANOTHER finished agent's idle tree, where that stage still removes.
-    Review point 5 (ruling point 2) is a pin: green on abf5f8e, must stay green."""
+    """Edge cases of the agent-end stage. Most cases run the hook in a subprocess (`fire`,
+    `fire_under_host`). A fault that must land inside the stage (a faked cwd read, a lock taken
+    mid-stage, a killed git call) runs `handle()` in this process instead: the same entry the
+    hook's main calls. Real git and real processes everywhere else. The own tree is always kept:
+    a case about the removal race or the unreadable-pid gate runs on ANOTHER finished agent's
+    idle tree, where that stage still removes."""
 
     def run_in_process(self, agent, path):
         """`handle()` on a SubagentStop payload for AGENT, in this process. CLAUDE_PID names this test
@@ -3857,8 +3823,8 @@ class AgentEndRulingTests(_AgentEndFixture):
         return proc
 
     def test_a_process_inside_a_sibling_tree_is_never_stopped(self):
-        """Review point 1, guard: green on abf5f8e. The stop covers the ending agent's own tree only. The
-        sibling is aged 31 minutes, so only the process inside it can keep it."""
+        """The stop covers the ending agent's own tree only. The sibling is aged 31 minutes, so
+        only the process inside it can keep it."""
         own, sibling = self.add("sibown"), self.add("sibproc")
         proc = self.sleeper(sibling)
         inside, _unreadable = sweep.processes_in(sibling)
@@ -3878,9 +3844,8 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertKept(sibling)
 
     def test_a_process_the_host_did_not_start_is_not_stopped_inside_the_own_tree(self):
-        """Review point 1, guard: green on abf5f8e. This reads ruling point 1 as "the host's processes
-        only". A grandchild of a live sponsor outside the host chain keeps the tree and runs on. To
-        confirm with the owner."""
+        """This reads the rule as "the host's processes only". A grandchild of a live sponsor
+        outside the host chain keeps the tree and runs on. To confirm with the owner."""
         own = self.add("spon")
         pidfile = os.path.join(self.root, "grand.pid")
         sponsor_code = ("import subprocess, sys, time\n"
@@ -3903,12 +3868,11 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertKept(own)
 
     def test_an_unreadable_pid_outside_the_host_is_out_of_scope(self):
-        """Review point 2, guard, re-pointed 2026-10-15 23:01 CDT. An unreadable pid that does not descend
-        from the host is out of scope at agent end, as WorktreeProcessPreCheckTests states for the pre-check.
-        The own tree is always kept now, so the unreadable-host-descendant case that sat beside this one is
-        removed (its gate only ever kept the own tree). This case runs on ANOTHER finished agent's idle tree,
-        which the stage still removes. The pid's parent is a sponsor that has exited, so no host sits on its
-        chain. Windows reads an exited parent as no parent. POSIX reparents such an orphan to init, which
+        """An unreadable pid that does not descend from the host is out of scope at agent end,
+        as WorktreeProcessPreCheckTests states for the pre-check. This case runs on ANOTHER
+        finished agent's idle tree, which the stage still removes (the own tree is always kept).
+        The pid's parent is a sponsor that has exited, so no host sits on its chain. Windows
+        reads an exited parent as no parent. POSIX reparents such an orphan to init, which
         host_pids() holds as an ancestor of the hook, so this arm runs on Windows only."""
         if sys.platform != "win32":
             self.skipTest("POSIX reparents an orphan to init, which host_pids() holds as an ancestor")
@@ -3941,13 +3905,13 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertRemoved(subject)
 
     def test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock(self):
-        """Review point 3, re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree. The own
-        tree is always kept now, so no own-tree removal reaches its unlock. decide_agent_end_worktree reads
-        idle first, decide_worktree reads a stale lock early (sweep.py ~666), and remove_worktree unlocks by
-        name later (~2189). A live lock taken in between must keep the tree and survive. The injection runs
-        inside processes_in: after the lock read, before the unlock. The lock names a separate child, never a
-        host pid. Red on abf5f8e: the unlock clears the live lock by name. The control twin has the same
-        dead-pid lock with no injection, and must be removed, so the case reaches the unlock path."""
+        """A live lock taken after the stale-lock read and before the unlock must keep ANOTHER
+        finished agent's idle tree, and the lock must survive. decide_agent_end_worktree reads
+        idle first, decide_worktree reads a stale lock early, and remove_worktree unlocks by
+        name later. The injection runs inside processes_in: after the lock read, before the
+        unlock. The lock names a separate child, never a host pid. The own tree is always kept,
+        so only another tree reaches the unlock. The control twin has the same dead-pid lock
+        with no injection, and must be removed, so the case reaches the unlock path."""
         ending = self.add("relend")
         control, subject = self.control_tree("reltwin"), self.control_tree("relock")
         dead = self.dead_pid()
@@ -3980,14 +3944,13 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertEqual(self.lock_reason(subject), live, "the live lock was cleared or replaced")
 
     def test_a_worktree_remove_cut_short_by_its_timeout_is_not_left_half_removed(self):
-        """Review point 4. guard._git kills `git worktree remove` at 10 s (hooks/guard_core.py
-        ~800) and returns None, so a removal cut short can leave a half-removed tree. Red on abf5f8e:
-        the row says "remove failed" and the tree stays, with nothing that says it was cut short.
-        The fault is SIMULATED, not measured: the first worktree remove with a finite timeout deletes
-        one tracked file and raises TimeoutExpired. Git calls without a timeout run for real, so a
-        builder who drops the timeout, or moves the removal into a detached child, is not faulted.
-        Re-pointed 2026-10-15 23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept
-        now, so the first finite-timeout remove the fault targets is the other tree's, matched by name."""
+        """guard._git kills `git worktree remove` at its timeout and returns None, so a removal
+        cut short can leave a half-removed tree. A tree left behind must say it was cut short,
+        not only "remove failed". The fault is SIMULATED: the first worktree remove with a
+        finite timeout deletes one tracked file and raises TimeoutExpired. Git calls without a
+        timeout run for real, so a change that drops the timeout, or moves the removal into a
+        detached child, is not faulted. The fault targets ANOTHER finished agent's idle tree
+        (the own tree is always kept), matched by name."""
         ending = self.add("cutend")
         subject = self.control_tree("cutshort")
         name = os.path.basename(subject)
@@ -4013,8 +3976,8 @@ class AgentEndRulingTests(_AgentEndFixture):
                 self.assertRegex(json.dumps(row), r"cut[- ]short",
                                  "a cut-short removal left the tree and did not say so")
             with self.subTest(arm="the next run finishes the removal"):
-                # A fresh ending tree: on 8209120 the first run already removed `ending`, so the next run has
-                # no target. The subject is aged again, since the first run's git calls reset its idle time.
+                # A fresh ending tree, so the next run has a target. The subject is aged again,
+                # since the first run's git calls reset its idle time.
                 finisher = self.add("cutnext")
                 self.age_control(subject)
                 self.run_in_process("cutnext", finisher)
@@ -4023,11 +3986,11 @@ class AgentEndRulingTests(_AgentEndFixture):
             self.assertRemoved(subject)
 
     def test_a_clean_pushed_tree_holding_git_ignored_files_is_removed(self):
-        """Review point 5 (ruling point 2), a pin: green on abf5f8e, must stay green. A clean, pushed
-        tree goes even when it holds git-ignored files (build output, .env.local). Re-pointed 2026-10-15
-        23:01 CDT onto ANOTHER finished agent's idle tree: the own tree is always kept now. The proof reads
-        show the files are ignored and not untracked, so the case tests the ruling and not a fixture that
-        never took. Both trees are aged last, after every git read."""
+        """A clean, pushed tree goes even when it holds git-ignored files (build output,
+        .env.local). This runs on ANOTHER finished agent's idle tree (the own tree is always
+        kept). The proof reads show the files are ignored and not untracked, so the case tests
+        the rule and not a fixture that never took. Both trees are aged last, after every git
+        read."""
         with open(os.path.join(self.primary, ".git", "info", "exclude"), "a", encoding="utf-8") as handle:
             handle.write(".env.local\nbuild/\n")
         ending = self.add("igned")
@@ -4060,7 +4023,7 @@ class BuildDirReapTests(unittest.TestCase):
     Real git repos, real hook processes (`agent_end_reap.py` run as the harness runs it). Every
     fixture is a few small files. Each keep arm sits beside a control arm that must delete, so a
     keep arm cannot pass on a reaper that deletes nothing. The trash-name contract is two
-    functions the builder exports: `trash_name(folder)` (the sibling path a reap renames to) and
+    functions `sweep.py` exports: `trash_name(folder)` (the sibling path a reap renames to) and
     `is_trash_name(basename)`.
     """
 
@@ -4353,8 +4316,8 @@ class BuildDirReapTests(unittest.TestCase):
 
 
 class StrictWorktreeTests(unittest.TestCase):
-    """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not
-    ancestry) and idle 1 hour. A person passes --attended for the old rules."""
+    """--confirm removes a worktree only when it is merged (by patch, not ancestry) and idle 1
+    hour. A person passes --attended for the old rules."""
 
     @classmethod
     def setUpClass(cls):
@@ -4409,8 +4372,8 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
 
-    # Owner ruling 2026-10-09 (decisions/when-a-worktree-may-be-removed.md): a pushed,
-    # clean, unmerged tree idle 24 hours is removable. Under 24 hours it is still kept.
+    # A pushed, clean, unmerged tree idle 24 hours is removable. Under 24 hours it is still kept
+    # (decisions/when-a-worktree-may-be-removed.md).
     def test_strict_removes_a_pushed_unmerged_tree_idle_25_hours(self):
         self.age(self.unmerged, 25 * 3600)
         decision = self.decide(self.unmerged)
@@ -4469,8 +4432,8 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertIsNone(sweep.worktree_idle_seconds(os.path.join(ROOT, "no-such-tree")))
 
     def test_an_unmerged_tree_whose_idle_time_cannot_be_read_is_unreadable_not_unmerged(self):
-        """P2 (review of 6351ac2): an unmerged tree the sweep cannot age keeps as
-        unreadable-subject. The reason "unmerged" names a fact the sweep does not have yet."""
+        """An unmerged tree the sweep cannot age keeps as unreadable-subject. The reason
+        "unmerged" names a fact the sweep does not have yet."""
         with mock.patch.object(sweep, "worktree_idle_seconds", return_value=None):
             decision = self.decide(self.unmerged)
         self.assertEqual(decision["action"], "keep")
@@ -4528,10 +4491,10 @@ class StrictWorktreeTests(unittest.TestCase):
 
 
 class RemoteLivenessTests(unittest.TestCase):
-    """P1 (review of 6351ac2): "pushed" means reachable from a head the remote lists NOW, read
-    with `git ls-remote` (read-only). This clone is never fetched or pruned, so a branch deleted
-    on the remote leaves a local refs/remotes/origin/<branch> that still names the commit. Local
-    refs alone then call the tree pushed, and an idle one gets reaped. An unreadable remote keeps."""
+    """A tree is "pushed" only when reachable from a head the remote lists NOW, read with `git
+    ls-remote` (read-only). This clone is never fetched or pruned, so a branch deleted on the
+    remote leaves a local refs/remotes/origin/<branch> that still names the commit. Local refs
+    alone would call the tree pushed and reap an idle one. An unreadable remote keeps."""
 
     @classmethod
     def setUpClass(cls):
@@ -4603,7 +4566,7 @@ class RemoteLivenessTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
 
     def test_ls_remote_runs_with_credential_prompts_off(self):
-        """P3 (coordinator, r24): the `git ls-remote` that _live_remote_heads runs must carry
+        """The `git ls-remote` that _live_remote_heads runs must carry
         GIT_TERMINAL_PROMPT=0 and GCM_INTERACTIVE=never, so an unattended run never waits on a
         credential or login window. The call is observed at subprocess.run, the runner guard._git
         uses. The real call still runs, so the answer is real."""
@@ -4623,7 +4586,7 @@ class RemoteLivenessTests(unittest.TestCase):
             self.assertEqual(env.get("GCM_INTERACTIVE"), "never", env)
 
 
-# --------------------------------------------------------------------------- owner rulings 2026-10-08
+# --------------------------------------------------------------------------- run log, agent worktrees, strays, default base
 
 
 def _norm_path(path):
@@ -4656,7 +4619,7 @@ def _machine_quiet():
 
 
 class RunLogTests(unittest.TestCase):
-    """Owner ruling 2026-10-08: a --confirm run appends ONE JSON line per repository to the run
+    """A --confirm run appends ONE JSON line per repository to the run
     log: `JANITOR_RUN_LOG`, or else `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl`.
     Each line carries `root`, `worktrees_removed`, `branches_reaped` and `free_bytes`
     (shutil.disk_usage on the repository's drive). A preview appends nothing."""
@@ -4725,8 +4688,8 @@ class RunLogTests(unittest.TestCase):
         self.assertEqual(len(_read_run_log(default_log)), 2)
 
     def test_first_repository_line_survives_a_later_failure(self):
-        """Finding (review): the run log was written after ALL roots, so a run cut short (the
-        SessionEnd hook's 25 s kill) left no line. One line per repository, as each finishes."""
+        """One line per repository, written as each finishes, not after ALL roots: a run cut
+        short (the SessionEnd hook's 25 s kill) must still leave the lines already finished."""
         _age_admin_files(self.wt, 7200)
         real = sweep.sweep_repo
 
@@ -4781,20 +4744,20 @@ def _aimed_at(path, argv, cwd):
 
 
 class AgentWorktreeReapTests(unittest.TestCase):
-    """Owner ruling 2026-10-14: the end-of-session sweep (`sweep.py --confirm`, no --attended, as
-    session_end_sweep.py runs it) removes a finished agent's worktree, IN ADDITION to what the
-    unattended rulings of 2026-10-01 and 2026-10-09 remove (merged and idle 1 hour, or pushed and
-    idle 24 hours, on any path). Those stay: no case here forbids one of their removals. The
-    agent rule removes a tree only when ALL hold: its path is `<repo>/.claude/worktrees/agent-*`
-    (a branch or a detached HEAD); it is clean (no uncommitted, no untracked file); no process has
-    a cwd inside it; its last change is 4 hours old or more; its HEAD commit is reachable from a
-    remote-tracking ref. A repo whose package.json defines `reap:worktrees` gets that script run
-    with `--remove` instead. A read that fails keeps the tree. A tree that should go below is
-    pushed and not merged, which the older rulings keep before 24 hours, so its removal at 5 hours
-    can only be the agent rule's, and its keep can only be that rule's refusal.
+    """The end-of-session sweep (`sweep.py --confirm`, no --attended, as session_end_sweep.py
+    runs it) removes a finished agent's worktree, IN ADDITION to what the unattended rulings
+    remove (merged and idle 1 hour, or pushed and idle 24 hours, on any path). Those stay: no
+    case here forbids one of their removals. The agent rule removes a tree only when ALL hold:
+    its path is `<repo>/.claude/worktrees/agent-*` (a branch or a detached HEAD); it is clean
+    (no uncommitted, no untracked file); no process has a cwd inside it; its last change is 4
+    hours old or more; its HEAD commit is reachable from a remote-tracking ref. A repo whose
+    package.json defines `reap:worktrees` gets that script run with `--remove` instead. A read
+    that fails keeps the tree. A tree that should go below is pushed and not merged, which the
+    older rulings keep before 24 hours, so its removal at 5 hours can only be the agent rule's,
+    and its keep can only be that rule's refusal.
 
-    Incident: q_max reached 798 registered worktrees. Its remover read 181 as "never pushed",
-    because a lane pushes `HEAD:<lane>` from a local branch of another name.
+    The incident shape: a lane pushes `HEAD:<lane>` from a local branch of another name, so a
+    remover that trusts the branch's upstream reads the tree as never pushed.
 
     Seams. Clock: `time.time` runs HOURS ahead, so no file is touched and nothing sleeps.
     Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
@@ -4835,7 +4798,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
         """A linked worktree, by default at `<repo>/.claude/worktrees/agent-<name>`, with one
         commit of its own that is not on main, on local branch `wt-<name>` or (DETACH) on no
         branch. STATE: "pushed" is that commit pushed with `push origin HEAD:lane-<name>`, so a
-        local branch has no upstream (the incident shape); "local" is never pushed; "ahead" is
+        local branch has no upstream; "local" is never pushed; "ahead" is
         pushed, then one more local commit."""
         path = path or os.path.join(self.repo, ".claude", "worktrees", "agent-" + name)
         branch = None if detach else "wt-" + name
@@ -4924,7 +4887,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
             self.assertNotIn(branch, sweep.list_local_branches(self.repo) or [],
                              "%s's local branch is still there. Report: %s" % (name, why))
 
-    # ---- (a) the incident shape
+    # ---- (a) a lane pushed as HEAD:<lane> from a local branch of another name
 
     def test_a_removes_a_clean_pushed_tree_idle_5h_with_its_local_branch(self):
         tree = self.agent("a")
@@ -5179,7 +5142,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
 
 class MergedCountsAsSafeTests(unittest.TestCase):
-    """Owner ruling 2026-10-08: a HEAD merged into the default branch, by ancestry or by patch,
+    """A HEAD merged into the default branch, by ancestry or by patch,
     is not kept for "unpushed". The other checks still apply, and a truly unpushed commit is
     still kept."""
 
@@ -5228,7 +5191,7 @@ class MergedCountsAsSafeTests(unittest.TestCase):
 
 
 class StrayFolderTests(unittest.TestCase):
-    """Owner ruling 2026-10-08: an entry under <root>/.claude/worktrees/ that git does not
+    """An entry under <root>/.claude/worktrees/ that git does not
     register as a worktree is a STRAY. The sweep lists it (result["strays"], and the printed
     report) and never deletes it, in preview or confirm."""
 
@@ -5267,10 +5230,10 @@ class StrayFolderTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(self.file), "a confirm run deleted x.bak")
 
     def test_unreadable_worktrees_base_does_not_abort_the_run(self):
-        """Finding (review): find_strays called a bare os.listdir, so a PermissionError on
-        <root>/.claude/worktrees escaped sweep_repo and aborted the run. The run must finish,
-        report the strays as UNKNOWN (result["strays"] is None, not []), and still judge every
-        registered worktree. Zero would read as a clean folder; None does not."""
+        """find_strays must not let a PermissionError on <root>/.claude/worktrees escape
+        sweep_repo. The run must finish, report the strays as UNKNOWN (result["strays"] is None,
+        not []), and still judge every registered worktree. Zero would read as a clean folder;
+        None does not."""
         base = os.path.join(self.root, ".claude", "worktrees")
         real_listdir = os.listdir
 
@@ -5305,11 +5268,10 @@ def _lane_entry(root, path):
 
 
 class DanglingDefaultBaseTests(unittest.TestCase):
-    """Finding (review): guard.resolve_default_base returned origin/HEAD without checking that it
-    resolves. A dangling origin/HEAD makes every base read unreadable, so no squash-merged lane is
-    ever exempted. The base must fall back to a ref that resolves. Owner's order (2026-10-16):
-    origin/HEAD when it resolves, then origin/main, origin/master, local main, local master. An
-    origin/HEAD that resolves stays the first base."""
+    """guard.resolve_default_base must check that origin/HEAD resolves. A dangling origin/HEAD
+    makes every base read unreadable, so no squash-merged lane is ever exempted. The base falls
+    back in order: origin/HEAD when it resolves, then origin/main, origin/master, local main,
+    local master. An origin/HEAD that resolves stays the first base."""
 
     def _squash_lane(self, origin_head_target, push_squash=False):
         base = tempfile.mkdtemp(prefix="dangling-base-", dir=ROOT)
@@ -5339,7 +5301,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         self.assertEqual(guard.resolve_default_base(root), "origin/main")
 
     def test_dangling_origin_head_reads_origin_main_when_it_is_ahead_of_local_main(self):
-        """Owner's ruling 2026-10-16: past a dangling origin/HEAD the base is origin/main, never a
+        """Past a dangling origin/HEAD the base is origin/main, never a
         local main that sits behind it."""
         root, _ = self._squash_lane("refs/remotes/origin/gone")
         ahead = run_vcs(root, *IDENT, "commit-tree", "main^{tree}", "-p", "main",
@@ -5363,7 +5325,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
                 "%s still resolves" % ref)
 
     def test_dangling_origin_head_and_no_origin_main_reads_origin_master_before_local_main(self):
-        """Owner's order 2026-10-16: origin/HEAD, origin/main, then origin/master, then local main.
+        """The base order is origin/HEAD, origin/main, then origin/master, then local main.
         Local main exists here and is still skipped for origin/master."""
         root, _ = self._squash_lane("refs/remotes/origin/gone")
         self._drop_ref(root, "refs/remotes/origin/main")
@@ -5411,8 +5373,8 @@ class DanglingDefaultBaseTests(unittest.TestCase):
 
     def test_dangling_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
         # Past a dangling origin/HEAD the base is origin/main, not a local main that sits ahead of
-        # it (owner's order 2026-10-16). The squash is on local main only, so the base lacks the
-        # patch and the unpushed lane is kept. The reap test above pushes its squash.
+        # it. The squash is on local main only, so the base lacks the patch and the unpushed lane
+        # is kept. The reap test above pushes its squash.
         root, lane = self._squash_lane("refs/remotes/origin/gone")
         self.assertEqual(guard.resolve_default_base(root), "origin/main")
         decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
@@ -5421,17 +5383,16 @@ class DanglingDefaultBaseTests(unittest.TestCase):
 
     def test_resolving_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
         # Local main is ahead of origin/main and holds the squash. origin/HEAD resolves, so it
-        # stays the base (owner's order), origin/main lacks the patch, and the lane is kept.
+        # stays the base, origin/main lacks the patch, and the lane is kept.
         root, lane = self._squash_lane("refs/remotes/origin/main")
         decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
         self.assertEqual(decision["action"], "keep", decision)
         self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
 
     def test_unreadable_origin_head_verify_returns_none_not_local_main(self):
-        """Batch review J3: guard.resolve_default_base treated a verify read that could not RUN
-        (guard._git returns None) as "does not exist", and fell through to local main. Only a git
-        that answers "does not exist" (returncode != 0) may fall through. An unreadable verify
-        returns None, so the sweep keeps the lane."""
+        """A verify read that could not RUN (guard._git returns None) must not read as "does not
+        exist". Only a git that answers "does not exist" (returncode != 0) may fall through to
+        local main. An unreadable verify returns None, so the sweep keeps the lane."""
         root, _ = self._squash_lane("refs/remotes/origin/main")
         require(guard.resolve_default_base(root) == "origin/main",
                 "the unpatched base is not origin/main, so the case proves nothing")
@@ -5451,10 +5412,9 @@ class DanglingDefaultBaseTests(unittest.TestCase):
 
 
 class UnreadableHuskBaseRunTests(unittest.TestCase):
-    """Batch review J1: find_husks called a bare os.listdir on <root>/.claude/worktrees. With
-    huskNames set (so find_husks reaches the listdir) and that folder unreadable, the PermissionError
-    escaped sweep_repo. The run aborted before the repository's run-log line was written. The run
-    must finish, and the repository must still get its run-log line."""
+    """With huskNames set (so find_husks reaches its listdir of <root>/.claude/worktrees) and
+    that folder unreadable, the PermissionError must not escape sweep_repo. The run must
+    finish, and the repository must still get its run-log line."""
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="husk-unreadable-", dir=ROOT)
@@ -5508,8 +5468,8 @@ class UnreadableHuskBaseRunTests(unittest.TestCase):
         return denied, denials
 
     def test_unreadable_worktrees_folder_husk_line_says_unknown_not_zero(self):
-        """Round 3 R5: find_husks returns [] for a folder it cannot read, so the report printed
-        "leftover folders: 0, kept: 0". The husk scan must read as unknown on that line."""
+        """A folder find_husks cannot read must not print as "leftover folders: 0, kept: 0". The
+        husk scan must read as unknown on that line."""
         denied, denials = self._denied_worktrees_listdir()
         out = io.StringIO()
         with mock.patch.object(sweep.os, "listdir", side_effect=denied), _machine_quiet():
@@ -5525,8 +5485,8 @@ class UnreadableHuskBaseRunTests(unittest.TestCase):
                          "could not run: %r" % lines[0])
 
     def test_unreadable_worktrees_folder_tier1_report_is_not_nothing_to_examine(self):
-        """Round 3 R6: with the stray scan unknown, the report printed "nothing to examine" for a
-        repository it had not finished examining. Tier1 runs only the husk and stray scans, so
+        """With the stray scan unknown, the report must not print "nothing to examine" for a
+        repository it has not finished examining. Tier1 runs only the husk and stray scans, so
         every other section is empty here."""
         denied, denials = self._denied_worktrees_listdir()
         out = io.StringIO()
@@ -5543,7 +5503,7 @@ class UnreadableHuskBaseRunTests(unittest.TestCase):
 
 # --------------------------------------------------------------------------- the simulator tier
 #
-# Owner ruling 2026-10-10. The contract these cases pin (janitor/sweep.py must match it):
+# The contract these cases pin (janitor/sweep.py must match it):
 #   sweep.sim_tier(confirm, record_path=None) returns one decision per UDID in the boot record:
 #     {"udid", "name", "action": "shutdown" | "keep", "reason"}.
 #   A keep reason string carries one code from SIM_KEEP_CODES. A shutdown runs ONE
@@ -5969,12 +5929,11 @@ class SimulatorTierActTests(unittest.TestCase):
 
 # --------------------------------------------------------------------------- the sweep finishes
 #
-# Owner ruling 2026-10-15 15:08 CDT ("make the janitor sweep finish"). Measured: `decide_worktree`
-# costs about 7.5 s per tree, and SessionEnd gives the whole sweep 25 s. Owner ruling 2026-10-15
-# 12:40 (decision test-strategy-reset): no case times a run on a local device. These cases count
-# calls and drive an injected clock.
+# `decide_worktree` costs about 7.5 s per tree, and SessionEnd gives the whole sweep 25 s. Per
+# decision test-strategy-reset, no case times a run on a local device. These cases count calls
+# and drive an injected clock.
 #
-# The contract the builder must honour. The seams are set with `create=True`, so they exist only
+# The contract these cases pin. The seams are set with `create=True`, so they exist only
 # inside these cases:
 #   sweep._now                  zero-argument callable, seconds. `main` reads it once when the pass
 #                               starts. The deadline is that reading plus the budget.
@@ -5985,8 +5944,7 @@ class SimulatorTierActTests(unittest.TestCase):
 # session_end_sweep.py passes. The budget is N minus a tail, never more than JUDGE_BUDGET_SECONDS
 # (12 s in the product). A run with no `--deadline-seconds` has no deadline and judges every tree
 # and every phase, however late the clock is: the scheduled `--confirm`, a person's bare
-# `--confirm`, `--attended`, or a plain preview (owner ruling 2026-10-15 15:08 CDT: only the
-# SessionEnd run has a deadline).
+# `--confirm`, `--attended`, or a plain preview (only the SessionEnd run has a deadline).
 # In the SessionEnd run, one deadline covers every phase in TIMED_PHASES. Each phase checks the
 # clock before it starts, and none starts at or past the deadline. No git read whose `-C` folder is
 # a tree starts at or past the deadline, the per-tree primary-checkout read included. Each tree's
@@ -6093,7 +6051,7 @@ def _is_worktree_list(argv):
 
 
 def _is_pushed_check(argv):
-    """The pushed check in any shape a builder may pick: one `rev-list --stdin` over the remote
+    """The pushed check in any accepted shape: one `rev-list --stdin` over the remote
     heads, or a `--contains` ref walk (`branch -r --contains`, `for-each-ref --contains`)."""
     return ("rev-list" in argv and "--stdin" in argv) or "--contains" in argv
 
@@ -6122,7 +6080,7 @@ class SweepFinishesTests(unittest.TestCase):
         """One `sweep.main` pass. Returns (git argv calls, result dicts, tree names in the order the
         pass judged them). CLOCK, when given, is a mutable [seconds]; each judged tree adds TICK
         seconds and each idle read adds IDLE_TICK, so the clock passes the deadline after a fixed
-        count of phases, however often the builder reads it. EXTRA is one context manager, entered
+        count of phases, however often the code reads it. EXTRA is one context manager, entered
         after the machine-wide stubs, for a case that sets one of their results. self.events holds
         the (phase, clock) pair at each TIMED_PHASES start in this pass."""
         calls, results, judged = [], [], []
@@ -6426,7 +6384,7 @@ class SweepFinishesTests(unittest.TestCase):
 
     def test_a_bare_confirm_run_has_no_deadline(self):
         # The scheduled job and a person's bare `--confirm` send this argv. Only a run that passes
-        # --deadline-seconds (the SessionEnd run) has a deadline (owner ruling 2026-10-15 15:08 CDT).
+        # --deadline-seconds (the SessionEnd run) has a deadline.
         self.assert_a_person_run_has_no_deadline(["--confirm"])
 
     def test_a_session_end_budget_is_capped_at_12_seconds(self):

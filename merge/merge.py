@@ -62,8 +62,7 @@ def resolve_program(name, env=None):
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
-# hold the read for each call in turn; one shared deadline bounds the whole read (incident
-# 2026-10-03: 3s/call read real `gh` at 3.0-3.9s as a hang). `Host.head_read` makes three calls
+# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes three calls
 # for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
 _READ_DEADLINE = None
@@ -93,8 +92,8 @@ def git(cwd, *a, input=None):
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
-NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (owner ruling 2026-10-16: 3 retries stay). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
+NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
+RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
@@ -242,7 +241,7 @@ def say(*lines):
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
-LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (owner ruling 2026-10-17: a rate wait is the exception to the 600 s cap)
+LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (a rate wait is the exception to the 600 s cap; standing-merge-grant)
 
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
@@ -760,7 +759,7 @@ class Host:
             raise NetStop(f"`gh pr merge` of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
                           f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
         # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
-        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Owner ruling: only a proven refusal reverts.
+        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
         return None, out
 
 # ------------------------------------------------------------------ git steps
@@ -1114,7 +1113,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
-    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (owner ruling 2026-10-17); the TTL spare is for the checks waits
+    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """At SubagentStart, gives each spawned agent the standing rules, so a brief need not retype them. The scope line depends on the agent type.
 
-Owner ruling 2026-10-12. Prints `hookSpecificOutput` with `hookEventName` "SubagentStart" and
+Decision agents-get-standing-rules. Prints `hookSpecificOutput` with `hookEventName` "SubagentStart" and
 `additionalContext` (Claude Code hooks reference). The scope line varies by `agent_type` from
 the hook input; an unknown or missing type gets the general scope text.
 Advisory, fail-open by design: on any error it prints one stderr line and exits 0, so a bug here never

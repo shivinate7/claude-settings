@@ -157,9 +157,8 @@ rc, out = run("changed", "false")
 check("fail=false: exit 0, PASS verdict, finding logged", rc == 0 and "ste-lint: PASS" in out and "a.md:5: STE001" in out, out)
 
 
-# Owner ruling 2026-10-17: a contraction, a Latin abbreviation, a nominalization, a phrasal verb, a condition
-# after its instruction and an omitted "that" are warnings. They reach the log and the annotation as warnings
-# and never fail the step.
+# A contraction, a Latin abbreviation, a nominalization, a phrasal verb, a condition after its instruction
+# and an omitted "that" are warnings. They reach the log and the annotation as warnings and never fail the step.
 ADVISORY = "They'd finished the work, e.g. before it runs.\n"
 
 
@@ -322,8 +321,7 @@ check("skipped: the command skips them too, with the same header, files, finding
 
 
 # No .ste-lint-exclude in the target: nothing is excluded. This repo's file lists skills/impeccable/**, so
-# a changed file there must be linted by the step and by the command. Red on 35b6b4c: the command fell
-# back to this repo's file and skipped it.
+# a changed file there must be linted by the step and by the command.
 def no_file_change(work):
     write(work, EXCLUDED, "# P\n\n" + LONG + "\n", "w")
     git(work, "add", "-A"); git(work, "commit", "-qm", "probe")
@@ -369,7 +367,6 @@ check("exclude input: an EXCLUDE value given to the command drops nothing, same 
 
 
 # A .ste-lint-exclude whose last line has no newline still excludes that line's pattern.
-# Red on b205964: `read -r` returns 1 on the last line, so run.sh dropped it and gen/x.md stayed in scope.
 (s_rc, s_out), (c_rc, c_out) = run_pair(target_exclude_change, base={"a.md": "# A\n", "gen/x.md": "# G\n"},
                                          exclude="gen/**")
 s, c = parts(s_out), parts(c_out)
@@ -382,8 +379,7 @@ check("no final newline: the command excludes it too, same header, files, findin
 
 # The command run from a subdirectory lints what it lints at the root, and gates the same lines.
 # `git diff --name-only` prints root-relative paths, so the pathspecs and the file names must not
-# depend on the current directory. Red on b205964: the root file fell out of scope ("no markdown
-# changed", exit 0), or, with a changed file in the subdirectory too, the linter got a path it could not open.
+# depend on the current directory.
 SUB_BASE = {"a.md": "# A\n", "sub/keep.txt": "x\n"}
 
 
@@ -406,7 +402,6 @@ for label, change, files in [("a changed root file", default_change, ["a.md"]),
 
 
 # '**/' matches zero directories in the exclude, as in the include: a root file is excluded, a nested one too.
-# Red on b205964: the exclude used git's default pathspec mode, where '**/decisions/**' needs a leading '/'.
 def decisions_change(work):
     write(work, "a.md", "# A\n\nShort line.\n", "w")
     write(work, "decisions/x.md", "# X\n\n" + LONG + "\n", "w")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """At a permission request for Bash in bypass mode, answers allow for a guarded delete of a safe, bound path. Prints nothing for any other command.
 
-Decision rm-on-a-variable-needs-a-guard (an rm on a variable needs a guard; owner, 2026-10-11).
+Decision rm-on-a-variable-needs-a-guard (an rm on a variable needs a guard).
 It answers allow only when all of these hold, and prints nothing otherwise:
 - `permission_mode` is "bypassPermissions";
 - the command is only simple assignments and `rm` calls, with no pipe, and it binds no name

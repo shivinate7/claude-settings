@@ -82,7 +82,7 @@ def stash_option_takes_next_word(arg: str) -> bool:
     """True when a `git stash push` option takes the NEXT word as its value.
 
     The options that take one are the two in git's synopsis: `-m`/`--message <msg>` and
-    `--pathspec-from-file <file>`. MEASURED 2026-10-13: git reads `-qm list`, `-um show`,
+    `--pathspec-from-file <file>`. Git reads `-qm list`, `-um show`,
     `--mess list` as a push with the message `list` or `show`. So a short cluster ending in `m`
     takes the next word, a long option takes it by any prefix git accepts, and a value glued on
     (`-mfoo`, `--message=x`) takes nothing more. `-U`/`--unified` and `--inter-hunk-context`

@@ -218,7 +218,7 @@ def case_model_ok_is_silent():
     check("ok: exactly one claude call", len(run.calls) == 1, len(run.calls))
 
 
-# Owner ruling: run model haiku at effort xhigh. This case alone pins the model this hook passes
+# The hook runs model haiku at effort xhigh. This case alone pins the model this hook passes
 # (reply_judge.py, the invoke_model call). test_decision_watch case_invoke_model_argv pins the
 # argv builder; neither covers the other's call site.
 
@@ -235,7 +235,7 @@ def case_model_is_haiku_at_xhigh():
 # object, the Stop note that Claude Code delivers at the start of the next turn:
 #   {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}
 # NOTE names the rule id and the fix. The shape is the one Claude Code's async hook validator
-# accepts for a Stop hook (checked in the installed binary, 2026-10-13).
+# accepts for a Stop hook (checked in the installed binary).
 
 def parse_stdout(run):
     try:
@@ -320,7 +320,7 @@ def case_timeout_leaks_no_reply_text():
 
 # --------------------------------------------------------------------------- case 5
 # The prompt holds the reply text and the three rules, and says running background work never
-# makes a reply unfinished (the second false block, 2026-10-13).
+# makes a reply unfinished.
 
 def case_prompt_carries_reply_and_rules():
     run = run_hook(MARK, answer=json.dumps({"ok": True}))
@@ -391,13 +391,13 @@ def case_settings_reply_judge_is_async_and_report_gate_is_not():
 
 
 # --------------------------------------------------------------------------- cases 8-13
-# Sampling. Owner ruling, 2026-10-13 14:40 CDT: the reply judge runs on one Stop in five. Stop n
+# Sampling: the reply judge runs on one Stop in five. Stop n
 # of a session is judged when (n - 1) % 5 == 0: Stops 1, 6, 11, so a short session is judged
 # once. The count is a file in the state folder under CLAUDE_CONFIG_DIR, one per session, the
 # home decision_watch.py uses. Every Stop writes it back, skipped Stops included. A skipped Stop
 # returns at once: no model call, no output, exit 0.
 #
-# Guesses, pinned here and named in the report:
+# Assumptions pinned here:
 #   (a) the file holds the Stops so far; this Stop is n = stored + 1.
 #   (b) a missing, unreadable or corrupt file reads as no count. That Stop is Stop 1 and is
 #       judged, and its write repairs the file. One branch, not two: a fresh session and a
@@ -513,7 +513,7 @@ def case_counter_is_a_file_that_survives_between_processes():
 
 # --------------------------------------------------------------------------- case 12
 # A missing, corrupt or unreadable counter fails open: exit 0, no traceback, no block, and this
-# Stop is judged (guess (b)). For missing and corrupt, the write repairs the file, so Stop 3 is
+# Stop is judged (assumption (b)). For missing and corrupt, the write repairs the file, so Stop 3 is
 # skipped. For unreadable, the write fails too, so every Stop is judged; Stop 3 is not pinned.
 
 def case_damaged_counter_fails_open():

@@ -4,14 +4,13 @@
 The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
 PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
-Owner ruling 2026-10-17 (turn the STE lint into a plain-prose lint): the fixer keeps only the
-fixed bloat phrases of STE011, minus eight rows. The orchestrator's calls of the same day: the three
-the decision plain-prose-lint names (in between, in terms of, it would appear that) leave the
-table entirely, and five borderline rows (in a timely manner, along the lines of, close down, of major
-importance, except when) stay errors with no fix. Every Latin (STE007), contraction (STE008) and
-nominalization (STE003) fix is gone, and no fix changes the case of the text it swaps. The sentence budget is one
-number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs, condition order
-and omitted "that" are advisory warnings: reported, never a deny, never a rewrite.
+The fixer keeps only the fixed bloat phrases of STE011, minus eight rows. The three rows the
+decision plain-prose-lint names (in between, in terms of, it would appear that) are not in the
+table, and five borderline rows (in a timely manner, along the lines of, close down, of major
+importance, except when) stay errors with no fix. No Latin (STE007), contraction (STE008) or
+nominalization (STE003) fix exists, and no fix changes the case of the text it swaps. The sentence
+budget is one number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs,
+condition order and omitted "that" are advisory warnings: reported, never a deny, never a rewrite.
 
     python lint/test_ste_autofix.py -v
 """
@@ -68,7 +67,7 @@ class FixtureCountTests(unittest.TestCase):
 
 # ------------------------------------------------------------------ 1. golden grammar set
 # (id, before, after). `after` is correct English. A row whose id ends in `_unchanged` holds a
-# pattern the fixer must leave UNCHANGED: either a fix removed by the 2026-10-17 ruling, or an
+# pattern the fixer must leave UNCHANGED: either a pattern whose fix plain-prose-lint removed, or an
 # unsafe pattern that never had one. Other rows hold the correct fixed text of a kept bloat phrase.
 
 GOLDEN = [
@@ -138,13 +137,13 @@ for _gid, _before, _after in GOLDEN:
     setattr(GoldenGrammarTests, "test_" + _gid, _golden_case(_before, _after))
 
 
-# ------------------------------------------------------------------ 2. fixes removed by the ruling
-# Owner ruling 2026-10-17, point 2: remove every autofix the decision plain-prose-lint lists, and
-# any other fix that rewrites more than whitespace or a fixed bloat phrase. The fixer has no
-# whitespace fix. A fixed bloat phrase is a row of the STE011 table. So every STE007, STE008 and
-# STE003 fix goes, and so do the three STE011 rows the debt names.
+# ------------------------------------------------------------------ 2. removed fixes
+# The decision plain-prose-lint removes every autofix it lists, and any other fix that rewrites
+# more than whitespace or a fixed bloat phrase. The fixer has no whitespace fix. A fixed bloat
+# phrase is a row of the STE011 table. So no STE007, STE008 or STE003 fix exists, and neither do
+# the three STE011 rows the debt names.
 
-# The debt's examples: (id, text). Each was rewritten before the ruling.
+# The debt's examples: (id, text). None may be rewritten.
 DEBT_EXAMPLES = [
     ("its_all_been_fixed", "It's all been fixed\n"),
     ("ad_hoc", "This is an ad hoc fix.\n"),
@@ -155,8 +154,7 @@ DEBT_EXAMPLES = [
     ("title_case_dont_trust", "Don't Trust\n"),
 ]
 
-# One sample per fix row of the STE007, STE008 and STE003 families (the rows FIXABLE held before
-# the ruling). Each was rewritten before the ruling; none may be now.
+# One sample per removed fix row of the STE007, STE008 and STE003 families. None may be rewritten.
 LATIN_SAMPLES = [
     ("eg_before_paren", "Check it (e.g.)\n"),
     ("eg_line_end", "Use tools, e.g.\n"),
@@ -243,12 +241,12 @@ class KeptFixesTests(unittest.TestCase):
     changed to fit a swap (the class of IT'S A TEST and Don't Trust in the debt)."""
 
     def test_k01_all_caps_phrase_keeps_its_case_or_is_left_alone(self):
-        # Before the ruling "PRIOR TO START" became "Before START".
+        # The fix must not turn "PRIOR TO START" into "Before START".
         out = ste_lint.apply_fixes("PRIOR TO START, CHECK THE OIL.\n")[0]
         self.assertIn(out, ("PRIOR TO START, CHECK THE OIL.\n", "BEFORE START, CHECK THE OIL.\n"))
 
     def test_k02_all_caps_in_order_to_keeps_its_case_or_is_left_alone(self):
-        # Before the ruling "IN ORDER TO STOP" became "To STOP".
+        # The fix must not turn "IN ORDER TO STOP" into "To STOP".
         out = ste_lint.apply_fixes("CLOSE IT IN ORDER TO STOP THE PUMP.\n")[0]
         self.assertIn(out, ("CLOSE IT IN ORDER TO STOP THE PUMP.\n", "CLOSE IT TO STOP THE PUMP.\n"))
 
@@ -483,7 +481,7 @@ class GateFixTests(_GateCase):
         self.assertIn("STE001", reason)
         self.assertNotIn("STE011", reason)
 
-    # Advisory text (ruling 2026-10-17): the gate neither denies nor rewrites it. The text stays
+    # Advisory text: the gate neither denies nor rewrites it. The text stays
     # exactly as the writer wrote it.
 
     def test_14_latin_vs_cf_via_neither_denied_nor_rewritten(self):
@@ -510,7 +508,7 @@ class GateFixTests(_GateCase):
 
 
 class RemovedFixesGateTests(_GateCase):
-    """The gate returns no updatedInput for any text whose only fix the ruling removed."""
+    """The gate returns no updatedInput for any text whose only fix was removed."""
 
     def _assert_not_rewritten(self, text):
         out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
@@ -542,7 +540,7 @@ class RemovedFixesGateTests(_GateCase):
 
 # ------------------------------------------------------------------ eight STE011 rows without a fix
 
-# Five borderline rows (orchestrator's call 2, 2026-10-17): the phrase is still an error, and no
+# Five borderline rows: the phrase is still an error, and no
 # rewrite is applied. The swap changes meaning or tone in some contexts.
 BORDERLINE_BLOAT = [
     ("in_a_timely_manner", "Send the report in a timely manner.\n"),
@@ -565,7 +563,7 @@ class BorderlineBloatTests(_GateCase):
     """The five borderline rows stay STE011 errors and are never rewritten."""
 
     def test_o01_still_an_error_in_the_linter(self):
-        # Guard: green before and after. The row is kept, only its fix goes.
+        # The row is kept, only its fix goes.
         for rid, text in BORDERLINE_BLOAT:
             with self.subTest(phrase=rid):
                 hits = [f for f in _findings(text) if f.code == "STE011"]
@@ -649,11 +647,9 @@ class UiFileTests(_GateCase):
         self.assertNotIn("updatedInput", out)
 
 
-# ------------------------------------------------------------------ review round 1 (PR 367)
-# Red pins for the reviewer's findings. Each name starts with its finding number.
-# test_r1_guard_* cases pass today: they hold a failure class the fix must not break.
-# After the 2026-10-17 ruling each fixture holds a kept bloat phrase, so the check still has a
-# fix to refuse.
+# ------------------------------------------------------------------ fixer and gate edge cases
+# Each name starts with its finding number. test_r1_guard_* cases hold a failure class the fix
+# must not break. Each fixture holds a kept bloat phrase, so the check still has a fix to refuse.
 
 class ReviewRound1FixerTests(unittest.TestCase):
     """apply_fixes on Markdown text: links, quotes, fences, front matter, English."""
@@ -734,8 +730,8 @@ class ReviewRound1FixerTests(unittest.TestCase):
                          "<p>Don't close it to stop</p>\n")
 
 
-# F4: an ambiguous 's (is or has) or 'd (would or had) stays unchanged. After the 2026-10-17
-# ruling every contraction stays unchanged, so these rows are plain "not rewritten" pins.
+# F4: an ambiguous 's (is or has) or 'd (would or had) stays unchanged. Every contraction stays
+# unchanged, so these rows are plain "not rewritten" pins.
 AMBIGUOUS_FORMS = [
     ("youd", "You'd finished the job.\n"),
     ("wed", "We'd finished the job.\n"),
@@ -845,17 +841,16 @@ class ReviewRound1GateTests(_GateCase):
         self.assertIn("STE011", out["permissionDecisionReason"])
 
 
-# ------------------------------------------------------------------ review round 2 (PR 367)
-# Red pins for review round 2. Names start with the finding number. test_r2_guard_* cases
-# pass today and hold a failure class the fix must keep.
+# ------------------------------------------------------------------ more fixer and gate edge cases
+# Names start with the finding number. test_r2_guard_* cases hold a failure class the fix must keep.
 
-# F1: an adverb between the form and a perfect verb. No contraction is fixed now, so the text
+# F1: an adverb between the form and a perfect verb. No contraction is fixed, so the text
 # is never rewritten.
 ADVERBS = ["never", "always", "also", "now", "only", "not"]
 
 
 class ReviewRound2FixerTests(unittest.TestCase):
-    """apply_fixes on Markdown text, round 2."""
+    """apply_fixes on Markdown text, second set."""
 
     # F2 code in a blockquote fence and in a raw HTML block stays unchanged
     def test_r2_f2_blockquote_fence_unchanged(self):
@@ -920,7 +915,7 @@ setattr(ReviewRound2FixerTests, "test_r2_guard_had_theres", _pin_unchanged("Ther
 
 
 class ReviewRound2GateTests(_GateCase):
-    """ste_gate.py, round 2."""
+    """ste_gate.py, second set."""
 
     def _gate_copy_env(self):
         env = dict(os.environ)
@@ -976,8 +971,8 @@ class ReviewRound2GateTests(_GateCase):
         self.assertNotIn("Before this", reason)
 
 
-# ------------------------------------------------------------------ review round 3 (PR 367)
-# Blocker: ste_gate.py reads the hook JSON with json.load(sys.stdin), which uses the locale
+# ------------------------------------------------------------------ raw UTF-8 on stdin
+# ste_gate.py reads the hook JSON with json.load(sys.stdin), which uses the locale
 # codec. A Windows pipe is cp1252 without PYTHONUTF8, so raw UTF-8 bytes turn into mojibake.
 # run_gate sends ASCII-escaped JSON, so the existing tests never see raw bytes. These send
 # raw UTF-8 bytes into a child with the UTF-8 env vars removed and PYTHONUTF8=0.

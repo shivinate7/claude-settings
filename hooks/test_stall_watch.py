@@ -17,14 +17,20 @@ The watcher streams LOG to stdout. After N silent seconds it prints one report t
 line `STALL:`, and exits 3. The command keeps running. If the pid ends first, the watcher exits 0,
 and `wait` returns the command's code.
 
+The STALL line lists the job's shell (the pid `&` gave) and every process under it, parent first.
+Stopping all of them, in that order, ends every shape with nothing left, and the report needs no
+scan of the command text. The shape cases stall a command in sh, bash and zsh and stop the listed
+pids. A shape that a shell cannot parse, such as `time while` in dash, runs in the other shells.
+
 Every case runs the real hook and the real rewritten command, the way the harness runs them. No
 case imports the module. Two environment variables steer the run:
 - STALL_WATCH_MODULE: the module under test (default hooks/stall_watch.py beside this file).
   Mutation runs point it at a copy with a defect in it.
 - STALL_WATCH_QUIET: the quiet seconds the hook writes into the rewritten command. The tests set 2.
 
-Report format the tests read: `pid=<n>` names the background job. its absolute path, ending in .log, names the log.
-Pids are found by regex, so spacing around `=` is tolerant.
+Report format the tests read: `pid=<a>,<b>,...` on the STALL line lists the pids to stop, parent first.
+Its absolute path, ending in .log, names the log. Pids are found by regex, so spacing around `=` is
+tolerant.
 
 Scratch files live in one temp directory, removed at exit. Every process a report names is killed
 at exit, with its descendants. The tests start those processes themselves.
@@ -47,7 +53,7 @@ MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch
 PY = sys.executable
 SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-")
 PIDS = set()
-MARKS = []  # tokens in loop commands that no other process carries, so reap() finds a stray loop
+MARKS = []  # tokens in job commands that no other process carries, so reap() finds a stray job
 CASES = []
 
 PID_RE = re.compile(r"\bpid\b\W{0,3}(\d+)")
@@ -464,26 +470,21 @@ def report_names_pid_and_asks_owner_to_stop():
 
 
 @posix_case
-def report_pid_is_the_job_not_its_wrapper():
-    """12. the STALL report's pid is the job's own pid, not the shell that wraps it"""
+def report_lists_the_job_pid_parent_first():
+    """12. a single command: the STALL line lists the job's own pid, parent first, so stopping the line ends the job"""
     problems = []
     for shell in shells():
         d = new_dir()
-        pidfile = os.path.join(d, "job.pid")
-        code = "import os, time\nopen(%r, 'w').write(str(os.getpid()))\ntime.sleep(30)" % pidfile
-        orig = " ".join(shlex.quote(a) for a in [PY, "-c", code])
+        orig, pidfile = pidfile_job(d, "job")
         rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
         problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
-        m = PID_RE.search(text)
-        job = open(pidfile).read().strip() if os.path.exists(pidfile) else ""
-        if m is None or not job.isdigit():
+        listed, job = stall_pids(text), read_pid(pidfile)
+        if not listed or job is None:
             problems.append(f"{shell}: report pid or job pid file missing")
         else:
-            named = int(m.group(1))
             problems += [f"{shell}: {p}" for p in expect(
-                named == int(job),
-                f"report names pid {named}, but the job is pid {job}. Stopping pid {named} "
-                f"leaves the job running")]
+                job in listed, f"the line lists pids {listed}, but the job is pid {job}")]
+            problems += [f"{shell}: {p}" for p in order_problems(listed, ppids())]
         reap()
     return problems
 
@@ -528,70 +529,143 @@ def crash_line(text):
 
 
 def new_mark():
-    """A token for a loop's command line. Its copies in ps carry it, and no other process does."""
+    """A token for a job's command line. The job's shell copies in ps carry it, and no other process does."""
     MARKS.append("7772%d%d" % (os.getpid(), len(MARKS)))
     return MARKS[-1]
 
 
-def loop_problems(shell, orig, mark):
-    """Stall the loop orig, which carries mark. The report must name the loop's own shell, and
-    stopping the pids it names must end the loop. Return a list of problems."""
+def ppids():
+    """Map each pid in the process table to its parent pid."""
+    return {pid: ppid for pid, ppid, _args in process_table()}
+
+
+def alive(pids):
+    """The pids in pids that still run. A zombie is an ended process, so it does not count."""
+    out = subprocess.run(["ps", "-axo", "pid=,stat="], capture_output=True, text=True).stdout
+    state = {}
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            state[parts[0]] = parts[1]
+    return [p for p in pids if not state.get(str(p), "Z").startswith("Z")]
+
+
+def parses(shell, orig):
+    """True when shell reads orig as shell code. dash has no `time` keyword, for one."""
+    return subprocess.run([shell, "-n", "-c", orig], capture_output=True).returncode == 0
+
+
+def order_problems(listed, ppid_of=None):
+    """Problems with the order of the pids on the STALL line: after the first, each pid has its
+    parent earlier in the line. The first is the root, and every other pid is under it."""
+    ppid_of = ppid_of or ppids()
+    problems = []
+    for i, pid in enumerate(listed[1:], 1):
+        parent = ppid_of.get(pid)
+        if parent in listed[:i]:
+            continue
+        if parent in listed[i:]:
+            problems.append(f"the line lists pid {pid} before its parent, pid {parent}")
+        else:
+            problems.append(f"the line lists pid {pid}, which is not under pid {listed[0]} "
+                            f"(its parent is pid {parent})")
+    return problems
+
+
+def job_problems(shell, template, pidfiles=()):
+    """Stall template in shell and check the claim: the STALL line lists the job's shell and every
+    process under it, parent first, and stopping them all in that order ends the job with nothing
+    left. template may hold @MARK@ (a token that only this job carries in its ps lines) and @NEVER@
+    (a file path that only a command after the stall point creates, so it must stay absent).
+    pidfiles name files where job processes wrote their pids, and each pid must be listed.
+    Return a list of problems."""
+    mark = new_mark()
+    never = os.path.join(new_dir(), mark + ".b")
+    orig = template.replace("@MARK@", mark).replace("@NEVER@", never) + " # " + mark
     rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10)
     problems = stall_problems(rc, text, secs)
     problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
-    named = stall_pids(text)
+    listed = stall_pids(text)
     args_of = {pid: args for pid, _ppid, args in process_table()}
-    for pid in named:
-        if mark not in args_of.get(pid, ""):
-            problems.append(f"report names pid {pid} ({args_of.get(pid, 'gone')[:40]!r}), not the "
-                            f"loop's shell. Stopping it leaves the loop running")
-    orphans = {p for pid in named for p, _a in tree(pid)}  # the loop's shell leaves its child behind
-    kill_all(named)
-    deadline = time.monotonic() + 2
+    ppid_of = ppids()
+    carriers = {pid for pid, args in args_of.items() if mark in args}
+    tops = [pid for pid in carriers if ppid_of[pid] not in carriers]  # the job's shell, found without the line
+    if len(tops) != 1:
+        kill_all(carriers)
+        return problems + [f"found {len(tops)} job shells (pids {sorted(tops)}), want 1"]
+    job = tops[0]
+    below = [pid for pid, _args in tree(job)]
+    if not listed:
+        problems.append("the STALL line lists no pid")
+    else:
+        if listed[0] != job:
+            problems.append(f"the line starts with pid {listed[0]} ({args_of.get(listed[0], 'gone')[:40]!r}), "
+                            f"not the job's shell, pid {job}")
+        problems += order_problems(listed, ppid_of)
+    for pid in alive(below):
+        if pid not in listed:
+            problems.append(f"pid {pid} ({args_of.get(pid, '')[:40]!r}) is under the job's shell, "
+                            f"and the line does not list it")
+    for pidfile in pidfiles:
+        member = read_pid(pidfile)
+        if member is None:
+            problems.append("a job process wrote no pid file")
+        elif member not in listed:
+            problems.append(f"the line does not list job process pid {member}")
+    before = alive(below)
+    for pid in listed:  # one at a time, in line order: the parent dies first and starts nothing more
+        kill_all([pid])
+    time.sleep(0.5)
+    deadline = time.monotonic() + 2.5
     while True:
-        left = [(pid, args) for pid, _ppid, args in process_table() if mark in args]
+        left = {pid: args for pid, _ppid, args in process_table() if mark in args}
+        for pid in alive(before):
+            left.setdefault(pid, args_of.get(pid, ""))
         if not left or time.monotonic() > deadline:
             break
         time.sleep(0.1)
-    if named and left:
-        problems.append(f"stopping pid {','.join(map(str, named))} leaves the loop running: "
-                        f"pid {left[0][0]} ({left[0][1][:40]!r})")
-    kill_all(orphans)
+    if left:
+        pid, args = next(iter(left.items()))
+        problems.append(f"stopping pids {','.join(map(str, listed))} leaves the job running: "
+                        f"pid {pid} ({args[:40]!r})")
+    if "@NEVER@" in template and os.path.exists(never):
+        problems.append("a command after the stall point ran after the stop")
+    kill_all(left)
+    return problems
+
+
+def shape_problems(shapes):
+    """Run each (label, template) shape through job_problems, in each shell that parses it."""
+    problems, ran = [], 0
+    for shell in shells():
+        for label, template in shapes:
+            if not parses(shell, template):
+                continue
+            ran += 1
+            problems += [f"{shell} {label}: {p}" for p in job_problems(shell, template)]
+            reap()
+    if not ran:
+        raise Skip("no installed shell parses these shapes")
     return problems
 
 
 @posix_case
-def pipeline_report_names_every_member_not_its_wrapper():
-    """13. a stalled pipeline: the report lists every member's pid and names no other process"""
+def pipeline_line_lists_the_shell_then_every_member():
+    """13. a stalled pipeline: the line lists the job's shell, then every member, parent first; stopping them ends the job"""
     problems = []
     for shell in shells():
         d = new_dir()
         first, first_file = pidfile_job(d, "first")
         second, second_file = pidfile_job(d, "second")
-        rc, text, _secs, _cmd = run_rewritten(first + " | " + second, shell=shell)
-        problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
-        members = {read_pid(first_file), read_pid(second_file)}
-        if None in members:
-            problems.append(f"{shell}: a pipeline member wrote no pid file")
-            reap()
-            continue
-        args_of = {pid: args for pid, _ppid, args in process_table()}
-        named = {int(m.group(1)) for m in PID_RE.finditer(text)}
-        problems += [f"{shell}: {p}" for p in expect(named, "report names no pid=")]
-        for pid in sorted(named - members):
-            problems.append(f"{shell}: report names pid {pid} ({args_of.get(pid, '?')[:40]!r}), "
-                            f"not a pipeline member. Stopping it leaves the members running")
-        for pid in sorted(members):
-            problems += [f"{shell}: {p}" for p in expect(
-                re.search(r"(?<!\d)%d(?!\d)" % pid, text) is not None,
-                f"report does not list pipeline member pid {pid}")]
+        problems += [f"{shell}: {p}" for p in job_problems(
+            shell, first + " | " + second, [first_file, second_file])]
         reap()
     return problems
 
 
 @posix_case
-def sequence_subshell_exec_report_names_the_running_command():
-    """14. a sequence, a subshell and an exec each stall on one command: the report names its pid"""
+def sequence_subshell_exec_line_lists_the_running_command():
+    """14. a sequence, a subshell and an exec each stall on one command: the line lists its pid, parent first"""
     shapes = (("sequence", "true; %s; true"), ("subshell", "( %s )"), ("exec", "exec %s"))
     problems = []
     for shell in shells():
@@ -600,68 +674,80 @@ def sequence_subshell_exec_report_names_the_running_command():
             word, pidfile = pidfile_job(d, "job")
             rc, text, _secs, _cmd = run_rewritten(template % word, shell=shell)
             problems += [f"{shell} {label}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
-            m = PID_RE.search(text)
-            job = read_pid(pidfile)
-            if m is None or job is None:
+            listed, job = stall_pids(text), read_pid(pidfile)
+            if not listed or job is None:
                 problems.append(f"{shell} {label}: report pid or job pid file missing")
             else:
                 problems += [f"{shell} {label}: {p}" for p in expect(
-                    int(m.group(1)) == job,
-                    f"report names pid {m.group(1)}, but the running command is pid {job}")]
+                    job in listed, f"the line lists pids {listed}, but the running command is pid {job}")]
+                problems += [f"{shell} {label}: {p}" for p in order_problems(listed, ppids())]
+                if label == "exec":  # the shell is the command: nothing else to list
+                    problems += [f"{shell} {label}: {p}" for p in expect(
+                        listed == [job], f"the line lists pids {listed}, want only the exec'd command, pid {job}")]
             reap()
     return problems
 
 
 @posix_case
 def builtin_only_loop_stalls_with_a_report():
-    """15. a loop of builtins only has no child: STALL report, exit 3, no traceback, and stopping
-    the pid it names ends the loop"""
-    problems = []
-    for shell in shells():
-        mark = new_mark()
-        problems += [f"{shell}: {p}" for p in loop_problems(shell, f"while [ x != {mark} ]; do :; done", mark)]
-        reap()
-    return problems
+    """15. a loop of builtins only has no child: STALL report, exit 3, no traceback, and stopping the line ends the loop"""
+    return shape_problems([("builtin loop", "while [ x != @MARK@ ]; do :; done")])
 
 
 @posix_case
-def polling_loop_report_names_the_loop_not_its_sleep():
-    """16. while true; do sleep N; done: the report names the loop's own shell, so stopping it ends the loop"""
-    problems = []
-    for shell in shells():
-        mark = new_mark()
-        problems += [f"{shell}: {p}" for p in loop_problems(
-            shell, f"while true; do : {mark}; sleep 30; done", mark)]
-        reap()
-    return problems
+def polling_loop_line_lists_the_loop_shell_then_its_sleep():
+    """16. while true; do sleep N; done: the line lists the loop's shell, then its sleep, so stopping the line ends the loop"""
+    return shape_problems([("polling loop", "while true; do sleep 30.@MARK@; done")])
 
 
 @posix_case
-def nested_pipeline_report_lists_only_real_members():
-    """17. (a|b)|c and { a|b; }|c: the report lists a, b and c, and no inner shell copy"""
+def nested_pipeline_line_lists_every_member_and_inner_shell():
+    """17. (a|b)|c and { a|b; }|c: the line lists the job's shell, every inner shell copy, and a, b and c, parent first"""
     shapes = (("subshell", "(%s | %s) | %s"), ("group", "{ %s | %s; } | %s"))
     problems = []
     for shell in shells():
         for label, template in shapes:
             d = new_dir()
             words = [pidfile_job(d, tag) for tag in ("a", "b", "c")]
-            rc, text, secs, _cmd = run_rewritten(template % tuple(w for w, _f in words), shell=shell)
-            where = f"{shell} {label}"
-            problems += [f"{where}: {p}" for p in stall_problems(rc, text, secs)]
-            members = {read_pid(f) for _w, f in words}
-            if None in members:
-                problems.append(f"{where}: a pipeline member wrote no pid file")
-                reap()
-                continue
-            args_of = {pid: args for pid, _ppid, args in process_table()}
-            listed = listed_pids(text)
-            for pid in sorted(listed - members):
-                problems.append(f"{where}: report lists pid {pid} ({args_of.get(pid, 'gone')[:40]!r}), "
-                                f"not a pipeline member")
-            for pid in sorted(members - listed):
-                problems.append(f"{where}: report does not list pipeline member pid {pid}")
+            problems += [f"{shell} {label}: {p}" for p in job_problems(
+                shell, template % tuple(w for w, _f in words), [f for _w, f in words])]
             reap()
     return problems
+
+
+@posix_case
+def sequence_never_starts_its_next_command_after_the_stop():
+    """18. a; b: after the line is stopped, b never starts"""
+    return shape_problems([("a; b", "sleep 30.@MARK@; touch @NEVER@")])
+
+
+@posix_case
+def loop_with_a_subshell_or_substitution_body_ends_with_the_stop():
+    """19. a loop whose body is a subshell or $(...): stopping the line leaves no process, and no restart"""
+    return shape_problems([
+        ("loop body ( )", "while true; do ( sleep 30.@MARK@; : ); done"),
+        ("loop body $( )", "while true; do x=$(sleep 30.@MARK@; :); done"),
+    ])
+
+
+@posix_case
+def loop_after_a_keyword_or_a_shift_ends_with_the_stop():
+    """20. a loop after `time`, in a case arm, or after << as a shift or a heredoc: stopping the line ends it"""
+    return shape_problems([
+        ("time while", "time while true; do sleep 30.@MARK@; done"),
+        ("case arm", "case x in x) while true; do sleep 30.@MARK@; done;; esac"),
+        ("<< as a shift", "x=$((1<<2))\nwhile true; do sleep 30.@MARK@; done"),
+        ("<< as a heredoc", "cat <<EOF >/dev/null\nbody\nEOF\nwhile true; do sleep 30.@MARK@; done"),
+    ])
+
+
+@posix_case
+def command_after_a_loop_ends_with_the_stop():
+    """21. a command after a loop: stopping the line ends the job, and a command past the stall never starts"""
+    return shape_problems([
+        ("loop, then sleep", "for i in 1; do :; done; sleep 30.@MARK@"),
+        ("loop, then b", "for i in 1 2; do sleep 30.@MARK@; done; touch @NEVER@"),
+    ])
 
 
 @posix_case
