@@ -74,9 +74,13 @@ Every skill under `skills/` has one row here: "no model pin; runs on the caller'
 skill's model is the model of the session that calls it. `lint/check_skill_model_rows.py` fails CI when a
 skill has no row or a row names a skill that does not exist.
 
-**The ceiling.** Sonnet is the ceiling for every role but three standing exceptions: Plan runs Opus; the
-advisor is `opus`, and agents inherit it; the builder's third try runs Opus by the owner's standing word,
-and the owner watches its cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
+**The ceiling.** Sonnet is the ceiling for every role but three standing exceptions.
+
+- Plan runs Opus.
+- The advisor is `opus`, and agents inherit it.
+- The builder's third try runs Opus by the owner's standing word, and the owner watches its cost.
+
+A reviewer's round 3 may run Opus on the owner's word for that spawn.
 Round 2 stays Sonnet only. Any other agent runs Opus only on the owner's word, for the spawn the owner
 names.
 
