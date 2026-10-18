@@ -153,13 +153,9 @@ def stash_discards(args) -> bool:
     `list` and `show` read the stash and change nothing, so they pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
-    OWNER'S RULING, 2026-09-19, which repeals the earlier exemption for `apply` and `pop`. The
-    old argument was MEASURED and correct on its own facts: git refuses to overwrite a modified
-    file rather than clobber it (2026-09-17, `git stash apply` aborted with "Please commit your
-    changes or stash them before you merge" and left the file untouched). It was wrong about the
-    SUBJECT. The thing at risk in an `apply` or a `pop` is not this tree. It is the shared stack.
-    The entry consumed may belong to another session, and a tree with nothing in it is exactly
-    when that theft leaves no trace.
+    `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
+    consumed may belong to another session, and a tree with nothing in it is exactly when that
+    theft leaves no trace.
     """
     return stash_action(args) not in STASH_READ_ACTIONS
 
@@ -304,7 +300,6 @@ RESET_HEAD_TARGETS = ("", "HEAD")
 # list, the read would narrow to it, and a delete of everything else would pass on an empty
 # answer. A wrong PASS is the one failure this layer must not have.
 CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}
-PATHSPEC_FROM_FILE = "--pathspec-from-file"
 
 
 def named_pathspecs(subcommand: str, args):
