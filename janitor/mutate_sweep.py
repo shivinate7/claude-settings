@@ -1,61 +1,44 @@
 #!/usr/bin/env python3
 """Mutation test for janitor/sweep.py and hooks/guard.py's sweep-facing primitives.
 
-Stdlib only. Ported from hooks/mutate_guard.py (555 lines, read first): same shape, same
-vocabulary (KILLED / SURVIVED / WRONG CAUSE), same fifth field (the required case name a
-mutant's own FAIL lines must carry, so a kill on an unrelated case never counts as proof).
-
-WHY THIS FILE EXISTS. janitor/test_sweep.py merged with 31 arms. The builder mutated 22
-assertions BY HAND, reported 22 kills, and committed nothing: no later reader can reproduce
-that evidence (plan, "the refusals"; CLAUDE.md, "trust a guard only once it goes red on the
-defect it guards"). This harness makes the claim reproducible: `python3 janitor/mutate_sweep.py`
-either kills every mutant below or names the ones it does not.
+Stdlib only. Same shape and vocabulary as hooks/mutate_guard.py (KILLED / SURVIVED / WRONG
+CAUSE) and the same fifth field: the case name a mutant's own FAIL lines must carry, so a kill
+on an unrelated case never counts as proof. `python3 janitor/mutate_sweep.py` either kills
+every mutant below or names the ones it does not.
 
 WHY TWO TARGETS, NOT ONE. janitor/sweep.py holds no code of its own for the ancestor test, the
 `git cherry` patch test, the remote-contains test, or the pid-vs-start-time liveness read: it
-calls hooks/guard.py's own tested primitives for every one of those (sweep.py's own docstring,
-"the one outcome to avoid"). A mutation harness that only ever edited sweep.py could not touch
-any of those four protections at all, and the build brief names all four by name. So a mutant
-here carries a TARGET ("sweep" or "guard") and this file mutates a copy of whichever file
-actually holds the line, the same file guard.py's own line 8 explains sweep.py leans on.
+calls hooks/guard.py's own tested primitives for each. A harness that only edited sweep.py
+could touch none of those four protections. So a mutant carries a TARGET ("sweep" or "guard")
+and this file mutates a copy of whichever file holds the line.
 
 A THIRD TARGET, "session_end_sweep", covers the SessionEnd hook itself (janitor/session_end_
 sweep.py), proven against its own suite (janitor/test_session_end_sweep.py) instead of
-test_sweep.py -- see SUITE_FOR_TARGET below. Its scaffold additionally carries a copy of the
-real REPO_ROOT/settings.json, never mutated, because that suite's own HookBudgetFitsUnderIts
-HostCeiling arm reads it.
+test_sweep.py -- see SUITE_FOR_TARGET below. Its scaffold also carries a copy of the real
+REPO_ROOT/settings.json, never mutated, because that suite's HookBudgetFitsUnderItsHostCeiling
+arm reads it.
 
 WHY A SCAFFOLD DIRECTORY, NOT AN ENV VAR. hooks/test_guard.py and hooks/test_config_watch.py
-each read a `*_UNDER_TEST` environment variable naming the copy to import instead of the real
-file (see hooks/mutate_guard.py's own TARGETS table). janitor/test_sweep.py has no such
-variable, and the fence around this build forbids adding one: `janitor/mutate_sweep.py` and
-`.github/workflows/gates.yml` are the only files this build may touch. So this harness rebuilds
-the two-directory shape (`hooks/`, `janitor/`) that `janitor/test_sweep.py` already computes
-its own import path from (`HERE = dirname(test_sweep.py)`, `REPO_ROOT = dirname(HERE)`,
-`sys.path.insert(0, REPO_ROOT/hooks)`) inside a fresh temporary directory per mutant, and copies
-the REAL `janitor/test_sweep.py` into it byte for byte, unmodified. Running that copy from that
-scaffold makes `import sweep` and `import guard` resolve to whichever copies -- mutated or real
--- this harness placed next to it. The real `janitor/test_sweep.py` on disk is never touched,
-and nothing is ever left behind: see `run_mutant` and `main`'s `finally`.
+each read a `*_UNDER_TEST` environment variable naming the copy to import (see
+hooks/mutate_guard.py's own TARGETS table). janitor/test_sweep.py has no such variable. So this
+harness rebuilds the two-directory shape (`hooks/`, `janitor/`) that `janitor/test_sweep.py`
+computes its own import path from (`HERE = dirname(test_sweep.py)`, `REPO_ROOT = dirname(HERE)`,
+`sys.path.insert(0, REPO_ROOT/hooks)`) inside a fresh temporary directory per mutant, and
+copies the REAL `janitor/test_sweep.py` into it byte for byte. Running that copy from that
+scaffold makes `import sweep` and `import guard` resolve to whichever copies -- mutated or
+real -- this harness placed next to it. The real `janitor/test_sweep.py` on disk is never
+touched, and nothing is left behind: see `run_mutant` and `main`'s `finally`.
 
 A MUTATION WHOSE ANCHOR TEXT IS NOT FOUND is STALE and fails loudly, the same rule
 hooks/mutate_guard.py enforces, checked for every mutation before any suite runs.
 
 A RED SUITE IS NOT ENOUGH. `janitor/test_sweep.py` runs as plain `unittest.main(verbosity=2)`,
-which prints its per-case progress and its failure headings to STDERR, not STDOUT (unlike
-hooks/test_guard.py's own hand-rolled PASS/FAIL runner). Both streams are scanned here for
-lines containing "FAIL", and a mutant's death only counts when the required case name shows up
-in one of them: a mutant that crashes the suite, or that some UNRELATED case happens to catch,
-is WRONG CAUSE, not KILLED, kept distinct exactly as hooks/mutate_guard.py keeps it distinct.
+which prints its per-case progress and its failure headings to STDERR, not STDOUT. Both streams
+are scanned for lines containing "FAIL", and a mutant's death only counts when the required
+case name shows up in one of them: a mutant that crashes the suite, or that some UNRELATED case
+happens to catch, is WRONG CAUSE, not KILLED.
 
-A FORMER KNOWN SURVIVOR, NOW CLOSED. "--confirm: reap branches for real with no --confirm on
-the line" (`if confirm and decision["action"] == "reap":` with the `confirm and` dropped) once
-survived: no case called `sweep.sweep_repo` with `confirm=False` against a repository holding
-a reapable subject. `janitor/test_sweep.py`'s `ConfirmGateTests.test_preview_names_reapable_
-subjects_but_touches_neither` closes that gap. MEASURED here: this mutant is KILLED, required
-case included. This paragraph stays as a record that the gap was real, found, and closed, not
-as a live warning: rule 1 below still says a mutant no arm kills is a survivor, and the run
-still exits 1 the day a future edit reopens this gap.
+A mutant no case kills is a survivor, and the run exits 1.
 
 Run:
     python3 janitor/mutate_sweep.py
@@ -243,10 +226,9 @@ MUTATIONS = [
      '        return {"name": branch, "action": "keep", "reason": "default-branch"}',
      "test_refusal_default_branch_itself"),
     # only_on="posix": test_refusal_unreadable_subject_is_kept drives its subject through a
-    # blind-git PATH stand-in. MEASURED on Windows (decisions/list-form-subprocess-ignores-a-
-    # path-shim-on-windows.md): a list-form subprocess call never reaches a PATH-shadowing
-    # .cmd shim there, so the real git answers instead of blind git, `empty` never comes back
-    # None, and the case is skipped on that platform -- it cannot prove this mutant either way.
+    # blind-git PATH stand-in. On Windows a list-form subprocess call never reaches a PATH shim
+    # (decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md), so `empty` never comes
+    # back None and the case is skipped there: it cannot prove this mutant.
     ("refusal: an unreadable branch subject reaps instead of keeping",
      "sweep",
      '    empty = guard.branch_is_empty(where, base, branch)\n'
@@ -487,7 +469,7 @@ MUTATIONS = [
      '                    False):\n',
      "test_a_broken_ref_file_is_an_error_not_a_gone_ref"),
 
-    # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
+    # ---- --confirm ----
     ("--confirm: reap branches for real with no --confirm on the line",
      "sweep",
      '        result["branches"].append(decision)\n'
@@ -498,11 +480,11 @@ MUTATIONS = [
      '            reap_branch(root, branch, decision, restore_log_path)',
      "test_preview_names_reapable_subjects_but_touches_neither"),
 
-    # ---- the opt-out file: a present-but-malformed value must refuse, not default (fail-open
-    # fix). A present `sweep` that is not a boolean, or a present `protectedPrefixes` that is not
-    # a list of strings, must refuse the whole repository -- the same direction an unreadable
-    # file already takes -- rather than fall through to the permissive default and sweep a
-    # repository that stated a wish the sweep could not read.
+    # ---- the opt-out file: a present-but-malformed value must refuse, not default. A present
+    # `sweep` that is not a boolean, or a present `protectedPrefixes` that is not a list of
+    # strings, must refuse the whole repository -- the same direction an unreadable file already
+    # takes -- rather than fall through to the permissive default and sweep a repository that
+    # stated a wish the sweep could not read.
     ("opt-out: a malformed present sweep/protectedPrefixes value falls back to the permissive default",
      "sweep",
      '    if "sweep" in data and not isinstance(data["sweep"], bool):\n'
@@ -515,16 +497,15 @@ MUTATIONS = [
      '    return data\n',
      "test_sweep_string_false_refuses_the_whole_repository"),
 
-    # ---- the primary-checkout exclusion (review fix, PR #83) ----
+    # ---- the primary-checkout exclusion ----
     #
-    # A reviewer ran sweep.py against a LINKED WORKTREE's own path (a shape session_end_sweep.py
-    # exists to prevent, but sweep.py itself must not depend on every caller getting that right)
-    # and watched the clone's real primary checkout get labeled `REAP removable`. `git worktree
-    # remove` on it then failed only because git itself refuses to remove a main working tree
-    # that way -- a refusal this program must not lean on (CLAUDE.md, "a recovery control must
-    # not depend on the state it recovers"). This mutant drops the exclusion `_is_primary_checkout`
-    # decides on, the same shape the reviewer measured by hand: the primary checkout falls
-    # through to `decide_worktree` again and gets a real decision recorded against it.
+    # sweep.py run against a LINKED WORKTREE's own path (a shape session_end_sweep.py exists to
+    # prevent, but sweep.py must not depend on every caller getting that right) must still
+    # exclude the clone's real primary checkout. Otherwise it is labeled `REAP removable`, and
+    # `git worktree remove` fails only because git itself refuses to remove a main working
+    # tree -- a refusal this program must not lean on. This mutant drops the exclusion
+    # `_is_primary_checkout` decides on: the primary checkout falls through to
+    # `decide_worktree` and gets a real decision recorded against it.
     ("primary-checkout: the clone's own main working tree is no longer excluded from decide_worktree",
      "sweep",
      '        is_primary = _is_primary_checkout(entry["path"])\n'
@@ -535,14 +516,12 @@ MUTATIONS = [
      '            return None  # MUTANT: the exclusion never fires',
      "test_no_decision_is_recorded_against_the_primary_checkout_when_swept_via_a_linked_worktree"),
 
-    # ---- the SessionEnd hook's own two budget protections (this build) ----
+    # ---- the SessionEnd hook's budget protections ----
     #
-    # 1. Spend what remains, not what was guessed: `remaining_sweep_timeout_seconds` must shrink
+    # Spend what remains, not what was guessed: `remaining_sweep_timeout_seconds` must shrink
     # (or refuse to run the sweep at all) as the hook's own elapsed time eats into its budget,
-    # rather than always handing the sweep the fixed SWEEP_TIMEOUT_SECONDS guess. Verified by
-    # hand against a `.bak` copy before this mutant was written: ignoring `elapsed_seconds`
-    # entirely fails exactly test_too_little_budget_left_returns_none among the FAIL lines (and,
-    # not required here, two siblings in the same protection).
+    # rather than always handing the sweep the fixed SWEEP_TIMEOUT_SECONDS guess. Ignoring
+    # `elapsed_seconds` entirely fails test_too_little_budget_left_returns_none, among others.
     ("budget: the sweep timeout ignores how much of the hook's budget is already spent",
      "session_end_sweep",
      '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS\n'
@@ -554,10 +533,10 @@ MUTATIONS = [
      "test_too_little_budget_left_returns_none"),
 
 
-    # 3. PR #84 review: an elapsed reading this function cannot trust (negative, or non-finite)
-    # must not be spent as if it were free time. Dropping the validation block fails the negative
-    # row and the nan row of test_too_little_budget_left_returns_none (one subTest per row). The
-    # inf row and the over-ceiling row still return None without the block, so they stay green.
+    # An elapsed reading this function cannot trust (negative, or non-finite) must not be spent
+    # as if it were free time. Dropping the validation block fails the negative row and the nan
+    # row of test_too_little_budget_left_returns_none (one subTest per row). The inf row and the
+    # over-ceiling row still return None without the block, so they stay green.
     ("budget: an untrustworthy elapsed reading (negative or non-finite) is spent as real time",
      "session_end_sweep",
      '    if (\n'
@@ -572,14 +551,12 @@ MUTATIONS = [
      '# MUTANT: no validation',
      "test_too_little_budget_left_returns_none"),
 
-    # 4. Command-line argv coverage (found 2026-09-22): the hook's own reap call,
-    # `[sys.executable, SWEEP_PATH, root, "--confirm", "--deadline-seconds", N]`, is the one subprocess.run in this whole
-    # program that actually deletes a branch for real, and no mutant here ever changed its argv
-    # before this one. Dropping `--confirm` turns the reap silently into a preview: sweep.py's own
-    # `if confirm and decision["action"] == "reap":` (janitor/sweep.py) then never fires, so
-    # `reap-me-a` survives. `test_sweeps_repo_a_leaves_repo_b_untouched` runs the REAL sweep.py
-    # against a REAL git repository, unmocked, and asserts the branch is gone -- proven against a
-    # `.bak` copy before this mutant was written.
+    # The hook's own reap call, `[sys.executable, SWEEP_PATH, root, "--confirm",
+    # "--deadline-seconds", N]`, is the one subprocess.run in this program that deletes a branch
+    # for real. Dropping `--confirm` turns the reap silently into a preview: sweep.py's own
+    # `if confirm and decision["action"] == "reap":` then never fires, so `reap-me-a` survives.
+    # `test_sweeps_repo_a_leaves_repo_b_untouched` runs the REAL sweep.py against a REAL git
+    # repository, unmocked, and asserts the branch is gone.
     ("confirm: the sweep call drops --confirm, so a reap silently becomes a preview",
      "session_end_sweep",
      '            [sys.executable, SWEEP_PATH, root, "--confirm",',
@@ -622,7 +599,7 @@ MUTATIONS = [
      "test_an_unreadable_orphan_read_is_listed_as_unknown",
      "posix"),
 
-    # ---- orphaned TCP listeners (this build, 2026-09-24) ----
+    # ---- orphaned TCP listeners ----
     #
     # ---- the agent-end reaper and the deepest-checkout match it depends on ----
     ("deepest checkout: the first containing checkout wins again, the primary over its worktree",
@@ -892,7 +869,7 @@ MUTATIONS = [
      "test_a_process_inside_keeps_the_husk",
      "posix"),
 
-    # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
+    # ---- the worktree pre-removal process check ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
      '    if inside:\n'
@@ -942,7 +919,7 @@ MUTATIONS = [
      '    if False:\n'
      '        # Unpushed is only a loss',
      "test_unlocked_clean_detached_worktree_with_an_unpushed_commit_keeps"),
-    # ---- owner rulings 2026-10-08: merged counts as safe, strays listed, run log ----
+    # ---- merged counts as safe, strays listed, run log ----
     ("merged exemption: a squash-merged, never-pushed lane is kept as unpushed",
      "sweep",
      '        merged = _merged_read(where, path) if has_remote else False\n',
@@ -1329,7 +1306,7 @@ MUTATIONS = [
      "test_an_unreadable_start_time_keeps_that_device",
      "posix"),
 
-    # ---- the sweep finishes (owner ruling 2026-10-15 15:08 CDT): the judge deadline, oldest first ----
+    # ---- the sweep finishes: the judge deadline, oldest first ----
     ("deadline: a pass past its budget still judges every tree",
      "sweep",
      '        if _past_deadline():\n'
