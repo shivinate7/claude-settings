@@ -28,7 +28,7 @@ a sibling trash name, then starts a detached child that deletes the trash. The h
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
-Worktrees (owner rulings 2026-10-15, 23:01 CDT): when the gates above hold for the whole worktree,
+Worktrees (decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or

@@ -8,7 +8,7 @@ Modes:
 - --stop: At Stop, while the session's flag that its handoff is not read is set and the
   handoff exists, blocks once per turn and names the handoff path.
 
-Spec: decisions/handoff-hooks-wave-2.md, ruling item 2. One flag file per session,
+Spec: decisions/precompact-handoff.md, item 9. One flag file per session,
 <config dir>/state/handoff/<session_id>.reread. Three modes, JSON on stdin:
 
   --post-compact (PostCompact)  sets the flag.
