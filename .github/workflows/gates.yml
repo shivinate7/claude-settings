@@ -62,9 +62,9 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     needs: scope
-    # About 2x the slowest green run measured 2026-10-12 (8 min 56 s: guard suite 224 s, merge-tool
-    # suite 124 s). The cap is a bandaid; the cause fix is the guard-suite split, brief step 9.
-    timeout-minutes: 18
+    # Green runs took 13.7-17.8 min (12 runs); two runs were cancelled at 18m10s with every step
+    # green (2026-10-17). Cap 36 = 2x the slowest green run. A bandaid: suite growth is the cause.
+    timeout-minutes: 36
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -648,7 +648,7 @@ jobs:
         shell: bash
         run: sh hooks/test_install_src.sh
 
-  # The mutation harness for the guard, moved off `gates` by cut F (decisions/ci-wall-time-cuts.md) so it runs in parallel.
+  # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope

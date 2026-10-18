@@ -19,8 +19,6 @@ Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 - `speak-cite-id-plus-gloss`: keep.
 - `output-write-in-ste`: separate lane.
 
-Precedent: `a-rule-with-no-gate-leaves-claude-md`.
-
 Why not all 30 rules: `CLAUDE.md` loads in every repo, and a gate that is only a test or a CI step here enforces nothing in another repo. Several guards cover only part of their sentence. `RULE_FLOOR` in `lint/rule_audit.py` is the anchor count (98). Update it when a rule is removed on purpose.
 
 What still protects each deleted rule:
@@ -33,10 +31,6 @@ What still protects each deleted rule:
 - Unlisted agents run Sonnet, and workers never spawn: `env.CLAUDE_CODE_SUBAGENT_MODEL` and `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` in `settings.json`, checked by `hooks/test_wrappers.py`.
 - Wait for required checks: the `merge-checks` guard rule refuses a merge while a check is pending or red.
 - Open every PR as a draft: the `draft-pr` guard rule, for the create command only.
-
-## Holes, named
-
-Debts: `slug-cite-gloss-unchecked` (slug cites have no gloss check), `report-on-empty-turn-unchecked` (no check sees a report on an empty turn), `pr-ready-unguarded` (nothing guards marking a PR ready), `push-report-before-checks` (no wait after a push).
 
 Kind: process
 Home: rule:outcomes-mechanize-rules

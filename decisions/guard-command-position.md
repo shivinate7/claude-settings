@@ -13,9 +13,5 @@ One resolver in `hooks/guard_core.py` finds the command word for every rule.
 
 Why: each wrapper moved the command word off the slot the rules read, so a refused command passed. The guard tests (families wsl, kill, env, impeccable, shared-tree) protect it.
 
-## Holes, named
-
-Debts: `cmd-c-script-skips-kill` (a `cmd /c` script is not read for a kill). `guard-timeout-fails-open` (a long command can run unjudged).
-
 Kind: process
 Home: hooks/guard_core.py

@@ -14,14 +14,9 @@ Bypass-mode sessions must not wait on the owner for Claude Code's critical-path 
      `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`, backtick or
      glob. With the values put in, the target is not `/`, home, a home parent, the cwd or a cwd parent.
      It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or `popd`.
-     More conditions apply:
-     - The variable starts the target word.
-     - A literal holds no whitespace or brace.
-     - Each binding comes before the `rm` and is not a prefix assignment such as `X=/tmp rm …`. A
-       binding after an `sh -c`, `bash -c` or `eval` that holds the `rm` also blocks `:?`.
-     - A `mktemp` value has nothing after the `)`.
-     - Home and the cwd are compared after `realpath`, and case-folded on macOS and Windows. On Windows
-       a Git Bash drive spelling such as `/c/Users/<you>` is read as `C:/Users/<you>` first.
+     Further conditions are in `hooks/guard_rm_var.py`: the variable starts the target word, each
+     binding comes before the `rm` and is no prefix assignment, and home and the cwd are compared after
+     `realpath`.
    - If the guard cannot read a target, the refusal gives the literal-path reason. A read error never
      lets a command through unjudged.
    - Otherwise: name the one directory as a literal path. This covers inherited names such as `$OLDPWD`,
@@ -42,9 +37,8 @@ Bypass-mode sessions must not wait on the owner for Claude Code's critical-path 
      expanded: a bound `IFS` splits an unquoted expansion into two targets, and a bound `PATH` picks the
      `rm` that runs.
 
-   Every other request prints nothing, so the prompt reaches the owner unchanged. The cases are in
-   `hooks/test_rm_prompt_answer.py`. No mutation anchor covers the hook module. Named limits, silent on
-   purpose. These still prompt:
+   Every other request prints nothing. The prompt then reaches the owner unchanged. These still prompt,
+   on purpose:
    - the `for d in …; do rm -rf "${S:?}/${d:?}"; done` form;
    - `export S=`, a value set twice, `/bin/rm`, `command rm`, `rm --recursive`;
    - a redirect, `|| true`, `&`, a trailing slash on the target, and a prefix assignment `S=x rm`.

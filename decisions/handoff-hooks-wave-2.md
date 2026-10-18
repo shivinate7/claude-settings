@@ -20,24 +20,7 @@ Owner, 2026-10-13 11:20 CDT: three hooks live in claude-settings. The mods sessi
 
 Why: after /clear or a fork a session started blind. After compaction nothing checked that it read its handoff. Sessions waited for CI with long background commands that ran on for hours.
 
-## Holes, named
-
-Limits:
-
-- The /clear pointer matches by project directory. Two sessions that clear in the same directory at the same time can swap pointers.
-- The docs give no minimum version for `asyncRewake`. A version below 2.1.287 can wake the session over and over.
-- A foreground command that times out and moves to the background is not seen by any hook event. The stall watch misses it.
-
-## Build plan
-
-### windows
-
-Build and prove on this machine, then install with install.ps1.
-
-### macos
-
-Same files. Prove on the Mac clone after `git pull` and install.sh.
-
-Kind: build
-Plan: decisions/handoff-hooks-wave-2.md#windows (windows)
-Plan: decisions/handoff-hooks-wave-2.md#macos (macos)
+Kind: process
+Home: hooks/precompact_handoff.py
+Home: hooks/reread_check.py
+Home: hooks/ci_wake.py
