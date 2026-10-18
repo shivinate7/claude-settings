@@ -13227,11 +13227,13 @@ def ov_type(config, session, prompt, seconds=0):
     return "override_pass.grant raised: %s" % run.stderr.strip()[-120:]
 
 
-def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None):
-    """One guard call at OV_T0 + seconds. Returns (decision, reason)."""
+def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
+            temp=None):
+    """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
+    reads as the system temp: a git write under it is a throwaway, and silent-write skips it."""
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
-        "config": config, "agent_id": agent_id, "agent_type": agent_type,
+        "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
         "env": {"LOCAL_TIME_NOW": ov_clock(seconds)}, "tool_input": tool_input,
     })
 
@@ -13483,13 +13485,13 @@ def ov_kill_all_acts(config, session):
 # One act of an exclusion story. `rule` names the refusal (a tuple lists the rules that may name it
 # under a pass); `first` names the refusal with no pass, when the first rule to fire is another
 # one. `want` is the decision: an ask for subagent-model-cap, else a deny.
-OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type",
-                   defaults=("deny", None, NOGIT, None, None))
+OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type temp",
+                   defaults=("deny", None, NOGIT, None, None, None))
 
 
 def ov_act_call(act, config, session, seconds):
     return ov_call(act.tool, act.tool_input, act.cwd, config, session, seconds, act.agent_id,
-                   act.agent_type)
+                   act.agent_type, act.temp)
 
 
 def ov_drift_acts(config, session):
@@ -13515,16 +13517,21 @@ def ov_chain_acts(config, session):
     """A refusal no pass lifts, in one command with a refusal a pass does lift. Reaching the lifted
     one must not end the judging before the other, and the one-act pass stays unspent."""
     hook = "echo x > " + slash(os.path.join(config, "hooks", "guard.py"))
-    return tuple(OvAct(label, "Bash", {"command": command}, rules) for label, command, rules in (
-        ("a write onto a config hook", hook, "frozen-path"),
+    silent = VCS + " commit -m x >/dev/null 2>&1; "
+    # The guard reads ROOT/tmp as the system temp, so the NOGIT cwd is no throwaway and a silenced
+    # commit there is refused by silent-write.
+    temp = os.path.join(ROOT, "tmp")
+    return tuple(OvAct(label, "Bash", {"command": command}, rules, first=first, temp=where)
+                 for label, command, rules, first, where in (
+        ("a write onto a config hook", hook, "frozen-path", None, None),
         ("a pkill, then a write onto a config hook", "pkill -f foo; " + hook,
-         ("machine-wide-kill", "frozen-path")),
+         ("machine-wide-kill", "frozen-path"), "machine-wide-kill", None),
         ("a write onto a config hook, then a pkill", hook + "; pkill -f foo",
-         ("machine-wide-kill", "frozen-path")),
-        ("a silent commit, then a kill of pid 0", "git commit -m x >/dev/null 2>&1; kill 0",
-         ("silent-write", "machine-wide-kill")),
-        ("a silent commit, then a kill of pid -1", "git commit -m x >/dev/null 2>&1; kill -9 -1",
-         ("silent-write", "machine-wide-kill")),
+         ("machine-wide-kill", "frozen-path"), None, None),
+        ("a silent commit, then a kill of pid 0", silent + "kill 0",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
+        ("a silent commit, then a kill of pid -1", silent + "kill -9 -1",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
     ))
 
 
