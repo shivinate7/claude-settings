@@ -22,7 +22,7 @@ Each route keeps its own limit. A clean, pushed agent worktree that is not merge
 ### Safe work
 
 - Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below. A repo's own `reap:worktrees` script keeps its own tests.
-- This covers every worktree reap, locked or not. `--confirm` unlocks, then removes, never with `--force`. If removal fails, the sweep restores the lock.
+- This covers every worktree reap, locked or not. `--confirm` unlocks, then removes, never with `--force`. If removal fails, the sweep restores the lock. After a cut-short remove, `_restore_cut_short` writes the deleted tracked files back from the index, never with `--force` (owner, 2026-10-15, review point 4).
 - A stale agent lock is judged by the rule in `the-janitor-is-one-machine-wide-sweep`.
 - Owner word, 2026-10-13 15:56 CDT: option A. The janitor's dirty test stays as it is. No junk-pattern change. Reaping dirty trees stays closed. The restore-point rule does not reopen it.
 - Re-measure `q_max` after the lane `worktree-hook-paths` merges. It is unmeasured until then.

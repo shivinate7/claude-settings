@@ -39,6 +39,7 @@ An unreadable read means keep. The signal goes by pid through `sweep.send_signal
 judged by the checkout that holds the cwd, never by a name.
 
 Reason for read 3: an orphaned shell stub has a dead parent, so the reaper stops the server and the stub.
+On Windows, `cmd &` then another line in one foreground Bash call outlives the agent. Its parent is a live MSYS bash stub, and the tool shell above the stub is dead. `sweep.is_orphan` alone reads the live stub and keeps the server forever, so the reaper climbs to the root of the tree inside the target.
 A `run_in_background` task of a live agent hangs from a live host outside the worktree, so the reaper
 keeps it. The agent's own shells have the live host as parent, so they keep the tree (`when-a-worktree-may-be-removed`).
 
@@ -52,3 +53,5 @@ Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
 (`sweep._read_all_cwds_macos`). A failed or empty read returns None, which means keep. Reason: a reap
 that hit the 60 s hook cap sent no signal and left a server running. The batch timeout stays below the
 hook cap.
+
+The payload log is written under a lock file. Measured on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a shared temp name and no lock.
