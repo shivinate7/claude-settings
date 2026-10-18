@@ -478,6 +478,69 @@ def report_pid_is_the_job_not_its_wrapper():
     return problems
 
 
+def pidfile_job(d, tag):
+    """Return (shell word, pidfile) for a 30 s python job that writes its own pid to the pidfile."""
+    pidfile = os.path.join(d, tag + ".pid")
+    code = "import os, time\nopen(%r, 'w').write(str(os.getpid()))\ntime.sleep(30)" % pidfile
+    return " ".join(shlex.quote(a) for a in [PY, "-c", code]), pidfile
+
+
+def read_pid(pidfile):
+    return int(open(pidfile).read().strip()) if os.path.exists(pidfile) else None
+
+
+@posix_case
+def pipeline_report_names_every_member_not_its_wrapper():
+    """13. a stalled pipeline: the report lists every member's pid and names no other process"""
+    problems = []
+    for shell in shells():
+        d = new_dir()
+        first, first_file = pidfile_job(d, "first")
+        second, second_file = pidfile_job(d, "second")
+        rc, text, _secs, _cmd = run_rewritten(first + " | " + second, shell=shell)
+        problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+        members = {read_pid(first_file), read_pid(second_file)}
+        if None in members:
+            problems.append(f"{shell}: a pipeline member wrote no pid file")
+            reap()
+            continue
+        args_of = {pid: args for pid, _ppid, args in process_table()}
+        named = {int(m.group(1)) for m in PID_RE.finditer(text)}
+        problems += [f"{shell}: {p}" for p in expect(named, "report names no pid=")]
+        for pid in sorted(named - members):
+            problems.append(f"{shell}: report names pid {pid} ({args_of.get(pid, '?')[:40]!r}), "
+                            f"not a pipeline member. Stopping it leaves the members running")
+        for pid in sorted(members):
+            problems += [f"{shell}: {p}" for p in expect(
+                re.search(r"(?<!\d)%d(?!\d)" % pid, text) is not None,
+                f"report does not list pipeline member pid {pid}")]
+        reap()
+    return problems
+
+
+@posix_case
+def sequence_subshell_exec_report_names_the_running_command():
+    """14. a sequence, a subshell and an exec each stall on one command: the report names its pid"""
+    shapes = (("sequence", "true; %s; true"), ("subshell", "( %s )"), ("exec", "exec %s"))
+    problems = []
+    for shell in shells():
+        for label, template in shapes:
+            d = new_dir()
+            word, pidfile = pidfile_job(d, "job")
+            rc, text, _secs, _cmd = run_rewritten(template % word, shell=shell)
+            problems += [f"{shell} {label}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+            m = PID_RE.search(text)
+            job = read_pid(pidfile)
+            if m is None or job is None:
+                problems.append(f"{shell} {label}: report pid or job pid file missing")
+            else:
+                problems += [f"{shell} {label}: {p}" for p in expect(
+                    int(m.group(1)) == job,
+                    f"report names pid {m.group(1)}, but the running command is pid {job}")]
+            reap()
+    return problems
+
+
 @posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
