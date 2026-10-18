@@ -1494,7 +1494,7 @@ class Helpers(unittest.TestCase):
 
 
 # ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
-# Owner ruling 2026-10-18 01:10 CDT: the cap sits above the longest current cell, so no cell loses text today.
+# Decision catalog-cells-never-cut: the cap sits above the longest current cell, so no cell loses text.
 # A cap stays only as a ceiling for growth. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
 # are never edited. The cap is one named constant in lint/hook_catalog.py, CELL_CAP. The cases import it,
 # so a new value moves every case with it. No case copies the number.
@@ -1585,7 +1585,7 @@ class CellCap(Tree):
         self.assert_cut(what_of(out, JUDGE_KEY), body)
 
     def test_e5_a_short_description_renders_unchanged(self):
-        # Green on main on purpose: it pins that a short cell is never touched. A regression pin, not a red case.
+        # Pins that a cell under the cap is never touched.
         self.assertEqual(what_of(self.render(files()), "skills/alpha"), "Use when testing alpha.")
 
     def test_e6_a_description_of_exactly_the_cap_is_unchanged_and_one_more_character_is_cut(self):
@@ -1640,7 +1640,7 @@ class RealCellCap(unittest.TestCase):
         self.assertFalse(over, "over the cap of %d: %s" % (cap, "; ".join(over)))
 
     def test_e13_no_real_description_cell_is_cut(self):
-        # Owner ruling 2026-10-18 01:10 CDT: no cell loses text today. Render the real repo at the cap and with
+        # Decision catalog-cells-never-cut: no cell loses text. Render the real repo at the cap and with
         # no cap; a row that differs was cut. The lists are zipped, never keyed: two judge rows share a key.
         import hook_catalog as gen
         saved = gen.CELL_CAP, gen.ROOT
