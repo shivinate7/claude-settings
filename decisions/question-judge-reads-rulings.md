@@ -16,10 +16,12 @@ question the owner already settled. A question that asks to change a ruling is a
   with one stem do not collide. The deny reason gives the id and title, with no absolute path. An id the
   hook did not show the model is not cited.
 - Each ruling is cut to `RULING_CAP` (800 chars) at a sentence end, and a mark shows the cut. The
-  rulings section adds at most `RULINGS_MAX` (60,000 chars) to the prompt. Records come newest first from
+  rulings section adds at most `RULINGS_MAX` (95,000 chars) to the prompt. Records come newest first from
   one `git log` call. File mtime orders them only when git fails or does not list a file. When the
   records hold more, the oldest are left out and the section says how many. A record with no H1 title
   shows as "untitled".
+- The budget fits every record in this repo, with headroom. Test case rl9 goes red when one is
+  left out.
 - The model makes the split between "settled" and "asks to change a ruling", from the intro text beside
   `PROMPT`. No test proves that split.
 
