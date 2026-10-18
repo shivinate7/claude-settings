@@ -41,6 +41,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -8012,8 +8013,9 @@ sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"'
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
 
-# NO OVERRIDE TOKEN IS A SKELETON KEY, because no override token exists any more. A leftover token
-# from either earlier guard changes nothing.
+# A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
+# assignments that the guard does not read. The one lift is the owner override pass (family
+# `override`): the owner types it as a prompt, and the guard reads it from a state file.
 sh("frozen: a leftover token is not a key to the environment rule",
    "DESTRUCTIVE_OK=1 cat " + ENV, "deny", "env-file", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the frozen rule",
@@ -13225,12 +13227,14 @@ def ov_type(config, session, prompt, seconds=0):
     return "override_pass.grant raised: %s" % run.stderr.strip()[-120:]
 
 
-def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None):
-    """One guard call at OV_T0 + seconds. Returns (decision, reason)."""
+def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
+            temp=None):
+    """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
+    reads as the system temp: a git write under it is a throwaway, and silent-write skips it."""
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
-        "config": config, "agent_id": agent_id, "env": {"LOCAL_TIME_NOW": ov_clock(seconds)},
-        "tool_input": tool_input,
+        "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
+        "env": {"LOCAL_TIME_NOW": ov_clock(seconds)}, "tool_input": tool_input,
     })
 
 
@@ -13241,12 +13245,13 @@ def ov_kill(config, session, seconds, agent_id=None):
 
 def ov_want(got, reason, want, rule):
     """'' when (got, reason) is the verdict wanted. An allow must print nothing. A refusal must name
-    its rule. Else why not."""
+    its rule; a tuple of rules lists the ones that may name it. Else why not."""
     if got != want:
         return "got %s (%s), want %s" % (got, reason[:70], want)
     if want == "allow" and reason:
         return "the allow printed %r, want nothing" % reason[:70]
-    if want != "allow" and rule not in reason:
+    names = (rule,) if isinstance(rule, str) else rule
+    if want != "allow" and not any(name in reason for name in names):
         return "the refusal does not name rule %r: %s" % (rule, reason[:70])
     return ""
 
@@ -13477,6 +13482,82 @@ def ov_kill_all_acts(config, session):
     ))
 
 
+# One act of an exclusion story. `rule` names the refusal (a tuple lists the rules that may name it
+# under a pass); `first` names the refusal with no pass, when the first rule to fire is another
+# one. `want` is the decision: an ask for subagent-model-cap, else a deny.
+OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type temp",
+                   defaults=("deny", None, NOGIT, None, None, None))
+
+
+def ov_act_call(act, config, session, seconds):
+    return ov_call(act.tool, act.tool_input, act.cwd, config, session, seconds, act.agent_id,
+                   act.agent_type, act.temp)
+
+
+def ov_drift_acts(config, session):
+    """A subagent that left its own worktree: worktree-home, rule 0, refuses every call it makes. A
+    pass that lifted rule 0 and then exited would never judge the refusals behind it."""
+    primary = os.path.join(ROOT, "ovdrift_primary")
+    worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + OV_AGENT)
+    if not os.path.isdir(worktree):
+        make_repo(primary, {"src/app.py": "print(1)\n"})
+        run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + OV_AGENT)
+    ov_call("Bash", {"command": "echo hi"}, worktree, config, session, 0, OV_AGENT)  # records the home
+    hook = slash(os.path.join(config, "hooks", "guard.py"))
+    return tuple(OvAct(label, "Bash", {"command": command}, ("worktree-home", rule),
+                       first="worktree-home", cwd=primary, agent_id=OV_AGENT)
+                 for label, command, rule in (
+        ("a drifted subagent's write onto a config hook", "echo x > " + hook, "frozen-path"),
+        ("a drifted subagent's kill of pid 0", "kill 0", "machine-wide-kill"),
+        ("a drifted subagent's command that sets GIT_DIR", "GIT_DIR=/x git status", "git-env-set"),
+    ))
+
+
+def ov_chain_acts(config, session):
+    """A refusal no pass lifts, in one command with a refusal a pass does lift. Reaching the lifted
+    one must not end the judging before the other, and the one-act pass stays unspent."""
+    hook = "echo x > " + slash(os.path.join(config, "hooks", "guard.py"))
+    silent = VCS + " commit -m x >/dev/null 2>&1; "
+    # The guard reads ROOT/tmp as the system temp, so the NOGIT cwd is no throwaway and a silenced
+    # commit there is refused by silent-write.
+    temp = os.path.join(ROOT, "tmp")
+    return tuple(OvAct(label, "Bash", {"command": command}, rules, first=first, temp=where)
+                 for label, command, rules, first, where in (
+        ("a write onto a config hook", hook, "frozen-path", None, None),
+        ("a pkill, then a write onto a config hook", "pkill -f foo; " + hook,
+         ("machine-wide-kill", "frozen-path"), "machine-wide-kill", None),
+        ("a write onto a config hook, then a pkill", hook + "; pkill -f foo",
+         ("machine-wide-kill", "frozen-path"), None, None),
+        ("a silent commit, then a kill of pid 0", silent + "kill 0",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
+        ("a silent commit, then a kill of pid -1", silent + "kill -9 -1",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
+    ))
+
+
+def ov_role_acts(config, session):
+    """The model and role guards stay outside every pass, as frozen paths do: a pass that lifted them
+    would let a subagent pick its own model or edit the tests it is judged by."""
+    return (
+        OvAct("a settings write that lifts the subagent model cap", "Write",
+              {"file_path": PROJ_LOCAL, "content": cap_settings()}, "subagent-model-cap", "ask"),
+        OvAct("a spawn on the Haiku model", "Agent",
+              {"prompt": "do it", "model": "haiku"}, "subagent-model-floor"),
+        OvAct("a builder's third try on Sonnet", "Agent",
+              {"prompt": "Try 3 of 3. Finish the fix.", "model": "sonnet",
+               "subagent_type": "builder"}, "roles-third-try-steps-up"),
+        OvAct("a builder's edit of a test file", "Edit",
+              {"file_path": "src/test_app.py", "new_string": "x = 1"}, "builder-test-edit",
+              agent_id="bld1", agent_type="builder"),
+        OvAct("a test-author's edit of product code", "Edit",
+              {"file_path": "src/app.py", "new_string": "x = 1"}, "test-author-scope",
+              cwd=GITMAIN, agent_id="auth1", agent_type="test-author"),
+        OvAct("a record-writer's edit of a Python file", "Edit",
+              {"file_path": "hooks/guard.py", "new_string": "x"}, "record-writer-scope",
+              agent_id="rw1", agent_type="record-writer"),
+    )
+
+
 def ov_exclusion_check(timed, make_acts, what):
     """The acts `make_acts` lists stay refused under either kind of pass. A refusal the pass does
     not lift does not spend it, so the next lifted act still goes through."""
@@ -13484,16 +13565,16 @@ def ov_exclusion_check(timed, make_acts, what):
 
     def check():
         config, session = ov_config("%s-%s" % (what, kind)), "ov-%s-%s" % (what, kind)
-        acts = make_acts(config, session)
-        for label, tool, tool_input, rule in acts:
-            problem = ov_want(*ov_call(tool, tool_input, NOGIT, config, session, 0), "deny", rule)
+        acts = [OvAct(*act) for act in make_acts(config, session)]
+        for act in acts:
+            problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
             if problem:
-                return False, "%s with no pass: %s" % (label, problem)
+                return False, "%s with no pass: %s" % (act.label, problem)
         note = ov_type(config, session, "override 15m" if timed else "override")
-        for label, tool, tool_input, rule in acts:
-            problem = ov_want(*ov_call(tool, tool_input, NOGIT, config, session, 60), "deny", rule)
+        for act in acts:
+            problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
             if problem:
-                return False, "%s under a %s pass: %s; %s" % (label, kind, problem, note or "typed")
+                return False, "%s under a %s pass: %s; %s" % (act.label, kind, problem, note or "typed")
         problem = ov_want(*ov_kill(config, session, 120), "allow", "machine-wide-kill")
         if problem:
             return False, "a lifted act after the excluded refusals: %s; %s" % (problem, note or "typed")
@@ -13581,6 +13662,18 @@ for _label, _check in (
      ov_exclusion_check(False, ov_kill_all_acts, "killall")),
     ("override: a kill of pid 0, 1 or -1 stays refused under a timed pass",
      ov_exclusion_check(True, ov_kill_all_acts, "killall")),
+    # A one-act pass never reaches a subagent (ov_agent_once_check), so the drifted subagent has
+    # a timed story only.
+    ("override: a drifted subagent's frozen-path, pid 0 and GIT_DIR refusals stay under a timed pass",
+     ov_exclusion_check(True, ov_drift_acts, "drift")),
+    ("override: a refusal no pass lifts stays when chained with one a pass lifts, one-act pass",
+     ov_exclusion_check(False, ov_chain_acts, "chain")),
+    ("override: a refusal no pass lifts stays when chained with one a pass lifts, timed pass",
+     ov_exclusion_check(True, ov_chain_acts, "chain")),
+    ("override: the model and role guards stay refused under a one-act pass",
+     ov_exclusion_check(False, ov_role_acts, "role")),
+    ("override: the model and role guards stay refused under a timed pass",
+     ov_exclusion_check(True, ov_role_acts, "role")),
     ("override: `override off` ends a pass at once", ov_off_check),
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
     ("override: a guard copy that cannot import override_pass never allows on a pass",
