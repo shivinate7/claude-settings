@@ -1969,15 +1969,31 @@ def set_pass_context(session_id, agent_id) -> None:
     _pass_who = (session_id, agent_id or None)
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str,
-           passable: bool = True) -> None:
+def set_pass_veto(veto) -> None:
+    """Register the test judge() builds for this call: veto() is true when the call holds an act no
+    override pass lifts. Until it is set, no refusal is passable."""
+    global _pass_veto
+    _pass_veto = veto
+
+
+_pass_veto = lambda: True  # noqa: E731 - fail closed until judge() registers its own
+
+
+def _vetoed() -> bool:
+    try:
+        return bool(_pass_veto())
+    except Exception:
+        return True  # a veto that cannot be read is a veto: the refusal stands
+
+
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> None:
     """Print a deny or an ask and exit, unless an owner override pass lifts it (decision
-    owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. A rule
-    in override_pass.NEVER, or a call with passable=False, never consults the pass."""
-    if passable:
+    owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. The
+    veto runs before the pass is taken, so a call that also holds a never-passed act spends no pass."""
+    if not _vetoed():
         try:  # an import or read failure is no pass: the refusal stands
             import override_pass
-            lifted = override_pass.take(_pass_who[0], _pass_who[1], rule, override_pass.now())
+            lifted = override_pass.take(_pass_who[0], _pass_who[1], override_pass.now())
         except Exception:
             lifted = None
         if lifted:

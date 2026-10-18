@@ -81,7 +81,7 @@ def summarize(lines, days, now, session=None):
 
 def render(s, by_session=False):
     rows = sorted(s["by_rule"].items(), key=lambda kv: (-kv[1]["deny"], kv[0]))
-    # The override column shows only once some pass lifted a refusal, so a log with none reads as before.
+    # The override column shows only once some pass lifted a refusal, so a log with no lifted act keeps the old columns.
     cols = COUNTED + ((OVERRIDE,) if any(OVERRIDE in c for _, c in rows) else ())
 
     def table(lead, items):

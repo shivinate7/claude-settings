@@ -13,14 +13,17 @@ JSON object on stdin and answers on stdout.
 
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
-  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0
+  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
+           override pass lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
 all allow the call. A guard bug must never brick a session.
 
 The rules below are the owner's global CLAUDE.md made mechanical. Each refusal and each note
 logs its rule name. This index lists every rule name that `refuse()` or `record()` writes,
-in the order `judge_shell` and `judge` check them. The first match wins. The reason text of a
+in the order `judge_shell` and `judge` check them. The first match wins, unless an override pass
+lifts it: then the call is allowed and no later rule runs, so `never_passed` checks the acts no
+pass lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
 Shell tools (Bash, PowerShell), in judge_shell order:
@@ -1888,9 +1891,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
     previous = None
-    # A kill of pid 0, 1 or -1 anywhere in the command keeps every kill refusal in it out of the
-    # override pass: one pass must not lift a group kill that shares the command.
-    group_kill = any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -1901,10 +1901,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
         previous = tokens
         if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched, not group_kill)
+            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
         matched = foreign_pid_kill(tokens, transcript)
         if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched, not group_kill)
+            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
@@ -2200,6 +2200,25 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
 
 
+def never_passed(payload, tool: str, tool_input: dict, cwd: str) -> bool:
+    """True when the call holds an act no owner override pass lifts (decision owner-override-pass): a
+    git location variable, a frozen path, a kill of pid 0, 1 or -1, or a role or model guard.
+    refuse() asks this before it spends a pass, because a lifted act ends the check."""
+    if floor_hit(tool, tool_input) or step_up_hit(tool, tool_input):
+        return True
+    if tool in SHELL_TOOLS:
+        raw = tool_input.get("command", "") or ""
+        stripped = strip_heredoc_bodies(raw)
+        return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+                    or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped))))
+    role = agent_role(payload)
+    for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
+        if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
+                or (is_settings_file(target, cwd) and cap_change_parts(write_content_parts(tool_input)))):
+            return True
+    return False
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -2216,6 +2235,7 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
+    guard_core.set_pass_veto(lambda: never_passed(payload, tool, tool_input, cwd))
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.

@@ -2,7 +2,8 @@
 reading it.
 
 The owner types `override` as a whole prompt. hooks/local_time.py, the prompt hook, calls grant().
-refuse() in hooks/guard_core.py calls take() before it prints a deny or an ask.
+refuse() in hooks/guard_core.py calls take() before it prints a deny or an ask, unless the veto that
+judge() in hooks/guard.py registers finds an act no pass lifts (decision owner-override-pass).
 
 A pass is the file <config dir>/state/override/<session_id>.json, {"kind": "once"|"timed",
 "until": ISO-8601 UTC}. It covers only the session that typed it. state/ is frozen against Claude's
@@ -23,9 +24,6 @@ from datetime import datetime, timedelta, timezone
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act pass waits for its act
 PROMPT = re.compile(r"override(?:\s+(?:(off)|(\d+)([mh])?))?", re.I)  # the whole stripped prompt
 SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
-# Rules no pass lifts (owner rulings 2026-10-18): the guard files and the pass file, and a git
-# location variable. A kill of pid 0, 1 or -1 shares its rule with other kills, so refuse() marks it.
-NEVER = frozenset({"frozen-path", "git-env-set"})
 PASSED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when a pass file cannot be read
 
@@ -71,12 +69,12 @@ def grant(session_id, prompt, at):
     return kind, until
 
 
-def take(session_id, agent_id, rule, at):
+def take(session_id, agent_id, at):
     """PASSED when the pass lifts this refusal (a one-act pass is spent), UNREAD when the file exists
     but cannot be read, else None. A one-act pass is spent by a rename to a unique name, so of two
     calls racing for it only one wins."""
     path = _path(session_id)
-    if path is None or rule in NEVER:
+    if path is None:
         return None
     try:
         with open(path, encoding="utf-8") as handle:
