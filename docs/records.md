@@ -224,6 +224,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`debts/sharables-adopts-the-stamp.md`](../debts/sharables-adopts-the-stamp.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`debts/stamp-shallow-depth-two.md`](../debts/stamp-shallow-depth-two.md) |
+| `test-guard-no-progress-line` | `hooks/test_guard.py` prints nothing for minutes, so the stall watch cuts off a healthy full run. | [`debts/test-guard-no-progress-line.md`](../debts/test-guard-no-progress-line.md) |
 | `three-skill-findings` | Two fixes for `skills/compliance-check` wait for the owner. | [`debts/three-skill-findings.md`](../debts/three-skill-findings.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`debts/verdict-pipe-drops-line.md`](../debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
