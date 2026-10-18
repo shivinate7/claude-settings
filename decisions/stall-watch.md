@@ -2,8 +2,8 @@
 
 ## The ruling
 
-The session learns within minutes that a background command stalled, and diagnoses the cause. When the
-stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
+The session learns within minutes that a background command stalled, and diagnoses the cause. The Stop-time check lists stalled shells and never blocks.
+When the stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
 stale cache lock, and the report names the lock file. A stop on a timer would kill a slow but healthy job
 and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
 guard rule, so the watcher does the waiting and the session is told once.
@@ -23,6 +23,26 @@ guard rule, so the watcher does the waiting and the session is told once.
   (guard-that-cries-wolf-is-spent). The merge tool prints `merge: waiting on ...` while it waits on checks,
   and while GitHub still shows the head before the push. `verdict` prints a `still running` line every 120
   seconds.
+
+## The Stop-time check
+
+When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
+lists each background shell that is not finished and whose output file has been quiet longer than the
+age. A shell whose output file is not found is listed as unknown. It prints one systemMessage that tells
+the model to stop the shell or tell the owner.
+
+The hook exits 0 and never blocks. A crash never refuses a call, as advisory hooks stay fail-open
+(`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
+one home (`building-one-home-per-capability`).
+
+- Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
+  number of seconds.
+- A job counts as finished when the transcript holds a completion notice with status completed, failed,
+  killed or stopped (as a user record, or as an attachment record of type queued_command), or a
+  "Successfully stopped task: <ID>" result of a TaskStop call.
+
+Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id
+exists for the job, so the age of its output file is the signal.
 
 Kind: process
 Home: hooks/stall_watch.py

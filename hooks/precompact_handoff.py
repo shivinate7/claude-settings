@@ -46,7 +46,7 @@ the desktop app has none.
   pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
   "no handoff". It also names the new session's own handoff. Every reorient then sweeps
   unusable pointers and stale .dir and .reread records (sweep()).
-  Spec: decisions/handoff-hooks-wave-2.md.
+  Spec: decisions/precompact-handoff.md, item 8.
 
 Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
@@ -339,8 +339,7 @@ def run_reorient_cleared(payload):
     handoff is named, or none when it has none: never another session's. fork: no pointer
     (it can name an older cleared session), only the newest handoff for the dir. Either way,
     with no pointer the newest handoff for the dir. ponytail: matches by dir only, so two
-    sessions clearing in one dir at once can swap pointers (decisions/handoff-hooks-wave-2.md,
-    named limits)."""
+    sessions clearing in one dir at once can swap pointers (decisions/precompact-handoff.md, item 8)."""
     session_id = payload.get("session_id", "")
     cwd = payload.get("cwd") or os.getcwd()
     ensure_handoff_dir(session_id)

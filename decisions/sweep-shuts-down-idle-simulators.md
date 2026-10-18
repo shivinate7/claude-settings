@@ -15,11 +15,8 @@ This extends `unattended-sweep-stops-proven-orphans`. It adds a new act: a per-d
    Any read that cannot tell means keep. Each device gets one `xcrun simctl shutdown <UDID>`. Never `all`. Never erase. A run stops at most 4 devices. The rest wait for the next run.
 3. Cap 2. Guard rule `simulator-boot-cap` refuses a session's boot when 2 devices are already booted, and names them. A boot is `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with `device` or `udid`. The cap counts every booted device, owner-booted ones included, because RAM is the limit and the cap needs no knowledge of who booted a device. With two owner-booted devices, no session can boot until the owner stops one.
 4. Reuse. Guard rule `simulator-boot-twin` refuses a boot when an idle booted device of the same type and runtime exists, and names its UDID. "Idle" is the ruling 2 test in full. The rule matches the device type, so `OS=latest` with an idle twin on an older runtime is refused.
-5. Boot check. The record hook checks each device that a `simctl boot` or an MCP `launch` took from `Shutdown` to `Booted`. No other boot path is checked. The check passes when `xcrun simctl bootstatus <UDID>` exits 0 and `xcrun simctl io <UDID> screenshot <file>` exits 0. A timeout is a fail. On a fail, the hook runs `simctl shutdown <UDID>` and then `simctl boot <UDID>` once, even when the shutdown failed, then checks again. Reason: a boot can leave the device `Booted` with no display, and SpringBoard crashes until a shutdown and boot fixes it.
-   - Pass after the retry: the hook tells the session that the device was booted again, and that an app launched by the call must be launched again.
-   - Fail after the retry: the hook tells the session that the device is broken, names its UDID, and says to stop using it. The hook does not shut it down. The sweep stops it once it is idle (ruling 2).
 
-   The hook writes the record line before the check, and one more line after a retry with the retry boot's launchd_sim pid, so the sweep sees no `boot-record-mismatch`. The hook writes to stdout only when the check failed.
+The boot check is in `sim-boot-is-verified`.
 
 Kind: process
 Home: janitor/sweep.py

@@ -4409,7 +4409,7 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
 
-    # Owner ruling 2026-10-09 (decisions/unattended-sweep-stops-proven-orphans.md): a pushed,
+    # Owner ruling 2026-10-09 (decisions/when-a-worktree-may-be-removed.md): a pushed,
     # clean, unmerged tree idle 24 hours is removable. Under 24 hours it is still kept.
     def test_strict_removes_a_pushed_unmerged_tree_idle_25_hours(self):
         self.age(self.unmerged, 25 * 3600)

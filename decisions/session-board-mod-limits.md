@@ -1,10 +1,11 @@
-# session-board keeps small records, and /safe-stop queues one prompt
+# session-board keeps small records
 
 ## The ruling
 
 The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all
 sessions and a safe stopping point, with no typing of "status?" into each one. Reason: each record is
-small. It holds names and counts, no prompt and no file content.
+small. It holds names and counts, no prompt and no file content. `/safe-stop` is in
+`safe-stop-queues-one-prompt`.
 
 Update-ready holds only when all five conditions hold (the owner's definition):
 
@@ -32,20 +33,6 @@ Privacy:
 - A name that looks secret shows as "(secret file)". The rule copies the plain-diff secret filter
   (`plain-diff-mod-limits`).
 - The mod shows no cost figure. The figure from `$.session.usage()` was unreliable.
-
-Stop:
-
-- `/safe-stop` refuses non-user origins by a block-list in `hooks/lib.mjs`. Other origins run, including
-  `unclassified`.
-- It asks the installed handoff hook for its path functions. A run makes the handoff folder. A plan makes
-  none.
-- It sends this session one prompt with `$.prompt.submit`. The prompt tells the session to finish or park
-  its step and to start no new work or agent. The session follows the hook's prompt file, rewrites the
-  handoff whole, and replies with one line: branch, uncommitted files, unpushed commits and running
-  agents. The session writes the handoff. The mod writes none.
-- The reply says the prompt is queued until the session is idle, or "could not send" if the host drops
-  it. An over-long path is refused, not cut.
-- `/safe-stop plan` prints the prompt and sends nothing.
 
 Safety of the session: every host call sits in a try and a failure logs one line prefixed
 "session-board:". Git reads run with no shell and no optional locks. Each hook waits a bounded time for

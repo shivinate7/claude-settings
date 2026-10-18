@@ -968,7 +968,7 @@ MUTATIONS = [
      '        if args.confirm:  # one line per repository',
      '        if True:  # one line per repository',
      "test_preview_appends_no_run_line_and_the_confirm_after_it_does"),
-    # ---- strict default: merged and idle 1 hour (decisions/unattended-sweep-stops-proven-orphans.md) ----
+    # ---- strict default: merged and idle 1 hour (decisions/when-a-worktree-may-be-removed.md) ----
     ("strict: the merged-and-idle gate is skipped",
      "sweep",
      '    if not attended:\n        kept = _strict_keep(where, path, idle)',
@@ -1224,7 +1224,7 @@ MUTATIONS = [
      '        pass',
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after",
      "posix"),
-    # ---- the agent worktree rule (decisions/agent-end-reap-stops-what-a-finished-agent-left.md) ----
+    # ---- the agent worktree rule (decisions/when-a-worktree-may-be-removed.md) ----
     ("agent rule: a finished agent tree is never removed past the older keeps",
      "sweep",
      '        if kept and agent_rule and _is_agent_worktree(where, path):',

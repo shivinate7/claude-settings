@@ -125,14 +125,14 @@ Every `--confirm` run adds two more keeps. A tree that is not merged is kept
 until it has been idle long enough, and the reason is `unmerged`. A tree with
 git activity inside the idle limit is kept, and the reason is `recently-active`.
 A time that cannot be read keeps the tree (`unreadable-subject`). The limits,
-and what idle means, are in decision `unattended-sweep-stops-proven-orphans`
-(an unattended sweep removes only proven orphans). Strict is the default, so a
+and what idle means, are in decision `when-a-worktree-may-be-removed`
+(when a worktree may be removed). Strict is the default, so a
 job that an older installer wrote is strict with no reinstall. A person passes
 `--attended` for the old rules.
 
 An agent worktree is removed at agent end, and by the session-end sweep, under
-its own limits. See decision `agent-end-reap-stops-what-a-finished-agent-left`
-(stops what a finished agent left).
+its own limits. See decision `when-a-worktree-may-be-removed`
+(when a worktree may be removed).
 
 The sweep keeps a worktree that any process sits inside, not only a
 listener. It names the pids. This check runs right before the removal

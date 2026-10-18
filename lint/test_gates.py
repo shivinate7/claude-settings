@@ -1053,9 +1053,9 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 
 class PromotedRuleTests(unittest.TestCase):
-    """The owner's ruling of 2026-10-17 (turn the STE lint into a plain-prose lint) replaced
-    the ruling that a rule either blocks or does not exist (decisions/every-lint-rule-blocks-
-    or-does-not-exist.md). Five rules block: STE001, STE011, STE013, STE020, STE021. Six are
+    """The owner's ruling of 2026-10-17 (turn the STE lint into a plain-prose lint,
+    decisions/plain-prose-lint.md): a rule either blocks or does not exist, and six advisory
+    codes are the one exception. Five rules block: STE001, STE011, STE013, STE020, STE021. Six are
     advisory: STE003, STE007, STE008, STE009, STE015, STE017 are warnings that the linter
     reports and no gate ever blocks on. Each case here proves a rule fires at its severity,
     the thing a table-row edit alone cannot prove. STE006 and STE018, deleted by the owner's

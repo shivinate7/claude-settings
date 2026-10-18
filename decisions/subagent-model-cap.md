@@ -11,8 +11,7 @@ claude-code-guide, test-author, reviewer and record-writer. Prose alone enforces
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
 `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it, and `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1.
-A write that sets the fallback is always an ask (guard rule `subagent-model-cap`). `hooks/config_watch.py`
-expires it, because a clock protects better than memory.
+The ask on a write and the expiry of a grant are in `opus-grant-expires`, an Opus grant expires.
 
 **The model per role.** Reason: Haiku is cheap enough for read-only work, tests, review and
 record-writing, and the owner will measure cost and quality. Writing prose and records is not building.
@@ -77,12 +76,6 @@ unless the file is a Haiku role. `agents/plan.md` pins Plan.
 the brief. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
 word. A try 3 builder needs Opus.
 
-**The record-writer boundary.** A `record-writer` may change only `*.md` files: records, README,
-CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or
-config. Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is
-a Haiku builder under a new name, and the floor means nothing. The guard denies a write to a non-`.md`
-path (`record-writer-scope`) and logs one in its diff at commit, push or stop (`writer-diff`).
-
 **No pin, no per-spawn gate.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
 spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
@@ -95,22 +88,6 @@ chosen, so it defends the choice. The one line before dispatch (`roles-opus-shap
 reason before the choice, so it stays. It asks; the owner's word decides. One gate stays: the ask on a
 write that changes the fallback. A write is a standing change, not a dispatch, so it stalls nothing
 mid-fan-out.
-
-**The grant.** An Opus worker is enabled for one repository, on the owner's word in chat
-(`roles-opus-override-guarded`). The grant raises the fallback and does not pin. For one Opus lane, the
-orchestrator passes the model on that one call, on the owner's word: narrower and cheaper. The grant is
-for several lanes in a row, and it needs a fresh session: a running session keeps the old value.
-
-The raise outlives the turn that wrote it. Two parts guard it. Both key on
-`CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` alone.
-
-- Guard rule `subagent-model-cap` asks on the write. It matches `_FORCE` too, so the ask still fires on a
-  stale file, or another repository, that sets the flag.
-- `hooks/config_watch.py` lifts the cap for any value of either model key other than `sonnet`. The
-  deadline `_subagentCapUntil` is a top-level key of `.claude/settings.local.json`, outside `env`, at most
-  24 hours ahead. Only the watch reads it. A deadline that is missing, unparseable, passed or too far out
-  gets the file reverted to the `prior` content the watch holds. With no `prior` on record the watch
-  reports UNKNOWN and asks the owner to read the file by hand.
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.

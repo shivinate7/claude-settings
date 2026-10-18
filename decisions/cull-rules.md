@@ -16,23 +16,9 @@ Owner answers, 2026-10-17 12:14 CDT:
 
 - Stop after two batches in a row in which debt files and decision files each fall by less than 5%. Hook Python lines need only go down.
 - A kept decision is trimmed to its ruling plus a one-line reason. A one-line Kind is added where `lint/check_ruling_kind.py` needs it.
-- Workers take the model-per-role table in `subagent-model-cap`.
 - A test-case rename is allowed for a prose-proof test. The change updates the mutants that name it in the same commit.
 
-Owner answers, 2026-10-17 12:53 CDT:
-
-- (a) A lane may reword a line when the result has fewer lines and words than before and keeps the current reason. The owner gave no other reason.
-- (b) Delete the decision on the Bash tool's PATH snapshot. The owner gave no reason. The file held a measured claim about a tool this repo cannot change.
-- (c) A delete-only change opens no hole unless it removes a guard, gate or check, which round 1 must judge (`hold-unsafe-after-round-3`). The owner gave no other reason.
-
-Owner answer, 2026-10-17 16:04 CDT:
-
-- Open findings no longer go under a "Holes, named" section. Each becomes a debt, or one line in `debts/notes.md`, pointing to its decision (`roles-holes-are-debts`).
-
-Owner rulings, 2026-10-17 23:46 CDT:
-
-- The ci-hygiene skill gets a step: when a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after.
-- `debts/` is the one home for deferred work. `deferred/` is folded into `debts/`, and the question judge reads `debts/` in place of it.
+Owner answer, 2026-10-17 12:53 CDT: a lane may reword a line when the result has fewer lines and words than before and keeps the current reason. The owner gave no other reason.
 
 ## Why
 
