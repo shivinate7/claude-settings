@@ -1,6 +1,0 @@
-# The records-page guard denies a generator word that writes no page
-
-- **What.** One call can run the generator and then a `git commit` that holds the page. The commit holds the page by an earlier `git add`, a path, or `-a` on a tracked page. The guard denies the commit with no compare of the page. The deny holds when the generator leaves the page unchanged. The hook runs before the shell chain, so it cannot see the page the generator will write. The generator word is also read too wide. `--root <other>` (writes another repo's page), `-h` and the abbreviation `--che` write no page here, but count as a run. Only the exact `--check` and `--print` are excluded.
-- **Where.** `hooks/guard_merge.py`: `_runs_generator`, the `_GENERATOR_READS` set, and the `generated and working` branch of `records_page_hit`.
-- **Decision.** `records-index-at-merge` (one records index page, rebuilt at merge time).
-- **Retire.** `_runs_generator` skips `-h`, `--help`, each prefix of `--check` or `--print`, and a `--root` that is not the checkout. A real run, then a commit that holds the page, stays denied. The page is unknown before the chain runs. Add cases to `hooks/test_guard.py` for `--root <other>`, `-h` and `--che`. Each case adds the page and commits it. Each case shows red on the current code and green after the fix.
