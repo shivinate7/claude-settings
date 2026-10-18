@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Writes docs/catalog.md and docs/records.md. The catalog says what each hook, judge, mod and skill does.
-The records page lists the records of a repo: its rules, decisions, debts, deferred items and plans.
+The records page lists the records of a repo: its rules, decisions, debts and plans.
 
 The owner asked for this page on 2026-10-13: plain words, one row each, and the model and
 effort beside it, like the model table in decisions/subagent-model-cap.md. The page is
@@ -17,7 +17,7 @@ this script is in. It is never the working folder.
 
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
 for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
-files in decisions/, debts/, deferred/ and plans/. A root with no record gets no records page. A record
+files in decisions/, debts/ and plans/. A root with no record gets no records page. A record
 that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
@@ -479,9 +479,9 @@ def render():
 # ---- the records page --------------------------------------------------------------------------
 
 RECORDS_PAGE = "docs/records.md"
-RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")
+RECORD_FOLDERS = ("decisions", "debts", "plans")
 NOTES_FILE = "debts/notes.md"  # the notes tier: one line per unlikely finding, not a record
-SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans")
+SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
@@ -496,7 +496,7 @@ OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/`, `deferred/` and `plans/`. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/` and `plans/`. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 

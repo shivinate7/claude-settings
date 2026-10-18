@@ -15,6 +15,8 @@ The rule refuses `cross-env`. Named limits, rare in docs and guides: `setx`, `ti
 here-string, a PowerShell block, a CI yaml `env:` key, and `node -e` or `python -c`. An export on a later
 line of a multi-line `printf` format is a limit too.
 
+Owner, 2026-10-16: the Playwright rows in `hooks/test_guard.py` (this rule's set forms and the `PLAYWRIGHT_INSTALL_DENY` table of `playwright-install-once`) stay until a session runs Playwright on a Mac. Then measure whether they still stop a real mistake. The incidents were on a Mac, so a Windows measure cannot show it. Not measured yet.
+
 Reason: a session set the variable to a scratch directory and hid both causes. The install then waited 73 minutes.
 
 Kind: process

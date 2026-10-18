@@ -25,7 +25,7 @@ Per question with two or more options (a clarifying question passes first):
   with CUT_MARK and none goes blank.
 - The judge also reads the rulings of the repo at the payload `cwd`: each "The ruling" / "Ruling" /
   "The rulings" / "The owner's rulings" H2 section (any suffix, to the next H2 outside a code
-  fence) of decisions/*.md, and the "**Why it waits.**" paragraph of deferred/*.md. Each ruling
+  fence) of decisions/*.md and debts/*.md. Each ruling
   is fenced and labeled with its record id (`<folder>/<stem>`) and H1 title. A question the owner already
   settled is FLAGged with the record id, and the deny reason gives the id and title, never an absolute path. A
   question that asks to change a ruling passes. Each ruling is cut to RULING_CAP chars at a
@@ -103,11 +103,10 @@ GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
 RULINGS_MAX = 60000  # chars the rulings section (intro, blocks, mark) adds to the prompt
 RULING_CAP = 800  # chars of one ruling; a longer one is cut at a sentence end
 RULING_CUT = " [ruling cut]"
-RULINGS_DIRS = ("decisions", "deferred")
+RULINGS_DIRS = ("decisions", "debts")
 RULINGS_LEFT_OUT = "[%d older rulings left out to fit the budget]"
 GIT_TIMEOUT = 3  # seconds for the one git log call that orders the records
 RULING_HEADING = re.compile(r"(?:the\s+)?(?:owner[’']s\s+)?rulings?\b", re.IGNORECASE)
-WAITS_LABEL = "**Why it waits.**"
 FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 # Added beside PROMPT, not in it, so the question-plain lane's PROMPT edits do not collide.
 RULINGS_INTRO = (
@@ -372,10 +371,10 @@ def span_text(entries, budget=SPAN_BUDGET):
 
 def _ruling_text(kind, text):
     """(title, ruling) of one record; ruling is "" when it has none. A decision's ruling is each
-    ruling H2 section, heading line included, to the next H2 outside a code fence. A deferred
-    record's is its WAITS_LABEL paragraph. Fences are tracked, so a `## ` line in one is no heading."""
+    ruling H2 section, heading line included, to the next H2 outside a code fence; so is a debt's.
+    Fences are tracked, so a `## ` line in one is no heading."""
     lines, title, fence, sections, take = text.splitlines(), "", "", [], False
-    for i, line in enumerate(lines):
+    for line in lines:
         m = FENCE_LINE.match(line)
         if m:
             run = m.group(1)
@@ -386,17 +385,9 @@ def _ruling_text(kind, text):
         elif not fence and line.startswith("# ") and not title:
             title = line[2:].strip()
         elif not fence and line.startswith("## "):
-            take = kind == "decisions" and bool(RULING_HEADING.match(line[3:].strip()))
+            take = bool(RULING_HEADING.match(line[3:].strip()))
             if take:
                 sections.append([])
-        elif not fence and kind == "deferred" and line.startswith(WAITS_LABEL):
-            para = []
-            for l in lines[i:]:
-                if not l.strip():
-                    break
-                para.append(l)
-            sections.append(para)
-            break
         if take:
             sections[-1].append(line)
     return title, "\n\n".join("\n".join(sec).strip() for sec in sections)

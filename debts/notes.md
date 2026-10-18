@@ -33,8 +33,8 @@
 - debts-no-check-reads-parts: no check reads the four parts of a debt file; check_record_slugs checks only the slug length (lint/check_record_slugs.py)
 - discards-output-slow-path: discards_output re-walks the segment once per redirect match; cost unmeasured (hooks/guard.py)
 - dropped-bloat-phrases-silent: 'in between', 'in terms of' and 'it would appear that' left BLOAT, so the lint no longer reports them even as a warning (lint/ste_lint.py)
-- drops-cite-forms-unchecked: git commit --trailer, a no-space Refs:deferred/a.md token, git merge -m and git tag -m are never cite-checked (hooks/guard.py)
-- drops-dot-slash-guard-lint: ./deferred/a.md after Drops-lines passes the guard but the lint's exact match refuses it (hooks/guard.py cited_record_path)
+- drops-cite-forms-unchecked: git commit --trailer, a no-space Refs:decisions/a.md token, git merge -m and git tag -m are never cite-checked (hooks/guard.py)
+- drops-dot-slash-guard-lint: ./decisions/a.md after Drops-lines passes the guard but the lint's exact match refuses it (hooks/guard.py cited_record_path)
 - drops-mixed-paragraph-exempt: guard exempts a last paragraph mixing prose and the Drops-lines trailer; git does not read it as trailers, so the cite stays in history (hooks/guard.py)
 - drops-reads-msg-unlike-git: guard refuses a folded Drops-lines trailer and reads a --file=- body last, unlike git; false refusals only (hooks/guard.py)
 - drops-stdin-message-unread: a commit message from -F - stdin is never read, so a prose cite there passes (hooks/guard.py cited_record_path)
@@ -52,7 +52,7 @@
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a hole with no pinning case (hooks/guard_env.py)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
-- estimate-rule-may-be-checkable: the deferred measured time table may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
+- estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
 - expired-lock-delete-race: the API cannot delete a ref only if it holds a value, so two runs can hold the merge lock for a few API calls (merge/merge.py)
 - fb-done-forms-unpinned: tests pin only a plain last line 'fb done'; colon, case, punctuation, CRLF, blank-line forms have no case, and fb and done on two last lines also close (hooks/local_time.py)
@@ -485,3 +485,10 @@
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch-stop-check
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/harness-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
+- banchi-build-steps: the shared stamp does not claim Banchi build steps; Banchi numbers them by hand, and its own config needs an `unclaimed` entry whose message names this note. When Banchi's claim-ids.py claims a step in docs/gates/steps/, copy its rules into the engine. Decision: one-shared-record-stamp
+- merge-retarget-before-merge: a base change after the last wait pass and before gh pr merge lands the merge on the new base; no retarget seen. Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none
+- playwright-rows-measure: whether the Playwright rows in hooks/test_guard.py still earn their place is unmeasured until a session runs Playwright on a Mac (hooks/test_guard.py). Decision: playwright-browsers-path
+- sharables-adopts-the-stamp: claude-sharables claims ids with its own check_records.py, so the merge tool cannot run there; sharables moves onto the stamp, and its ids (D93) may need a stamp change first (actions/stamp). Decision: one-shared-record-stamp
+- stamp-shallow-depth-two: stamp.mjs --check off the default branch needs fetch-depth 0; first parent of the merge commit with fetch-depth 2 is an unmeasured idea (actions/stamp/stamp.mjs). Decision: one-shared-record-stamp
+- ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still say "Write in Simplified Technical English". Owner's word, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). Decision: plain-prose-lint
+- undo-check-rename-alarm: check_silent_undo goes red when a PR renames a file and main edits the old name, because it reads with --no-renames; a Drops-lines trailer passes it. Fix when it fires on a real merge: read renames with -M for the PR side only (lint/check_silent_undo.py). Decision: none
