@@ -4,7 +4,7 @@
     python3 lint/test_check_record_slugs.py
 
 A record file that a change adds must have a slug of 32 characters or fewer. The check reads
-decisions/, deferred/ and debts/ from the diff, or the files it is given.
+decisions/ and debts/ from the diff, or the files it is given.
 
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
@@ -92,15 +92,15 @@ class RecordSlugsTests(unittest.TestCase):
         self.put("decisions/" + OK)
         self.assert_passes("decisions/" + OK)
 
-    def test_default_flags_long_slugs_in_decisions_and_deferred(self):
+    def test_default_flags_long_slugs_in_decisions_and_debts(self):
         self.put("decisions/" + LONG)
-        self.put("deferred/" + LONG)
-        rc, out = self.lint("decisions/" + LONG, "deferred/" + LONG)
+        self.put("debts/" + LONG)
+        rc, out = self.lint("decisions/" + LONG, "debts/" + LONG)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(flagged(out), ["decisions/" + LONG, "deferred/" + LONG])
+        self.assertEqual(flagged(out), ["decisions/" + LONG, "debts/" + LONG])
 
     def test_default_flags_long_slugs_in_debts(self):
-        # debts/ holds slug-named records too, so the default run checks it with decisions/ and deferred/.
+        # debts/ holds slug-named records too, so the default run checks it with decisions/.
         self.put("debts/" + OK)
         self.assert_passes("debts/" + OK)
         self.put("debts/" + LONG)
