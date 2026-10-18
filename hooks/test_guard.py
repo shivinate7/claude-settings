@@ -13144,8 +13144,8 @@ FAMILY = "override"
 #
 # What a pass does: it covers only the session that typed it. A subagent's call spends only a timed
 # pass. A valid pass makes the guard print nothing, so the normal permission flow runs, and it logs
-# one line naming `override` and the rule it lifted. What no pass does: lift frozen-path or git-env-set,
-# or count an unreadable pass file as a pass.
+# one line with decision `override` and the rule it lifted. What no pass does: lift frozen-path,
+# git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable pass file as a pass.
 #
 # A one-act pass is state that a call uses up, so each case is a story over several guard calls on
 # one fixed clock (LOCAL_TIME_NOW). A single-call `sh` case cannot show "allowed once, then refused
@@ -13449,26 +13449,42 @@ def ov_agent_timed_check():
     return True, "a subagent is allowed under a timed pass until it ends"
 
 
-def ov_exclusion_check(timed):
-    """frozen-path and git-env-set stay refused under either kind of pass. The pass file itself is
-    frozen: a session that could write it could grant itself a pass. A refusal the pass does not
-    lift does not spend it, so the next lifted act still goes through."""
+def ov_frozen_acts(config, session):
+    """frozen-path and git-env-set refusals. The pass file itself is frozen: a session that could
+    write it could grant itself a pass."""
+    pass_file = slash(ov_pass_path(config, session))
+    return (
+        ("a Write of a config hook", "Write",
+         {"file_path": slash(os.path.join(config, "hooks", "guard.py")), "content": "x"},
+         "frozen-path"),
+        ("a Write of the pass file", "Write", {"file_path": pass_file, "content": "{}"},
+         "frozen-path"),
+        ("a cp onto the pass file", "Bash", {"command": "cp /tmp/x.json " + pass_file},
+         "frozen-path"),
+        ("a command that sets GIT_DIR", "Bash",
+         {"command": "export GIT_DIR=/x; python -m pytest"}, "git-env-set"),
+    )
+
+
+def ov_kill_all_acts(config, session):
+    """A kill of pid 0 (the process group), 1 (init) or -1 (every process) can end the owner's whole
+    machine session. No pass covers it, so a pass that lifts `kill $(pgrep ...)` still refuses these."""
+    return tuple((label, "Bash", {"command": command}, "machine-wide-kill") for label, command in (
+        ("a kill of pid 0", "kill 0"),
+        ("a kill of pid 1", "kill 1"),
+        ("a kill of pid -1", "kill -9 -- -1"),
+        ("a kill of pid -1 with a named signal", "kill -TERM -1"),
+    ))
+
+
+def ov_exclusion_check(timed, make_acts, what):
+    """The acts `make_acts` lists stay refused under either kind of pass. A refusal the pass does
+    not lift does not spend it, so the next lifted act still goes through."""
     kind = "timed" if timed else "once"
 
     def check():
-        config, session = ov_config("exclude-" + kind), "ov-exclude-" + kind
-        pass_file = slash(ov_pass_path(config, session))
-        acts = (
-            ("a Write of a config hook", "Write",
-             {"file_path": slash(os.path.join(config, "hooks", "guard.py")), "content": "x"},
-             "frozen-path"),
-            ("a Write of the pass file", "Write", {"file_path": pass_file, "content": "{}"},
-             "frozen-path"),
-            ("a cp onto the pass file", "Bash", {"command": "cp /tmp/x.json " + pass_file},
-             "frozen-path"),
-            ("a command that sets GIT_DIR", "Bash",
-             {"command": "export GIT_DIR=/x; python -m pytest"}, "git-env-set"),
-        )
+        config, session = ov_config("%s-%s" % (what, kind)), "ov-%s-%s" % (what, kind)
+        acts = make_acts(config, session)
         for label, tool, tool_input, rule in acts:
             problem = ov_want(*ov_call(tool, tool_input, NOGIT, config, session, 0), "deny", rule)
             if problem:
@@ -13481,7 +13497,7 @@ def ov_exclusion_check(timed):
         problem = ov_want(*ov_kill(config, session, 120), "allow", "machine-wide-kill")
         if problem:
             return False, "a lifted act after the excluded refusals: %s; %s" % (problem, note or "typed")
-        return True, "four excluded refusals stayed; the pass was still there for a lifted act"
+        return True, "%d excluded refusals stayed; the pass was still there for a lifted act" % len(acts)
     return check
 
 
@@ -13503,8 +13519,8 @@ def ov_off_check():
 
 
 def ov_log_check():
-    """A lifted act writes one log line: the decision cell or the rule cell says `override`, the other
-    names the rule that was lifted, and the last cell is the session. A refusal writes its own line."""
+    """A lifted act writes one log line: the decision cell says `override`, the rule cell names the rule
+    that was lifted, and the last cell is the session. lint/guard_log_report.py reads that shape."""
     config, session = ov_config("log"), "ov-log-session"
     note = ov_type(config, session, "override 15m")
     log = os.path.join(config, "guard.log")
@@ -13520,12 +13536,9 @@ def ov_log_check():
     if len(lines) != 1:
         return False, "expected one line for the passed call, found %d: %r" % (len(lines), lines)
     fields = lines[0].split("\t")
-    named = " ".join(fields[2:4])
-    wrong = (len(fields) != 6 or fields[5] != session or fields[2] in ("deny", "ask")
-             or "override" not in named or "machine-wide-kill" not in named)
-    if wrong:
+    if len(fields) != 6 or fields[2:4] != ["override", "machine-wide-kill"] or fields[5] != session:
         return False, "the line does not read override + machine-wide-kill + the session: %r" % lines[0]
-    return True, "one line: %s" % named
+    return True, "one line: decision override, rule machine-wide-kill"
 
 
 def ov_no_module_check():
@@ -13561,8 +13574,13 @@ for _label, _check in (
     ("override: a subagent never spends a one-act pass", ov_agent_once_check),
     ("override: a timed pass reaches a subagent until it ends", ov_agent_timed_check),
     ("override: frozen-path and git-env-set stay refused under a one-act pass",
-     ov_exclusion_check(False)),
-    ("override: frozen-path and git-env-set stay refused under a timed pass", ov_exclusion_check(True)),
+     ov_exclusion_check(False, ov_frozen_acts, "frozen")),
+    ("override: frozen-path and git-env-set stay refused under a timed pass",
+     ov_exclusion_check(True, ov_frozen_acts, "frozen")),
+    ("override: a kill of pid 0, 1 or -1 stays refused under a one-act pass",
+     ov_exclusion_check(False, ov_kill_all_acts, "killall")),
+    ("override: a kill of pid 0, 1 or -1 stays refused under a timed pass",
+     ov_exclusion_check(True, ov_kill_all_acts, "killall")),
     ("override: `override off` ends a pass at once", ov_off_check),
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
     ("override: a guard copy that cannot import override_pass never allows on a pass",

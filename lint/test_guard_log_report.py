@@ -801,5 +801,29 @@ class FixedDecisionTests(unittest.TestCase):
         self.assertIn("| STE001,STE008 | 1 | 0 | 0 |", out)
 
 
+class OverrideDecisionTests(unittest.TestCase):
+    """A lifted act writes a line whose decision is `override` and whose rule is the one it lifted
+    (the owner override pass). The report counts those lines per rule and per session, so the owner
+    can see which refusals a pass lifted. Without it they would print under the verbatim lines."""
+
+    LINES = [
+        "2026-10-11T09:00:00\tBash\toverride\tmachine-wide-kill\tkill $(pgrep x)\tsess-a",
+        "2026-10-11T09:05:00\tBash\toverride\tmachine-wide-kill\tkill 4242\tsess-a",
+        "2026-10-11T09:10:00\tBash\toverride\tshared-tree\tgit stash --help -h\tsess-b",
+        "2026-10-11T09:15:00\tBash\tdeny\tmachine-wide-kill\tkill 1\tsess-a",
+        "2026-10-04T09:00:00\tBash\toverride\tmachine-wide-kill\toutside the window\tsess-a",
+    ]
+
+    def test_override_lines_are_counted_by_rule_and_session_not_left_verbatim(self):
+        s = glr.summarize(self.LINES, 7, NOW)
+        kill = s["by_rule"]["machine-wide-kill"]
+        self.assertEqual((kill.get("override"), kill["deny"]), (2, 1))
+        self.assertEqual(s["by_rule"]["shared-tree"].get("override"), 1)
+        self.assertEqual(s["other"], [])
+        self.assertEqual(s["per_day"]["2026-10-11"], 1)  # the per-day row counts denies only
+        self.assertEqual(s["by_session"]["sess-a"]["machine-wide-kill"].get("override"), 2)
+        self.assertEqual(s["by_session"]["sess-b"]["shared-tree"].get("override"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
