@@ -6,7 +6,7 @@ The Stop hooks read the transcript through one module, `lint/_transcript.py`. It
 
 - The cheap Stop reads live there too. `last_human_epoch` and `read_turn` read only the tail of the transcript since the last human message. `landed_work` is the one early exit "nothing dirty, committed, or in the extra paths since that message". `lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py`, `hooks/config_report.py` and `hooks/ruling_home.py` call the tail readers.
 - `hooks/config_watch.py` calls neither, because its expiry rule fires with no file change, so no such exit is safe there.
-- The scope of `a-gates-allow-list-is-the-constant` is unchanged. A transcript helper is not a permit list.
+- `building-allow-list-is-the-constant` does not govern it: a transcript helper is not a permit list.
 
 Why: four hooks carried copies of the same readers, and the claim that each Stop hook stays in one file with no import between hooks was already false.
 
