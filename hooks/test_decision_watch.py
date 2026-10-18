@@ -147,11 +147,10 @@ def case_flag_unapproved():
 
 
 # --------------------------------------------------------------------------- case 1z
-# A protected file DELETED this turn must still flag. Regression for a bug where
-# `changed_this_turn` called os.path.getmtime on a path git reports as deleted, got
-# FileNotFoundError every time (not a race), and silently dropped the file from the
-# changed set -- an empty "protected" set reads as a clean pass, not even UNKNOWN, on
-# exactly the case the judge prompt names as a FLAG criterion ("removed").
+# A protected file DELETED this turn must still flag. `changed_this_turn` must not call
+# os.path.getmtime on a deleted path: the FileNotFoundError would drop the file from the
+# changed set, and an empty "protected" set reads as a clean pass, not even UNKNOWN, on
+# the case the judge prompt names as a FLAG criterion ("removed").
 
 def case_flag_deleted_protected_file():
     repo = make_repo("flag_deleted_protected")
@@ -172,10 +171,9 @@ def case_flag_deleted_protected_file():
 
 # --------------------------------------------------------------------------- case 1a
 # The model's `why` text is attacker-influenced (it is the judge's summary of a diff this
-# hook fed it) and is capped, control-character-stripped, and clearly attributed before it
-# reaches the parent session's transcript. Added against a reviewer finding that an
-# uncapped, unattributed `why` field was an open channel for whoever can land text in a
-# diff to steer what appears there.
+# hook fed it). It is capped, control-character-stripped, and attributed before it reaches
+# the parent session's transcript: an uncapped, unattributed `why` lets whoever can land
+# text in a diff steer what appears there.
 
 def case_why_field_is_sanitized():
     repo = make_repo("why_field_sanitized")
@@ -591,10 +589,9 @@ def case_cache_key_holds_the_repo_and_a_bounded_read():
 
 # --------------------------------------------------------------------------- case 9
 # invoke_model's real argv and kwargs, against a fake subprocess.run: the explicit empty
-# tool set, --permission-mode plan, and an isolated cwd/env are actually on the command
-# line, not only claimed in a docstring. Added against a reviewer finding that an earlier
-# version claimed "no tools" while its argv granted every tool, in this project's own
-# directory, inheriting this project's own permissions.allow.
+# tool set, --permission-mode plan, and an isolated cwd/env are on the command line, not
+# only claimed in a docstring. A claim of "no tools" with an argv that grants every tool,
+# in this project's directory, inheriting its permissions.allow, must fail.
 
 class _FakeCompletedProcess:
     def __init__(self, returncode=0, stdout="", stderr=""):
@@ -604,11 +601,9 @@ class _FakeCompletedProcess:
 
 
 # --------------------------------------------------------------------------- case 9a
-# _judge_isolation copies the real login credential into the isolated config dir. Added
-# against a real, empirically found defect: an earlier version left the isolated config
-# dir empty, which a real run failed with "Not logged in" -- a DIFFERENT, earlier failure
-# than an expired-token error, proving the wipe took the credential down with it, on any
-# machine, not only a sandboxed one.
+# _judge_isolation copies the real login credential into the isolated config dir. An empty
+# isolated config dir fails a real run with "Not logged in", on any machine, not only a
+# sandboxed one.
 
 def case_judge_isolation_copies_credentials():
     fake_home_config = os.path.join(ROOT, "fake_home_config")
@@ -825,10 +820,9 @@ def case_invoke_model_prompt_bytes_reach_child_exact():
 
 
 # --------------------------------------------------------------------------- case 10
-# main() itself, invoked exactly as the harness invokes it: a real subprocess, JSON on
-# stdin, and its stdout/exit code read back. Added against a reviewer finding that every
-# other case stubbed model_call, so main()'s own contract (stdin parsing, stop_hook_active,
-# the printed systemMessage envelope, exit 0) was never actually exercised end to end.
+# main() itself, invoked as the harness invokes it: a real subprocess, JSON on stdin,
+# stdout and exit code read back. Every other case stubs model_call, so this one exercises
+# main()'s own contract (stdin parsing, stop_hook_active, the systemMessage envelope, exit 0).
 
 def _run_main(hook_payload, timeout=30):
     # An empty config directory, so the config report never reads this machine's own guard.log.
@@ -1120,7 +1114,6 @@ def case_token_t10_undecodable_file_is_an_error():
 # The child writes UTF-8 (the judge's JSON carries an em dash in the why). The fake child
 # returns BYTES, and decodes them the way subprocess.run does for the call's own arguments:
 # the named encoding when one is passed, else the Windows code page (cp1252) when text=True.
-# That is the live defect (2026-10-09): a deny reason read "â€”" instead of "—".
 E1_WHY = "The wait option answers timing — the three-try limit is not in it."
 
 
@@ -1174,8 +1167,7 @@ def _timeout_run(argv, **kwargs):
 
 
 def case_invoke_model_return_shape_pinned():
-    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its
-    # (verdict | None, error | None) return must not move.
+    # reply_judge and question_outcome call invoke_model: its (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
@@ -1184,7 +1176,7 @@ def case_invoke_model_return_shape_pinned():
 
 
 def case_parse_verdict_default_shape():
-    # Red on main until parse_verdict exists. Default shape: ALLOW or FLAG, one JSON object.
+    # Default shape: ALLOW or FLAG, one JSON object.
     pv = dw.parse_verdict
     v, e = pv(ALLOW_JSON)
     check("parse_verdict: ALLOW", v == {"verdict": "ALLOW"} and e is None, (v, e))
@@ -1221,7 +1213,7 @@ def case_parse_verdict_is_the_one_home():
 
 
 def case_invoke_model_custom_shape_end_to_end():
-    # Pin, green on main. invoke_model with reply_judge's shape, through a fake subprocess.
+    # invoke_model with reply_judge's shape, through a fake subprocess.
     shape = {"ok": (True, False)}
     with scratch_config("custom_shape"):
         got = _invoke_with(_envelope('{"ok": true}'), shape=shape)
@@ -1312,8 +1304,7 @@ def _run_script(hook, argv, cfg):
 
 
 def case_argv_bad_combinations_fall_back_to_invoke_model():
-    # Red on main until _model_call_from_argv exists. Any argv that is not one well-formed flag
-    # falls back to the default model call, which is invoke_model.
+    # Any argv that is not one well-formed flag falls back to the default model call, invoke_model.
     pick = dw._model_call_from_argv
     check("argv: no flags is invoke_model", pick([]) is dw.invoke_model)
     for argv in BAD_ARGV:
@@ -1321,7 +1312,7 @@ def case_argv_bad_combinations_fall_back_to_invoke_model():
 
 
 def case_bad_flag_runs_the_default_model_call():
-    # Pin, green on main. A malformed flag run is the default path: one claude call, in-process.
+    # A malformed flag run is the default path: one claude call, in-process.
     for i, argv in enumerate((["--model-text"], ["--foo"])):
         name = "argv_fallback_%d" % i
         with scratch_config(name):
@@ -1330,7 +1321,7 @@ def case_bad_flag_runs_the_default_model_call():
 
 
 def case_emit_prompt_prints_needs_model_and_calls_no_model():
-    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model, key} and
+    # --emit-prompt on a due model call prints {needs_model, prompt, model, key} and
     # spawns no model. It writes no cache, so a second run still asks.
     name = "emit_needs"
     with scratch_config(name):
@@ -1360,7 +1351,7 @@ def case_emit_prompt_prints_needs_model_and_calls_no_model():
 
 
 def case_emit_prompt_is_silent_when_nothing_is_due():
-    # Pin, green on main. A clean turn prints nothing, and never a needs_model.
+    # A clean turn prints nothing, and never a needs_model.
     name = "emit_clean"
     with scratch_config(name):
         repo = make_repo(name)
@@ -1376,7 +1367,7 @@ def case_emit_prompt_is_silent_when_nothing_is_due():
 
 
 def case_emit_prompt_missing_transcript_never_asks_for_a_model():
-    # Pin, green on main. A missing transcript is UNKNOWN, and the cheap path never asks for a model.
+    # A missing transcript is UNKNOWN, and the cheap path never asks for a model.
     name = "emit_missing"
     with scratch_config(name):
         hook = {"transcript_path": os.path.join(ROOT, "no-such-transcript.jsonl"), "cwd": ROOT,
@@ -1389,7 +1380,7 @@ def case_emit_prompt_missing_transcript_never_asks_for_a_model():
 
 
 def case_model_text_flag_prints_flag_and_calls_no_model():
-    # Red on main. --model-text with a FLAG prints the FLAG message and spawns no model.
+    # --model-text with a FLAG prints the FLAG message and spawns no model.
     name = "text_flag"
     with scratch_config(name):
         out, spawns = _main_in_process(_judged_hook(name),
@@ -1401,7 +1392,7 @@ def case_model_text_flag_prints_flag_and_calls_no_model():
 
 
 def case_model_text_allow_is_silent_and_cached():
-    # Red on main. --model-text with an ALLOW prints nothing, spawns no model, and caches the
+    # --model-text with an ALLOW prints nothing, spawns no model, and caches the
     # verdict: the next --emit-prompt on this session is silent too.
     name = "text_allow"
     with scratch_config(name):
@@ -1415,7 +1406,7 @@ def case_model_text_allow_is_silent_and_cached():
 
 
 def case_model_text_without_a_verdict_is_unknown_never_a_pass():
-    # Red on main. A reply with no verdict reads as UNKNOWN, never as silence.
+    # A reply with no verdict reads as UNKNOWN, never as silence.
     for name, reply in [("text_unknown_prose", "The change looks fine to me."),
                         ("text_unknown_shape", '{"ok": true}')]:
         with scratch_config(name):
@@ -1425,7 +1416,7 @@ def case_model_text_without_a_verdict_is_unknown_never_a_pass():
 
 
 def case_model_error_is_unknown_cut_to_200_and_not_cached():
-    # Red on main. --model-error reads as UNKNOWN, keeps the first 200 characters of the error,
+    # --model-error reads as UNKNOWN, keeps the first 200 characters of the error,
     # and is not cached: a later reply still judges.
     name = "model_error"
     with scratch_config(name):
@@ -1442,7 +1433,7 @@ def case_model_error_is_unknown_cut_to_200_and_not_cached():
 
 
 def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
-    # Red on main. The mod spawns `python -I decision_watch.py --emit-prompt`. The file must
+    # The mod spawns `python -I decision_watch.py --emit-prompt`. The file must
     # import under -I and print needs_model.
     name = "emit_dash_i"
     with scratch_config(name) as cfg:
@@ -1455,7 +1446,7 @@ def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
 
 
 def case_phase_one_prints_a_key_for_the_evidence_it_judged():
-    # Red on main. HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
+    # HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
     # "key" with the needs_model JSON, so phase 2 can be given back the evidence it judged.
     name = "key_printed"
     with scratch_config(name):
@@ -1468,10 +1459,9 @@ def case_phase_one_prints_a_key_for_the_evidence_it_judged():
 
 
 def case_phase_two_with_a_moved_key_reads_unknown_never_allow():
-    # Red on main. The evidence moves between the two phases: the protected file is edited after
+    # The evidence moves between the two phases: the protected file is edited after
     # phase 1 printed its key. Phase 2 gets that key back, so it reads UNKNOWN and never a silent
-    # ALLOW on evidence that is no longer the evidence judged. On main there is no --key: the argv
-    # falls back to the claude call (HOLE 7 path) and the ALLOW is silent.
+    # ALLOW on evidence that is no longer the evidence judged.
     name = "key_moved"
     with scratch_config(name):
         hook = _judged_hook(name)
@@ -1486,7 +1476,7 @@ def case_phase_two_with_a_moved_key_reads_unknown_never_allow():
 
 def case_phase_two_with_the_same_key_stays_silent_on_allow():
     # Guard. An unchanged turn keeps its ALLOW silent: a rule that makes every keyed reply loud
-    # would teach the reader to skip the watch. Red on main only through the missing --key.
+    # would teach the reader to skip the watch.
     name = "key_same"
     with scratch_config(name):
         hook = _judged_hook(name)
@@ -1498,7 +1488,7 @@ def case_phase_two_with_the_same_key_stays_silent_on_allow():
 
 
 def case_default_path_still_calls_claude_without_a_flag():
-    # Pin, green on main. With no flag the watch calls the model itself. With no claude on PATH
+    # With no flag the watch calls the model itself. With no claude on PATH
     # that call fails, and the answer is UNKNOWN, never needs_model.
     name = "default_subproc"
     with scratch_config(name) as cfg:

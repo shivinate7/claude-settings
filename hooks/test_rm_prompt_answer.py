@@ -158,7 +158,7 @@ silent("rm-prompt: bypass, S reassigned to / later is not allowed",
 silent("rm-prompt: bypass, an unbound guarded variable is not allowed", 'rm -rf "${S:?}"/build')
 silent("rm-prompt: bypass, a variable bound to the wrong name is not allowed",
        'T=/tmp/x; rm -rf "${S:?}"/build')
-# Round 2: an assignment to a name that no rm target uses changes how the shell runs the rm
+# An assignment to a name that no rm target uses changes how the shell runs the rm
 # (IFS splits an unquoted expansion, PATH picks another rm, CDPATH, any stray binding), so it
 # stops the allow. The allow cases are the controls: every binding is used by a target.
 silent("rm-prompt: bypass, IFS=: splits S into two targets, one the home folder",
@@ -183,7 +183,7 @@ silent("rm-prompt: bypass, a stray plain-folder binding no target uses is not al
        'T=/tmp/y; S=/tmp/x; rm -rf "${S:?}"/a')
 silent("rm-prompt: bypass, a stray binding set after the rm is not allowed",
        'S=/tmp/x; rm -rf "${S:?}"/a; T=/tmp/y')
-# Round 3: IFS and PATH are refused by name, even when a target expands the name that was bound.
+# IFS and PATH are refused by name, even when a target expands the name that was bound.
 silent("rm-prompt: bypass, IFS bound and expanded unquoted is not allowed",
        'IFS=t; rm -rf ${IFS:?}/home')
 silent("rm-prompt: bypass, IFS bound and expanded quoted is not allowed",

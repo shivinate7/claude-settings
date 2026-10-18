@@ -96,7 +96,7 @@ def run_gate(gate, hook, raw_stdin=None, env=None):
     return run
 
 
-# The config report is a section of hooks/decision_watch.py (decisions/guard-trims-from-the-audit.md).
+# The config report is a section of hooks/decision_watch.py.
 # This runs just that section, in a fresh process like the hook, so a case never reaches the git
 # status and model judgment `decision_watch.run` makes. It prints what `main` would print for it.
 CONFIG_REPORT_CODE = (
@@ -753,7 +753,7 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "")
 
     def test_19_merge_into_main_after_last_human_names_it_by_pr_number(self):
-        # The report gate is a CHECK now (decisions/merge-notice-checks-the-report.md): when
+        # The report gate is a CHECK now: when
         # the reply's own report block does not already name the merge, it fires, by PR
         # number, never by the raw command line.
         rows = [
@@ -921,7 +921,7 @@ class SentenceSplitBoldTests(unittest.TestCase):
 
 class DecisionGlossCollapseTests(unittest.TestCase):
     """STE001 must not count the words a gloss tool inserts after a citation
-    (decisions/ste-lint-gloss-collapse.md). A hermetic fixture folder stands
+    (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
     in for a real `docs/decisions/`, so this needs no other repository.
     """
 

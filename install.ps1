@@ -622,7 +622,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     }
 
     $srcFiles = @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)
-    # bin/rm is a posix sh shim; no Windows half lands it (debt rm-shim-windows).
+    # bin/rm is a posix sh shim; no Windows half lands it.
     if ($sub -eq 'bin') { $srcFiles = @($srcFiles | Where-Object { $_.Name -ne 'rm' }) }
     # Guard set: guard.py goes first, the landing that switches; see the comment above Install-GuardSet.
     if ($GuardSetMode -and $sub -eq 'hooks') { $srcFiles = @($srcFiles | Sort-Object @{ Expression = { $_.Name -cne 'guard.py' } }, Name) }

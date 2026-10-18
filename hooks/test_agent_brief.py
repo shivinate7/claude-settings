@@ -360,8 +360,8 @@ add("case: Builder gets the builder scope line", "context", payload("Builder"), 
 add("case: explore gets the Explore scope line", "context", payload("explore"), scope_check("Explore"))
 add("case: explore gets the five-line set", "context", payload("explore"), line_set_check(READER_RULES))
 
-# BUILDER ROUND 2 (F2): the push, trailer and record-path lines are for the write-capable types
-# and the general case, and never for reviewer or Explore.
+# The push, trailer and record-path lines are for the write-capable types and the general
+# case, and never for reviewer or Explore.
 for _t in ["builder", "test-author", "record-writer"]:
     add("brief lines: %s gets the push, trailer and record-path lines" % _t, "context",
         payload(_t), brief_lines_check(True))
@@ -371,15 +371,14 @@ for _t in ["reviewer", "Explore"]:
     add("brief lines: %s gets none of the push, trailer and record-path lines" % _t, "context",
         payload(_t), brief_lines_check(False))
 
-# BUILDER ROUND 2 (F3): the builder never edits tests, and may add mutants to hooks/mutate_guard.py
-# only when the brief asks.
+# The builder never edits tests, and may add mutants to hooks/mutate_guard.py only when the brief asks.
 add("builder scope: says never edit tests", "context", payload("builder"),
     builder_scope_check("never edit tests"))
 add("builder scope: allows adding mutants to hooks/mutate_guard.py when the brief asks",
     "context", payload("builder"),
     builder_scope_check("mutant", "hooks/mutate_guard.py", "brief asks"))
 
-# PLUGIN NAMESPACE (F4): `plugin:type` takes the scope of its bare type name.
+# PLUGIN NAMESPACE: `plugin:type` takes the scope of its bare type name.
 add("namespace: my-plugin:builder gets the builder scope line", "context",
     payload("my-plugin:builder"), scope_check("builder"))
 

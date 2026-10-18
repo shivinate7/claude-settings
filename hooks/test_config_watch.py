@@ -186,9 +186,9 @@ def cap_json_until_in_env(model, force, until):
     return json.dumps({"env": {KEY: model, KEY_FORCE: force, EXPIRY_FIELD: until}})
 
 
-# LIFT now carries a valid, current expiry: a lift with none is, since this change, exactly what
-# the new "bad expiry" cases below test. The bypass cases reuse LIFT too, and are unaffected: they
-# are reverted for being UNASKED, a check that runs before the expiry rule ever does.
+# LIFT carries a valid, current expiry: a lift with none is what the "bad expiry" cases below
+# test. The bypass cases reuse LIFT and are reverted for being UNASKED, a check that runs
+# before the expiry rule.
 LIFT = cap_json(model="opus", force="1", until=VALID_UNTIL)
 SONNET = json.dumps({"env": {KEY: "sonnet", KEY_FORCE: "1"}})
 UNRELATED = json.dumps({"env": {KEY: "sonnet", KEY_FORCE: "1"}, "theme": "light"})
@@ -333,16 +333,10 @@ bypass("mv from another file",
                  % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case2.json")))
 bypass("sed -i in place",
        # `sed -i ''` is BSD syntax: GNU sed's `-i` takes its suffix only ATTACHED, so a
-       # SEPARATE `''` argument is read as the script instead, `s/sonnet/opus/` is then read
-       # as a missing filename (an error, not a write), and the target is edited with an EMPTY
-       # script -- no bytes change. MEASURED: on GNU sed (gsed 4.10), `sed -i '' s/sonnet/opus/
-       # <path>` prints "can't read s/sonnet/opus/: No such file or directory" and leaves
-       # <path> byte-for-byte the same; the case was a false pass on Linux CI for exactly that
-       # reason, never a defect in the watch (CI run 35525705259, `Config watch fixture suite`).
-       # `-i.bak` attaches a REAL suffix, which both dialects parse the same way, so this edits
-       # in place identically on BSD and GNU. Verified locally against both `/usr/bin/sed`
-       # (BSD) and Homebrew's `gnu-sed` (GNU, as `gsed`): both produce {"opus", ...} and leave
-       # `s/sonnet/opus/` alone as a file that never existed, never as a stray argument.
+       # SEPARATE `''` is read as the script and `s/sonnet/opus/` as a missing filename (an
+       # error, not a write); the target is edited with an EMPTY script and no byte changes
+       # (MEASURED on gsed 4.10). `-i.bak` attaches a REAL suffix, which BSD and GNU parse the
+       # same way, so this edits in place identically on both.
        lambda p: "sed -i.bak -e s/sonnet/opus/ .claude/settings.local.json "
                  "&& rm -f .claude/settings.local.json.bak")
 bypass("python3 -c writes the path",
@@ -422,19 +416,15 @@ def stop_backstop(project):
 
 # ------------------------------------------------------------------ absent, never merely empty
 #
-# `digest()`'s own docstring draws a line between a file that is ABSENT and one that is merely
+# `digest()`'s docstring draws a line between a file that is ABSENT and one that is merely
 # EMPTY: "a cap lift that CREATES settings.local.json must read as a change and its restore must
 # remove the file again." Every other case above starts from `start=SONNET` and never deletes the
-# file, so that line is never read at all: a `digest()` that hashed an absent file the same as an
-# empty one would pass every case above unnoticed (MEASURED: it did, 0 red lines, once an
-# unrelated crash that had been masking this gap was fixed — see
-# decisions/mutant-cause-of-death.md).
+# file, so a `digest()` that hashed an absent file the same as an empty one would pass them all.
 #
 # ONE MORE STEP THAN IT LOOKS LIKE IT NEEDS, and each one is load-bearing. `load_baseline`
 # recomputes `"digest": ""` by hand whenever a stored baseline's content is `None` (a genuinely
-# absent file), rather than trusting the digest that was written for it. So a baseline that goes
-# straight from "no baseline yet" to "absent" never asks `digest(None)` an interesting question:
-# that first branch is a dead end for this bug, no matter how the fixture is built. The bug only
+# absent file), rather than trusting the stored digest. So a baseline that goes straight from
+# "no baseline yet" to "absent" never asks `digest(None)` an interesting question. The bug only
 # shows through a baseline that starts REAL AND EMPTY (`digest()` is trusted and verified there),
 # and is THEN deleted by an ordinary, non-cap event. A `digest()` confusing absent with empty
 # makes that deletion invisible to the watch's own baseline, so a later cap lift reverts to an
@@ -554,9 +544,8 @@ approved_case("an approved lift with _subagentCapUntil one second past the deadl
 
 @case("a baseline entry in the old on-disk shape (no 'prior' key) still works", "compat")
 def old_shape_baseline(project):
-    # Seed the store with exactly the shape `main`'s save_baseline ever wrote: no "prior" key at
-    # all. load_baseline must read this without crashing, and the unasked lift below must still
-    # be caught and reverted from it.
+    # Seed the store with a baseline entry that has no "prior" key. load_baseline must read it
+    # without crashing, and the unasked lift below must still be caught and reverted from it.
     store_dir = os.path.join(project.cfg, "state", "config-watch")
     os.makedirs(store_dir, exist_ok=True)
     content = SONNET.encode("utf-8")

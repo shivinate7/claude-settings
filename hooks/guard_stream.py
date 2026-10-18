@@ -1,8 +1,8 @@
 """The guard's stream family: a stream that never ends, a waiter loop, a background server with no end
 note, a waiter loop over a pattern and two ported shell traps.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -258,9 +258,8 @@ WAITER_REASON = (
 
 # ------------------------------------------------------------------ a background end condition
 #
-# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A server or watcher that runs in the
-# background has no end of its own (incident: a file server on port 3202 ran 27 h unnoticed). The
-# call must say when it ends: an `until: <condition>` note in the tool's `description`. The note
+# A server or watcher that runs in the background has no end of its own. The call must say when it
+# ends: an `until: <condition>` note in the tool's `description`. The note
 # belongs to the call, not the command text. stall_watch.py --stop shows the note per quiet job, and
 # reads it through `until_note` below, the one parser.
 #
@@ -283,8 +282,7 @@ SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab",
                 "streamlit": ("run",)}
 SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
 # Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
-# is checked for presence only, and some wrappers and forms are not read (debt
-# server-wrappers-unread).
+# is checked for presence only, and some wrappers and forms are not read (debt notes).
 
 
 def until_note(description) -> str:
@@ -395,13 +393,6 @@ BACKGROUND_END_REASON = (
 
 # ------------------------------------------------------------------ a waiter loop over a pattern
 #
-# Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
-# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
-# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
-# the condition never went false, because `pgrep -f` matches every process whose command line
-# names the pattern, including that very invocation of itself. A second copy of the driver then
-# raced the live one.
-#
 # THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
 # a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
 # token of its segment rather than only the first.
@@ -434,7 +425,7 @@ PATTERN_POLLER_REASON = (
 # self-contained so it merges cleanly beside other edits to this file.
 
 # `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
-# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# so a call meant as a GET silently becomes a write.
 # A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
 # is a POST by design and takes no method.
 GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
@@ -490,8 +481,8 @@ GH_API_METHOD_REASON = (
 
 
 # `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
-# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
-# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0.
+# A real directory always
 # descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
 # the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
 # fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing
