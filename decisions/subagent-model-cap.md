@@ -112,6 +112,11 @@ The raise outlives the turn that wrote it. Two parts guard it. Both key on
   gets the file reverted to the `prior` content the watch holds. With no `prior` on record the watch
   reports UNKNOWN and asks the owner to read the file by hand.
 
+Measured 2026-09-19 against `hooks/guard.py`: a cap lift to `.claude/settings.local.json` drew an ask
+from the Write tool, a `>` redirect, a heredoc, `tee` and `jq ... > file`. It was ALLOWED from `cp`,
+`mv`, `sed -i`, `python3 -c "open(path,'w')"`, `python3 gen.py` and `bash gen.sh`: the value sits in
+another file or a script, so the guard cannot read it. That gap is why the watch hashes the file.
+
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.
 

@@ -40,5 +40,10 @@ as below.
   a missing `transcript_path`, a git failure, and a model failure or odd answer each print a
   `systemMessage` that says UNKNOWN and names why. None collapses into silence, into ALLOW or into a flag.
 
+Measured 2026-09-22 over every session transcript on this machine since 2026-09-15: the agent hook gave
+34 real flags and about 60 "Unable to verify" answers, which track the `auto` permission mode. The 34
+flags were 8 real incidents; one unresolved finding was re-flagged at ten Stops. An outbound
+`SendMessage` or `Task` with no disk change also gave false positives, so the gate keys on the disk.
+
 Kind: process
 Home: hooks/decision_watch.py
