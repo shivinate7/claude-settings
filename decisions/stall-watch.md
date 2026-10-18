@@ -15,7 +15,9 @@ guard rule, so the watcher does the waiting and the session is told once.
 - The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
   still sees it. Allow rules still match a rewritten command.
 - The shell gives the watcher the pid of `&`. In sh and bash a `{ }` group runs in a forked copy of the
-  shell, so the STALL report steps down through that copy and names the job's own pid.
+  shell, so the STALL report steps down through that copy and names the job's own pid. A pipeline has no
+  single pid: the report lists each member's pid and leaves the wrapper shell out, so stopping every
+  listed pid ends the job (owner ruling, 2026-10-18).
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
   running and the watcher never stops it.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child

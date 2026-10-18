@@ -81,10 +81,12 @@ def ended_state(state):
 
 
 def job_tree(pid):
-    """Return [pid, state, elapsed, command] for the job and its descendants. The job's pid is
-    the one `&` gave the shell. A `{ }` group in sh or bash runs in a forked copy of the shell,
-    which has its parent's command line. Step down through each such copy that has one child,
-    to the process that runs the job."""
+    """Return (roots, rows). roots lists the pids that run the job. rows lists [pid, state,
+    elapsed, command] for each root and its descendants. The job's pid is the one `&` gave the
+    shell. A `{ }` group in sh or bash runs in a forked copy of the shell, which has its parent's
+    command line. Step down through each such copy that has one child, to the process that runs
+    the job. A copy with several children is a pipeline: its members are the roots, and the
+    copy is left out, so stopping every root ends the job."""
     rows = {}
     for line in _run(["ps", "-axo", "pid=,ppid=,stat=,etime=,command="]).splitlines():
         p = line.split(None, 4)
@@ -93,27 +95,34 @@ def job_tree(pid):
     kids = {}
     for p in rows.values():
         kids.setdefault(p[1], []).append(p[0])
-    cur = str(pid)
-    while (cur in rows and len(kids.get(cur, [])) == 1 and rows[cur][1] in rows
-           and rows[cur][4:] == rows[rows[cur][1]][4:]):
-        cur = kids[cur][0]
-    found, stack = [], [cur]
+
+    def is_copy(cur):
+        return cur in rows and rows[cur][1] in rows and rows[cur][4:] == rows[rows[cur][1]][4:]
+
+    def step_down(cur):
+        while is_copy(cur) and len(kids.get(cur, [])) == 1:
+            cur = kids[cur][0]
+        return cur
+
+    cur = step_down(str(pid))
+    roots = [step_down(k) for k in kids[cur]] if is_copy(cur) and len(kids[cur]) > 1 else [cur]
+    found, stack = [], roots[::-1]
     while stack:
         cur = stack.pop()
         if cur in rows:
             p = rows[cur]
             found.append([p[0], p[2], p[3], p[4] if len(p) > 4 else ""])
         stack.extend(kids.get(cur, []))
-    return found
+    return [r for r in roots if r in rows], found
 
 
 def report(pid, quiet, log):
-    rows = job_tree(pid)
-    pid = int(rows[0][0]) if rows else pid
+    roots, rows = job_tree(pid)
+    pid = ",".join(roots) or str(pid)
     pids = ",".join(r[0] for r in rows) or str(pid)
-    lines = ["STALL: no output for %ss; pid=%d is still running" % (quiet, pid),
+    lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pid),
              "The job was not stopped, and the session cannot stop it: the job is not its child.",
-             "Diagnose it from this report. To stop pid=%d, ask the owner to stop it." % pid,
+             "Diagnose it from this report. To stop pid=%s, ask the owner to stop it." % pid,
              "Processes (pid state elapsed command):"]
     lines += ["  " + " ".join(r) for r in rows] or ["  (none found)"]
     if shutil.which("lsof"):
