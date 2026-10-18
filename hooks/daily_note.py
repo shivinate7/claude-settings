@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """At the first session start of each US Central day, prints one line for each failed check in the recent guard.log. Prints nothing when every check passes.
 
-Owner ruling 2026-10-13: a once-a-day session-start note, silent unless a check fails. It replaces the
-weekly read of guard.log by hand. See decision guard-log-read-weekly.
+A once-a-day session-start note, silent unless a check fails (decision guard-log-read-weekly).
 
 The first start on a Central day (America/Chicago, the rule in hooks/local_time.py) runs the checks
 and writes the done-today stamp, <config dir>/daily-note.stamp, holding that day. A later start on the

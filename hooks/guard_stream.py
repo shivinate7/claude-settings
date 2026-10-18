@@ -72,8 +72,7 @@ LIVE_STREAM_REASON = (
 )
 
 
-# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from banchi's
-# `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. The merge tool waits minutes for
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
 # incident, because "does this command narrate for minutes" cannot be resolved from the system, and
@@ -145,7 +144,7 @@ NARRATED_TAIL_REASON = (
 WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
-SLEEP_LIMIT = 25   # owner ruling 2026-10-12: one sleep under 25 s is allowed
+SLEEP_LIMIT = 25   # one sleep under 25 s is allowed
 LOOP_WORDS = {"while", "until", "for", "foreach", "do", "%", "foreach-object"}
 
 
@@ -419,10 +418,7 @@ PATTERN_POLLER_REASON = (
 )
 
 
-# ------------------------------------------------------------------ two ported shell traps
-#
-# Ported from banchi's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
-# self-contained so it merges cleanly beside other edits to this file.
+# ------------------------------------------------------------------ two shell traps
 
 # `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
 # so a call meant as a GET silently becomes a write.

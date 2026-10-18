@@ -2,7 +2,7 @@
 """Writes docs/catalog.md and docs/records.md. The catalog says what each hook, judge, mod and skill does.
 The records page lists the records of a repo: its rules, decisions, debts and plans.
 
-The owner asked for this page on 2026-10-13: plain words, one row each, and the model and
+Plain words, one row each, and the model and
 effort beside it, like the model table in decisions/subagent-model-cap.md. The page is
 generated and never edited by hand. Each description comes from the source it describes, so
 the page cannot drift from it.

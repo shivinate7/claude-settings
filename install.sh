@@ -176,7 +176,7 @@ pin_off_main() {
     || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
 }
 
-# Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
+# An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
 # worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
@@ -227,7 +227,7 @@ put_file() {
 }
 
 # ---- one install at a time, one start line and one end line in the install log --------------------
-# Owner ruling 2026-10-15 (install-set). The lock is a file made with noclobber, so only one run makes
+# The lock is a file made with noclobber, so only one run makes
 # it. install.ps1 and its post-merge hook take the same file, so the three paths wait on each other.
 # A run waits CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with
 # nothing written. A lock file older than 10 minutes is a dead run's: it is removed.
@@ -347,8 +347,8 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files. Owner ruling 2026-10-15 (install-set):
-# a guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
+# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files.
+# A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
 # with this run's id, into DEST_HOOKS/guard.d/<id>/, where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
 # id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept

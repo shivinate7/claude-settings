@@ -62,7 +62,7 @@ def _push_bare_destination(cwd: str, overrides=None):
 def _push_default_branches(cwd: str, remote: str):
     """The default branch names, or None when git cannot be read at all.
 
-    `guard_core.read_default_base` answers for the PUSHED remote (owner's ruling 2026-10-16). A
+    `guard_core.read_default_base` answers for the PUSHED remote. A
     resolved `<remote>/HEAD` names the one branch. Any other answer (HEAD unset, dangling, or a
     read that did not answer) protects main AND master, plus the name HEAD holds. No readable
     repository is unknown, and unknown is never safe.

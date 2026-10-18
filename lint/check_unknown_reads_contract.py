@@ -9,11 +9,10 @@ failed and the caller does not know which. Folding that third answer into either
 first two is the defect this check exists to catch: a silent allow reads as "nothing is
 wrong", and a silent deny reads as "this is unsafe", when the true state is "unread".
 
-WHY THIS IS BEHAVIOURAL, NOT A GREP. An earlier draft of this check planned to scan the
-source tree for phrases such as "cannot read" and call that coverage. decisions/
-predicate-is-the-act.md already paid for that lesson: a phrase list grows one shape at a
-time and never finishes, and it passes on a branch that spells the same failure a different
-way. This check instead REPRODUCES the failure -- makes the read genuinely fail -- and
+WHY THIS IS BEHAVIOURAL, NOT A GREP. A scan of the source tree for phrases such as "cannot
+read" is no coverage: a phrase list grows one shape at a time and never finishes, and it
+passes on a branch that spells the same failure a different way (decisions/
+predicate-is-the-act.md). This check instead REPRODUCES the failure -- makes the read genuinely fail -- and
 reads the code's own answer back, the way hooks/mutate_guard.py proves a rule catches its
 own defect rather than assuming a green run means the rule exists.
 

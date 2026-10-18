@@ -1,13 +1,12 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
 `hooks/decision_watch.py`'s config report section already imports `lint/report_gate.py`, which
-already imports `lint/ste_gate.py`. The "no import between two
-hooks fired by the same Stop event" rule that once justified copying these readers into each
-hook is retired, so this module holds the one copy and the four hooks import it.
+already imports `lint/ste_gate.py`. This module holds the one
+copy of these readers, and the four hooks import it.
 
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
 and its `content` blocks. paragraph_blocks / format_finding are the STE-lint-result helpers
-`lint/ste_gate.py` and `lint/md_sweep.py` both used to carry.
+`lint/ste_gate.py` and `lint/md_sweep.py` both use.
 
 format_finding is also the one place both of those hooks turn a finding's `message` into text
 for a reason a person or the model reads: ste_gate.py's permissionDecisionReason, live on every

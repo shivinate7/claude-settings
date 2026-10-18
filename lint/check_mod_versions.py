@@ -2,7 +2,7 @@
 """Fails when a changed plugin's plugin.json version did not rise against origin/main.
 
 `claude plugin update` keeps the installed copy when the version is the same, so a changed mod with
-no bump never reaches an install (incident 2026-10-14, PR 430). Plugin folders: every folder under
+no bump never reaches an install. Plugin folders: every folder under
 mods/ with a plugin.json, and every folder .claude-plugin/marketplace.json lists as a "./" source.
 The diff is origin/main...HEAD (the merge base), so a main that moved ahead does not flag a plugin
 this branch never touched. Plugins are matched by plugin.json "name", not by folder: the install

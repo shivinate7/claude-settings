@@ -19,7 +19,7 @@ function Get-Git { $ErrorActionPreference = 'Continue'; & git @args 2>$null }
 function Get-FullDir([string]$p) { [IO.Path]::GetFullPath($p).TrimEnd('\') }
 $CloneDir = $RepoDir     # the clone that holds .git\hooks; $RepoDir moves to the pinned checkout below
 $IsLinked = $false
-# Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
+# An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
 # worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked worktree
@@ -63,7 +63,7 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
 }
 
 # ---- one install at a time, one start line and one end line in the install log -----------------------
-# Owner ruling 2026-10-15 (install-set). The lock is a file made with CreateNew and held open with no
+# The lock is a file made with CreateNew and held open with no
 # sharing and delete-on-close, so it goes away when this run ends, even if it dies. install.sh and the
 # post-merge hook make the same file with noclobber, so the three paths wait on each other. A run waits
 # CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with nothing written.
@@ -385,8 +385,8 @@ function New-Link([string]$Path, [string]$Target) {
     if ($env:CLAUDE_SETTINGS_FORCE_COPY -eq '1') { throw 'symlink forced off by CLAUDE_SETTINGS_FORCE_COPY' }
     try { New-Item -ItemType SymbolicLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null; return }
     catch { $newItemErr = $_.Exception.Message }
-    # Windows PowerShell 5.1 New-Item needs admin even in Developer Mode; mklink does not
-    # (measured 2026-10-15). Try it before the caller copies.
+    # Windows PowerShell 5.1 New-Item needs admin even in Developer Mode; mklink does not.
+    # Try it before the caller copies.
     if ($env:OS -eq 'Windows_NT') {
         $flag = if (Test-Path -LiteralPath $Target -PathType Container) { '/D ' } else { '' }
         $out = cmd /c "mklink $flag`"$Path`" `"$Target`" 2>&1"
@@ -530,7 +530,7 @@ function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) 
     }
     return $how
 }
-# Copy mode, the guard files. Owner ruling 2026-10-15 (install-set): a guard run sees the old set or the
+# Copy mode, the guard files. A guard run sees the old set or the
 # new set, never a mix. Step 1 (here) writes every guard file, stamped with this run's id, into
 # hooks\guard.d\<id>\, where no guard reads it yet. Step 2 is the landing loop below, which lands
 # guard.py first: the one landing that switches, because a stamped guard.py loads guard.d\<its id>\
