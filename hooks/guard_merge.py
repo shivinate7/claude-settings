@@ -1,7 +1,7 @@
 """The guard's merge family: a merge made outside the merge tool, and the git and gh call readers.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import fnmatch
 import json

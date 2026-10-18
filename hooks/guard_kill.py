@@ -1,7 +1,7 @@
 """The guard's kill family: a machine-wide kill, a detached launch and the Playwright browser cache.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import itertools
 import os

@@ -147,8 +147,7 @@ import sys
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
-# file (decision guard-split-by-family). This
-# file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
+# file. This file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
 _HERE = os.path.dirname(os.path.realpath(__file__))
 if sys.path[:1] != [_HERE]:
     sys.path.insert(0, _HERE)

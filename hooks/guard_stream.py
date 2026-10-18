@@ -1,8 +1,8 @@
 """The guard's stream family: a stream that never ends, a waiter loop, a background server with no end
 note, a waiter loop over a pattern and two ported shell traps.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
