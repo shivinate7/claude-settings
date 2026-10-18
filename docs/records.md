@@ -1,6 +1,6 @@
 # Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/`, `deferred/` and `plans/`. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/` and `plans/`. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
@@ -98,7 +98,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
 | `a-kill-by-pid-needs-an-owned-pid` | CLAUDE.md: "Never kill a process you did not start." `kill` with a literal pid is denied under rule `machine-wide-kill` when the pid is not owned. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
-| `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops, and that worktree is removed when Part 4 allows. | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops. | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
 | `ask-steps-run-alone` | An agent never chains a step that needs the owner's answer onto other steps in one command (owner, 2026-10-14). | [`decisions/ask-steps-run-alone.md`](../decisions/ask-steps-run-alone.md) |
@@ -108,7 +108,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `browser-prompts-are-the-apps` | Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's approval prompts on outside sites. | [`decisions/browser-prompts-are-the-apps.md`](../decisions/browser-prompts-are-the-apps.md) |
 | `build-dirs-reaped-at-agent-end` | Owner, 2026-10-11: the agent-end reap also deletes build folders. | [`decisions/build-dirs-reaped-at-agent-end.md`](../decisions/build-dirs-reaped-at-agent-end.md) |
 | `builders-cannot-edit-tests` | A builder that cannot pass a test must not delete, skip or rewrite it. | [`decisions/builders-cannot-edit-tests.md`](../decisions/builders-cannot-edit-tests.md) |
-| `ci-unknown-is-red-and-dedup` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red-and-dedup.md`](../decisions/ci-unknown-is-red-and-dedup.md) |
+| `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red.md`](../decisions/ci-unknown-is-red.md) |
 | `cite-by-id-blocks-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard blocks `git commit -F <file>` when it cannot read the file at hook time. | [`decisions/cite-by-id-blocks-unread-file.md`](../decisions/cite-by-id-blocks-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`decisions/copy-mode-overwrites-no-backup.md`](../decisions/copy-mode-overwrites-no-backup.md) |
@@ -117,9 +117,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
 | `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`decisions/dependabot-security-only.md`](../decisions/dependabot-security-only.md) |
 | `design-skills` | Owner, 2026-10-10: three third-party skills apply to any repo with screens. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
+| `detached-launch-refused` | The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. | [`decisions/detached-launch-refused.md`](../decisions/detached-launch-refused.md) |
 | `docs-only-prs-skip-review` | Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, gate or product code, gets no reviewer pass. | [`decisions/docs-only-prs-skip-review.md`](../decisions/docs-only-prs-skip-review.md) |
 | `draft-until-reviewed` | Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. | [`decisions/draft-until-reviewed.md`](../decisions/draft-until-reviewed.md) |
-| `every-lint-rule-blocks-or-does-not-exist` | Owner: a lint rule either blocks or does not exist. | [`decisions/every-lint-rule-blocks-or-does-not-exist.md`](../decisions/every-lint-rule-blocks-or-does-not-exist.md) |
 | `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`decisions/fewest-words-mandate.md`](../decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right. | [`decisions/frozen-path-resolves-shell-vars.md`](../decisions/frozen-path-resolves-shell-vars.md) |
 | `gate-hooks-fail-closed` | Owner, 2026-10-12: a gate whose script or python is missing refuses the call. | [`decisions/gate-hooks-fail-closed.md`](../decisions/gate-hooks-fail-closed.md) |
@@ -129,11 +129,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-log-read-weekly` | Owner, 2026-10-13. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
 | `haiku-prompt-hooks` | **Prompt hooks judge rules that no script can parse.** Each blocks the call when it finds a breach (owner ruling 2026-10-07). | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
-| `handoff-hooks-wave-2` | Owner, 2026-10-13 11:20 CDT: three hooks live in claude-settings. | [`decisions/handoff-hooks-wave-2.md`](../decisions/handoff-hooks-wave-2.md) |
 | `hold-unsafe-after-round-3` | Owner, 2026-10-15 12:00 CDT. | [`decisions/hold-unsafe-after-round-3.md`](../decisions/hold-unsafe-after-round-3.md) |
 | `hooks-share-the-transcript-reader` | The Stop hooks read the transcript through one module, `lint/_transcript.py`. | [`decisions/hooks-share-the-transcript-reader.md`](../decisions/hooks-share-the-transcript-reader.md) |
 | `install-hooks-whole` | No running session judges a call with a missing, short or mixed set of hook files. | [`decisions/install-hooks-whole.md`](../decisions/install-hooks-whole.md) |
-| `janitor-dirty-test-stays` | Owner word, 2026-10-13 15:56 CDT: option A. | [`decisions/janitor-dirty-test-stays.md`](../decisions/janitor-dirty-test-stays.md) |
 | `lane-by-slug` | Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: the guard refuses a session number that names a lane, such as `N20` or `(N16)`. | [`decisions/lane-by-slug.md`](../decisions/lane-by-slug.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | A blind-command fixture cannot shadow a real executable for a list-form subprocess call on Windows. | [`decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
 | `local-time-central` | Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. | [`decisions/local-time-central.md`](../decisions/local-time-central.md) |
@@ -144,6 +142,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no workflow step. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
+| `opus-grant-expires` | An Opus worker is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). | [`decisions/opus-grant-expires.md`](../decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | When the owner opens a feedback burst, a hook writes each message to a per-session inbox. | [`decisions/owner-feedback-inbox.md`](../decisions/owner-feedback-inbox.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`decisions/plain-prose-lint.md`](../decisions/plain-prose-lint.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`decisions/playwright-browsers-path.md`](../decisions/playwright-browsers-path.md) |
@@ -153,16 +152,18 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `question-judge-reads-rulings` | The question judge (question-outcome-check) reads the repo's decision and debt records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
 | `question-outcome-check` | A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`. | [`decisions/question-outcome-check.md`](../decisions/question-outcome-check.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
+| `reply-judge-samples-never-blocks` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`decisions/reply-judge-samples-never-blocks.md`](../decisions/reply-judge-samples-never-blocks.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
 | `rm-on-a-variable-needs-a-guard` | Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt. | [`decisions/rm-on-a-variable-needs-a-guard.md`](../decisions/rm-on-a-variable-needs-a-guard.md) |
 | `rulings-declare-kind` | A decision record that a pull request adds or changes must say what kind each ruling is: a build task, or a process change. | [`decisions/rulings-declare-kind.md`](../decisions/rulings-declare-kind.md) |
+| `safe-stop-queues-one-prompt` | `/safe-stop` is a command of the session-board mod (`session-board-mod-limits`, session-board keeps small records). | [`decisions/safe-stop-queues-one-prompt.md`](../decisions/safe-stop-queues-one-prompt.md) |
 | `session-board-mod-limits` | The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all sessions and a safe stopping point, with no typing of "status?" into each one. | [`decisions/session-board-mod-limits.md`](../decisions/session-board-mod-limits.md) |
 | `session-end-sweep-is-disarmed-until-liveness-is-proven` | The `SessionEnd` hook in `settings.json` runs `janitor/session_end_sweep.py`. | [`decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`](../decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md) |
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`decisions/silent-undo-check-design.md`](../decisions/silent-undo-check-design.md) |
+| `sim-boot-is-verified` | The record hook of `sweep-shuts-down-idle-simulators` (ruling 1) checks each device that a `simctl boot` or an MCP `launch` took from `Shutdown` to `Booted`. | [`decisions/sim-boot-is-verified.md`](../decisions/sim-boot-is-verified.md) |
 | `source-prose-lint-ships-dark` | The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and `check_source`). | [`decisions/source-prose-lint-ships-dark.md`](../decisions/source-prose-lint-ships-dark.md) |
 | `stale-safe-force-push` | The owner gets no prompt for a safe push, and no push overwrites newer remote work with a stale copy. | [`decisions/stale-safe-force-push.md`](../decisions/stale-safe-force-push.md) |
 | `stall-watch` | The session learns within minutes that a background command stalled, and diagnoses the cause. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
-| `stall-watch-stop-check` | When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. | [`decisions/stall-watch-stop-check.md`](../decisions/stall-watch-stop-check.md) |
 | `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "A stash entry belongs to no branch." The guard reads `git stash` against the whole stack, not only the working tree. | [`decisions/stash-stack-is-a-shared-subject.md`](../decisions/stash-stack-is-a-shared-subject.md) |
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
@@ -173,6 +174,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch that holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `unattended-sweep-stops-proven-orphans` | **What an unattended run can stop.** A `--confirm` run, run by the SessionEnd hook or the scheduled task, can send one signal to one process. | [`decisions/unattended-sweep-stops-proven-orphans.md`](../decisions/unattended-sweep-stops-proven-orphans.md) |
 | `ux-house-rules` | The UX rules that every repo with screens shares, beyond the three third-party sets, live in `ux/`. | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
+| `when-a-worktree-may-be-removed` | Four idle limits. | [`decisions/when-a-worktree-may-be-removed.md`](../decisions/when-a-worktree-may-be-removed.md) |
 | `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`decisions/worktree-setup-is-per-repo.md`](../decisions/worktree-setup-is-per-repo.md) |
 | `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
 
