@@ -2,7 +2,7 @@
 
 ## The ruling
 
-A test must not fail on runner speed.
+A test must not fail on runner speed. CI runs a job only when its suites' files change, runs OS-independent suites on ubuntu only, and splits a near-cap job's slowest suite by family (a `ci-hygiene` step).
 
 1. A skipped test reports SKIP with a count, never PASS. The fail-closed test list comes from the guard modules on disk.
 2. No test waits on a fixed sleep or a wall-clock bound. A test uses a marker file, a ratio to a same-process baseline, or an injected

@@ -2,6 +2,8 @@
 
 ## The ruling
 
+Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. The unattended run needs merged, or pushed and idle 24 h. A dirty tree is never reaped. A read that cannot tell keeps the tree.
+
 Four routes remove a worktree: the unattended `--confirm` run, and three routes that remove a tree under `.claude/worktrees/agent-*` without both of its conditions. Those three are the agent-end reap, the session-end sweep's agent rule, and the repository's own `reap:worktrees` script. A route removes a worktree only when every read of that route answers a confirmed yes. A read that cannot tell keeps the tree.
 
 ### Idle limits, side by side
@@ -11,15 +13,15 @@ Every idle limit reads idle the same way: the newest mtime of the worktree's own
 | Idle limit | Route | Case it governs | Why this limit |
 |---|---|---|---|
 | 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | The tree is clean and pushed, so no work is at risk. The wait only keeps a follow-up message to the finished agent working. |
-| 1 hour | Unattended `--confirm` run: the daily job and SessionEnd | Every worktree this route removes, together with the merged-or-pushed test below. | A merged tree holds work that is already on the default branch. One hour only spares a tree that a session just touched. |
-| 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in every repo. | This route has no SubagentStop to tell it the agent has finished, so it judges by quiet alone and waits longer than the reap. |
-| 24 hours | Unattended `--confirm` run | A pushed tree, merged or not. | Pushed proves that a copy exists, not that the work is done. A day leaves time to pick the tree up again. |
+| 1 hour | Unattended `--confirm` run: the daily job and SessionEnd | Every worktree this route removes, together with the merged-or-pushed test below. | Unrecorded. |
+| 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in every repo. | Unrecorded. |
+| 24 hours | Unattended `--confirm` run | A pushed tree that is not merged. A merged tree goes at 1 hour. | Pushed proves that a copy exists, not that the work is done. A day leaves time to pick the tree up again. |
 
 Each route keeps its own limit. A clean, pushed agent worktree that is not merged is governed by the agent-end reap (30 min) and the agent rule (4 hours). The unmerged 24-hour limit applies to it only on the unattended run.
 
 ### Safe work
 
-- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough. HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below.
+- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below.
 - This covers every worktree reap, locked or not. `--confirm` unlocks, then removes, never with `--force`. If removal fails, the sweep restores the lock.
 - A stale agent lock is judged by the rule in `the-janitor-is-one-machine-wide-sweep`.
 - Owner word, 2026-10-13 15:56 CDT: option A. The janitor's dirty test stays as it is. No junk-pattern change. Reaping dirty trees stays closed. The restore-point rule does not reopen it.

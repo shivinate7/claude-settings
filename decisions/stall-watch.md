@@ -2,8 +2,8 @@
 
 ## The ruling
 
-The session learns within minutes that a background command stalled, and diagnoses the cause. When the
-stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
+The session learns within minutes that a background command stalled, and diagnoses the cause. The Stop-time check lists stalled shells and never blocks.
+When the stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
 stale cache lock, and the report names the lock file. A stop on a timer would kill a slow but healthy job
 and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
 guard rule, so the watcher does the waiting and the session is told once.

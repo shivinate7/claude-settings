@@ -294,7 +294,7 @@ WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
 
-OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision agent-end-reap-stops-what-a-finished-agent-left (own tree waits 30 idle min); a later agent end removes it
+OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision when-a-worktree-may-be-removed (own tree waits 30 idle min); a later agent end removes it
 
 
 def reap_worktrees(target: str, deadline: float):

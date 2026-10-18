@@ -479,7 +479,7 @@
 - model-cap-alias-rows-merged: Alias, availableModels and /model picker rows in subagent-model-cap are one row now. the haiku 'follows Claude Code' wording is gone. Decision: subagent-model-cap
 - discard-fail-closed-list-in-code-only: The shape list that keeps the ask in a linked worktree now lives only in hooks/guard_shared_tree.py. Decision: agent-worktree-discard-is-noted
 - silent-undo-flag-print-no-cap-unrecorded: The 'print every flagged line, no cap' choice left the decision and is unverified in lint/check_silent_undo.py. Decision: silent-undo-check-design
-- janitor-ruling-over-judge-cap: the janitor and stop-guardrail rulings exceed the 800-char judge cap, so the judge sees only their first sentences. Decision: the-janitor-is-one-machine-wide-sweep
+- janitor-ruling-over-judge-cap: the janitor and stop-guardrail rulings exceed the 800-char judge cap, so the judge sees only their first sentences. Decision: when-a-worktree-may-be-removed
 - feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch

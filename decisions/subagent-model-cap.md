@@ -11,7 +11,7 @@ claude-code-guide, test-author, reviewer and record-writer. Prose alone enforces
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
 `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it, and `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1.
-A write that raises it is an ask, and the raise expires (`opus-grant-expires`, an Opus grant expires).
+The ask on a write and the expiry of a grant are in `opus-grant-expires`, an Opus grant expires.
 
 **The model per role.** Reason: Haiku is cheap enough for read-only work, tests, review and
 record-writing, and the owner will measure cost and quality. Writing prose and records is not building.
