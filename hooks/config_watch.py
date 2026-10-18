@@ -42,9 +42,8 @@ The fix reads a second field the override file carries OUTSIDE its `env` block:
 `_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
 `env` is exported into every subagent's shell, which an expiry timestamp has no business being.
 And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
-into a second cap-change ask the field is not one. MEASURED: `guard._cap_reading('"_subagentCapUntil":
-"2026-09-21T00:00:00Z"')` returns `{}`. The guard's PreToolUse ask never sees this field, and only
-this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
+into a second cap-change ask the field is not one. The guard's PreToolUse ask never sees this field,
+and only this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file
@@ -324,8 +323,7 @@ def reading_text(reading) -> str:
 # `_subagentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
 # text scan. That keeps it out of `env` (see the module docstring: an `env` key is exported into
 # every subagent's shell, and a key inside `env` is what `guard.SUBAGENT_CAP_KEY` reads). It also
-# keeps this watch the ONLY reader of it: MEASURED, `guard._cap_reading('"_subagentCapUntil": "..."')`
-# returns `{}`, so the PreToolUse ask never fires on this field alone.
+# keeps this watch the ONLY reader of it, so the PreToolUse ask never fires on this field alone.
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = "_subagentCapUntil"
