@@ -10,6 +10,9 @@ The cases pin this contract:
 - Each hit prints `path:line` (the physical line of the comment or docstring text) and the matched text.
 - Comments come from `tokenize`, docstrings from `ast`. The same words in any other string never fail.
 - Only lines the diff adds can fail (a ratchet). Old lines never fail, even when the diff moves them.
+- Line numbers follow `ast` and `tokenize`, which break lines on \\r\\n, \\r and \\n only. A U+2028, U+2029,
+  \\x0b, \\x0c, \\x1c-\\x1e or \\x85 inside a string never shifts a reported line or hides an added one.
+- Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -43,10 +46,15 @@ CLEAN = [
     "review the code first", "ask the reviewer", "the year 2026",
 ]
 
+# Characters that str.splitlines() treats as a line break but ast and tokenize do not.
+NON_BREAKS = [" ", " ", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85"]
+
+REMEDY = "say what and why; the history goes in git or the decision"
+
 
 def at(src, needle):
-    """1-based number of the first line of src that holds needle."""
-    for n, line in enumerate(src.splitlines(), 1):
+    """1-based number of the first line of src that holds needle. Lines break on \\n only, as in ast."""
+    for n, line in enumerate(src.split("\n"), 1):
         if needle in line:
             return n
     raise AssertionError("fixture lacks %r" % needle)
@@ -180,6 +188,53 @@ class FlagsAddedLines(Case):
         self.assertIn("MEASURED", self.hit_line(out, "pkg/mod.py", 5) or "")
         self.assertNoHit(out, "pkg/mod.py", 1)
         self.assertNoHit(out, "pkg/mod.py", 4)
+
+    def test_each_hit_row_carries_the_one_line_remedy(self):
+        samples = ["fixed in round 2", "from PR #509", "reverted in 2ff288b3", "MEASURED 40 ms",
+                   "since 2026-10-18", "owner ruling"]
+        src = "".join("# %s\n" % t for t in samples) + 'def f():\n    """Does a thing.\n\n    %s\n    """\n' % samples[0]
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"pkg/mod.py": src})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        lines = list(range(1, len(samples) + 1)) + [at(src, "    fixed in round 2")]
+        for line in lines:
+            with self.subTest(line=line):
+                row = self.hit_line(out, "pkg/mod.py", line)
+                self.assertIsNotNone(row, out)
+                self.assertIn(REMEDY, row.lower())
+
+
+class LineCounting(Case):
+    """A character that only str.splitlines() breaks on, inside a string, must not move a line number."""
+
+    @staticmethod
+    def docstring_src(sep, narration):
+        return 'S = "a%sb"\n\n\ndef f():\n    """Does a thing.\n\n    Returns one.\n%s    """\n    return S\n' % (
+            sep, "    %s\n" % narration if narration else "")
+
+    def test_added_docstring_line_after_a_non_break_in_a_string_is_flagged(self):
+        files = {"n%d.py" % i: self.docstring_src(sep, None) for i, sep in enumerate(NON_BREAKS)}
+        self.base(dict(files, **{"keep.py": "x = 1\n"}))
+        changed = {"n%d.py" % i: self.docstring_src(sep, "Fixed in round 2.") for i, sep in enumerate(NON_BREAKS)}
+        self.change(changed)
+        rc, out = self.lint()
+        for i, sep in enumerate(NON_BREAKS):
+            with self.subTest(sep=repr(sep)):
+                self.assertHit(out, "n%d.py" % i, at(changed["n%d.py" % i], "round 2"))
+        self.assertEqual(rc, 1, out)
+
+    def test_new_file_reports_the_ast_line_after_a_non_break_in_a_string(self):
+        self.base({"keep.py": "x = 1\n"})
+        files = {"f%d.py" % i: self.docstring_src(sep, "Fixed in round 2.") for i, sep in enumerate(NON_BREAKS)}
+        self.change(files)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for i, sep in enumerate(NON_BREAKS):
+            path, want = "f%d.py" % i, at(files["f%d.py" % i], "round 2")
+            with self.subTest(sep=repr(sep)):
+                self.assertHit(out, path, want)
+                self.assertNoHit(out, path, want + 1)
 
 
 class Ratchet(Case):
