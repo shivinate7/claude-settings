@@ -34,6 +34,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    concurrency cap, such as hosted macOS, queue first.
 5. **Cap each job's time.** Set `timeout-minutes` on each job at about 2x its slowest green run.
    Give a network step, such as a browser install, its own short cap.
+   When a job nears its cap, split the slowest suite's subject by family into its own job. Give
+   the measured CI time before and after.
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
    required check, so its failure shows on no PR.
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as

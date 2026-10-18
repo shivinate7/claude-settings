@@ -29,8 +29,7 @@ branch, a merge approval for one act, a personal preference. `lint/ruling_census
   scratchpad: each ruling in it moves to its decision entry or a deferred item.
 - No standing `records/<session>` branch for the orchestrator's records, until a measure shows the
   cost of a record is the cause.
-- The home for a deferred item is the `deferred/` folder, one file per item. Some repos call this
-  kind "debts".
+- The home for a deferred item is the `debts/` folder, one file per item.
 - Auto-memory stays on, as short-term notes. When a fact or ruling has a tracked home on main,
   delete its memory file and its `MEMORY.md` line (`rule:building-memory-is-short-term`).
 

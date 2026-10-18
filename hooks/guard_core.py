@@ -1,8 +1,8 @@
 """The guard's shared code: stream encoding, shell segments, heredoc bodies, git call parsing,
 command roots, tree and worktree reads, session liveness, the config folder, and the log.
 
-guard.py is the only entry point. It loads this module from its own folder (decision
-guard-split-by-family). Other files reach these names through `guard`. A test or the janitor
+guard.py is the only entry point. It loads this module from its own folder.
+Other files reach these names through `guard`. A test or the janitor
 that patches one of them patches it here, on the one object that every caller reads.
 """
 import errno

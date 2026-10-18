@@ -1,7 +1,7 @@
 """The guard's rm-var family: a recursive delete on an unguarded variable.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import functools
 import itertools

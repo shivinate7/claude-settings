@@ -1,7 +1,7 @@
 """The guard's frozen family: a write to the settings, the hooks or the global CLAUDE.md.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
