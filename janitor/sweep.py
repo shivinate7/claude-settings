@@ -597,7 +597,7 @@ def fully_pushed(path: str):
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
-# Owner ruling 2026-10-09 (decisions/unattended-sweep-stops-proven-orphans.md): a pushed, clean,
+# Owner ruling 2026-10-09 (decisions/when-a-worktree-may-be-removed.md): a pushed, clean,
 # NOT merged tree is removable once it is idle this long.
 STRICT_UNMERGED_IDLE_SECONDS = 24 * 60 * 60
 
