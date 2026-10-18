@@ -12,7 +12,7 @@ subprocess, with the hook JSON on stdin and its stdout and stderr written to fil
 cases import the module and swap its `gh`, `time`, `subprocess` and `shutil` for fakes: no gh runs
 and no wait is real.
 
-Decision, from decision handoff-hooks-wave-2, part 3 (CI wake-up):
+Decision ci-wait-reads-run-status, section "The CI wake-up":
 - Only `gh pr ready <N>` starts a watch. A `git push` in any form starts none, and makes no gh call.
 - Each `gh pr ready` in one command gets its own watch, in one process. The hook prints one
   verdict line per PR, then exits 2 once.

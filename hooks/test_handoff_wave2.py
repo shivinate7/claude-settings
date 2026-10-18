@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cases for the wave-2 handoff hooks: decisions/handoff-hooks-wave-2.md, ruling items 1 and 2.
+"""Cases for the wave-2 handoff hooks: decisions/precompact-handoff.md, items 8 and 9.
 Standard library only, and no test runner.
 
 Run it from the repository root:
