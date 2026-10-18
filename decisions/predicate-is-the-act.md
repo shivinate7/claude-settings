@@ -21,5 +21,14 @@ Named limits:
 - A file written this turn whose content matches HEAD is clean. The git filter drops it.
 - Another agent writing markdown into the same checkout is read as this turn.
 
+Measured 2026-09-19 against `hooks/guard.py`: a cap lift to `.claude/settings.local.json` drew an ask
+from the Write tool, a `>` redirect, a heredoc, `tee` and `jq ... > file`. It was ALLOWED from `cp`,
+`mv`, `sed -i`, `python3 -c "open(path,'w')"`, `python3 gen.py` and `bash gen.sh`: the value sits in
+another file or a script, so no list of write commands closes the gap. `hooks/config_watch.py` hashes
+the file instead.
+
+Measured 2026-09-20: `guard._cap_reading('"_subagentCapUntil": "2026-09-21T00:00:00Z"')` returns `{}`, so
+the guard never sees the expiry field and only the watch reads it.
+
 Kind: process
 Home: lint/md_sweep.py

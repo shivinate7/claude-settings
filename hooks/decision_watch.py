@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 """Claude Code hook: decision/gate/settings watch (Stop). Replaces the `type: agent` guardrail.
 
-WHAT IT REPLACES. The Stop hook used to spawn a Sonnet subagent that read `transcript_path`
-and judged, in prose, whether the turn silently changed a decision, gate, build-order,
-CLAUDE.md or settings file without visible chat approval. An agent hook goes through the
-permission system before its own `Read`/`Bash` calls run. MEASURED across every session
-transcript on this machine since 2026-09-15: 34 real flags, and roughly 60 "Unable to
-verify" answers that correlate with the desktop app's `auto` permission mode, where the
-transcript path sits outside the working directory and a hook agent cannot prompt to cross
-it. In `bypassPermissions`, where the hook does work, it still spends a full model turn on
-every Stop, whether or not anything protected changed.
-
-WHAT THIS FILE DOES INSTEAD. A command hook. Command hooks receive the same Stop JSON
+WHAT THIS FILE DOES. A command hook. Command hooks receive the same Stop JSON
 (`transcript_path`, `session_id`, `cwd`) with no permission check at all, so the `auto`-mode
-failure mode above cannot happen here. It answers the cheap part of the question itself,
+failure cannot happen here. It answers the cheap part of the question itself,
 from `git status` and the transcript, and calls a model only for the residual judgment a
 file diff cannot make: whether an approval for this exact change is visible in the chat.
 
@@ -31,16 +21,9 @@ match: a triage filter that decides whether to spend a model call, never the ver
 itself, so a false positive costs one subprocess call and a false negative skips judgment
 entirely.
 
-THE GATE, CORRECTED 2026-09-22 AGAINST AN INDEPENDENT AUDIT. An earlier version of this
-hook also spent a model call on an outbound `SendMessage`/`Task` alone, with no matching
-disk change, to catch one measured flag with no local file edit: a message telling a peer
-session to remove a rule from a skill file. The audit of all 34 historical flags found
-that shape produced a false positive of its own (a peer instructed to do something that
-had not yet executed), and named the same shape in two more of the three false positives
-(a role question, and a probe of a scratch copy rather than the real file). `run` now
-gates every model call on `protected`, an ACTUAL on-disk change to a protected path,
-full stop. `looks_concerning`'s outbound scan still runs, but only to enrich the evidence
-a real change already triggered on, never to trigger by itself.
+THE GATE. `run` gates every model call on `protected`, an ACTUAL on-disk change to a protected
+path. `looks_concerning`'s outbound scan only enriches the evidence of a change that already
+triggered the call.
 
 WHEN NOTHING PROTECTED IS TOUCHED. No model call. Print nothing. Exit 0. This is the common
 case and it must stay fast: a `git status` and the transcript's tail for the last human
@@ -61,15 +44,11 @@ prompt asked for, on the same criteria: additive or consistent, or surfaced as a
 and approved, is ALLOW; silently changed, weakened, removed, or reversed with no visible
 approval is FLAG.
 
-THE PER-INCIDENT, PER-SESSION CAP, ADDED 2026-09-22. The same audit found 34 raw flags
-collapsing to 8 real incidents: one unresolved finding re-flagged at every Stop while the
-owner had not yet answered, ten times in one case. `decisions/guard-that-cries-wolf-is-
-spent.md` names this exact shape. `incident_key` hashes the protected paths plus their
-evidence; `_load_seen`/`_mark_seen` persist that hash per session under
-`<config dir>/state/decision-watch/`, the same frozen `state` subtree
-`hooks/config_watch.py` already uses for its own baseline. A finding already flagged this
-session, with unchanged evidence, stays quiet. A finding whose evidence moved is a new
-incident and is reported once more.
+THE PER-INCIDENT, PER-SESSION CAP (decision `guard-that-cries-wolf-is-spent`). `incident_key`
+hashes the protected paths plus their evidence; `_load_seen`/`_mark_seen` persist that hash per
+session under `<config dir>/state/decision-watch/`, the same frozen `state` subtree
+`hooks/config_watch.py` uses for its baseline. A finding already flagged this session, with
+unchanged evidence, stays quiet. A finding whose evidence moved is reported once more.
 
 UNKNOWN IS A FIRST-CLASS OUTPUT. Per CLAUDE.md's Verification rule, a read that could not
 run is reported as unknown, never as clear and never as a flag. `transcript_path` missing
@@ -79,16 +58,11 @@ run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook onl
 reports, so nothing here ever blocks the turn. The incident cap never touches this branch:
 an UNKNOWN read is never cached and always reported again.
 
-THE CONFIG REPORT. The same Stop run also prints the old `hooks/config_report.py` message,
-folded in below ("the config report"): the project config files, merges into main and
-unreadable subjects of this turn. It is a separate section with its own message, joined to the
-judgment's with a space, and it never calls the model. Under a split flag (below) the output
-also carries `verdict` (the judgment's text alone) and `notices` (one line per kind of
-notice), so a caller can show each notice apart from the verdict.
-
-WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
-is an open draft on another branch, and this file matches the inline python-fallback shape
-already used by the other Stop entries in `settings.json` instead.
+THE CONFIG REPORT. The same Stop run also prints the config report: the project config files,
+merges into main and unreadable subjects of this turn. It is a separate section with its own
+message, joined to the judgment's with a space, and it never calls the model. Under a split flag
+(below) the output also carries `verdict` (the judgment's text alone) and `notices` (one line per
+kind of notice), so a caller can show each notice apart from the verdict.
 """
 import hashlib
 import json

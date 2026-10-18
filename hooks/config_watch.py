@@ -14,47 +14,9 @@ Claude Code runs this file after every tool call that matches, and again when th
   stdout : one JSON object with a systemMessage, or nothing
   exit   : always 0
 
-WHY THIS FILE EXISTS, MEASURED 2026-09-19 against hooks/guard.py on main.
+It reads a content hash of the file, never the shell text (decision `predicate-is-the-act`).
 
-The guard runs at PreToolUse. Rule 8 asks before a write that lifts the subagent model cap. The
-rule needs TWO readings of one tool call: the PATH it writes, and the CAP VALUE it writes there.
-A write that hides either reading walks past the rule. Fed a cap lift to
-`<project>/.claude/settings.local.json` in every shape, the guard answered:
-
-  Write tool                        ask
-  `>` redirect                      ask
-  heredoc                           ask
-  `tee`                             ask
-  `jq ... > file`                   ask
-  `cp /tmp/x.json <path>`           ALLOWED
-  `mv /tmp/x.json <path>`           ALLOWED
-  `sed -i '' s/a/b/ <path>`         ALLOWED
-  `python3 -c "open(<path>,'w')"`   ALLOWED
-  `python3 gen.py`                  ALLOWED
-  `bash gen.sh`                     ALLOWED
-
-The first five name the value on the command line. The last six carry it in another file, in a
-script, or in a substitution, so the value is unreadable and rule 8 stays silent. `cp` is a
-one-word bypass of the cap recorded in `decisions/subagent-model-cap.md`.
-
-WHAT THIS FILE DOES NOT DO. It does not read shell text. A longer list of write commands cannot
-close this hole, because `bash gen.sh` and `python3 gen.py` name no path at all, and
-`f=.claude/settings.local.json; cp x "$f"` names no path either. An allow-list over command words
-closes the command-word axis and leaves the path-visibility axis open.
-
-This is the rule `decisions/predicate-is-the-act.md` records: judge a guard by the ACT it must
-catch, never by the spelling of the act, and when a gate needs a list of shapes the predicate is
-wrong. `lint/md_sweep.py` reached that rule first and dropped its own shape list, which had grown
-to fourteen entries and still missed `python3 gen.py`. The same two shapes are in the table above.
-
-WHERE THIS FILE DIFFERS FROM THE SWEEP, AND WHY. `md_sweep.py` runs at Stop and reads FILE MTIME.
-This file reads a CONTENT HASH. Three reasons. A hash tells a write that changed nothing from a
-write that lifted the cap, so an ordinary `touch` or a rewrite of identical bytes stays silent. A
-hash needs no turn boundary, so it works at PostToolUse where there is no "since the last human
-message" to compare against. And a hash carries the PREVIOUS CONTENT with it, which is what a
-restore needs and an mtime cannot give.
-
-WHAT THIS FILE DOES INSTEAD. It watches the FILE, not the command. After each matching tool call it
+WHAT THIS FILE DOES. It watches the FILE, not the command. After each matching tool call it
 hashes the project settings files and compares each hash against a stored baseline. `cp`, `sed -i`,
 a script file and a path held in a shell variable are all equally visible to a hash. On a cap
 change that the guard did not ask about, this file puts the previous content back and prints a
@@ -74,17 +36,14 @@ DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported
 an ordinary project config edit is re-baselined in silence. Only a change to a CAP VARIABLE is
 reverted, and only when the guard did not ask about it.
 
-THE EXPIRY, ADDED 2026-09-20. An APPROVED lift (the guard asked, the owner said yes) used to stay
-lifted forever: nothing removed the file once the work was done. `decisions/subagent-model-cap.md`
-records that as the grant's own promise.
+THE EXPIRY. An approved lift is revoked at its deadline (decision `subagent-model-cap`, "The grant").
 
 The fix reads a second field the override file carries OUTSIDE its `env` block:
 `_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
 `env` is exported into every subagent's shell, which an expiry timestamp has no business being.
 And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
-into a second cap-change ask the field is not one. MEASURED: `guard._cap_reading('"_subagentCapUntil":
-"2026-09-21T00:00:00Z"')` returns `{}`. The guard's PreToolUse ask never sees this field, and only
-this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
+into a second cap-change ask the field is not one. The guard's PreToolUse ask never sees this field,
+and only this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file
@@ -364,8 +323,7 @@ def reading_text(reading) -> str:
 # `_subagentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
 # text scan. That keeps it out of `env` (see the module docstring: an `env` key is exported into
 # every subagent's shell, and a key inside `env` is what `guard.SUBAGENT_CAP_KEY` reads). It also
-# keeps this watch the ONLY reader of it: MEASURED, `guard._cap_reading('"_subagentCapUntil": "..."')`
-# returns `{}`, so the PreToolUse ask never fires on this field alone.
+# keeps this watch the ONLY reader of it, so the PreToolUse ask never fires on this field alone.
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = "_subagentCapUntil"
