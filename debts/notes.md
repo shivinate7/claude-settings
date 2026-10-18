@@ -343,12 +343,12 @@
 - haiku-hook-model-id-prefix-only: lint/test_settings_matcher.py checks the claude- prefix only, so a well-formed wrong id such as claude-sonnet-5 passes the test and fails open
 - haiku-hook-headless-only: the prompt-hook model id and latency were tested in the headless CLI only, not in the desktop app
 - install-stamp-stuck-file: a file the installer cannot replace keeps its old stamp, so the guard denies every call until an install succeeds; remedy is to run the installer from a terminal. Decision: install-hooks-whole
-- clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: handoff-hooks-wave-2
-- asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: handoff-hooks-wave-2
-- foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: handoff-hooks-wave-2
+- clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
+- asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
+- foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
 - question-check-style-slice: _style_rules in hooks/question_outcome.py cuts 2 chars off a style line not starting with '- '; not reachable today. Decision: question-outcome-check
 - feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
-- sim-hook-gaps: unrecorded boot behind a script with no simulator word. ruling 5 skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. ruling 5 timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators
+- sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
 - builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes write deny. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
 - memory-home-gaps: a Bash write that does not name the memory folder (cd plus relative path, variable, script) is out of reach. one rare false block when this session reads the folder while a peer writes. a ruling typed in chat and never written, and cloud sessions with no memory folder, leave no act to key on. a 'home: process-only' reflex is counted by lint/ruling_census.py only. Decision: memory-is-never-a-rulings-only-home
 - ruling-kind-gaps: actions/ruling-kind/check.sh copies the lint's RULE_FILES with no test comparing them. action never run on a hosted runner. no test for '..' or leading '/' in --dir/records-dir. Edit judge misses old records without Kind and allowed deleting one of two Plan lines. Bash writes into decisions/ not judged. slug lints skip absolute file args and .MD names. Decision: rulings-declare-kind
@@ -394,12 +394,12 @@
 - env-unpinned-shapes: no test pins timeout --preserve-status or --foreground, python3 bin/verdict, or a runner behind env/sudo/command/xargs (reviewer grep of test_guard.py found no case). Decision: none
 - path-identity-windows-unverified: the fallback tests stub _path_identity. os.stat st_dev/st_ino agreement on subst and mapped drives is unverified. A recycled pid with startedAt far behind real creation time is kept, not reaped. Decision: none
 - claude-sharables-stamp-copy: claude-sharables should drop its own copy of the stamp cite near-miss check once adopting repos use the stamp action's check. Decision: none
-- sb-command-turn-unknown: Unknown whether a prompt sent from a command, such as /safe-stop, starts a turn in the app. untested in the app (mods/session-board $.prompt.submit). Decision: session-board-mod-limits
+- sb-command-turn-unknown: Unknown whether a prompt sent from a command, such as /safe-stop, starts a turn in the app. untested in the app (mods/session-board $.prompt.submit). Decision: safe-stop-queues-one-prompt
 - sb-pane-untested: The /board pane draw is untested in the desktop app. for example, a press on a row may not open its detail view (mods/session-board). Decision: session-board-mod-limits
 - sb-process-desktop-unknown: $.process is noted CLI only. if it fails in the desktop app, no session reads ready, the claude agents seed is missing, and the board shows store entries alone. Decision: session-board-mod-limits
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
-- stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch-stop-check
+- stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
 - dw-mod-stop-reach-unproven: Unverified whether classic.Stop reaches a mod in the desktop app, or how long $ lives after it returns on a void shadow call. the watch may never judge. Decision: decision-watch-mod-limits
 - ste-comment-gt-mask-early: A > inside a comment such as <!-- a > b --> ends the mask early, so the rest of the comment is read as text (lint/ste_gate.py). Decision: ste-gate-fixes-not-nags
 - prompt-hooks-fail-open: Prompt hooks (Agent, AskUserQuestion, decisions/ Edit and Write, SendMessage) can deny but have no documented onFailure, so a failed prompt hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
@@ -429,8 +429,8 @@
 - model-ceiling-no-after-read: a spawn above Sonnet with no owner word passes without a prompt. nothing reads it after the turn. Cost accepted: one lane at higher spend. Decision: subagent-model-cap
 - under-provisioning-unguarded: nothing catches a too-weak model before the rework cycle, except the step-up and the floor. Decision: subagent-model-cap
 - done-line-tier-unchecked: no check reads which tier a lane ran, so a Done line need not name a tier above Sonnet. report_gate.py cannot see the model. Decision: subagent-model-cap
-- detached-launch-heredoc-blind: an & job inside bash <<EOF is not seen, because the rule drops each heredoc body first. Decision: agent-end-reap-stops-what-a-finished-agent-left
-- agent-end-resume-fails-after-removal: a resume of a finished agent fails once its worktree is gone after the idle limit. the last agent's tree waits for the session-end sweep. Decision: agent-end-reap-stops-what-a-finished-agent-left
+- detached-launch-heredoc-blind: an & job inside bash <<EOF is not seen, because the rule drops each heredoc body first. Decision: detached-launch-refused
+- agent-end-resume-fails-after-removal: a resume of a finished agent fails once its worktree is gone after the idle limit. the last agent's tree waits for the session-end sweep. Decision: when-a-worktree-may-be-removed
 - merge-net-retry-linux-unmeasured: bin/merge proof on the Mac clone is not measured. Linux is unmeasured. Decision: none
 - stop-guardrail-tool-block-unknown: runtime blocking of tools in the isolated judge call is UNKNOWN, not PASS, because a raw subprocess in the sandbox cannot authenticate. Decision: stop-guardrail-became-a-command-hook
 - stamp-banchi-adoption-step: Banchi must retire its branch-side claim in make merge before running stamp --check, or the check refuses its own numbers. Decision: one-shared-record-stamp
@@ -440,7 +440,7 @@
 - unattended-sweep-branch-reap: branch reap reads local origin/* refs, not ls-remote. A tombstone keeps 90 days. Decision: unattended-sweep-stops-proven-orphans
 - merge-config-defaults: three small behaviours have no test: the stamp.mjs failure line with its log path, the checkout path in the dirty-tree message, and the bare --unlock origin/HEAD-then-gh order. Decision: none
 - a-gates-allow-list-is-the-constant: check_landed_dirs catches a directory added to one side only, never one that neither side holds. the three patterns (import, emit, pin) are now unwritten guidance. Decision: none
-- purge-keeps-younger-restore-ref: the restore point is the branch tip only, with no snapshot of dirty content, and the restore log is never compacted. untested. Decision: janitor-dirty-test-stays
+- purge-keeps-younger-restore-ref: the restore point is the branch tip only, with no snapshot of dirty content, and the restore log is never compacted. untested. Decision: when-a-worktree-may-be-removed
 - ste-lint-gloss-collapse: no test pins that a title holding inline code collapses whole. Decision: none
 - install-sh-mv-retries: the 25 x 0.1 s retry budget in install.sh has no test and no pin to Move-OverFile in install.ps1. Decision: none
 - env-file-rule-false-alarms: The env-file guard refuses `ag -f` and `ack -f` (boolean -f), `grep -r --exclude=.env` and `rg -t py .env`. all four are safe. Where: hooks/guard_env.py. Decision: none
@@ -455,7 +455,7 @@
 - ruling-kind-write-judge-misses: The Write and Edit prompt judges are models and can miss a case. only the Write judge and the lint check a whole record. Decision: rulings-declare-kind
 - one-shared-record-stamp-left-out: The stamp engine leaves out build steps, debts, the flat-file fallback when ORDER.json is missing, branch-side reads (--stale, --unclaim, --landed, --porcelain, merging()), and folder/prefix forms with no pending form. Decision: one-shared-record-stamp
 - stale-safe-force-push-sha-lease: A lease with a sha guards only the one ref it names. the design accepts this, and git's own lease plus --force-if-includes still protects where the guard reads no push. Decision: stale-safe-force-push
-- stall-watch-windows-stop-check: Windows is not covered by the stall hook (it returns nothing when os.name is not posix). the Stop-time check stall-watch-stop-check reports a background shell left open. Decision: stall-watch
+- stall-watch-windows-stop-check: Windows is not covered by the stall hook (it returns nothing when os.name is not posix). the Stop-time check reports a background shell left open. Decision: stall-watch
 - stall-watch-quiet-job: A quiet but healthy job is reported, not stopped, and a command that prints progress forever is never reported even when stuck. Decision: stall-watch
 - stall-watch-log-and-child: After a stall report the temp-directory log stays and nothing removes it. a command that backgrounds its own child is not watched (the guard denies that shape). Decision: stall-watch
 - stall-watch-backslash: A trailing backslash continuation or an odd run of backslashes at the end of a command: the hook probes /bin/sh and doubles the last backslash when sh keeps it literal. Decision: stall-watch
@@ -483,7 +483,7 @@
 - janitor-ruling-over-judge-cap: the janitor and stop-guardrail rulings exceed the 800-char judge cap, so the judge sees only their first sentences. Decision: the-janitor-is-one-machine-wide-sweep
 - feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
-- stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch-stop-check
+- stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/harness-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
 - banchi-build-steps: the shared stamp does not claim Banchi build steps; Banchi numbers them by hand, and its own config needs an `unclaimed` entry whose message names this note. When Banchi's claim-ids.py claims a step in docs/gates/steps/, copy its rules into the engine. Decision: one-shared-record-stamp
 - merge-retarget-before-merge: a base change after the last wait pass and before gh pr merge lands the merge on the new base; no retarget seen. Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none

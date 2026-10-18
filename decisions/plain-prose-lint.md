@@ -5,6 +5,9 @@
 The STE lint is a plain-prose lint. The writer gets a rewrite only where the rewrite keeps the meaning.
 Where the lint cannot judge meaning, it nudges and never blocks.
 
+Owner: a lint rule either blocks or does not exist. A rule nobody can see is not a rule. The six advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
+
+- A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may block. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
 - Errors stay for five codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat),
   STE013 (double negative), STE020 (label length) and STE021 (bad escape).
 - Six codes are advisory and never block: STE003 (nominalization), STE007 (Latin abbreviation), STE008
@@ -22,6 +25,7 @@ Where the lint cannot judge meaning, it nudges and never blocks.
 - `agents/*.md` keep their STE wording. Agent briefs are the future home of the writing standard.
 
 Reason: safer outcome first, smaller diff second. A rewrite that changes meaning costs more than a nudge.
+A guard that goes red on prose the project already lives with finds no defect and is spent (`verification-cry-wolf-guard-is-spent`).
 
 Kind: process
 Home: lint/ste_lint.py

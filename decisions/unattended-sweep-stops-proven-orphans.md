@@ -14,19 +14,6 @@ The signal is SIGTERM on Linux and macOS, and `TerminateProcess` on Windows. Bot
 
 **A process this sweep cannot read is out of scope.** It is counted. It is never acted on, and never a reason to keep something else. A single process whose cwd cannot be read never blocks a worktree removal. Only the WHOLE pid enumeration failing means keep-everything. Reason: on a real machine many processes belong to another account, so keeping on any one of them would refuse to reap anything.
 
-**An unattended run may remove a worktree.** Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd included, needs both of these to remove a worktree:
-
-- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, read-only). It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
-- Idle 1 hour. Every idle limit of the sweep and of the agent rules reads idle the same way: the newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD`. A younger tree is kept. A time that cannot be read keeps the tree.
-
-Three other routes remove a tree under `.claude/worktrees/agent-*` without both. All three are in `agent-end-reap-stops-what-a-finished-agent-left`: the sweep's agent rule, the repo's own `reap:worktrees` script, and the agent-end removal.
-
-The worktree must also be clean and fully pushed. No live session and no process may be inside. The lock must be gone, or its host process must be gone.
-
-Strict is the default. A job that an older installer wrote passes no flag, so it is strict at once, with no reinstall. A person who wants the old rules passes `--attended`. The launchd plist, the Task Scheduler task and the SessionEnd hook never pass it. The agent-end reap takes no flag.
-
-Reason: pushed proves that a copy exists. It does not prove that the work is done. The reasons for the other conditions are in `the-janitor-is-one-machine-wide-sweep`.
-
 **Dead-rooted servers follow the same gate.** `find_dead_rooted` finds a process whose argv names a script file and whose parent directory are both gone, under a deleted checkout or worktree. It stops that process only on two reads: orphaned, and owned by the account running the sweep. It has no session read, because a deleted tree has no checkout left to hold a session. The one signal, the grace period, and the keep on an unreadable answer are the same.
 
 **Loose processes are never stopped.** `find_loose_processes` lists a process whose argv contains a shell-snapshots path. It stops none, under any flag. That path does not prove a Claude Code Bash call started the process, or that the process is abandoned. A live session owns its own wrapper. The tier reports, and a person decides.

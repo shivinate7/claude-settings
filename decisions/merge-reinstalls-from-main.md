@@ -15,13 +15,6 @@
    do. It exits non-zero, so the merge tool reports FAILED. The merge stays. A merge run from a worktree made before this
    change cannot find the script, so the tool reports FAILED. When the local main does not move, the install runs from the old
    main and the tool reports the failed move.
-6. A plain `settings.json` is backed up before the install replaces it (copy-mode-overwrites-no-backup).
-7. An install or update never locks a session out. It switches all guard files at once: it writes a new stamped folder
-   `hooks/guard.d/<id>/`, then makes one rename of `guard.py`. In link mode it makes one rename of the `<clone>-live` link
-   instead. For the guard set this replaces the per-file rule of install-hooks-whole.
-8. One install runs at a time. One lock file serves every installer path: `install.sh`, `install.ps1` and the post-merge hook that
-   `install.ps1` writes.
-9. Each installer path logs a start line and an end line. Each line carries a unique install id and the pid.
 
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its
 checked-out lane branch, so unreviewed hooks would go live.
