@@ -9,8 +9,7 @@ Where the lint cannot judge meaning, it nudges and never blocks.
   STE013 (double negative), STE020 (label length) and STE021 (bad escape).
 - Six codes are advisory and never block: STE003 (nominalization), STE007 (Latin abbreviation), STE008
   (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that"). The nudge is
-  temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (deferred item
-  `ste-into-agent-briefs`).
+  temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (note `ste-into-agent-briefs`).
 - Autofix covers STE011 only, and only a fixed bloat phrase. A borderline STE011 row has no fix and still
   errors, as does a bloat phrase in ALL CAPS.
 - STE001 reads one key, `max_words`, set to 30. Mode decides only whether STE015 runs.

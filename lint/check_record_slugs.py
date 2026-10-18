@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a record file ADDED against origin/main has a slug over 32 characters.
 
-Records live in decisions/, deferred/ and debts/. The UI crops long file names, so a slug is 32
+Records live in decisions/ and debts/. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
     python3 lint/check_record_slugs.py [file ...]
@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 MAX = 32
-DIRS = ("decisions/", "deferred/", "debts/")  # one line: hooks/guard.py reads it
+DIRS = ("decisions/", "debts/")  # one line: hooks/guard.py reads it
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

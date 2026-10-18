@@ -4,7 +4,8 @@
 
 One shared parser in claude-settings handles every repo's record format. Each repo keeps a config file in its
 own tree. No repo gets its format rewritten. No existing record is ever renumbered or renamed. `actions/stamp`
-names no repo: it describes record shapes, config fields and a contract. A behavior that only one repo needs
+names no repo: it describes record shapes, config fields and a contract. The merge tool gets no
+setting that names a repo's own claim command. A behavior that only one repo needs
 becomes a config field with a generic name, or the engine drops it. A shape that no config field can state
 without naming one repo goes to the owner as a question. Do not guess a fourth format into `stamp.mjs`.
 

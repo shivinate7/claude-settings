@@ -83,11 +83,11 @@ second script.
   docs/records.md and never reads settings.json or the model table. A root with a part and no
   settings.json is still exit 2 (F20).
 - Records, read from the root: the `<!-- rule:<id> -->` markers in CLAUDE.md, and the .md files in
-  decisions/, debts/, deferred/ and plans/. A README.md in a folder is no record. Other files and a
+  decisions/, debts/ and plans/. A README.md in a folder is no record. Other files and a
   missing folder are ignored. A file the generator cannot read is exit 2 naming it. An empty record,
   or a debt with no What, is a problem: exit 1 naming the file.
 - Page: one `## ` section per kind, in this order, only when it has a row: Mandates, Rulings, Build
-  designs, Unsorted decisions, Debts, Deferred, Plans. Each holds a table headed Slug | Gist | Link.
+  designs, Unsorted decisions, Debts, Plans. Each holds a table headed Slug | Gist | Link.
   Slug: the rule id, or the file name without .md. Link: `../CLAUDE.md` or `../<folder>/<slug>.md`.
   Rows: Mandates in CLAUDE.md order, every other kind sorted by slug. A pipe in a gist is written \\|.
 - Rulings: Kind: process. Build designs: Kind: build. Unsorted decisions: no Kind line, or a Kind
@@ -99,14 +99,14 @@ second script.
   under the first `## Ruling` or `## The ruling`, else under `## The question`, else the first
   paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
   text stays as written, so a decision whose paragraph opens with bold text (the real
-  one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
+  one-shared-record-stamp does) keeps it. Debt: the What. Plan: the first line, its
   leading # dropped.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
   or "Old ruling", in any case. The other five fail only where they open a block: the text of a
   heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
   marker itself. "was:" fails where it opens a block, or where the word "old" comes earlier in the
   same block ("the old wording was: ..."). A bare "no longer" is no marker. The failure is one line per
-  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
+  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/ and
   plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
   comments are not special: their lines are read as prose, so history hidden in a comment fails when
   it opens a block. A continuation line of a wrapped paragraph does not open a block.
@@ -510,7 +510,7 @@ def row_for(rows, key):
 # ---- the records page: readers and fixture texts ------------------------------------------------
 
 RECORDS_COLUMNS = ["Slug", "Gist", "Link"]
-SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans"]
+SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans"]
 RECORDS_PAGE = os.path.join(ROOT, "docs", "records.md")
 LINK_TARGET = re.compile(r"\]\(([^)]*)\)")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
@@ -583,7 +583,6 @@ LOOSE = ("# Loose note\n\nThis note has no kind and no\nruling heading. It wraps
 TITLED = "# Just a title\n\n## Why\n\nBecause.\n"
 DEBT = ("# Gap one\n\n- **What.** The check misses one case. It also misses a second.\n"
         "- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover both.\n")
-WAITING = "# Waiting for a thing\n\n**What waits.** The thing.\n"
 PLAN = "# Plan: do a thing\n\nOne command does it.\n"
 RULES = ("# How I work\n\n**Building.** Never guess an answer the code should give you.<!-- rule:b-one --> "
          "Surface ambiguity instead\nof resolving it silently. Say why.<!-- rule:b-two -->\n\n"
@@ -595,7 +594,7 @@ def with_records(extra=None):
     spec = clean()
     spec.update({"CLAUDE.md": RULES, "decisions/ruled.md": RULED, "decisions/built.md": BUILT,
                  "decisions/loose.md": LOOSE, "decisions/titled.md": TITLED, "debts/gap-one.md": DEBT,
-                 "deferred/waiting.md": WAITING, "plans/plan-a.md": PLAN})
+                 "plans/plan-a.md": PLAN})
     for rel, text in (extra or {}).items():
         if text is None:
             spec.pop(rel, None)
@@ -917,7 +916,6 @@ class RecordsPage(Tree):
             "Build designs": ["built"],
             "Unsorted decisions": ["loose", "subagent-model-cap", "titled"],
             "Debts": ["gap-one"],
-            "Deferred": ["waiting"],
             "Plans": ["plan-a"],
         })
 
@@ -928,7 +926,6 @@ class RecordsPage(Tree):
             ("Unsorted decisions", "loose"): "This note has no kind and no ruling heading.",
             ("Unsorted decisions", "titled"): "Just a title",
             ("Debts", "gap-one"): "The check misses one case.",
-            ("Deferred", "waiting"): "Waiting for a thing",
             ("Plans", "plan-a"): "Plan: do a thing",
             ("Mandates", "b-one"): "Never guess an answer the code should give you.",
             ("Mandates", "b-two"): "Surface ambiguity instead of resolving it silently.",
@@ -940,7 +937,7 @@ class RecordsPage(Tree):
 
     def test_a3_each_row_links_to_its_file(self):
         folder = {"Rulings": "decisions", "Build designs": "decisions", "Unsorted decisions": "decisions",
-                  "Debts": "debts", "Deferred": "deferred", "Plans": "plans"}
+                  "Debts": "debts", "Plans": "plans"}
         rows = self.rows()
         self.assertTrue(rows)
         for r in rows:
@@ -965,9 +962,9 @@ class RecordsPage(Tree):
         self.assertNotIn("README", got["Debts"])
 
     def test_a6_one_slug_in_two_kinds_gets_two_rows(self):
-        got = listed(self.rows({"decisions/shared.md": RULED, "deferred/shared.md": WAITING}))
+        got = listed(self.rows({"decisions/shared.md": RULED, "debts/shared.md": DEBT}))
         self.assertIn("shared", got["Rulings"])
-        self.assertIn("shared", got["Deferred"])
+        self.assertIn("shared", got["Debts"])
 
     def test_a7_a_decision_gist_comes_from_its_ruling_else_its_question(self):
         extra = {"decisions/g%d.md" % i: text for i, (_name, text, _gist) in enumerate(GIST_CASES)}
@@ -1082,7 +1079,6 @@ class RecordsStale(Tree):
                 root, "debts/gap-one.md", DEBT.replace("The check misses one case.", "The check misses two cases.")),
             "a decision is added": lambda root: put(root, "decisions/new.md", LOOSE),
             "a decision gains a Kind line": lambda root: put(root, "decisions/loose.md", LOOSE + "\nKind: process\n"),
-            "a deferred file is added": lambda root: put(root, "deferred/new.md", WAITING),
             "a plan is added": lambda root: put(root, "plans/new.md", PLAN),
             "a rule marker is added": lambda root: put(root, "CLAUDE.md", RULES + "\nShip it.<!-- rule:b-four -->\n"),
             "a rule marker is deleted": lambda root: put(root, "CLAUDE.md", RULES.replace("<!-- rule:b-three -->", "")),
@@ -1228,7 +1224,6 @@ class RecordsHistory(Tree):
 
     def test_c2_every_record_folder_and_claude_md_is_read(self):
         cases = [
-            ("deferred/old.md", "# Old\n\nSuperseded: by the new plan.\n", "Superseded: by the new plan."),
             ("plans/old.md", "# Plan\n\n## Old ruling\n\nText.\n", "## Old ruling"),
             ("debts/old.md", DEBT + "\nPreviously: the check ran.\n", "Previously: the check ran."),
             ("CLAUDE.md", RULES + "\nOverruled: the old rule text.\n", "Overruled: the old rule text."),
@@ -1408,7 +1403,7 @@ class RealRecords(unittest.TestCase):
     def test_r10_every_record_file_has_one_row_and_a_link_that_resolves(self):
         rows = self.rows()
         folders = (("decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("debts", ("Debts",)),
-                   ("deferred", ("Deferred",)), ("plans", ("Plans",)))
+                   ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
             # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.

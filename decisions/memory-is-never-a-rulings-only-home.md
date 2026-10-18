@@ -26,7 +26,7 @@ branch, a merge approval for one act, a personal preference. `lint/ruling_census
 - "A memory entry may point to a ruling. It is never the ruling's only home." `hooks/ruling_home.py`
   enforces it, so its prose left CLAUDE.md (claude-md-shrink).
 - Each answer to a question gets a home (`rule:output-answer-has-a-home`). The report is a
-  scratchpad: each ruling in it moves to its decision entry or a deferred item.
+  scratchpad: each ruling in it moves to its decision entry or a debt's Ruling section.
 - No standing `records/<session>` branch for the orchestrator's records, until a measure shows the
   cost of a record is the cause.
 - The home for a deferred item is the `debts/` folder, one file per item.
