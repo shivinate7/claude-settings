@@ -59,10 +59,10 @@ except (TypeError, ValueError):
 # WHAT PINS EACH NUMBER:
 #   GUARD_GIT_CALL_TIMEOUT_SECONDS is pinned live. HookBudgetFitsUnderItsHostCeiling reads
 #   `guard._git`'s own source and goes red when the two drift apart.
-#   SESSION_END_CEILING_SECONDS is NOT pinned while the hook is disarmed. Its arm reads
-#   settings.json, which no longer carries a SessionEnd entry, so that arm SKIPS. This
-#   number is on the hand-sync comment alone until the hook is re-armed. See
-#   decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
+#   SESSION_END_CEILING_SECONDS is pinned while settings.json carries the SessionEnd entry
+#   (timeout 55): HookBudgetFitsUnderItsHostCeiling reads that timeout. The hook is armed. If the
+#   entry is ever absent, those arms skip and this number rests on the hand-sync comment alone.
+#   See decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
 GUARD_GIT_CALL_TIMEOUT_SECONDS = 10.0
 SESSION_END_CEILING_SECONDS = 55.0
 
