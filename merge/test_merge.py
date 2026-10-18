@@ -1688,7 +1688,7 @@ class GhHalf(Env):
     def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)", rate=True)  # a 429 is a rate limit: the whole ladder, then the network stop
 
-    # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge-net-retry): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
+    # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge/merge.py RATE_LADDER): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
 
     def test_a_run_list_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped(RATE_403, rate=True)  # the incident text: 4 calls over the whole ladder, never "not green". Its request timestamp is no reset time.
