@@ -11,19 +11,16 @@ Where the lint cannot judge meaning, it nudges and never blocks.
   (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that"). The nudge is
   temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (deferred item
   `ste-into-agent-briefs`).
-- Autofix stays for STE011 only. Each fix that changes meaning or rewrites more than a fixed bloat phrase
-  is removed.
+- Autofix covers STE011 only, and only a fixed bloat phrase. A borderline STE011 row has no fix and still
+  errors, as does a bloat phrase in ALL CAPS.
 - STE001 reads one key, `max_words`, set to 30. Mode decides only whether STE015 runs.
-- The six advisory rules read `warning`. `lint/ste_gate.py` prints one note line per code: the first finding
-  and the count of more. The write goes ahead. A denied write shows no note. `lint/md_sweep.py` never blocks
-  on an advisory finding. `actions/ste-lint` reports one as a `::warning` and never fails the step.
+- `lint/ste_gate.py` prints one note line per advisory code: the first finding and the count of more. The
+  write goes ahead. A denied write shows no note. `lint/md_sweep.py` never blocks on an advisory finding.
+  `actions/ste-lint` reports one as a `::warning` and never fails the step.
 - The `NOTE` string of both gates names what blocks: a sentence over 30 words, bloat, double negative.
 - Rule `output-write-in-ste` has its row in `lint/rule_mechanisms.json` at `test_ste011_bloat_blocks`.
 - No renames. q_max and banchi pin `actions/ste-lint` by SHA, so every code, file and key keeps its name.
 - `agents/*.md` keep their STE wording. Agent briefs are the future home of the writing standard.
-- Five borderline STE011 rows have no fix and still error: `in a timely manner`, `along the lines of`,
-  `close down`, `of major importance` and `except when`. A bloat phrase in ALL CAPS errors with no fix.
-  Three phrases leave the `BLOAT` table: `in between`, `in terms of` and `it would appear that`.
 
 Reason: safer outcome first, smaller diff second. A rewrite that changes meaning costs more than a nudge.
 
