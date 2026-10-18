@@ -293,7 +293,6 @@
 - stash-allow-any-linked-worktree: the allow passes any linked worktree, not only the caller's own (hooks/guard_shared_tree.py)
 - stash-create-false-refusal: git stash create reads as a take and is denied over a non-empty stack; false refusal unmeasured (hooks/guard_shared_tree.py)
 - stash-export-comment-stale: a comment in the test file says import and export are not git subcommands; git 2.55 lists both (hooks/test_guard.py line 1737)
-- stash-help-flag-refused-as-push: git stash -h and --help are refused over a dirty tree; git changes nothing (hooks/guard_shared_tree.py stash_action)
 - stash-read-to-run-race: a session that dirties the tree or pushes an entry between the guard's read and the run is not covered (hooks/guard_shared_tree.py)
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI)
 - ste-eg-in-fence-reported: the lint reports e.g. inside a blockquote fence or pre block as a warning; a false alarm (lint/ste_lint.py LATIN)
