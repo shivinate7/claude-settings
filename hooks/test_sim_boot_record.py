@@ -5,7 +5,7 @@ Run it from the repository root:
 
     python3 hooks/test_sim_boot_record.py -v
 
-Owner ruling 2026-10-10: a hook on Bash and on the simulator MCP control tool records each device
+A hook on Bash and on the simulator MCP control tool records each device
 that went shut-down -> booted during the call, in <config>/state/sim-boots.jsonl. The hook runs
 for BOTH events of one call: a PreToolUse run snapshots every simulator's state, and the matching
 PostToolUse run records the shut-down -> booted changes against that snapshot. A PostToolUse run

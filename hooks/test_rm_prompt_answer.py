@@ -5,8 +5,8 @@ Run it from the repository root:
 
     python3 hooks/test_rm_prompt_answer.py
 
-Contract, from decision rm-on-a-variable-needs-a-guard (rm on a variable path needs a `:?` guard)
-(owner ruling, 2026-10-11). The hook answers allow ONLY when all of these hold:
+Contract, from decision rm-on-a-variable-needs-a-guard (rm on a variable path needs a `:?` guard).
+The hook answers allow ONLY when all of these hold:
 - the hook input has `permission_mode` == "bypassPermissions";
 - each `rm` target is a `${NAME:?}` expansion followed only by plain folder names (`/a/b`): no
   `..`, no glob, no braces, no `~`, no `$HOME`, no `$PWD`, no command substitution, no second
@@ -16,7 +16,7 @@ Contract, from decision rm-on-a-variable-needs-a-guard (rm on a variable path ne
   `_rm_target_bad` in hooks/guard.py). The value is judged, not the joined path.
 Every other request gets no output and exit 0, so the owner is still asked.
 
-Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks, read 2026-10-11):
+Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks):
 - Input: one JSON object on stdin. Common fields include `session_id`, `transcript_path`, `cwd`,
   `permission_mode` ("default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions"),
   `hook_event_name` "PermissionRequest", `tool_name`, and `tool_input` (`tool_input.command` for
@@ -27,7 +27,7 @@ Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks, r
 - No decision: the docs show no example. This file pins stdout empty and exit 0.
 - Bad JSON on stdin: no output, exit 0.
 
-Whole-command rule (kept from the first test file; a stated reading, not in the ruling): the hook
+Whole-command rule (a stated reading, not in the decision): the hook
 answers allow only when every simple command in the input is an `rm` command or a simple
 assignment. Anything else, such as `curl`, `echo`, a pipe, or a `for` loop, gets no output.
 An `rm` target variable with no assignment in the command is unverifiable and gets no output.

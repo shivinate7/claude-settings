@@ -39,7 +39,7 @@ run with no such twin reads cancelled.
 Unreadable gh: gh not on PATH, exit non-zero, or output that is not JSON. For a `gh pr ready`
 that could start a watch, exit 2 with one line `CI unknown on <sha>: <reason>`. Never a silent exit 0.
 
-Seams under test (the builder must read these names):
+Seams under test:
 - CI_WAKE_MODULE: the module under test (default hooks/ci_wake.py beside this file).
 - CI_WAKE_LOCK_DIR: the folder that holds the per-PR watch locks. Each case sets its own.
 - CI_WAKE_DEADLINE: the watch budget in seconds. Unset, the hook uses its own default.
@@ -71,11 +71,10 @@ log, all PRs together). A run with unfinished_to_list N: `run list` shows it in 
 conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
 
-Draft run, then the real run (incident 2026-10-16, PR 452 head 5cee0ee; debt ci-wake-lists-runs-once):
-`gh pr create --draft` made a run whose jobs all skipped. `gh pr ready` made the real run 6 s later.
-The hook listed the head once. The draft run had no conclusion at that list, so it was waited on and
-then read as skipped. The real run was not listed yet. The hook then printed "CI red ...: workflow
-gates", from judge_runs' "skipped, no job ran". The cases below use these rules:
+Draft run, then the real run: `gh pr create --draft` makes a run whose jobs all skip, and
+`gh pr ready` makes the real run seconds later. A hook that lists the head once waits on the draft
+run, reads it as skipped, and prints "CI red ...: workflow gates" (judge_runs' "skipped, no job
+ran") before the real run shows. The cases below use these rules:
 - A run that ends skipped is no run, whether the list showed it skipped or in progress.
 - While no run that ran has been judged, the hook lists the head again, at most once per 30 s
   (STATUS_PAUSE). It keeps listing until its deadline: the last pause ends at the deadline.
@@ -645,8 +644,8 @@ def case_import_error_wakes_unknown():
 
 
 def case_final_flush_error_wakes_unknown():
-    """stderr whose flush raises. The final flush sits outside the try today. It must end in a
-    wake with an unknown line, not a crash."""
+    """stderr whose flush raises. The final flush must end in a wake with an unknown line, not a
+    crash."""
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), launcher=FLUSH_LAUNCHER)
     unknown = []
     for line in res.lines:
@@ -687,9 +686,9 @@ def case_lock_folder_unusable_wakes_unknown():
 
 
 def case_draft_run_then_real_run():
-    """Incident 2026-10-16, PR 452. The draft run skips, and the real run comes after it. The hook
+    """The draft run skips, and the real run comes after it. The hook
     never reads red for the skipped run: it waits on the real run and reports that run's result.
-    Rows marked (control) pass on main. FAST_SLEEP_LAUNCHER: the pauses between lists cost 0.05 s."""
+    Rows marked (control) check the paths the wait leaves unchanged. FAST_SLEEP_LAUNCHER: the pauses between lists cost 0.05 s."""
     fast = dict(launcher=FAST_SLEEP_LAUNCHER)
     ready = bash("gh pr ready 12")
     res = run_hook(ready, fixture(READY, [DRAFT_DONE, GREEN]))
@@ -730,8 +729,8 @@ def case_real_failed_run_beside_a_draft_run_is_red():
 
 def case_draft_run_ending_skipped_is_no_run_yet():
     """The draft run is still running at the first list and ends skipped, and no real run comes. A
-    real clock and a 4 s deadline: it ends in `CI unknown`, near the deadline. Never red (main read
-    "CI red ...: workflow gates"), never green. At most one list at the start and one at the deadline."""
+    real clock and a 4 s deadline: it ends in `CI unknown`, near the deadline. Never red ("CI red
+    ...: workflow gates"), never green. At most one list at the start and one at the deadline."""
     label = "head whose draft run ends skipped, no real run by the deadline"
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_LIVE]), extra={"CI_WAKE_DEADLINE": "4"})
     expect_verdict(label, res, "unknown")
@@ -883,8 +882,7 @@ def case_watch_run_returns_at_the_deadline():
 
 def case_watch_run_at_or_past_the_deadline_reads_nothing():
     """A call made at its deadline (budget 0) or past it (budget below 0) makes no read and returns
-    at once, though the run is in progress: the clock does not move, so no pause either. Review
-    round 1 found the first read came before any deadline check."""
+    at once, though the run is in progress: the clock does not move, so no pause either."""
     for budget in (0, -30):
         label = "watch_run, always in_progress, deadline already passed (%d s)" % budget
         mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
@@ -1215,7 +1213,7 @@ def main():
     case_watch_run_reads_past_a_queued_status()
     case_watch_run_retry_never_reads_or_pauses_past_the_deadline()
 
-    # Incident 2026-10-16 (PR 452): a draft run that skips, then the real run. Debt ci-wake-lists-runs-once.
+    # A draft run that skips, then the real run.
     case_draft_run_then_real_run()
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
