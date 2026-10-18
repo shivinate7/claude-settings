@@ -1,6 +1,6 @@
 #!/bin/sh
-# Cases for merge/install_from_main.sh, the afterMerge helper. Owner ruling 2026-10-15 (record
-# merge-reinstalls-from-main, "The ruling"): the links in ~/.claude point at one pinned checkout,
+# Cases for merge/install_from_main.sh, the afterMerge helper (record
+# merge-reinstalls-from-main): the links in ~/.claude point at one pinned checkout,
 # a worktree of the clone on a detached HEAD at main's commit, at the sibling path <clone>-live.
 # The helper moves that checkout to main, then runs its install from there (Windows: install.ps1).
 # Shell script, following the layout of hooks/test_install_src.sh: named cases, each isolated, a
@@ -429,7 +429,7 @@ case11() {
 }
 
 # ---- Case 12: link mode, the pinned checkout moves from A to B while the links are loaded -----
-# Owner ruling 2026-10-15 (install-set). A link in ~/.claude points into <clone>-live, and the move
+# Record install-set. A link in ~/.claude points into <clone>-live, and the move
 # is the git switch in this helper, which writes the files one at a time. Link mode carries the
 # placeholder in every guard file, so guard.py's INSTALL_ID check cannot see a mix here: the case
 # samples the loads itself. The fixture's guard_core.py and guard_sib.py carry a marker that differs
@@ -609,7 +609,7 @@ case14() {
 }
 
 # ---- Case 15: another run holds the install lock -> the helper waits, refuses, moves nothing ----
-# Owner ruling 2026-10-15 (install-set): the pin move holds the lock the installers hold. A lock file
+# Record install-set: the pin move holds the lock the installers hold. A lock file
 # with a fresh mtime is a live run's, so this run waits CLAUDE_SETTINGS_LOCK_WAIT seconds, then exits
 # non-zero with nothing written. The lock is not this run's, so the run must leave it as it is.
 case15() {
@@ -794,7 +794,7 @@ EOF
 end_exits() { grep -w end "$1" 2>/dev/null | grep "id=$2 " | sed -n 's/.* exit=\([^ ]*\).*/\1/p' | sort -u; }
 
 # ---- Case 19: run B waits on the lock, main moves X -> Y meanwhile; B must not move the pin back to X ----
-# Owner ruling 2026-10-15 (install-set). The helper reads main's commit before it takes the lock, so
+# Record install-set. The helper reads main's commit before it takes the lock, so
 # a run that waits on the lock can act on a commit that is no longer main when it gets the lock. The
 # lock is a fake holder (case15's pattern), which keeps the race deterministic. The case plays run A's
 # part: main moves to Y, the pin moves to Y, and the lock is let go. B is the real run, and it started
