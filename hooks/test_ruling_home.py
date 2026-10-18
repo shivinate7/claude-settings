@@ -300,9 +300,7 @@ def case_idle_turn_never_parses_the_whole_transcript():
     check("idle_tail_only: this turn's memory write still blocks", "notes.md" in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 1
-
-# --------------------------------------------------------------------------- finding 1
+# ---------------------------------------------------------------------------
 # The Bash path, naming a specific file: a FRESH mtime, a Bash command naming that one
 # file, blocks that file and only that file.
 
@@ -326,7 +324,7 @@ def case_bash_names_specific_file():
     check("bash_specific: does not name the other file", "other.md" not in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 1
+# ---------------------------------------------------------------------------
 # The Bash path, naming only the folder: every .md file in it counts, each still gated on
 # its own FRESH mtime.
 
@@ -350,7 +348,7 @@ def case_bash_names_folder_only():
     check("bash_folder: does not name the resolved file", "has_home.md" not in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 1 / 2
+# ---------------------------------------------------------------------------
 # A read (`cat`/`ls`) never changes mtime. An OLD file a Bash command reads must stay
 # silent, whether named specifically or only through the folder.
 
@@ -376,7 +374,7 @@ def case_bash_read_only_old_files_silent():
         check(label, reason == "", reason)
 
 
-# --------------------------------------------------------------------------- finding 3
+# ---------------------------------------------------------------------------
 # The folder is also named through its ~ and $HOME forms.
 
 def case_bash_names_folder_tilde_and_home_forms():
@@ -407,7 +405,7 @@ def case_bash_names_folder_tilde_and_home_forms():
             os.environ["HOME"] = prior_home
 
 
-# --------------------------------------------------------------------------- finding 3
+# ---------------------------------------------------------------------------
 # A file-name match is a whole path component, never a bare substring: a Bash write to
 # data.md must not mark a.md.
 
@@ -442,7 +440,7 @@ def case_bash_whole_component_not_substring():
     check("whole_component: exactly data.md named, not a.md", entries == ["data.md (Note)"], entries)
 
 
-# --------------------------------------------------------------------------- finding 3
+# ---------------------------------------------------------------------------
 # A home value that is no home is refused: every absolute path (even one that exists on disk),
 # ".", "..", a path that leaves the repo, git pathspec-magic values, and a directory with or
 # without a trailing slash. Rows: (row id, home value, cwd). The row id prints on FAIL.
@@ -480,7 +478,7 @@ def case_values_that_are_no_home():
         check("%s: blocks" % label, bool(reason), reason)
 
 
-# --------------------------------------------------------------------------- finding 5
+# ---------------------------------------------------------------------------
 # A fenced code block can hold text that LOOKS like a heading and a home-less section. A
 # fence-blind reader would split on it and wrongly block; the real, single section already
 # carries its own real home: line and must read as silent.
@@ -507,7 +505,7 @@ def case_fence_hides_fake_content():
     check("fence: silent, the fenced fake heading is not a real section", reason == "", reason)
 
 
-# --------------------------------------------------------------------------- finding 5 (2nd shape)
+# ---------------------------------------------------------------------------
 # A home: line that exists ONLY inside a fence, with real prose outside it, must still
 # block: a fenced home never counts as the section's own home.
 
@@ -532,7 +530,7 @@ def case_home_only_inside_fence_blocks():
     check("home_only_inside_fence: names the section", "Note" in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 6
+# ---------------------------------------------------------------------------
 # A home: key in the YAML frontmatter counts for the section before the first heading.
 
 def case_frontmatter_home_passes():
@@ -552,7 +550,7 @@ def case_frontmatter_home_passes():
     check("frontmatter_home: silent", reason == "", reason)
 
 
-# --------------------------------------------------------------------------- finding 7
+# ---------------------------------------------------------------------------
 # A value wrapped in one pair of backticks or quotes is accepted, unwrapped. The remedy
 # prints process-only with no quotes, as plain text.
 
@@ -589,7 +587,7 @@ def case_wrapped_value_and_remedy_wording():
     check("remedy_wording: not double-quoted", '"process-only"' not in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 2
+# ---------------------------------------------------------------------------
 # A git non-zero exit for one value (a syntactically fine path no ref's tree holds) must
 # not turn off the OTHER section's own finding.
 
@@ -649,7 +647,7 @@ def case_deleted_path_and_unpushed_branch():
     check("unpushed_branch: side.md resolves, not named", "side.md" not in reason, reason)
 
 
-# --------------------------------------------------------------------------- finding 4
+# ---------------------------------------------------------------------------
 # One value, several refs, ONE git process (a batch-check call), not one process per ref.
 
 def case_batch_check_single_process_call():
@@ -782,7 +780,7 @@ def case_main_blocks():
     check("main_blocks: reason names the file", "notes.md" in (payload or {}).get("reason", ""), result.stdout)
 
 
-# --------------------------------------------------------------------------- finding 8 / FAIL OPEN
+# ---------------------------------------------------------------------------
 # A missing git binary stands the whole hook down, silently, even though the memory file
 # would otherwise resolve fine if git worked.
 
@@ -814,7 +812,7 @@ def case_main_missing_git_binary_stands_down():
     check("main_missing_git: nothing printed", result.stdout.strip() == "", result.stdout)
 
 
-# --------------------------------------------------------------------------- finding 2 / item 9
+# ---------------------------------------------------------------------------
 # A repo git itself cannot read -- a `.git` file pointing at a missing gitdir -- stands the
 # hook down silently, even with a correct-looking home: value in the memory file.
 

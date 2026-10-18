@@ -26,7 +26,7 @@ Contract, from decision gate-hooks-fail-closed:
   alias there hung the guard for 30 s (2026-10-12). A stub alias ahead of a real python must be
   skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
   the no-python remedy and an advisory hook exits 0.
-- The guard split (decision guard-split-by-family): a copied guard.py takes split_segments from its
+- The guard split: a copied guard.py takes split_segments from its
   own guard_core.py sibling, never the real one. With the sibling missing, a Bash call is refused with
   the reinstall step named (audit-high, decision gate-hooks-fail-closed), and one fallback line naming
   guard_core goes to guard.log. Every name other
@@ -304,7 +304,7 @@ def check_alias_only_advisory():
     return (not bad and len(adv) > 0), "advisory checked %d; wrong: %s" % (len(adv), bad)
 
 
-# Guard split (decision guard-split-by-family). guard.py stays the entry point; shared code moves to
+# Guard split. guard.py stays the entry point; shared code moves to
 # guard_core.py beside it. The pins below are red on a guard.py that has no sibling yet.
 GUARD_PY = os.path.join(HERE, "guard.py")
 SPLIT_LABEL = "split_segments: a comment starting a word"  # a test_guard.py log check

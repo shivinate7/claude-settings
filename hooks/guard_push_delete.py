@@ -1,7 +1,7 @@
 """The guard's push-delete family: a forced push and a wide delete.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -290,9 +290,8 @@ DELETE_REASON = (
 
 # THE CMD.EXE VERBS. `rd`/`rmdir` and `del`/`erase` take slash flags, never `rm`'s or
 # `Remove-Item`'s dash flags, so neither pattern above ever reads them: `/s` is the recurse
-# switch, and `/q` (optional, never required) only silences the confirmation prompt. MEASURED
-# 2026-09-24: `rd /s /q C:\Users\x`, `cmd /c rd /s /q %USERPROFILE%` and `del /s /q C:\*` all
-# passed, on both tool names, though their `rm`/`Remove-Item` twins deny.
+# switch, and `/q` (optional, never required) only silences the confirmation prompt.
+# `rd /s /q C:\Users\x`, `cmd /c rd /s /q %USERPROFILE%` and `del /s /q C:\*` deny, as their twins do.
 #
 # Checked by TOKENS, not by a whole-string search like the two patterns above, so a name sitting
 # inside a quoted argument or a grep pattern never reads as a command: `echo "rd /s /q"` and

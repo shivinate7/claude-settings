@@ -6,4 +6,4 @@
 
 **What keeps it from being lost.** This file.
 
-**Trigger.** The owner's word, or when the advisory nudge has run 30 days, whichever comes first. The 30 days start when the plain-prose lint merges to main. Count them by date: the nudge writes no log line (debt `advisory-note-not-logged`).
+**Trigger.** The owner's word, or when the advisory nudge has run 30 days, whichever comes first. The 30 days start when the plain-prose lint merges to main. Count them by date: the nudge writes no log line.

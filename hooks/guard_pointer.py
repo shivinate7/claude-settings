@@ -1,7 +1,7 @@
 """The guard's pointer family: the pointer checkout's HEAD.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -18,12 +18,6 @@ from guard_core import (
 # checkout: the one the owner's global rules file names on its `@<path>` line. That checkout's HEAD
 # decides WHICH COPY of the rules and of the gates every session on this machine runs. The owner
 # has stated the rule: that checkout's HEAD is always `main`.
-#
-# OBSERVED 2026-09-19. The primary checkout sat on `feat/config-watch-post` while a session edited
-# the guard on that branch. The live PreToolUse guard for every session on the machine, including
-# the sessions reviewing that very change, was the unreviewed branch's copy. Nothing refused it and
-# nothing reported it. `hooks/session_start.sh` now REPORTS the state at session start, which is
-# detection after the fact. This rule is the refusal that stops it happening.
 #
 # THE POINTER LINE IS PARSED HERE RATHER THAN IMPORTED. The three other readers of that line are
 # all shell: `install.sh`'s `pointer_dir`, the settings refresh hook, and `hooks/session_start.sh`.

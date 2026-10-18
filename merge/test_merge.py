@@ -893,8 +893,8 @@ class Stopped(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 class BaseAware(Env):
-    """Decision merge-follows-the-prs-base: the pull request's own base drives every
-    step. Cause: q_max #497 merged into claude/speed-wave-2 and claimed D-720 against main."""
+    """The pull request's own base drives every step. Cause: q_max #497 merged into
+    claude/speed-wave-2 and claimed D-720 against main."""
     BASE = "integ"
 
     def setUp(self):
@@ -1260,8 +1260,8 @@ PLAIN_403_API = ('{"message":"Resource not accessible by integration","documenta
 # The GraphQL form on `gh pr checks`, `gh pr view` and `gh pr merge`: no HTTP status in the line.
 RATE_GQL_ALREADY = "GraphQL: API rate limit already exceeded for user ID 309471439."
 
-# The rate waits, in seconds, when GitHub gives no reset time: one per retry. The last one is also the cap on any wait (lane merge-rate-wait,
-# debt rate-wait-outside-ttl-budget). The retry count stays 3 (owner ruling 2026-10-13, "Retry 3 times"). The ladder waits 21 minutes in all.
+# The rate waits, in seconds, when GitHub gives no reset time: one per retry. The last one is also the cap on any wait (lane merge-rate-wait).
+# The retry count stays 3 (owner ruling 2026-10-13, "Retry 3 times"). The ladder waits 21 minutes in all.
 RATE_LADDER = [60, 300, 900]
 _HTTP_TEXT = {200: "OK", 403: "Forbidden", 404: "Not Found", 422: "Unprocessable Entity", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway"}
 
@@ -1688,7 +1688,7 @@ class GhHalf(Env):
     def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)", rate=True)  # a 429 is a rate limit: the whole ladder, then the network stop
 
-    # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge-net-retry): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
+    # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge/merge.py RATE_LADDER): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
 
     def test_a_run_list_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped(RATE_403, rate=True)  # the incident text: 4 calls over the whole ladder, never "not green". Its request timestamp is no reset time.
@@ -4930,7 +4930,7 @@ class GhLockRateRetry(unittest.TestCase):
         self.assertEqual(snapshots, [])
         self.assertNotRegex(buf.getvalue(), r"(?i)\bwait")
 
-    # lane merge-rate-wait (debt rate-wait-outside-ttl-budget): the ladder, GitHub's reset time, and the lock's expiry
+    # lane merge-rate-wait: the ladder, GitHub's reset time, and the lock's expiry
     HDR_404 = {"X_Github_Request_Id": "4040:1A2B3C:4D5E6F:6700AB:67890CDE", "Content_Length": 404}  # header values that hold "404": a request id, a length
 
     def test_every_lock_call_asks_gh_for_the_response_headers(self):  # the seam: without -i no reset time reaches the tool, so the reset code is unreachable
@@ -5015,7 +5015,7 @@ class BeforeWaitHost(FakeHost):
         return super().wait_checks(n, sha, d, prior)
 
 class LockExtensionReachesHost(Env):
-    """Owner ruling 2026-10-17 (was LockExpiryReachesHost, debt rate-wait-outside-ttl-budget): a rate wait is the exception to the lock's 600 s cap. So once the lock is
+    """Owner ruling 2026-10-17 (was LockExpiryReachesHost): a rate wait is the exception to the lock's 600 s cap. So once the lock is
     taken, confirm hands the host the lock's own extend_for (host.before_wait): the host runs it before each rate wait. It no longer hands over a bound
     (host.until) that stops a wait at the end of the lock's spare."""
     def test_the_run_hands_the_host_the_lock_extension_before_its_first_wait(self):

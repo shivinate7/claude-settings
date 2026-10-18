@@ -273,8 +273,7 @@ def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None,
         carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
-# ASK ALONE (incident 2026-10-14 10:51 CDT: an optional `git worktree prune`, chained with two more
-# steps, sent the whole command to the owner as one permission prompt). A command that holds a step
+# ASK ALONE. A command that holds a step
 # the guard would ASK on, chained with other steps by `&&`, `||`, `;`, `|` or a newline, is DENIED to
 # the agent, and the remedy says to run that step alone or drop it. A lone ask step still asks, and a
 # deny anywhere in the command still wins. Owner ruling 2026-10-15 (decision ask-steps-run-alone): a
@@ -908,9 +907,11 @@ def build_fixtures():
     write(os.path.join(PROJ, ".claude", "hooks", "g.py"), "# hook\n")
     write(os.path.join(PROJ, "src", "app.py"), "print(1)\n")
     # The clone of claude-settings. Its own settings.json is the SOURCE the install script copies,
-    # so it must stay editable. The two marker files are what tell the clone from a config folder.
+    # so it must stay editable. The marker files tell the clone from a config folder, and the install
+    # script is the one that makes the pin, so a folder beside a clone that holds it is a pin.
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
+    write(os.path.join(CLONE, "merge", "install_from_main.sh"), "# install\n")
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
@@ -929,9 +930,8 @@ def build_fixtures():
     # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
     # whole shared budget on its own, whichever call absorbs the time.
     make_fake_gh(GHSLOW, "main", delay=20)
-    # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
-    # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
-    # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
+    # 3.5s per call stands in for real gh latency (3.0-3.9s): slower than the 3s MERGE_READ_TIMEOUT,
+    # nowhere near a hang.
     make_fake_gh(GHWARM, "main", delay_s=3.5)
     # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
     # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
@@ -1822,7 +1822,7 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
 # ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
 # the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
 # deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
-# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+# bandaid the reset runs in the clean lane and allows.
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -1970,8 +1970,8 @@ sh("worktree data: a reset named in a JSON payload piped to python, inside a wor
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
    + "' | python hooks/guard.py", "allow", cwd=GITWT)
 
-# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
-# clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
+# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decision
+# agent-worktree-discard-is-noted). In a linked worktree, a checkout or restore that names only FILES writes the
 # lane's own change to those files, so it runs with no ask. A folder, a glob, `.`, and a whole-tree
 # reset keep the ask. A shared checkout denies every form here. Each case is tagged "per-file", so
 # MUTATE_ONLY=per-file runs this block alone. The fixtures are real: fixtures/a.json,
@@ -2393,7 +2393,7 @@ sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
    carries="stash stack")
 
 
-# ---- r1-hd (review round 1), shared-tree family. H1: a python body under a backslash, single-quoted or
+# ---- r1-hd, shared-tree family. H1: a python body under a backslash, single-quoted or
 # double-quoted delimiter, closed at EOF, then a stash push. The python body stays in view, so both heads deny.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a stash push, denies" % _label,
@@ -2424,7 +2424,7 @@ sh("work-tree: the spaced form is read the same way",
 # ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
 # or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
 # header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
-# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
+# it. Named holes: debts/notes.md. Each RED case below is a hole. The
 # PINNED cases already deny or allow, and a fix must keep them so.
 for _name, _command in (
     ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
@@ -2717,7 +2717,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 2. machine-wide kills
 FAMILY = "kill"
 
-sh("kill: pkill by pattern", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill by pattern denies", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -2890,7 +2890,7 @@ sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | x
    "allow", cwd=NOGIT)
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 3). Four ways to stop a process by port, or every
+# Four ways to stop a process by port, or every
 # process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
 # a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
@@ -2918,7 +2918,7 @@ sh("kill: every process behind a signal number, with the root unknown", "kill -9
 sh("kill: fuser without -k only lists the holders", "fuser -v 3000/tcp", "allow", cwd=NOGIT)
 sh("kill: grep for kill-port in a file is no kill", 'grep -n "kill-port" package.json', "allow",
    cwd=NOGIT)
-# Review round 1 (guard-audit-fixes-234), green today: a pid list read from a file the session wrote
+# A pid list read from a file the session wrote
 # is no pattern kill, so the new `$(lsof -t ...)` match must not widen to every substitution.
 sh("kill: a pid list read from a file is no pattern kill", "kill $(cat f)", "allow", cwd=NOGIT)
 sh("kill: a commit message that names fuser -k and kill-port is no kill",
@@ -3022,9 +3022,7 @@ sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "a
 # item 1). A recursive rm whose target has an unguarded variable, then "/", then a glob, another
 # variable, a slash, a quote, or the end, is refused: Claude Code's prompt shape. A literal after
 # the slash is not refused. The remedy is ${NAME:?} only when every such name is safe (the
-# allow-list), else a literal path that prints no expanded path. INCIDENT 2026-10-10 to 10-11: 7 of
-# 24 Bash prompts were rm on a $var path, 5 of them `S=...; for d in ...; do rm -rf $S/$d`.
-# Cases marked "(b) ruling changed" were re-pointed to the 2026-10-11 ruling.
+# allow-list), else a literal path that prints no expanded path.
 sh("rm-var: a loop deletes under an unguarded variable",
    "S=/tmp/x; for d in a b; do rm -rf $S/$d; done", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("rm -rf ${S:?}/${d:?}",))
@@ -3189,7 +3187,7 @@ sh("rm-var: a git toplevel value names a literal path",
 sh("rm-var: a literal value that resolves to the cwd names a literal path",
    'D=%s; rm -rf "$D"/*' % NOGIT, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", NOGIT))
-# Named limits, taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
+# Taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
 # from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
 # when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
 # moved to a glob is (b) ruling changed: the trigger shape is now tested.
@@ -3255,8 +3253,8 @@ def rm_var_taint_reader_case():
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
-# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+# Taint (decision rm-on-a-variable-needs-a-guard): a pwd command in $(...) or backticks taints,
+# with any flags or path. Red until the guard matches them.
 sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3272,8 +3270,8 @@ sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays al
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, derived forms: a variable whose assigned or loop value holds ~, HOME, PWD or pwd is
-# tainted, so its refusal names a literal path, never ${D:?} advice.
+# Derived forms (decision rm-on-a-variable-needs-a-guard): a variable whose assigned or loop value
+# holds ~, HOME, PWD or pwd is tainted, so its refusal names a literal path, never ${D:?} advice.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -3291,7 +3289,7 @@ sh("rm-var: $HOME joined to a literal path is not refused",
 sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
    "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",))
-# Ruling changed (rm-on-a-variable-needs-a-guard, named limits). Taint comes only from a real
+# Ruling changed (rm-on-a-variable-needs-a-guard). Taint comes only from a real
 # expansion. A literal value that spells pwd or HOME is not one.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a literal value that spells pwd is not tainted",
@@ -3307,19 +3305,19 @@ sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its ow
 sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
-# Named limits, substitution spans. The assigned-value reader cuts the value at ; & | even inside
-# $(...) or backticks, so a pwd after the cut is missed. Each case must deny with the literal-path
-# reason. Each case whose target moved to a glob is (b) ruling changed.
+# Substitution spans (decision rm-on-a-variable-needs-a-guard). The assigned-value reader cuts the
+# value at ; & | even inside $(...) or backticks, so a pwd after the cut is missed. Each case must
+# deny with the literal-path reason. Each case whose target moved to a glob is (b) ruling changed.
 sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
-# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
-# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
-# with the literal-path reason and never name ${D:?}.
+# Taint (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an expansion of HOME or
+# PWD, anywhere in the command taints every variable it assigns. The guard reads no $(…) span, so
+# quotes and ; inside the span cannot hide the source. Each case must deny with the literal-path
+# reason and never name ${D:?}.
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3331,10 +3329,10 @@ sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
-# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
-# value whose path is the home folder or the cwd, so the refusal names the literal path and never
-# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard). Each case below has an unsafe binding,
+# a value the guard cannot read, or a value whose path is the home folder or the cwd, so the
+# refusal names the literal path and never ${NAME:?}. Each case must be refused. A pass, or a
+# crash that exits 0, is a FAIL.
 HOME = os.path.expanduser("~")
 sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
    'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -3380,7 +3378,7 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
-# Ruling item 1 (decisions/rm-on-a-variable-needs-a-guard.md): a binding written AFTER a wrapper
+# Ruling item 1 (decision rm-on-a-variable-needs-a-guard): a binding written AFTER a wrapper
 # still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
 # never ${NAME:?}. Red on 50d9f57: the `later` scan sees only the inner text of the wrapper.
 sh("rm-var: a binding after sh -c names a literal path, not ${OLDPWD:?}",
@@ -3798,7 +3796,7 @@ sh("heredoc: a machine-wide kill in a python body still denies, in one command",
    "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
 
 
-# ---- r1-hd (review round 1), kill family. H1: a python body under a backslash, single-quoted or
+# ---- r1-hd, kill family. H1: a python body under a backslash, single-quoted or
 # double-quoted delimiter, closed at EOF, then a kill. Both heads deny: the python body stays in view.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a kill, denies" % _label,
@@ -3812,11 +3810,10 @@ for _shell in ("sh", "bash"):
 sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
    "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- r2-hd (review round 2), kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
+# ---- r2-hd, kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
 # backticks, or on a line that feeds eval, source, `.` or xargs, reads as a shell body. Each form names a
 # delimiter main misreads (`'EOF-1'`, `\EOF`, `E-F`), so main keeps the body in view and denies. The lane
 # head reads the delimiter as bash does, drops the body, and allows. RED ON THE LANE HEAD, DENY ON MAIN.
-# Measured on main (4112319): main denies every payload of these three forms.
 R2_FORMS = (
     ("source with <( ), an escaped delimiter", "source <(cat <<\\EOF\nBODY\nEOF\n)"),
     ("a heredoc piped to xargs", "cat <<'EOF-1' | xargs -I{} sh -c '{}'\nBODY\nEOF-1"),
@@ -3922,10 +3919,10 @@ sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", 
 sh("stream: tail -f inside a loop's do-block denies unchanged",
    "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 4). The rule reads every token of a segment, not the
+# The rule reads every token of a segment, not the
 # command word, so a command that only NAMES `tail` or `Get-Content` before a flag is a false alarm:
 # a commit message or a note that names the refused form, and `grep ... tail -F`, where -F is grep's
-# fixed-string flag. Claude writes the first two whenever it works on this rule. RED today.
+# fixed-string flag. Claude writes the first two whenever it works on this rule.
 for _name, _command in (
     ("a commit message that names tail -f", VCS + ' commit -m "Refuse tail -f in the guard"'),
     ("a commit message that names Get-Content -Wait",
@@ -3945,10 +3942,10 @@ for _name, _command in (
 ):
     sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
 
-# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these, because it scans
+# Main denies each of these, because it scans
 # every token; reading the command word alone lets them through. Each is a program Claude runs a
 # follow through: a container or pod exec, find -exec, a remote or nested shell, and the wrappers
-# that start the real command (stdbuf, unbuffer, caffeinate, flock). RED on 106f785.
+# that start the real command (stdbuf, unbuffer, caffeinate, flock).
 for _name, _command in (
     ("behind docker exec", "docker exec c tail -f x"),
     ("behind podman exec", "podman exec c tail -f x"),
@@ -3966,11 +3963,10 @@ for _name, _command in (
 sh("stream: grep for the text tail -f in a file is no follow", "grep 'tail -f' notes.txt", "allow",
    cwd=NOGIT)
 
-# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies each of these, because it
-# scans every token; 914a2e7 allows them. The wrapper has options or a subcommand before the real
+# Main denies each of these, because it
+# scans every token. Reading the command word alone lets them through. The wrapper has options or a subcommand before the real
 # command (`docker run --rm alpine`, `compose -f x.yml exec web`, `--context x exec c`, `kubectl run
 # x --image=a --`), or it is a wrapper with no skip rule at all (gtimeout, watch, uv run).
-# RED on 914a2e7.
 for _name, _command in (
     ("behind docker run with an option", "docker run --rm alpine tail -f /dev/null"),
     ("behind docker-compose exec", "docker-compose exec web tail -f log"),
@@ -4153,7 +4149,7 @@ sh("waiter: a loop inside a heredoc body is allowed",
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 
-# Review round 1 on ca4f96d (FAIL). Each refused shape below waits by repeating or by a long
+# Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
 # A bare `&` job is refused first by detached-launch (rule 2b), so the waiter rule is not reached
 # for these two. They pin the refusal; the rule named is the one that fires.
@@ -4186,7 +4182,7 @@ sh("waiter: gh issue list --label watch is allowed", "gh issue list --label watc
 sh("waiter: gh issue create --title watch is allowed", "gh issue create --title watch", "allow",
    cwd=NOGIT)
 
-# Review round 2 on 3f2b435. `-w` is `--web` for `gh pr checks` (open the browser), and
+# `-w` is `--web` for `gh pr checks` (open the browser), and
 # `--watch` has no short form, so `-w` there is not a watcher. A repo flag (`-R o/r`) sits
 # between the command group and its verb, so the verb is not the token after `gh`.
 sh("waiter: gh pr checks -w, --web, in the foreground is allowed", "gh pr checks 5 -w", "allow",
@@ -4420,7 +4416,7 @@ add("background-end: py -3 -m http.server under run_in_background with no note i
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
-# Lane swn-pwsh-escape, review round 2, item 3: a backslash before ; hides the server in a cmd /c
+# A backslash before ; hides the server in a cmd /c
 # script. RED when guard_stream's cmd /c tail (guard_stream:319) is read as bash text.
 add("background-end: a cmd /c with a backslash before ; hides npm run dev under run_in_background, denies",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
@@ -4562,6 +4558,33 @@ sh("wsl: wrapped by verdict, node",
 sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 
+# Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
+# flag (CI runs the mod tests this way). Plain node runs only its
+# first file, and the rest become argv. So the plain form takes exactly one literal test path. A glob
+# or a second file gives a false green. `--test` keeps its glob and multi-file form.
+sh("wsl: a plain node test file, no --test flag",
+   "wsl -e node mods/x/x.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a glob in a plain node test path is refused",
+   "wsl -e node mods/*/*.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: two test files in a plain node call are refused",
+   "wsl -e node mods/a/a.test.mjs mods/b/b.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test file then a script in a plain node call is refused",
+   "wsl -e node x.test.mjs other.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a flag before the test file in a plain node call is refused",
+   "wsl -e node --inspect x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a --test node path is allowed",
+   "wsl -e node --test mods/*/*.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a plain node script that is not a test",
+   "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node file whose name only starts like a test",
+   "wsl -e node x.test.mjs.evil", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: plain node with an eval flag",
+   'wsl -e node -e "console.log(1)"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that climbs",
+   "wsl -e node ../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that is absolute",
+   "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder subagent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
@@ -4694,7 +4717,7 @@ sh("wsl: a test path whose dot-led glob expands to ..",
 # `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
 # `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
 # that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
-# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
+# holes: debts/notes.md. The RED cases are holes. The PINNED cases already
 # refuse or allow, and a fix must keep them so.
 for _name, _command in (
     ("exec", "exec wsl --shutdown"),
@@ -4760,7 +4783,7 @@ for _name, _command in (
     sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 1 (lane). Each RED case below is a hole on 707f9dd.
+# ---- guard-command-position.
 # A real quote that opens after a letter (`sed -e's/a/b/'`, `cut -d't'`) or closes after one
 # (`x'd'`) is read as a contraction, so the call after it is hidden. A quoted `(wsl` is text, and
 # must allow. A long value flag (`--unset`, `--user`, `--adjustment`, `--max-args`) and the short
@@ -4786,7 +4809,7 @@ for _name, _command in (
     sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 2 (lane). Each RED case below is a hole on 8b6813a.
+# ---- guard-command-position.
 # Item 1 is a regression: main denies these, and 8b6813a allows them. A contraction (`a's b'`) is
 # read as a contraction, so the real quote after it is not seen, and the call after that quote is
 # hidden. `sed -e's;a;b;'` holds a real quote, and the call after it must deny. Item 3: a short flag
@@ -4823,8 +4846,8 @@ for _name, _command in (
        rule=WSL_RULE, cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 3 (lane gcp-quote-fix). Each RED case below is a hole
-# on 335c4a9, and origin/main denies it. is_contraction counted every later `'`, so a later
+# ---- guard-command-position.
+# is_contraction counted every later `'`, so a later
 # apostrophe (`don't`, `"it's"`) paired with the contraction's own `'`, and the contraction read
 # hid the refused call after it. The first two groups must deny. The scanner group holds comment
 # openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
@@ -4931,10 +4954,8 @@ sh("wsl: a sed script with a backslash before & and a trigger word after it, all
 sh("wsl: a find -exec with a backslash before ; is text, allowed",
    r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
 
-# ---- lane swn-pwsh-escape, review round 2, item 3. Each case is RED when the read it names is
-# dropped (the scratch mutants, see the proof): quote_advance:118 for the escaped quote, _split_
-# reading:196 for the backslash-newline, nested_script's cmd /c tail (guard_core:1900). Each DENIES
-# on 2055fd8, so each is green there.
+# Each case is RED when the read it names is dropped: quote_advance for the escaped quote,
+# _split_reading for the backslash-newline, the cmd /c tail of nested_script.
 sh("wsl: a pwsh -c with an escaped quote before ; hides wsl --shutdown, denies",
    r"""pwsh -c 'echo "a\"; wsl --shutdown'""", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a pwsh -c with a backslash before a line break hides wsl --shutdown, denies",
@@ -4946,10 +4967,10 @@ sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell
 sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
    "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, holes F1 to F3 (red until the builder fixes them).
+# ---- PowerShell quoting, holes F1 to F3.
 # F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
 # PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
-# a backtick that the outer string already consumed. Each DENIES on origin/main.
+# a backtick that the outer string already consumed.
 sh("wsl: a PowerShell comment opener mid-word, then wsl --shutdown, denies",
    "echo a<# ; wsl --shutdown #>", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 sh("wsl: a Bash pwsh -c with a comment opener mid-word, then wsl --shutdown, denies",
@@ -4968,7 +4989,7 @@ sh("wsl: a PowerShell unclosed comment at a token start with no call after it, a
 sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
    "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, hole F4: a backtick hides the next `;` before an env read.
+# ---- hole F4: a backtick hides the next `;` before an env read.
 # It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
 FAMILY = "env"
 sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
@@ -4998,7 +5019,7 @@ sh("silent-write: merge's own quiet flag needs no redirect at all, MEASURED 2026
    VCS + " merge --quiet feature/x", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-write: rebase's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
    VCS + " rebase -q main", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
-sh("silent-write: a discarded proof of landing, stdout alone",
+sh("silent-write: discarding a write command output denies, stdout alone",
    VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
@@ -5452,8 +5473,8 @@ sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, 
    "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
-# (f) round 3 hole F5. Owner ruling 2026-10-15: these two were pinned allowed as limits, and are now
-# denies. A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
+# (f) Owner ruling 2026-10-15: these two deny.
+# A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
 # discarded commit or merge in a real checkout.
 sh("silent-write: a quote inside $( ) in a message does not hide a discarded commit, denies",
    VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
@@ -5768,7 +5789,7 @@ sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"',
 sh("delete: a grep pattern naming the cmd.exe form calls nothing",
    'grep "del /s" notes.md', "allow", cwd=NOGIT)
 
-# AUDIT 2026-10-17 (guard-audit-fixes, finding 2). The `rm` pattern reads raw text: a target must end
+# The `rm` pattern reads raw text: a target must end
 # at a space or the end, the flags must be one `-rf` cluster, and a quote hides nothing. Three
 # misses and one false alarm, each a form Claude writes.
 #
@@ -5822,9 +5843,9 @@ for _name, _command in (
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
 
-# REVIEW ROUND 1, 2026-10-17 (guard-audit-fixes-234). Main denies each of these four, because it
+# Main denies each of these four, because it
 # scans the raw text; reading `rm` as the command word alone lets them through. Each is a program
-# that runs the real command: find -exec, su -c, a container exec, and flock. RED on 106f785.
+# that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
     ("behind find -exec", "find . -exec rm -rf / \\;"),
     ("behind su -c", "su -c 'rm -rf /'"),
@@ -5834,9 +5855,9 @@ for _name, _command in (
     sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
        cwd=NOGIT)
 
-# REVIEW ROUND 3, 2026-10-17 (guard-audit-fixes-234). Main (cf4f82a) denies both, because it scans the
-# raw text; 914a2e7 allows them. `docker run --rm alpine` and `docker-compose exec web` have options
-# or a hyphenated name ahead of the real command. RED on 914a2e7.
+# Main denies both, because it scans the
+# raw text. Reading `rm` as the command word alone lets them through. `docker run --rm alpine` and `docker-compose exec web` have options
+# or a hyphenated name ahead of the real command.
 for _name, _command in (
     ("behind docker run with an option", "docker run --rm alpine rm -rf /"),
     ("behind docker-compose exec", "docker-compose exec web rm -rf /"),
@@ -6243,7 +6264,7 @@ sh("env: the accessor search in the other shell",
    tool="PowerShell", cwd=NOGIT)
 
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the loader rule reads a wrapper only in
+# ---- audit-high (owner ruling 2026-10-13): the loader rule reads a wrapper only in
 # its exact shape. `time`, a loop's `do`, a timeout flag written `--flag=value`, and the Windows
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
 # refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
@@ -6321,7 +6342,7 @@ for _cmd in (
     sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
        _cmd, "deny", "env-file", cwd=NOGIT)
 
-# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# ---- audit-high (owner ruling 1): a file-reading flag reads the file it names,
 # so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
 # cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
 # operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
@@ -6787,13 +6808,13 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
-# Named limits, no case: `gh api -X POST .../pulls`, `hub pull-request`, and short-flag clusters
-# such as `-dt x` (refused, a rare false alarm).
+# Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
+# `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
 # =========================================================================== 5b. the merge gate
 #
-# Decision `merge-waits-on-every-check`. A merge made outside the merge tool is refused while the head has
+# The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
 
@@ -7317,7 +7338,7 @@ def cite_unread_folders_case():
 # flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
 # quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
 # interpreter-fed body, which shifts the header count so the commit reads another body; and a case
-# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
+# pattern's `)` inside an open `$(`. Named holes: debts/notes.md. The RED
 # cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
 # Wrapper forms: one row per wrapper walk (a bare form, a value flag, a subshell). The deep set of
 # wrappers lives in the wsl section above, so this block keeps one row for each walk.
@@ -7824,6 +7845,143 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
    "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
+# OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
+# reads the frozen file, so it is allowed. A copy INTO a frozen path, a copy between two frozen
+# paths and a `mv` of a frozen file stay denied: `mv` takes the file away, and a copy writes into
+# the frozen set. The two copy-out cases are RED on main, where MUTATING_COMMAND denies any `cp`.
+sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /tmp/guard.bak",
+   "allow", cwd=NOGIT)
+sh("frozen: cp FROM the frozen settings to scratch is a read",
+   "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: cp from a frozen path TO a frozen path still denies",
+   "cp " + CFG_HOOK + " " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM a frozen hook still denies", "mv " + CFG_HOOK + " /tmp/guard.bak", "deny",
+   "frozen-path", cwd=NOGIT)
+# A LINK IS NOT A COPY. `cp -l` and `cp -s` (also `-a` with either, and the long forms) make a hard or
+# symbolic link to the frozen file, so a later write to the new name writes the frozen file. Only a
+# plain copy reads its source.
+sh("frozen: cp -al FROM a frozen hook makes a link, and stays denied",
+   "cp -al " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -l FROM a frozen hook makes a hard link, and stays denied",
+   "cp -l " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --link FROM a frozen hook stays denied",
+   "cp --link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -s FROM a frozen hook makes a symbolic link, and stays denied",
+   "cp -s " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --symbolic-link FROM a frozen hook stays denied",
+   "cp --symbolic-link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A HARD LINK TO A DIRECTORY LINKS EACH FILE IN IT. `cp -al` of the config directory (the test's
+# stand-in for ~/.claude) or `cp -Rl` of its hooks folder gives /tmp/x the frozen files themselves.
+sh("frozen: cp -al of the config directory makes links into it, and stays denied",
+   "cp -al " + slash(CFG) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -Rl of the frozen hooks folder makes links, and stays denied",
+   "cp -Rl " + slash(os.path.join(CFG, "hooks")) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A redirect of stderr to the null device writes no frozen file. A redirect onto one still denies.
+sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
+   "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
+sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
+   "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
+# no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
+# worktree `<clone>-live-<12 hex>`. The links in ~/.claude load from it, so a write into either one
+# changes what every session runs. The fixture clone is CLONE, so its pin is ROOT/clone-live.
+# ONLY THE TREE THE PIN LINKS TO IS FROZEN. install_from_main.sh makes `<clone>-live` a link to the
+# current stamped tree, and the trees before it stay on disk until pruned. OLD_PIN is one of those.
+LIVE_PIN = CLONE + "-live"
+STAMPED_PIN = CLONE + "-live-abcdef123456"
+OLD_PIN = CLONE + "-live-111111111111"
+LIVE_CLAUDEMD = slash(os.path.join(LIVE_PIN, "CLAUDE.md"))
+STAMPED_GUARD = slash(os.path.join(STAMPED_PIN, "hooks", "guard.py"))
+OLD_GUARD = slash(os.path.join(OLD_PIN, "hooks", "guard.py"))
+write(STAMPED_GUARD, "# pinned\n")
+write(OLD_GUARD, "# old\n")
+try:
+    os.symlink(STAMPED_PIN, LIVE_PIN)
+    PIN_LINKED = True
+except OSError:
+    PIN_LINKED = False   # no link rights: the pin is a plain folder, and the link cases do not run
+write(LIVE_CLAUDEMD, "# pinned\n")
+add("frozen: Write of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, content="rules\n")
+add("frozen: Edit of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Edit",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, old_string="# pinned", new_string="# rewritten")
+if PIN_LINKED:
+    add("frozen: Write of a hook in the stamped tree the pin links to", "deny", "frozen-path",
+        tool="Write", cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
+    sh("frozen: sed -i on a hook in the stamped tree the pin links to",
+       "sed -i '' s/a/b/ " + STAMPED_GUARD, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i on the live pinned checkout's CLAUDE.md", "sed -i '' s/a/b/ " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a redirect onto the live pinned checkout's CLAUDE.md", "echo rules > " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp onto the live pinned checkout's CLAUDE.md", "cp /tmp/x.md " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM the live pinned checkout's CLAUDE.md still denies",
+   "mv " + LIVE_CLAUDEMD + " /tmp/live.md", "deny", "frozen-path", cwd=NOGIT)
+# A copy OUT of the pin reads it, the same as the copy-out rule above.
+sh("frozen: cp OUT of the live pinned checkout to scratch is a read",
+   "cp " + LIVE_CLAUDEMD + " /tmp/live.md", "allow", cwd=NOGIT)
+add("frozen: Read of the live pinned checkout's CLAUDE.md is allowed", "allow", tool="Read",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD)
+# NOT THE PIN: the clone itself, a folder whose name only starts with the pin's name, a `-live`
+# folder that belongs to no clone, and a `-live-` folder whose tail is not 12 hex.
+add("frozen: an edit in the clone itself is allowed", "allow", tool="Edit", cwd=CLONE,
+    file_path=slash(os.path.join(CLONE, "CLAUDE.md")), old_string="rules", new_string="rewritten")
+sh("frozen: sed -i on the clone's own CLAUDE.md is allowed",
+   "sed -i '' s/a/b/ " + slash(os.path.join(CLONE, "CLAUDE.md")), "allow", cwd=NOGIT)
+add("frozen: an edit in claude-settings-livestock is allowed", "allow", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clone-livestock", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in an unrelated folder named -live is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "other-live", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in a -live folder whose tail is not 12 hex is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clone-live-scratch", "CLAUDE.md")),
+    old_string="a", new_string="b")
+# THE RECOVERY PATH STAYS OPEN. A broken pin is repaired by running the install by hand, or by
+# running the merge tool, so neither may be gated on the pin being healthy (verification-recovery-
+# not-gated-on-own-state). Each runs from the clone, and each from the pin itself.
+sh("recovery: merge/install_from_main.sh run by hand from the clone is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=CLONE)
+sh("recovery: merge/install_from_main.sh run by hand from the live pin is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=LIVE_PIN)
+sh("recovery: the merge tool run from the clone is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=CLONE)
+sh("recovery: the merge tool run from the live pin is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=LIVE_PIN)
+# A STAMPED TREE NO LINK POINTS AT IS NOT FROZEN. install_from_main.sh says "move it aside" when a
+# tree is in the way (move_pin), and prune_trees removes the old ones. Neither may be blocked.
+sh("recovery: mv of an old stamped tree that no link points at is allowed",
+   "mv " + OLD_PIN + " /tmp/aside", "allow", cwd=NOGIT)
+sh("recovery: rm -rf of an old stamped tree that no link points at is allowed",
+   "rm -rf " + OLD_PIN, "allow", cwd=NOGIT)
+# A FOLDER IS A PIN ONLY WHEN ITS SIBLING CLONE HOLDS merge/install_from_main.sh, the script that
+# makes the pin (orchestrator call, 2026-10-17). The two marker files alone do not make one, so a
+# sibling with only settings.json, or only install.ps1, leaves `X-live` editable.
+write(os.path.join(ROOT, "clonea", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonea-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloneb", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "cloneb-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "clonec", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonec", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "clonec-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloned", "merge", "install_from_main.sh"), "# install\n")
+write(os.path.join(ROOT, "cloned-live", "CLAUDE.md"), "# pinned\n")
+add("frozen: Write of X-live beside a clone with only settings.json stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clonea-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with only install.ps1 stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "cloneb-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with both markers and no install script stays editable",
+    "allow", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clonec-live", "CLAUDE.md")), content="rules\n")
+add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
+    "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
@@ -8883,8 +9041,8 @@ deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
 # (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
-# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are the
-# open items of the debt `ask-step-hidden-in-script`). W is the cap write with no quote in it, so it
+# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are open
+# items). W is the cap write with no quote in it, so it
 # nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
 # redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
 CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
@@ -9793,7 +9951,7 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the test-author's own scratch writes.
+# ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
 # scratchpad allowance is the one under_session_scratchpad gives, keyed by the session id the payload
@@ -12268,7 +12426,7 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
                          mask_pin_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# Time bound (decision rm-on-a-variable-needs-a-guard): 2000 unclosed $( spans must be
 # judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
 # then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
 # same decide() call the main loop uses.
@@ -12327,8 +12485,8 @@ def judge_in_process(command, cwd):
 
 
 # Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
-# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
-# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). One
+# wall-clock case stays live. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
 # slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
@@ -12523,7 +12681,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13, guard-audit-high; decision gate-hooks-fail-closed): a guard
+# audit-high (owner ruling 2026-10-13; decision gate-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control

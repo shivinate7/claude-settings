@@ -1,7 +1,7 @@
 """The guard's rm-var family: a recursive delete on an unguarded variable.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import functools
 import itertools
@@ -15,13 +15,12 @@ from guard_core import (
 )
 
 
-# THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard (owner ruling, 2026-10-11):
-# a recursive `rm` whose target has an unguarded expansion followed by `/` is refused, and the
-# refusal prints the targets with every expansion written `${NAME:?}`. INCIDENT 2026-10-10 to
-# 10-11: 7 of 24 Bash prompts were `rm` on a `$var` path. Segments, the command word and the
-# `sh -c` script come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
+# THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard: a recursive `rm` whose
+# target has an unguarded expansion followed by `/` is refused, and the refusal prints the targets
+# with every expansion written `${NAME:?}`. Segments, the command word and the `sh -c` script
+# come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
 # `segment_tokens` drops, and `rm_call` checks that both reads agree on the word count.
-# Named limits: decision rm-on-a-variable-needs-a-guard.
+# Limits: the debt notes (rm-var-unseen-forms).
 _RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
 _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")

@@ -903,7 +903,7 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     check(name + ": no question text echoed", "ECHO-QUESTION-SENTINEL" not in out, out[:200])
 
 
-# --------------------------------------------------------------------------- round 3
+# ---------------------------------------------------------------------------
 # R1 a deny state that cannot be removed; R2 deny-state age; R3 UTF-8 stdin read as cp1252;
 # R4 the Goal: deny reason is sanitized.
 
@@ -1007,9 +1007,9 @@ def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
     check(name + ": no model call", stub.prompts == [], len(stub.prompts))
 
 
-# --------------------------------------------------------------------------- round 4
+# ---------------------------------------------------------------------------
 # R8 a stale deny state whose remove fails is ignored: the ask is judged, no did-not-run note.
-# Pin: a fresh deny state whose remove fails gives the did-not-run note and no deny.
+# A fresh deny state whose remove fails gives the did-not-run note and no deny.
 
 def case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged():
     name = "caseR8 deny-state 2 hours old, remove fails: ignored, the ask is judged once"
@@ -1062,9 +1062,9 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
 # - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
-# - Each ruling is shown with its record id (the file stem).
+# - Each ruling is shown with its record id, <folder>/<stem> (owner ruling 2026-10-17).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
-#   holds the id and the record's H1 title, and names no path.
+#   holds the id and the record's H1 title, and names no absolute path.
 
 # The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
 # module at test time. No case here keeps a copy of them.
@@ -1160,14 +1160,14 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
-    name = "caseRL2 settled question: refused, reason cites the record's id and title, no path"
+    name = "caseRL2 settled question: refused, reason cites the record's folder/stem id and title, no absolute path"
     if not need_module(name):
         return
     for kind, rel, text, rid, title in (
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
-             "rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "rl-beta", "Beta waits for the owner")):
+             "decisions/rl-alpha", "Retries wait between tries"),
+            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "deferred/rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1180,7 +1180,64 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
         reason = reason or ""
         check(sub + ": reason cites the record id " + rid, rid in reason, reason)
         check(sub + ": reason gives the record title as its gloss", title in reason, reason)
-        check(sub + ": reason names no path or file", not re.search(r"decisions|deferred|\.md", reason), reason)
+        # Owner ruling 2026-10-17: a relative folder/stem id is fine; an absolute path or a .md file is not.
+        check(sub + ": reason names no absolute path and no .md file", repo not in reason and ".md" not in reason,
+              reason)
+
+
+# Owner ruling 2026-10-17: the judge labels each ruling `<folder>/<stem>`. One stem in two folders must keep
+# two distinct ids, so the cite cannot pick the wrong record's title.
+DUP_FILES = {
+    "decisions/rl-dup.md": decision_text("Decision dup record", [("The ruling", "RL8-DEC-BODY: retries never wait.")]),
+    "deferred/rl-dup.md": "\n".join(["# Deferred dup record", "",
+                                     "**Why it waits.** Owner, 2026-10-06: RL8-DEF-BODY waits for the owner.", ""]),
+}
+
+
+def case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title():
+    name = "caseRL2b same stem in decisions/ and deferred/: two folder/stem ids, each FLAG cites its own title"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl8", DUP_FILES)
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the decision is labeled decisions/rl-dup with its own title",
+          "Ruling of record decisions/rl-dup (Decision dup record)" in prompt, "")
+    check(name + ": the deferred record is labeled deferred/rl-dup with its own title",
+          "Ruling of record deferred/rl-dup (Deferred dup record)" in prompt, "")
+    check(name + ": both rulings' text reaches the judge", "RL8-DEC-BODY" in prompt and "RL8-DEF-BODY" in prompt, "")
+    for rid, title, other in (("deferred/rl-dup", "Deferred dup record", "Decision dup record"),
+                              ("decisions/rl-dup", "Decision dup record", "Deferred dup record")):
+        sub = "%s (FLAG %s)" % (name, rid)
+        with model_stub(({"verdict": "FLAG", "record": rid, "why": WHY}, None)):
+            _code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                                            default_transcript(), repo))
+        reason = deny_reason(out)
+        check(sub + ": denied", reason is not None, out)
+        reason = reason or ""
+        check(sub + ": reason cites the id " + rid, rid in reason, reason)
+        check(sub + ": reason cites its own title, " + title, title in reason, reason)
+        check(sub + ": reason does not cite the other record's title, " + other, other not in reason, reason)
+
+
+def case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records():
+    name = "caseRL2c bare stem reply, same stem in two records: no title is cited"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl9", DUP_FILES)
+    with model_stub(({"verdict": "FLAG", "record": "rl-dup", "why": WHY}, None)) as stub:
+        _code, out, _ = run_guarded(name, ruling_payload(fresh_session("rl9"), [question(GOOD_Q, LABELS)],
+                                                         default_transcript(), repo))
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    reason = deny_reason(out)
+    check(name + ": the FLAG is still denied", reason is not None, out)
+    reason = reason or ""
+    check(name + ": the bare id is not cited: no title of either record",
+          "Decision dup record" not in reason and "Deferred dup record" not in reason, reason)
+    check(name + ": the deny keeps the judge's why", WHY in reason, reason)
 
 
 def case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed():
@@ -1447,7 +1504,7 @@ def case_g5_prompt_reads_the_style_file_not_a_copy():
           "DECOY-FIX found")
 
 
-# --------------------------------------------------------------------------- goal format, review round 1
+# --------------------------------------------------------------------------- goal format
 # No order between the Problem and Goal lines; the literals tied to the style file by module
 # constants; one stderr line when the style file or a rule anchor is missing.
 ORDER_WORD = re.compile(
@@ -2498,8 +2555,8 @@ def case_d3_an_option_with_no_description_renders_its_label_alone():
 
 
 # --------------------------------------------------------------------------- option text: size, fences, separator, preview; question text; options shape
-# Red cases for review round 1. Each names the defect in its case name. The cap value is the
-# builder's: these cases assert only that the judge runs and that the first owner message stays whole.
+# Each case names its defect in its case name. The cap value is the builder's: these cases
+# assert only that the judge runs and that the first owner message stays whole.
 
 FIRST_OWNER_CHARS = 8000  # the first owner message: enough to be cut once a huge option leaves little room
 
@@ -2653,7 +2710,7 @@ def case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash():
 
 
 # --------------------------------------------------------------------------- option cut: whole text, and the mark that names it
-# Red cases for review round 2. Real option descriptions run to 375 chars at p99 (max 605). The Loss
+# Real option descriptions run to 375 chars at p99 (max 605). The Loss
 # text sits at the end, so a cut at 300 chars can hide the reason the judge needs.
 
 LOSS_TAIL = "Loss: D11-LOSS-TAIL drops the review step for one day."
@@ -2776,7 +2833,9 @@ def main():
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
-                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark):
+                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
+                 case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title,
+                 case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records):
         case()
     if LOAD_ERROR is None:
         check("no real claude process started", _claude_calls() == 0, _claude_calls())

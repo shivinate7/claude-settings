@@ -34,7 +34,7 @@ line is `CI unknown`. A status that is not `completed` (in_progress, queued) mea
 
 Verdict line, exit 2: `CI <green|red|cancelled> on <sha7>: <failing job names>`.
 A cancelled run beside a run of the same name that ran, on the same head, reads as the ran one,
-in either list order, completed or in progress (decision merge-needs-a-proven-head). A cancelled
+in either list order, completed or in progress (merge/merge.py Host.judge_runs). A cancelled
 run with no such twin reads cancelled.
 Unreadable gh: gh not on PATH, exit non-zero, or output that is not JSON. For a `gh pr ready`
 that could start a watch, exit 2 with one line `CI unknown on <sha>: <reason>`. Never a silent exit 0.
@@ -369,7 +369,7 @@ BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=
 QUEUED_913 = run(913, "gates", "success", [job("unit", "success")], in_progress_reads=2,
                  early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
-# skipped (the form that read red on main). DRAFT_DONE lists skipped (the form main already drops).
+# skipped. DRAFT_DONE lists skipped from the first list.
 DRAFT_LIVE = run(920, "gates", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
 DRAFT_DONE = run(921, "gates", "skipped", [job("unit", "skipped")])
 
@@ -697,7 +697,7 @@ def case_draft_run_then_real_run():
     expect_watch("draft run listed skipped beside a real run (control)", res, ["901"])
     res = run_hook(ready, fixture(READY, [DRAFT_LIVE, INPROG_906]), **fast)
     expect_verdict("draft run running at the list, real run listed with it (control)", res, "green")
-    # The incident: the first list shows only the draft run, still running. The real run lists second.
+    # The first list shows only the draft run, still running. The real run lists second.
     label = "draft run running at the first list, real run listed second"
     res = run_hook(ready, fixture(READY, [DRAFT_LIVE, late(922, 2)]), **fast)
     expect_verdict(label, res, "green")
@@ -1198,7 +1198,6 @@ def main():
     res = run_hook({"tool_name": "Bash", "tool_input": "ls -la"}, fixture(READY, [GREEN]))
     expect_verdict("uncaught error: tool_input is not an object", res, "unknown")
 
-    # Review round 2: skipped-only head, draft PR, import and flush errors, separators, low items.
     case_skipped_only_head_is_no_run_yet()
     case_draft_pr_starts_no_watch()
     case_import_error_wakes_unknown()

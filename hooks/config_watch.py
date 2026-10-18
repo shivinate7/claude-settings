@@ -60,7 +60,7 @@ a script file and a path held in a shell variable are all equally visible to a h
 change that the guard did not ask about, this file puts the previous content back and prints a
 systemMessage naming the file, the tool and the command.
 
-THE SHELL ROUTE HAS TWO LAYERS (decisions/guard-trims-from-the-audit.md). The guard asks about
+THE SHELL ROUTE HAS TWO LAYERS. The guard asks about
 the shell shapes that name the value, and this file reverts every shell cap change it did not
 explain, in every shape. This file sees only the watched paths of the current directory, so the
 guard's ask is the layer for a shell write from a subdirectory or another worktree. The guard's
@@ -84,8 +84,7 @@ The fix reads a second field the override file carries OUTSIDE its `env` block:
 And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
 into a second cap-change ask the field is not one. MEASURED: `guard._cap_reading('"_subagentCapUntil":
 "2026-09-21T00:00:00Z"')` returns `{}`. The guard's PreToolUse ask never sees this field, and only
-this watch reads it. See decision `subagent-model-cap` (the subagent model cap), sections "The grant"
-and "What was measured".
+this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file

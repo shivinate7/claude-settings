@@ -559,7 +559,7 @@ class ModTestStep(unittest.TestCase):
             ("all pass", {"mods/a/a.test.mjs": True, "mods/b/b.test.mjs": True}, True),
             ("first file fails", {"mods/a/first.test.mjs": False, "mods/b/b.test.mjs": True}, False),
             ("last file fails, in a new mod", {"mods/a/a.test.mjs": True, "mods/zz-new/last.test.mjs": False}, False),
-            # Debt mods-tests-glob-too-narrow: these two shapes never ran.
+            # These two shapes never ran.
             ("nested tests/ file fails", {"mods/a/a.test.mjs": True, "mods/a/tests/b.test.mjs": False}, False),
             ("*.test.js file fails", {"mods/a/a.test.mjs": True, "mods/a/c.test.js": False}, False),
             # Control, green now: a dependency's own test under node_modules is not ours to run.
