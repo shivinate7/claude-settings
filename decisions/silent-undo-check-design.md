@@ -20,27 +20,25 @@
 
 The escape is the trailer `Drops-lines: <path> -- <reason>`, one per path, on any commit of the branch. A
 bare path excuses nothing. Each use prints `ALLOWED <path>: <reason>`. A commit message that only names
-the file does not pass. A junk reason passes, so the reviewer reads every reason. There is no switch that
-turns the check off.
+the file does not pass. A junk reason passes, so the reviewer reads every reason. No switch turns the
+check off.
 
 **The window starts at the fork point,** not at the plain merge-base, which moves to main's tip once the
 branch merges main. There is no `--since` time. Reason: a commit-time window let the same shape pass or
 fail by its timestamp, and a commit-count floor read old main work that a branch may remove on purpose.
 
-- Fork point: `merge-base(upstream, own[-1] + "^")`, where `own` lists the branch's first-parent commits
-  that upstream lacks, newest first. With no merge-base there, the plain merge-base is used.
+- Fork point: the merge-base of upstream and the parent of the branch's oldest first-parent commit that
+  upstream lacks. With no merge-base there, the plain merge-base is used.
 - The read covers upstream's first-parent commits from the tip down to the fork commit, and the result is
-  read against upstream's tip. A conflict leaves no result. Then the branch's own diff is read off the
-  plain merge-base.
+  read against upstream's tip. Main work before the fork commit is not read, unless the fork point is off upstream's first-parent line.
 - A branch cut at main's tip that undoes the tip commit is flagged, a deliberate revert included, which
-  needs the trailer. Main work before the fork commit is not read, unless the fork point is off
-  upstream's first-parent line. `test_main_work_before_the_cut_is_not_read` pins this.
+  needs the trailer.
 
 **Required or advisory.** The check is required here, where lanes are short and land through integration
-batches. It is advisory in a repo whose long-lived lanes merge main in and then edit main's lines. Advisory
-means that the check runs and prints its flags. The batch reviewer marks each flag real or deliberate, and
-a real flag blocks the merge. Move to required when a rule separates a deliberate edit of main's lines
-from a stale overwrite, with every incident fixture still red.
+batches. It is advisory in a repo whose long-lived lanes merge main in and then edit main's lines.
+Advisory means that the check runs and prints its flags. The batch reviewer marks each flag real or
+deliberate, and a real flag blocks the merge. It moves to required when a rule separates a deliberate
+edit of main's lines from a stale overwrite, with every incident fixture still red.
 
 **The stale green PR.** An older PR overwrites a newer change to the same file. The agent resolves a
 conflict to its own side, or writes the whole file from an old copy. `merge/merge.py` runs the check in
@@ -52,10 +50,9 @@ lines are a new edit, so the reversal dial stays at one line until a measured ca
 
 - Whitespace and blank lines never count.
 - A move, a rename or a reorder: a removed line that the change adds to another file is excused.
-- A re-wrapped prose line, when the whole line is a run of the new lines with whitespace collapsed. A
-  short line never passes as a re-wrap.
-- A rewrite by the resolver, when a line of the same hunk reads very much like it. A merge that only adds
-  tokens to a line (a new argument) is a rewrite when the line starts the same way and adds no negation.
+- A re-wrapped prose line. A short line never passes as a re-wrap.
+- A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. A merge
+  that only adds tokens to a line (a new argument) is a rewrite when it adds no negation.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).

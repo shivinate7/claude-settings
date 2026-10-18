@@ -10,9 +10,8 @@ the owner names.
 
 Where each part lives:
 
-- The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`, and
-  `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it. `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1.
-  `hooks/test_wrappers.py` checks all three.
+- The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
+  `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it, and `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1.
 - The floor: guard rule `subagent-model-floor`.
 - The step-up: guard rule `roles-third-try-steps-up`.
 - A write that sets the fallback: guard rule `subagent-model-cap`, always an ask. Its expiry:
@@ -64,15 +63,13 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the mod passes model, prompt, maxTokens and timeoutMs only, and no effort field is known on that call; `timeoutMs` is not a known request field, and the mod enforces 50 s with its own timer |
 | every other hook and gate | no model; plain code | n/a |
 
-The Agent prompt judge checks the Explore audit row. It blocks an Explore whose brief asks it to audit,
-review, judge, rate or compare meaning, when the call does not set model sonnet. A plain search passes on
-the Haiku default. The caller spot-checks findings before it acts on an audit.
+The Agent prompt judge blocks an Explore whose brief asks it to audit, review, judge, rate or compare
+meaning, when the call does not set model sonnet. A plain search passes on the Haiku default. The caller
+spot-checks findings before it acts on an audit.
 
-Haiku means Haiku 5.5.
-
-Every skill under `skills/` has one row here: "no model pin; runs on the caller's model", because a
+Every skill under `skills/` has one row here, "no model pin; runs on the caller's model", because a
 skill's model is the model of the session that calls it. `lint/check_skill_model_rows.py` fails CI when a
-skill has no row or a row names a skill that does not exist.
+skill has no row or a row names a missing skill.
 
 **The ceiling.** Sonnet is the ceiling for every role but three standing exceptions.
 
@@ -87,37 +84,32 @@ names.
 Prose alone enforces the ceiling, and no forcing returns. Reason: Claude Code emits no rank over models,
 so a rank in a hook copies a list (`building-allow-list-is-the-constant`) and goes stale the day a model
 ships. A permission prompt cannot time out, so the guard allows Opus at round 3 and the owner's word stays
-prose. CLAUDE.md `roles-sonnet-is-the-ceiling` states the ceiling, and `lint/rule_mechanisms.json` records
-it as `unmechanized`.
+prose.
 
 **The floor.** Haiku runs only in Explore, claude-code-guide, test-author, reviewer and record-writer.
 Every other role has Sonnet as the floor. Two places enforce it, and both read one list, `HAIKU_ROLES` in
 `hooks/guard.py`.
 
 - Guard rule `subagent-model-floor` denies an `Agent` or `Task` call whose `model` holds "haiku", unless
-  its `subagent_type` is a Haiku role. It reads a `Workflow` script too, denying an `agent()` call that
-  names a Haiku model outside the Haiku roles. It also denies a `start_session` that names Haiku.
-- `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an `agents/*.md` or
-  `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file is one of the Haiku roles.
+  its `subagent_type` is a Haiku role. It also covers a `Workflow` `agent()` call and a `start_session`.
+- `lint/check_agent_models.py` fails when an `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a
+  Haiku `model:`, unless the file is one of the Haiku roles.
 
 `agents/plan.md` pins Plan.
 
 **The step-up.** Guard rule `roles-third-try-steps-up` in `hooks/guard.py` reads the `Round N of 3` or
 `Try N of 3` line in the brief of an `Agent` or `Task` call. A round 2 reviewer runs on Sonnet, its
-ceiling. A round 3 reviewer runs Sonnet, or Opus on the owner's word. A try 3 builder needs Opus. The
-Agent prompt hook in `settings.json` does not hold this check.
+ceiling. A round 3 reviewer runs Sonnet, or Opus on the owner's word. A try 3 builder needs Opus.
 
 **The record-writer boundary.** A `record-writer` may change only `*.md` files: records, README,
 CLAUDE.md-style docs. It never changes product code, tests, CI or config. Reason: a role name is only a
 label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and
-the floor means nothing. The guard enforces the limit at the same points as the builder and test-author
-limits (builders-cannot-edit-tests). A write tool call to a non-`.md` path is denied as
-`record-writer-scope`. A non-`.md` path in its diff at commit, push or stop logs `writer-diff`.
-`agents/*.md`, `skills/*/SKILL.md` and output styles are `.md` but steer behaviour, and they stay in scope.
+the floor means nothing. The guard denies a write to a non-`.md` path (`record-writer-scope`) and logs a
+non-`.md` path in its diff at commit, push or stop (`writer-diff`). `agents/*.md`, `skills/*/SKILL.md` and
+output styles are `.md` but steer behaviour, and they stay in scope.
 
-**No pin, no per-spawn gate.** Claude Code picks a spawn's model in this order: the per-invocation
-`model` parameter, the subagent definition's `model` frontmatter, `CLAUDE_CODE_SUBAGENT_MODEL`, then the
-main conversation's model. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses the order onto the variable.
+**No pin, no per-spawn gate.** `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses Claude Code's model order
+(per-call `model`, definition frontmatter, `CLAUDE_CODE_SUBAGENT_MODEL`, main model) onto the variable.
 That is a pin, not a ceiling: it holds Opus back exactly as hard as Haiku. The owner wants both halves
 held, the ceiling by prose alone. With the flag gone, the variable is a true fallback. It decides only the
 spawns that name no model and whose definition names no model. `agents/builder.md` carries no `model:`
@@ -125,10 +117,10 @@ key, so a builder spawn reads the fallback.
 
 No per-spawn gate guards the ceiling. Reason: an ask blocks the dispatch, so a fan-out stalls at the first
 ask until the owner returns. A gate also fires only on over-provisioning and is blind to
-under-provisioning, and it is silent where model freedom is greatest (`guard-that-cries-wolf-is-spent`).
-A justification line is the wrong mechanism: written after the model is chosen, it defends the choice and
-does not change it. The one line before dispatch (`roles-opus-shaped-say-so`) names the reason before the
-choice, so it stays. It asks; the owner's word decides.
+under-provisioning (`guard-that-cries-wolf-is-spent`). A justification line is the wrong mechanism:
+written after the model is chosen, it defends the choice and does not change it. The one line before
+dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. It asks; the
+owner's word decides.
 
 One gate stays: guard rule `subagent-model-cap` asks on a write that changes the fallback. A write is a
 standing change, not a dispatch, so the ask stalls nothing mid-fan-out.
@@ -149,12 +141,16 @@ The grant raises the fallback. It does not pin. For one Opus lane, the orchestra
 that one call, on the owner's word: narrower and cheaper than a repository-wide raise. The grant is for
 several lanes in a row, and it needs a fresh session: a running session keeps the old value.
 
-The raise is a standing change. Every spawn in that repository that names no model reads it, and it
-outlives the turn that wrote it. Two parts guard it. Both key on `CLAUDE_CODE_SUBAGENT_MODEL` and
-`CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` alone.
+The raise is a standing change that outlives the turn that wrote it. Two parts guard it. Both key on
+`CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` alone.
 
-- Guard rule `subagent-model-cap` asks on the write. The ask names the model and the file. The rule matches `_FORCE` too, so the ask still fires on a stale file, or another repository, that sets the flag.
-- `hooks/config_watch.py` judges the override on every sweep. Any value of either model key other than `sonnet` lifts the cap. `_subagentCapUntil` sits outside `env`, only the watch reads it, and it must be no more than 24 hours ahead. A deadline that is missing, unparseable, passed or too far out gets the file reverted to the `prior` content the watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner to read the file by hand.
+- Guard rule `subagent-model-cap` asks on the write. The rule matches `_FORCE` too, so the ask still fires
+  on a stale file, or another repository, that sets the flag.
+- `hooks/config_watch.py` lifts the cap for any value of either model key other than `sonnet`.
+  `_subagentCapUntil` sits outside `env`, only the watch reads it, and it must be no more than 24 hours
+  ahead. A deadline that is missing, unparseable, passed or too far out gets the file reverted to the
+  `prior` content the watch holds. With no `prior` on record the watch reports UNKNOWN and asks the owner
+  to read the file by hand.
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.

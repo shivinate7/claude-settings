@@ -26,19 +26,16 @@ denies, and the judge's reason goes to the session. A question must be plain, in
    for a record (rule `style-option-says-effect`)?
 
 **The model call.** Haiku at effort `xhigh`, through `invoke_model` in `hooks/decision_watch.py`. It
-starts a second `claude` program that does not share the app's login. Both hooks log in with a one-year
-token from `claude setup-token`, saved in `~/.claude/state/hook-token` on each machine and never in the
-repository. Accepted risk: the guard blocks writes to `~/.claude/state`, but not reads, so a session can
-print the token into its transcript. `.credentials.json` carries the same risk.
+starts a second `claude` program that does not share the app's login. Both hooks log in with a token from
+`claude setup-token`, saved in `~/.claude/state/hook-token` on each machine and never in the repository.
 
 **Presence and order.**
 
 - A clarifying question, with no options or one option, passes first.
 - Any other question with no `Goal:` line, no `Problem:` line, or an empty one, is denied with no model
-  call. The reason names each missing label. The presence check needs the plain label at a line start.
+  call. The reason names each missing label.
 - A `Problem:` line before the `Goal:` line is denied with no model call. The reason says `Goal:` goes
-  first. The order check reads both labels loosely (any case, a full-width colon, a one-line non-word
-  prefix).
+  first.
 - Only the question text counts. A `Problem:` or `Goal:` line in an option does not count.
 
 **What the judge reads.**
@@ -50,15 +47,11 @@ print the token into its transcript. `.credentials.json` carries the same risk.
 - The goal is read from owner records only: human user records, plus the owner's answers in
   `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and other tool results
   are not the owner's.
-- Each option is read on one line (label, description, preview), cut when long and marked `[cut]`. The
-  prompt says that mark is a cut for length, not a missing part.
-- Span blocks sit between fences, and text that looks like a fence is defanged. So a relay sender cannot
-  forge an Owner block.
-- The prompt goes to the model on stdin and stays within a size cap. The oldest assistant and relay text
-  is trimmed first. Owner messages are trimmed only as a last resort, from the oldest one, and keep their
-  end. When the fixed text and the question alone go over the cap, the question passes and the hook says
-  the check did not run.
-- The reason sent back to the session is capped and cleaned.
+- A relay sender cannot forge an Owner block: span blocks sit between fences, and fence-like text is
+  defanged.
+- Over the size cap, the oldest assistant and relay text is trimmed first. Owner messages are trimmed only
+  as a last resort. When the fixed text and the question alone go over the cap, the question passes and
+  the hook says the check did not run.
 
 **Fail open.**
 
