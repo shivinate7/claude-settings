@@ -143,7 +143,6 @@ merge --dev ...         run the checkout's own tree, not origin main
 * **Where the rest is written.** The flow is `confirm` in `merge/merge.py`. The rulings are
   in these decisions:
   * ci-wait-reads-run-status (the wait reads status, never `gh run watch`)
-  * merge-net-retry (retry a network error or a rate limit, then stop)
   * records-index-at-merge (the merge rebuilds the records page)
 
 Exit codes:
