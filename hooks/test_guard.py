@@ -1799,7 +1799,7 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
 # ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
 # the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
 # deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
-# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+# bandaid the reset runs in the clean lane and allows.
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -1947,8 +1947,8 @@ sh("worktree data: a reset named in a JSON payload piped to python, inside a wor
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
    + "' | python hooks/guard.py", "allow", cwd=GITWT)
 
-# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
-# clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
+# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decision
+# agent-worktree-discard-is-noted). In a linked worktree, a checkout or restore that names only FILES writes the
 # lane's own change to those files, so it runs with no ask. A folder, a glob, `.`, and a whole-tree
 # reset keep the ask. A shared checkout denies every form here. Each case is tagged "per-file", so
 # MUTATE_ONLY=per-file runs this block alone. The fixtures are real: fixtures/a.json,
@@ -2401,7 +2401,7 @@ sh("work-tree: the spaced form is read the same way",
 # ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
 # or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
 # header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
-# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
+# it. Named holes: debts/notes.md. Each RED case below is a hole. The
 # PINNED cases already deny or allow, and a fix must keep them so.
 for _name, _command in (
     ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
@@ -3164,7 +3164,7 @@ sh("rm-var: a git toplevel value names a literal path",
 sh("rm-var: a literal value that resolves to the cwd names a literal path",
    'D=%s; rm -rf "$D"/*' % NOGIT, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", NOGIT))
-# Named limits, taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
+# Taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
 # from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
 # when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
 # moved to a glob is (b) ruling changed: the trigger shape is now tested.
@@ -3230,8 +3230,8 @@ def rm_var_taint_reader_case():
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
-# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+# Taint (decision rm-on-a-variable-needs-a-guard): a pwd command in $(...) or backticks taints,
+# with any flags or path. Red until the guard matches them.
 sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3247,8 +3247,8 @@ sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays al
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, derived forms: a variable whose assigned or loop value holds ~, HOME, PWD or pwd is
-# tainted, so its refusal names a literal path, never ${D:?} advice.
+# Derived forms (decision rm-on-a-variable-needs-a-guard): a variable whose assigned or loop value
+# holds ~, HOME, PWD or pwd is tainted, so its refusal names a literal path, never ${D:?} advice.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -3266,7 +3266,7 @@ sh("rm-var: $HOME joined to a literal path is not refused",
 sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
    "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",))
-# Ruling changed (rm-on-a-variable-needs-a-guard, named limits). Taint comes only from a real
+# Ruling changed (rm-on-a-variable-needs-a-guard). Taint comes only from a real
 # expansion. A literal value that spells pwd or HOME is not one.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a literal value that spells pwd is not tainted",
@@ -3282,19 +3282,19 @@ sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its ow
 sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
-# Named limits, substitution spans. The assigned-value reader cuts the value at ; & | even inside
-# $(...) or backticks, so a pwd after the cut is missed. Each case must deny with the literal-path
-# reason. Each case whose target moved to a glob is (b) ruling changed.
+# Substitution spans (decision rm-on-a-variable-needs-a-guard). The assigned-value reader cuts the
+# value at ; & | even inside $(...) or backticks, so a pwd after the cut is missed. Each case must
+# deny with the literal-path reason. Each case whose target moved to a glob is (b) ruling changed.
 sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
-# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
-# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
-# with the literal-path reason and never name ${D:?}.
+# Taint (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an expansion of HOME or
+# PWD, anywhere in the command taints every variable it assigns. The guard reads no $(…) span, so
+# quotes and ; inside the span cannot hide the source. Each case must deny with the literal-path
+# reason and never name ${D:?}.
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3306,10 +3306,10 @@ sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
-# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
-# value whose path is the home folder or the cwd, so the refusal names the literal path and never
-# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard). Each case below has an unsafe binding,
+# a value the guard cannot read, or a value whose path is the home folder or the cwd, so the
+# refusal names the literal path and never ${NAME:?}. Each case must be refused. A pass, or a
+# crash that exits 0, is a FAIL.
 HOME = os.path.expanduser("~")
 sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
    'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -4694,7 +4694,7 @@ sh("wsl: a test path whose dot-led glob expands to ..",
 # `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
 # `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
 # that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
-# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
+# holes: debts/notes.md. The RED cases are holes. The PINNED cases already
 # refuse or allow, and a fix must keep them so.
 for _name, _command in (
     ("exec", "exec wsl --shutdown"),
@@ -6241,7 +6241,7 @@ sh("env: the accessor search in the other shell",
    tool="PowerShell", cwd=NOGIT)
 
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the loader rule reads a wrapper only in
+# ---- audit-high (owner ruling 2026-10-13): the loader rule reads a wrapper only in
 # its exact shape. `time`, a loop's `do`, a timeout flag written `--flag=value`, and the Windows
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
 # refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
@@ -6319,7 +6319,7 @@ for _cmd in (
     sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
        _cmd, "deny", "env-file", cwd=NOGIT)
 
-# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# ---- audit-high (owner ruling 1): a file-reading flag reads the file it names,
 # so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
 # cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
 # operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
@@ -7315,7 +7315,7 @@ def cite_unread_folders_case():
 # flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
 # quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
 # interpreter-fed body, which shifts the header count so the commit reads another body; and a case
-# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
+# pattern's `)` inside an open `$(`. Named holes: debts/notes.md. The RED
 # cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
 # Wrapper forms: one row per wrapper walk (a bare form, a value flag, a subshell). The deep set of
 # wrappers lives in the wsl section above, so this block keeps one row for each walk.
@@ -9018,8 +9018,8 @@ deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
 # (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
-# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are the
-# open items of the debt `ask-step-hidden-in-script`). W is the cap write with no quote in it, so it
+# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are open
+# items). W is the cap write with no quote in it, so it
 # nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
 # redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
 CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
@@ -9928,7 +9928,7 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the test-author's own scratch writes.
+# ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
 # scratchpad allowance is the one under_session_scratchpad gives, keyed by the session id the payload
@@ -12403,7 +12403,7 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
                          mask_pin_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# Time bound (decision rm-on-a-variable-needs-a-guard): 2000 unclosed $( spans must be
 # judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
 # then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
 # same decide() call the main loop uses.
@@ -12462,8 +12462,8 @@ def judge_in_process(command, cwd):
 
 
 # Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
-# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
-# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). One
+# wall-clock case stays live. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
 # slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
@@ -12658,7 +12658,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13, guard-audit-high; decision gate-hooks-fail-closed): a guard
+# audit-high (owner ruling 2026-10-13; decision gate-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control

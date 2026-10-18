@@ -282,8 +282,7 @@ SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab",
                 "streamlit": ("run",)}
 SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
 # Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
-# is checked for presence only, and some wrappers and forms are not read (debt
-# server-wrappers-unread).
+# is checked for presence only, and some wrappers and forms are not read (debt notes).
 
 
 def until_note(description) -> str:

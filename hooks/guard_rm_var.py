@@ -20,7 +20,7 @@ from guard_core import (
 # with every expansion written `${NAME:?}`. Segments, the command word and the `sh -c` script
 # come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
 # `segment_tokens` drops, and `rm_call` checks that both reads agree on the word count.
-# Named limits: decision rm-on-a-variable-needs-a-guard.
+# Limits: the debt notes (rm-var-unseen-forms).
 _RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
 _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")

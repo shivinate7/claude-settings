@@ -2,66 +2,27 @@
 
 ## The ruling
 
-Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt.
+Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt. In bypass mode no allow rule clears that prompt, but a removal with every expansion guarded `${NAME:?}` runs without one, and a `PermissionRequest` hook can answer the prompt that remains.
 
-1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` only in the shape Claude Code
-   prompts on: a variable, then `/`, then a glob, another variable, a slash, a quote, or the end.
-   Examples: `rm -rf $S/$d`, `rm -rf "$D"/*`, `rm -rf $D/`. So `rm -rf "$ROOT/dist"` is not refused. A
-   `..` right after the variable, as in `rm -rf "$S"/../*`, is refused with the literal-path reason,
-   because it can empty the cwd. The refusal offers one of two remedies:
-   - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each binding
-     of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or
-     `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`, backtick or
-     glob. With the values put in, the target is not `/`, home, a home parent, the cwd or a cwd parent.
-     It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or `popd`.
-     Further conditions are in `hooks/guard_rm_var.py`: the variable starts the target word, each
-     binding comes before the `rm` and is no prefix assignment, and home and the cwd are compared after
-     `realpath`.
-   - If the guard cannot read a target, the refusal gives the literal-path reason. A read error never
-     lets a command through unjudged.
-   - Otherwise: name the one directory as a literal path. This covers inherited names such as `$OLDPWD`,
-     positionals, `read` loops, and every other binding. The remedy never computes a path, because a
-     computed path such as `/Users/<you>/*` could wipe the home folder.
+1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` only in the shape Claude Code prompts on: a variable, then `/`, then a glob, another variable, a slash, a quote, or the end. Examples: `rm -rf $S/$d`, `rm -rf "$D"/*`, `rm -rf $D/`. So `rm -rf "$ROOT/dist"` is not refused. A `..` right after the variable, as in `rm -rf "$S"/../*`, is refused with the literal-path reason, because it can empty the cwd. The refusal offers one of two remedies:
+   - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`, backtick or glob. With the values put in, the target is not `/`, home, a home parent, the cwd or a cwd parent, and not a glob directly under one of them. The command holds no `cd`, `pushd` or `popd`. The other conditions are in `hooks/guard_rm_var.py`.
+   - Otherwise: name the one directory as a literal path. This covers inherited names such as `$OLDPWD`, positionals, `read` loops, and every other binding. The remedy never computes a path, because a computed path such as `/Users/<you>/*` could wipe the home folder.
 
-   The agent retries. The owner sees no prompt. This is an allow-list, because a deny-list of unsafe
-   sources took seven review rounds and still missed classes.
-2. `hooks/rm_prompt_answer.py`, a `PermissionRequest` hook on Bash, answers the prompt that remains. It
-   answers allow only when all of these hold:
+   If the guard cannot read a target, the refusal gives the literal-path reason. A read error never lets a command through unjudged. The agent retries, and the owner sees no prompt. This is an allow-list, because a deny-list of unsafe sources missed classes through many review rounds.
+2. `hooks/rm_prompt_answer.py`, a `PermissionRequest` hook on Bash, answers the prompt that remains. It answers allow only when all of these hold:
    - The session is in bypass mode: `permission_mode` is `bypassPermissions`.
    - The command is only assignments and `rm` calls.
-   - Each `rm` target is one `${NAME:?}` expansion followed only by plain folder names. No `..`, glob,
-     brace, `~`, `$HOME`, `$PWD`, second expansion or substitution.
-   - Each NAME is assigned once, in the same command, to a literal. `_rm_target_bad` in
-     `hooks/guard.py` says the literal is not a critical path. That function is the one home.
-   - The command binds no other name. The names `IFS` and `PATH` are refused outright, bound or
-     expanded: a bound `IFS` splits an unquoted expansion into two targets, and a bound `PATH` picks the
-     `rm` that runs.
+   - Each `rm` target is one `${NAME:?}` expansion followed only by plain folder names. No `..`, glob, brace, `~`, `$HOME`, `$PWD`, second expansion or substitution.
+   - Each NAME is assigned once, in the same command, to a literal. `_rm_target_bad` in `hooks/guard.py` says the literal is not a critical path. That function is the one home.
+   - The command binds no other name. `IFS` and `PATH` are refused outright, bound or expanded: a bound `IFS` splits an unquoted expansion into two targets, and a bound `PATH` picks the `rm` that runs.
 
-   Every other request prints nothing. The prompt then reaches the owner unchanged. These still prompt,
-   on purpose:
+   Every other request prints nothing. The prompt reaches the owner unchanged. These still prompt, on purpose:
    - the `for d in …; do rm -rf "${S:?}/${d:?}"; done` form;
    - `export S=`, a value set twice, `/bin/rm`, `command rm`, `rm --recursive`;
    - a redirect, `|| true`, `&`, a trailing slash on the target, and a prefix assignment `S=x rm`.
 
    A non-recursive `rm "${S:?}"/a` is allowed.
-3. A bare variable target, such as `rm -rf "$d"`, is not refused. Claude Code does not treat it as a
-   critical path.
-
-Reason: in bypass mode no allow rule clears this prompt. The permission-modes docs say a removal with
-every expansion guarded `${NAME:?}` "runs without a prompt" in bypass mode, and that "a
-`PermissionRequest` hook can answer the prompt".
+3. A bare variable target, such as `rm -rf "$d"`, is not refused. Claude Code does not treat it as a critical path.
 
 Kind: process
 Home: hooks/guard.py
-
-## Named limits
-
-- A bare `$HOME` target is refused by rule `destructive-delete`. The brace forms `${HOME}` and
-  `${HOME:?}` are not, so Claude Code's own prompt stays the backstop.
-- An escaped `\$S/x` gets a hit, although the shell reads it as literal. This is a rare false alarm.
-- These forms are not seen, so Claude Code's own prompt stays the backstop:
-  - an `rm` inside a script file, a heredoc piped to `sh`, or `sh -c` nested 5 deep;
-  - `exec rm`, `timeout 5 rm`, `nice -n 5 rm`, `! rm`, `(rm …)`, `$(rm …)`, backtick `rm`,
-    `find -exec rm`, and `$cmd -rf`;
-  - `$S'/'*`, `$S\/*`, `${S:-}/*`, `$S*`, and `rm -rf $(pwd)/dist`;
-  - `${D[0]}`, `${!D}`, `${D%…}` and zsh `$D:h`.
