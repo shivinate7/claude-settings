@@ -749,6 +749,27 @@ def command_after_a_loop_ends_with_the_stop():
 
 
 @posix_case
+def reap_ends_a_job_that_no_report_names():
+    """22. reap() ends an endless loop that no report names: it finds the job by its mark"""
+    rc, text, _secs, _cmd = run_rewritten("while true; do sleep 1; done")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    m = PID_RE.search(text)
+    job = [pid for pid, _args in tree(int(m.group(1)))] if m else []
+    try:
+        problems += expect(m is not None, "report names no pid=")
+        PIDS.clear()  # as when a report names the wrong pid: only the mark is left to find the job
+        reap()
+        deadline = time.monotonic() + 2.5
+        while alive(job) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        problems += expect(not alive(job), f"reap() left the job running: pids {alive(job)}")
+    finally:
+        kill_all(alive(job))  # the job must not outlive a failing case
+        reap()
+    return problems
+
+
+@posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
     rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second")
