@@ -71,10 +71,10 @@ log, all PRs together). A run with unfinished_to_list N: `run list` shows it in 
 conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
 
-Draft run, then the real run: `gh pr create --draft` makes a run whose jobs all skip, and
-`gh pr ready` makes the real run seconds later. A hook that lists the head once waits on the draft
-run, reads it as skipped, and prints "CI red ...: workflow gates" (judge_runs' "skipped, no job
-ran") before the real run shows. The cases below use these rules:
+Draft run, then the real run (debt ci-wake-lists-runs-once): `gh pr create --draft` makes a run
+whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
+once waits on the draft run, reads it as skipped, and prints "CI red ...: workflow gates"
+(judge_runs' "skipped, no job ran") before the real run shows. The cases below use these rules:
 - A run that ends skipped is no run, whether the list showed it skipped or in progress.
 - While no run that ran has been judged, the hook lists the head again, at most once per 30 s
   (STATUS_PAUSE). It keeps listing until its deadline: the last pause ends at the deadline.
@@ -686,9 +686,10 @@ def case_lock_folder_unusable_wakes_unknown():
 
 
 def case_draft_run_then_real_run():
-    """The draft run skips, and the real run comes after it. The hook
-    never reads red for the skipped run: it waits on the real run and reports that run's result.
-    Rows marked (control) check the paths the wait leaves unchanged. FAST_SLEEP_LAUNCHER: the pauses between lists cost 0.05 s."""
+    """The draft run skips, and the real run comes after it. The hook never reads red for the
+    skipped run: it waits on the real run and reports that run's result. Rows marked (control) list
+    the real run at the first list, so no second list is needed. FAST_SLEEP_LAUNCHER: the pauses
+    between lists cost 0.05 s."""
     fast = dict(launcher=FAST_SLEEP_LAUNCHER)
     ready = bash("gh pr ready 12")
     res = run_hook(ready, fixture(READY, [DRAFT_DONE, GREEN]))
@@ -1213,7 +1214,7 @@ def main():
     case_watch_run_reads_past_a_queued_status()
     case_watch_run_retry_never_reads_or_pauses_past_the_deadline()
 
-    # A draft run that skips, then the real run.
+    # A draft run that skips, then the real run (debt ci-wake-lists-runs-once).
     case_draft_run_then_real_run()
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
