@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk build guard is deferred to deferred item
+Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk build guard is deferred to debt
 `build-disk-guard`.
 
 `janitor/agent_end_reap.py` (SubagentStop) deletes build folders in the finished agent's own worktree: `native/build`, `.build`,

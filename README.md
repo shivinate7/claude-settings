@@ -28,7 +28,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
 | `testing/` | A shared test helper, `skip-locally-fail-in-ci.mjs`. |
-| `decisions/`, `debts/`, `deferred/`, `plans/` | The records: one file per ruling, known gap, open question, and plan. See `debts/README.md`. |
+| `decisions/`, `debts/`, `plans/` | The records: one file per ruling, known gap or deferred item, and plan. See `debts/README.md`. |
 | `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
 | `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
 | `.claude/` | Instructions that load only in sessions on this repo. |
@@ -172,7 +172,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   locally so a new symlink exists.
 * A ruling worth keeping: one new file under `decisions/`, named by slug. Claim its number only
   at merge, per CLAUDE.md ("never allocate a numbered record on a branch").
-* An open question, not yet ruled on: a file under `deferred/`.
+* An open question, not yet ruled on, or a deferred item: a file under `debts/`.
 
 ## Troubleshooting
 

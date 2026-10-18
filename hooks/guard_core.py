@@ -1974,14 +1974,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 
 # ------------------------------------------------------------------ builders do not edit tests
 #
-# EVIDENCE: ImpossibleBench (arXiv 2510.20270): read-only tests block a worker's direct edits of
-# the tests that grade it, with little loss of real performance. A builder that cannot pass a test
-# may otherwise delete it, skip it, or rewrite it to pass.
+# A builder that cannot pass a test may otherwise delete it, skip it, or rewrite it to pass.
 #
-# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). A first
-# version read shell commands (`rm`, `mv`, `sed -i`, a redirect). A review found a bypass for
-# each: `bash -c`, `find -delete`, `xargs rm`, `dd`, `rsync`, `patch`, a variable, a symlink. The
-# commands are not the act. The act is a test path in the diff. So the diff is judged, at three
+# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). The act is a
+# test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
 # `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
 # the agent's branch was created from, plus untracked files, with every path normalised for

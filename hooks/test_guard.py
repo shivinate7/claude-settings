@@ -1747,6 +1747,42 @@ sh("stash export: over an empty stack in a dirty checkout takes nothing, as on m
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
 sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
    VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+# STASH HELP FLAGS (owner ruling 2026-10-17). `stash -h` and
+# `stash --help` allow over a dirty shared tree when the flag comes first after `stash`: the flag
+# prints usage and reads no stack and no tree. Every other shape stays a push. `push -h` stays
+# denied because the ruling names the first flag only. Git's own output for `push -h` is
+# unmeasured here, and the verdict does not depend on it.
+sh("stash help: -h over real uncommitted work allows", VCS + " stash -h", "allow", cwd=SUBJDIRTY)
+sh("stash help: --help over real uncommitted work allows", VCS + " stash --help", "allow",
+   cwd=SUBJDIRTY)
+sh("stash help pin: a bare stash over real uncommitted work still denies like a push",
+   VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u over real uncommitted work still denies like a push",
+   VCS + " stash -u", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash push -h still denies, the flag is not first after stash",
+   VCS + " stash push -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -- -h denies, the -h is a pathspec",
+   VCS + " stash -- -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u -h still denies, the flag is not first after stash",
+   VCS + " stash -u -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash # -h is a bare stash in the shell, still denies",
+   VCS + " stash # -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: a help call chained with a bare stash still denies",
+   VCS + " stash -h && " + VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# A help flag with anything after it keeps main's verdict: the flag is skipped and the next word decides
+# (measured on main, 2026-10-18, these cases already pass there). The action word keeps its side. A
+# second flag, or a word that is no action, reads as a push.
+sh("stash help pin: stash -h list reads as list, allowed over real uncommitted work",
+   VCS + " stash -h list", "allow", cwd=SUBJDIRTY)
+sh("stash help pin: stash -h pop reads as pop, denied with the stack remedy",
+   VCS + " stash -h pop", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash help pin: stash --help -h reads as a push, still denies",
+   VCS + " stash --help -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -h -h reads as a push, still denies",
+   VCS + " stash -h -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash --help x reads as a push, still denies",
+   VCS + " stash --help x", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
@@ -6986,7 +7022,7 @@ CITE = "decisions/one-shared-record-stamp.md"
 # path spelling. A form that only repeats another's branch is not listed.
 for _name, _command in (
     ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
-    ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
+    ("a -am cluster", VCS + ' commit -am "see debts/later-item.md"'),
     ("the long --message=", VCS + ' commit --message="cites ' + CITE + '"'),
     ("a file named by -F", VCS + " commit -F " + slash(MSG_BAD)),
     ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
@@ -7022,7 +7058,7 @@ sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CI
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
     ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
-    ("the word deferred and a folder", VCS + ' commit -m "move the deferred items, see decisions/"'),
+    ("the word debts and a folder", VCS + ' commit -m "move the debts around, see decisions/"'),
     ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),
     ("a record path in the add, not the message",
      VCS + " add " + CITE + " && " + VCS + ' commit -m "add the record"'),
@@ -7071,45 +7107,45 @@ sh("cite-by-id: a lone quote pair, then a -F - commit with a clean body is allow
 # commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
 # from the last paragraph of a commit. A trailer with no ` -- reason` excuses nothing. The reason
 # may not cite a record path. Every other line is still judged by the cite rule.
-DROPS_BODY = "title\n\nbody\n\nDrops-lines: deferred/a.md -- replaced by a decision"
+DROPS_BODY = "title\n\nbody\n\nDrops-lines: debts/a.md -- replaced by a decision"
 sh("cite-by-id: Drops-lines trailer in a commit -m body is allowed",
    VCS + ' commit -m "' + DROPS_BODY + '"', "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines trailer in a heredoc -F - body is allowed",
    VCS + " commit -F - <<'EOF'\n" + DROPS_BODY + "\nEOF", "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: two Drops-lines trailers with two paths are allowed",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n'
-   'Drops-lines: deferred/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- replaced by a decision\n'
+   'Drops-lines: debts/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a prose cite beside a Drops-lines trailer is denied",
-   VCS + ' commit -m "title\n\nbody cites deferred/a.md\n\n'
-   'Drops-lines: deferred/a.md -- replaced by a decision"', "deny", "cite-by-id",
+   VCS + ' commit -m "title\n\nbody cites debts/a.md\n\n'
+   'Drops-lines: debts/a.md -- replaced by a decision"', "deny", "cite-by-id",
    cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines reason that cites a record path is denied",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- see decisions/b.md"', "deny",
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- see decisions/b.md"', "deny",
    "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines trailer in a gh pr create body is denied",
-   'gh pr create --draft --title t --body "title\n\nDrops-lines: deferred/a.md -- replaced by a decision"',
+   'gh pr create --draft --title t --body "title\n\nDrops-lines: debts/a.md -- replaced by a decision"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines key spelled drops-lines: is allowed",
-   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: deferred/a.md -- replaced by a decision"',
+   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: debts/a.md -- replaced by a decision"',
    "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines trailer with no reason is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md"', "deny", "cite-by-id",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md"', "deny", "cite-by-id",
    cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines line in a middle paragraph is denied",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n\n'
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- replaced by a decision\n\n'
    'body after the trailer"', "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 # Round 2 (owner ruling 2026-10-12). The exemption must blank one path, not the whole token after
 # the key, so a second path in the same token is still judged. The lint reads that token as one path,
 # which excuses no record path. A space before the colon is still the key `Drops-lines`, which
 # `git interpret-trailers` reads and the lint accepts.
 sh("cite-by-id: Drops-lines token with a comma-joined second path is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md,deferred/b.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md,debts/b.md -- replaced"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md;deferred/b.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md;debts/b.md -- replaced"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : debts/a.md -- replaced"',
    "allow", cwd=NOGIT, config=MERGECFG)
 
 # ---- lane-by-slug (owner ruling 2026-10-13). A commit message or PR body names a lane by its
@@ -13805,7 +13841,7 @@ if _UNNAMED or _BAD_LOG:
              % (_UNNAMED, _BAD_LOG))
 
 
-# Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
+# Debt: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
 
 
 # A log check returns (SKIP, note) when it cannot run on this platform. run_cases prints a SKIP line for
