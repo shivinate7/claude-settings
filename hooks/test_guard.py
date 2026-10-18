@@ -1947,8 +1947,8 @@ sh("worktree data: a reset named in a JSON payload piped to python, inside a wor
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
    + "' | python hooks/guard.py", "allow", cwd=GITWT)
 
-# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
-# clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
+# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decision
+# agent-worktree-discard-is-noted). In a linked worktree, a checkout or restore that names only FILES writes the
 # lane's own change to those files, so it runs with no ask. A folder, a glob, `.`, and a whole-tree
 # reset keep the ask. A shared checkout denies every form here. Each case is tagged "per-file", so
 # MUTATE_ONLY=per-file runs this block alone. The fixtures are real: fixtures/a.json,
@@ -3164,7 +3164,7 @@ sh("rm-var: a git toplevel value names a literal path",
 sh("rm-var: a literal value that resolves to the cwd names a literal path",
    'D=%s; rm -rf "$D"/*' % NOGIT, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", NOGIT))
-# Named limits, taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
+# Taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
 # from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
 # when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
 # moved to a glob is (b) ruling changed: the trigger shape is now tested.
@@ -3230,8 +3230,8 @@ def rm_var_taint_reader_case():
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
-# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+# Taint (decision rm-on-a-variable-needs-a-guard): a pwd command in $(...) or backticks taints,
+# with any flags or path. Red until the guard matches them.
 sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3247,8 +3247,8 @@ sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays al
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, derived forms: a variable whose assigned or loop value holds ~, HOME, PWD or pwd is
-# tainted, so its refusal names a literal path, never ${D:?} advice.
+# Derived forms (decision rm-on-a-variable-needs-a-guard): a variable whose assigned or loop value
+# holds ~, HOME, PWD or pwd is tainted, so its refusal names a literal path, never ${D:?} advice.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -3266,7 +3266,7 @@ sh("rm-var: $HOME joined to a literal path is not refused",
 sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
    "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",))
-# Ruling changed (rm-on-a-variable-needs-a-guard, named limits). Taint comes only from a real
+# Ruling changed (rm-on-a-variable-needs-a-guard). Taint comes only from a real
 # expansion. A literal value that spells pwd or HOME is not one.
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a literal value that spells pwd is not tainted",
@@ -3282,19 +3282,19 @@ sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its ow
 sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
-# Named limits, substitution spans. The assigned-value reader cuts the value at ; & | even inside
-# $(...) or backticks, so a pwd after the cut is missed. Each case must deny with the literal-path
-# reason. Each case whose target moved to a glob is (b) ruling changed.
+# Substitution spans (decision rm-on-a-variable-needs-a-guard). The assigned-value reader cuts the
+# value at ; & | even inside $(...) or backticks, so a pwd after the cut is missed. Each case must
+# deny with the literal-path reason. Each case whose target moved to a glob is (b) ruling changed.
 sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
-# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
-# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
-# with the literal-path reason and never name ${D:?}.
+# Taint (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an expansion of HOME or
+# PWD, anywhere in the command taints every variable it assigns. The guard reads no $(…) span, so
+# quotes and ; inside the span cannot hide the source. Each case must deny with the literal-path
+# reason and never name ${D:?}.
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
@@ -3306,10 +3306,10 @@ sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
-# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
-# value whose path is the home folder or the cwd, so the refusal names the literal path and never
-# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard). Each case below has an unsafe binding,
+# a value the guard cannot read, or a value whose path is the home folder or the cwd, so the
+# refusal names the literal path and never ${NAME:?}. Each case must be refused. A pass, or a
+# crash that exits 0, is a FAIL.
 HOME = os.path.expanduser("~")
 sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
    'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -12403,7 +12403,7 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
                          mask_pin_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# Time bound (decision rm-on-a-variable-needs-a-guard): 2000 unclosed $( spans must be
 # judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
 # then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
 # same decide() call the main loop uses.
