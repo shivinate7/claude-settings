@@ -12,18 +12,14 @@ The signal is SIGTERM on Linux and macOS, and `TerminateProcess` on Windows. Bot
 
 **No arm flag, every checkout.** Owner, 2026-09-24: both unattended paths may stop a proven orphan with no separate arm flag, in every checkout. A primary checkout gets no exemption. The three reads above are the whole gate. Reason: a stopped process cannot come back, but a reaped branch keeps a tombstone and a kept worktree stays whole.
 
-**A process this sweep cannot read is out of scope.** It is counted. It is never acted on, and never a reason to keep something else. `decide_worktree`'s pre-removal check asks whether any process sits inside a worktree. A single process whose cwd cannot be read never blocks a removal. Only the WHOLE pid enumeration failing means keep-everything. Reason: on a real machine many processes belong to another account, so keeping on any one of them would refuse to reap anything.
+**A process this sweep cannot read is out of scope.** It is counted. It is never acted on, and never a reason to keep something else. A single process whose cwd cannot be read never blocks a worktree removal. Only the WHOLE pid enumeration failing means keep-everything. Reason: on a real machine many processes belong to another account, so keeping on any one of them would refuse to reap anything.
 
 **An unattended run may remove a worktree.** Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd included, needs both of these to remove a worktree:
 
-- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A detached HEAD counts by its commit. A pushed tree has every commit on a remote branch. It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. Before that, the keep reason is `unmerged`. Pushed means reachable from a head that the remote lists now (`git ls-remote`, read-only), because a local `origin/*` ref can name a branch that the remote deleted. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
-- Idle 1 hour. Idle is the newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD`, under `.git/worktrees/<name>`. Every idle limit of the sweep and of the agent rules reads it this way. The sweep reads it before any `git status`, which can rewrite the index. A younger tree is kept, with reason `recently-active`. A time that cannot be read keeps the tree, with reason `unreadable-subject`.
+- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, read-only). It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
+- Idle 1 hour. Every idle limit of the sweep and of the agent rules reads idle the same way: the newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD`. A younger tree is kept. A time that cannot be read keeps the tree.
 
-Three other routes remove a tree under `.claude/worktrees/agent-*` without both. All three are in `agent-end-reap-stops-what-a-finished-agent-left`:
-
-- The sweep's agent rule: a clean, pushed `agent-*` tree idle 4 hours.
-- The repo's own `reap:worktrees` script. The sweep runs it in place of the agent rule.
-- The agent-end removal: the SubagentStop reaper removes an `agent-*` tree at its idle limit.
+Three other routes remove a tree under `.claude/worktrees/agent-*` without both. All three are in `agent-end-reap-stops-what-a-finished-agent-left`: the sweep's agent rule, the repo's own `reap:worktrees` script, and the agent-end removal.
 
 The worktree must also be clean and fully pushed. No live session and no process may be inside. The lock must be gone, or its host process must be gone.
 
