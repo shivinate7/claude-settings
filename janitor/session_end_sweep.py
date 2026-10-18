@@ -7,14 +7,12 @@ a linked worktree's own path, see `guard.primary_checkout`'s own docstring for w
 distinction matters -- and runs `janitor/sweep.py <that root> --confirm` there. Nothing else is
 swept. Always exits 0.
 
-FAILS OPEN, ON PURPOSE (plan: "Two triggers", CLAUDE.md rule:verification-recovery-not-gated-on-
-own-state's sibling posture for a hook rather than a recovery control). This script's own job is
-to let the session end; it is never the thing that decides whether a branch or a worktree is
-reapable. Every way this script itself can go wrong -- unreadable stdin, a payload that is not
-the SessionEnd shape, a `cwd` that names no directory or no repository, a missing
-janitor/sweep.py, a sweep call that raises or hangs -- is caught here and answered by doing
-nothing and exiting 0. A hook that can refuse the end of a session is worse than the leak it
-guards against (plan, "the hook always fails open").
+FAILS OPEN, ON PURPOSE. This script's own job is to let the session end; it is never the thing
+that decides whether a branch or a worktree is reapable. Every way this script itself can go
+wrong -- unreadable stdin, a payload that is not the SessionEnd shape, a `cwd` that names no
+directory or no repository, a missing janitor/sweep.py, a sweep call that raises or hangs -- is
+caught here and answered by doing nothing and exiting 0. A hook that can refuse the end of a
+session is worse than the leak it guards against.
 
 FAILS OPEN IS NOT FAILS PERMISSIVE ON THE REAP DECISION ITSELF. This script never lowers the
 bar `janitor/sweep.py` and `hooks/guard.py` already hold for what counts as reapable -- an
@@ -24,9 +22,9 @@ about the sweep's keep-or-reap answer. The two directions are opposite on purpos
 cannot finish must let the session go; a sweep that cannot read its subject must leave it alone.
 
 The sweep itself decides `--confirm`, because the owner chose an automatic sweep with a
-per-repository opt-out (`.claude/janitor.json`, plan: "the sweep is automatic, and a repository
-opts out"). This hook adds no new judgment call: it locates the one repository the ending
-session touched, and calls the same program a person would call by hand.
+per-repository opt-out (`.claude/janitor.json`). This hook adds no new judgment call: it locates
+the one repository the ending session touched, and calls the same program a person would call
+by hand.
 """
 import json
 import math
@@ -48,25 +46,23 @@ try:
 except (TypeError, ValueError):
     SWEEP_TIMEOUT_SECONDS = 25.0
 
-# NO environment seam for elapsed time, on purpose (PR #84 review). A hook that is now live on
-# this machine and deletes branches unattended must never let an inherited shell variable change
-# its own timing: `elapsed_seconds` reaches `handle` only as an explicit argument (see `handle`
-# and `main` below), which a test can pass directly by calling the function in-process. There is
-# no name here for an environment to carry.
+# NO environment seam for elapsed time, on purpose. A hook that deletes branches unattended must
+# never let an inherited shell variable change its own timing: `elapsed_seconds` reaches `handle`
+# only as an explicit argument (see `handle` and `main` below), which a test can pass directly by
+# calling the function in-process. There is no name here for an environment to carry.
 
 
 # `hooks/guard.py._git`'s own per-call subprocess timeout, and settings.json's own SessionEnd
 # entry timeout for THIS hook, end to end. Plain constants, not a read of either real file:
 # THEY MUST STAY IN SYNC BY HAND with `guard._git`'s `timeout=` and with settings.json's
 # `hooks.SessionEnd[].hooks[].timeout` for `session_end_sweep.py`.
-# WHAT ACTUALLY PINS EACH NUMBER, as of the SessionEnd disarm:
+# WHAT PINS EACH NUMBER:
 #   GUARD_GIT_CALL_TIMEOUT_SECONDS is pinned live. HookBudgetFitsUnderItsHostCeiling reads
-#   `guard._git`'s own source and goes red when the two drift apart. MEASURED: raising
-#   `_git`'s timeout to 15 fails that arm.
-#   SESSION_END_CEILING_SECONDS is NOT pinned while the hook is disarmed. Its arm reads
-#   settings.json, which no longer carries a SessionEnd entry, so that arm SKIPS. This
-#   number is on the hand-sync comment alone until the hook is re-armed. See
-#   decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
+#   `guard._git`'s own source and goes red when the two drift apart.
+#   SESSION_END_CEILING_SECONDS is pinned while settings.json carries the SessionEnd entry
+#   (timeout 55): HookBudgetFitsUnderItsHostCeiling reads that timeout. The hook is armed. If the
+#   entry is ever absent, those arms skip and this number rests on the hand-sync comment alone.
+#   See decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
 GUARD_GIT_CALL_TIMEOUT_SECONDS = 10.0
 SESSION_END_CEILING_SECONDS = 55.0
 
@@ -84,17 +80,12 @@ RESOLVE_ROOT_WORST_CASE_SECONDS = GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_
 #   this hook's own timeout cuts it off:
 HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECONDS
 #
-#   With the defaults above (10 * 2 + 25), that is 45 seconds -- MORE than the 30-second
-# ceiling settings.json's SessionEnd entry used to give this hook end to end (measured by a
-# reviewer against a real run: the process was still inside its own subprocess.run call when
-# Claude Code's own timeout would already have killed it, which fails open only because Claude
-# Code enforces that outer ceiling itself, not because this script proved anything about its
-# own worst case). settings.json's SessionEnd entry for this hook must set a timeout STRICTLY
-# GREATER than HOOK_WORST_CASE_SECONDS, with margin for process-start and interpreter-import
-# overhead neither number above counts; it now sets 55, a 10-second margin over the 45-second
-# worst case above. Changing SWEEP_TIMEOUT_SECONDS (or a future change to guard._git's own
-# timeout) without also widening that settings.json entry is exactly the drift
-# HookBudgetFitsUnderItsHostCeiling exists to catch.
+#   With the defaults above (10 * 2 + 25), that is 45 seconds. settings.json's SessionEnd entry
+# for this hook must set a timeout STRICTLY GREATER than HOOK_WORST_CASE_SECONDS, with margin for
+# process-start and interpreter-import overhead neither number above counts; it sets 55, a
+# 10-second margin over the 45-second worst case. Changing SWEEP_TIMEOUT_SECONDS (or a future
+# change to guard._git's own timeout) without also widening that settings.json entry is exactly
+# the drift HookBudgetFitsUnderItsHostCeiling exists to catch.
 
 # THE LOWER EDGE. The settings.json SessionEnd timeout must leave at least this much over
 # HOOK_WORST_CASE_SECONDS, for process-start and import overhead. A test reads the constant.

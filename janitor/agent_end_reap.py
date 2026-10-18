@@ -3,13 +3,9 @@
 
 Design: decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
 
-MEASURED on Windows: `cmd &` then another line, in one foreground Bash call, outlives the agent. Its
-parent is a live MSYS bash stub, and the tool shell above the stub is dead. `sweep.is_orphan`
-reads the live stub and keeps the server forever.
-
 Reads one hook payload on stdin. SubagentStop names the agent by `agent_id`. The harness names
 that agent's worktree `.claude/worktrees/agent-<agent_id>` under the primary checkout.
-Only SubagentStop names a target (owner ruling 1, 2026-09-27: WorktreeRemove stays
+Only SubagentStop names a target (WorktreeRemove stays
 unwired). The target must have the `.claude/worktrees/<name>` shape and must not be a primary checkout.
 
 A process is stopped only when all of these answer a confirmed yes:
@@ -89,11 +85,10 @@ def _log_lock(path: str):
 
 def log(record: dict, replace_run=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
-    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
-    it grew to thousands of raw payloads nobody reads. Parallel runs take turns on a lock file,
-    because MEASURED on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a
-    shared temp name and no lock. The temp name carries the pid. On Windows the replace can
-    raise PermissionError while the destination is held for a moment, so it retries a few times.
+    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
+    Parallel runs take turns on a lock file, because writers lost rows without it. The temp name
+    carries the pid. On Windows the replace can raise PermissionError while the destination is
+    held for a moment, so it retries a few times.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
     A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
@@ -116,7 +111,7 @@ def log(record: dict, replace_run=None):
                 try:
                     os.replace(temp, path)  # a reader never sees an empty or half-written file
                     break
-                except PermissionError:  # MEASURED 2026-10-08 on Windows: the destination is held a moment
+                except PermissionError:  # Windows: the destination is held a moment
                     if attempt == REPLACE_TRIES - 1:
                         raise
                     time.sleep(0.05)
