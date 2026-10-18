@@ -65,7 +65,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (stale-safe-force-push)
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, or the read
-                       could not run. `--auto` too. (merge-needs-a-proven-head)
+                       could not run. `--auto` too.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -1796,7 +1796,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             state = False  # an unparsable segment: the paths read above are a guess, keep the ask
         if state is None:
             # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
-            # so a note protects nothing (owner ruling, decisions/guard-that-cries-wolf-is-spent.md).
+            # so a note protects nothing (owner ruling, agent-worktree-discard-is-noted).
             if subcommand != "worktree-remove" or worktree_remove_forced(args):
                 record(tool, "noted", "subject-unread", matched)
             continue

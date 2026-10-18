@@ -142,9 +142,6 @@ merge --dev ...         run the checkout's own tree, not origin main
   A rerun on a branch that already holds its own claim resumes at the wait.
 * **Where the rest is written.** The flow is `confirm` in `merge/merge.py`. The rulings are
   in these decisions:
-  * merge-config-defaults (merge needs no config file)
-  * merge-waits-on-every-check (check first, then claim; never merge on a running or failing check)
-  * merge-needs-a-proven-head (a head with only skipped checks is unproven)
   * ci-wait-reads-run-status (the wait reads status, never `gh run watch`)
   * merge-net-retry (retry a network error or a rate limit, then stop)
   * records-index-at-merge (the merge rebuilds the records page)
@@ -215,7 +212,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 * **Why `actions/ste-lint` exists as a composite action.** A caller repo can then lint only the
   lines a pull request changed, against the pull request base. It never pays down a whole
   document's old backlog on the first branch that touches it. See the diff-scope rationale in
-  `actions/ste-lint` and `decisions/ste-lint-gloss-collapse.md`.
+  `actions/ste-lint`.
 * **The janitor is one machine-wide sweep, not a per-repo tool.** It reaps branches and
   worktrees no session still needs, across every repository on the machine. It can stop one
   kind of process: an orphaned TCP listener it owns. Full contract in `janitor/GUIDE.md`

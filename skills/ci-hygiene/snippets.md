@@ -122,8 +122,7 @@ gh run list --commit <head-sha> --json name,status,conclusion   # completed, and
 gh workflow run <workflow-file> --ref <branch>           # none ran: dispatch one
 ```
 
-`gh workflow run` needs a `workflow_dispatch` trigger in the workflow. (Decision
-merge-needs-a-proven-head: a merge needs a proven head.)
+`gh workflow run` needs a `workflow_dispatch` trigger in the workflow.
 
 ## 6. Read every run after a merge
 
