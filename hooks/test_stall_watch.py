@@ -47,6 +47,7 @@ MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch
 PY = sys.executable
 SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-")
 PIDS = set()
+MARKS = []  # tokens in loop commands that no other process carries, so reap() finds a stray loop
 CASES = []
 
 PID_RE = re.compile(r"\bpid\b\W{0,3}(\d+)")
@@ -139,14 +140,23 @@ def pid_alive(pid):
     return True
 
 
+def kill_all(pids):
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def reap():
-    """Kill the background jobs that reports named, with their descendants. Then forget them."""
+    """Kill the background jobs that reports named, with their descendants. Also kill each loop
+    that carries a mark: a watcher that crashed names no pid, and its loop would spin on. Then
+    forget them."""
     for root in list(PIDS):
-        for pid, _args in tree(root):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+        kill_all(pid for pid, _args in tree(root))
+    for pid, _ppid, args in process_table():
+        if any(mark in args for mark in MARKS):
+            kill_all(p for p, _a in tree(pid))
     PIDS.clear()
 
 
@@ -450,6 +460,207 @@ def report_names_pid_and_asks_owner_to_stop():
     problems += expect(re.search(r"\bkill", text, re.I) is None,
                        "report tells the session to kill; the guard denies that for a reparented job")
     reap()
+    return problems
+
+
+@posix_case
+def report_pid_is_the_job_not_its_wrapper():
+    """12. the STALL report's pid is the job's own pid, not the shell that wraps it"""
+    problems = []
+    for shell in shells():
+        d = new_dir()
+        pidfile = os.path.join(d, "job.pid")
+        code = "import os, time\nopen(%r, 'w').write(str(os.getpid()))\ntime.sleep(30)" % pidfile
+        orig = " ".join(shlex.quote(a) for a in [PY, "-c", code])
+        rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
+        problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+        m = PID_RE.search(text)
+        job = open(pidfile).read().strip() if os.path.exists(pidfile) else ""
+        if m is None or not job.isdigit():
+            problems.append(f"{shell}: report pid or job pid file missing")
+        else:
+            named = int(m.group(1))
+            problems += [f"{shell}: {p}" for p in expect(
+                named == int(job),
+                f"report names pid {named}, but the job is pid {job}. Stopping pid {named} "
+                f"leaves the job running")]
+        reap()
+    return problems
+
+
+def pidfile_job(d, tag):
+    """Return (shell word, pidfile) for a 30 s python job that writes its own pid to the pidfile."""
+    pidfile = os.path.join(d, tag + ".pid")
+    code = "import os, time\nopen(%r, 'w').write(str(os.getpid()))\ntime.sleep(30)" % pidfile
+    return " ".join(shlex.quote(a) for a in [PY, "-c", code]), pidfile
+
+
+def read_pid(pidfile):
+    return int(open(pidfile).read().strip()) if os.path.exists(pidfile) else None
+
+
+def stall_pids(text):
+    """The pids on the report's STALL: line. This is what the report says to stop."""
+    m = re.search(r"^STALL:.*?\bpids?\b\W{0,3}(\d+(?:,\s?\d+)*)", text, re.M)
+    return [int(p) for p in re.split(r"\D+", m.group(1))] if m else []
+
+
+def listed_pids(text):
+    """Every pid the report lists: the STALL: line and the rows of the process table."""
+    pids = set(stall_pids(text))
+    in_table = False
+    for line in text.splitlines():
+        if line.startswith("Processes"):
+            in_table = True
+        elif in_table:
+            m = re.match(r"  (\d+) ", line)
+            if m:
+                pids.add(int(m.group(1)))
+            elif not line.startswith(" "):
+                break
+    return pids
+
+
+def crash_line(text):
+    """The error line that ends a Python traceback in text, or ''."""
+    m = re.search(r"^Traceback[^\n]*\n(?:[ \t]+[^\n]*\n)+(\S[^\n]*)", text, re.M)
+    return m.group(1) if m else ""
+
+
+def new_mark():
+    """A token for a loop's command line. Its copies in ps carry it, and no other process does."""
+    MARKS.append("7772%d%d" % (os.getpid(), len(MARKS)))
+    return MARKS[-1]
+
+
+def loop_problems(shell, orig, mark):
+    """Stall the loop orig, which carries mark. The report must name the loop's own shell, and
+    stopping the pids it names must end the loop. Return a list of problems."""
+    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10)
+    problems = stall_problems(rc, text, secs)
+    problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
+    named = stall_pids(text)
+    args_of = {pid: args for pid, _ppid, args in process_table()}
+    for pid in named:
+        if mark not in args_of.get(pid, ""):
+            problems.append(f"report names pid {pid} ({args_of.get(pid, 'gone')[:40]!r}), not the "
+                            f"loop's shell. Stopping it leaves the loop running")
+    orphans = {p for pid in named for p, _a in tree(pid)}  # the loop's shell leaves its child behind
+    kill_all(named)
+    deadline = time.monotonic() + 2
+    while True:
+        left = [(pid, args) for pid, _ppid, args in process_table() if mark in args]
+        if not left or time.monotonic() > deadline:
+            break
+        time.sleep(0.1)
+    if named and left:
+        problems.append(f"stopping pid {','.join(map(str, named))} leaves the loop running: "
+                        f"pid {left[0][0]} ({left[0][1][:40]!r})")
+    kill_all(orphans)
+    return problems
+
+
+@posix_case
+def pipeline_report_names_every_member_not_its_wrapper():
+    """13. a stalled pipeline: the report lists every member's pid and names no other process"""
+    problems = []
+    for shell in shells():
+        d = new_dir()
+        first, first_file = pidfile_job(d, "first")
+        second, second_file = pidfile_job(d, "second")
+        rc, text, _secs, _cmd = run_rewritten(first + " | " + second, shell=shell)
+        problems += [f"{shell}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+        members = {read_pid(first_file), read_pid(second_file)}
+        if None in members:
+            problems.append(f"{shell}: a pipeline member wrote no pid file")
+            reap()
+            continue
+        args_of = {pid: args for pid, _ppid, args in process_table()}
+        named = {int(m.group(1)) for m in PID_RE.finditer(text)}
+        problems += [f"{shell}: {p}" for p in expect(named, "report names no pid=")]
+        for pid in sorted(named - members):
+            problems.append(f"{shell}: report names pid {pid} ({args_of.get(pid, '?')[:40]!r}), "
+                            f"not a pipeline member. Stopping it leaves the members running")
+        for pid in sorted(members):
+            problems += [f"{shell}: {p}" for p in expect(
+                re.search(r"(?<!\d)%d(?!\d)" % pid, text) is not None,
+                f"report does not list pipeline member pid {pid}")]
+        reap()
+    return problems
+
+
+@posix_case
+def sequence_subshell_exec_report_names_the_running_command():
+    """14. a sequence, a subshell and an exec each stall on one command: the report names its pid"""
+    shapes = (("sequence", "true; %s; true"), ("subshell", "( %s )"), ("exec", "exec %s"))
+    problems = []
+    for shell in shells():
+        for label, template in shapes:
+            d = new_dir()
+            word, pidfile = pidfile_job(d, "job")
+            rc, text, _secs, _cmd = run_rewritten(template % word, shell=shell)
+            problems += [f"{shell} {label}: {p}" for p in expect(rc == 3, f"exit {rc}, want 3")]
+            m = PID_RE.search(text)
+            job = read_pid(pidfile)
+            if m is None or job is None:
+                problems.append(f"{shell} {label}: report pid or job pid file missing")
+            else:
+                problems += [f"{shell} {label}: {p}" for p in expect(
+                    int(m.group(1)) == job,
+                    f"report names pid {m.group(1)}, but the running command is pid {job}")]
+            reap()
+    return problems
+
+
+@posix_case
+def builtin_only_loop_stalls_with_a_report():
+    """15. a loop of builtins only has no child: STALL report, exit 3, no traceback, and stopping
+    the pid it names ends the loop"""
+    problems = []
+    for shell in shells():
+        mark = new_mark()
+        problems += [f"{shell}: {p}" for p in loop_problems(shell, f"while [ x != {mark} ]; do :; done", mark)]
+        reap()
+    return problems
+
+
+@posix_case
+def polling_loop_report_names_the_loop_not_its_sleep():
+    """16. while true; do sleep N; done: the report names the loop's own shell, so stopping it ends the loop"""
+    problems = []
+    for shell in shells():
+        mark = new_mark()
+        problems += [f"{shell}: {p}" for p in loop_problems(
+            shell, f"while true; do : {mark}; sleep 30; done", mark)]
+        reap()
+    return problems
+
+
+@posix_case
+def nested_pipeline_report_lists_only_real_members():
+    """17. (a|b)|c and { a|b; }|c: the report lists a, b and c, and no inner shell copy"""
+    shapes = (("subshell", "(%s | %s) | %s"), ("group", "{ %s | %s; } | %s"))
+    problems = []
+    for shell in shells():
+        for label, template in shapes:
+            d = new_dir()
+            words = [pidfile_job(d, tag) for tag in ("a", "b", "c")]
+            rc, text, secs, _cmd = run_rewritten(template % tuple(w for w, _f in words), shell=shell)
+            where = f"{shell} {label}"
+            problems += [f"{where}: {p}" for p in stall_problems(rc, text, secs)]
+            members = {read_pid(f) for _w, f in words}
+            if None in members:
+                problems.append(f"{where}: a pipeline member wrote no pid file")
+                reap()
+                continue
+            args_of = {pid: args for pid, _ppid, args in process_table()}
+            listed = listed_pids(text)
+            for pid in sorted(listed - members):
+                problems.append(f"{where}: report lists pid {pid} ({args_of.get(pid, 'gone')[:40]!r}), "
+                                f"not a pipeline member")
+            for pid in sorted(members - listed):
+                problems.append(f"{where}: report does not list pipeline member pid {pid}")
+            reap()
     return problems
 
 

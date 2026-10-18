@@ -36,14 +36,14 @@ DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported
 an ordinary project config edit is re-baselined in silence. Only a change to a CAP VARIABLE is
 reverted, and only when the guard did not ask about it.
 
-THE EXPIRY. An approved lift is revoked at its deadline (decision `subagent-model-cap`, "The grant").
+THE EXPIRY. An approved lift is revoked at its deadline (decision `opus-grant-expires`, an Opus grant expires within 24 hours).
 
 The fix reads a second field the override file carries OUTSIDE its `env` block:
 `_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
 `env` is exported into every subagent's shell, which an expiry timestamp has no business being.
 And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
 into a second cap-change ask the field is not one. The guard's PreToolUse ask never sees this field,
-and only this watch reads it. See decision `subagent-model-cap` (the subagent model cap), section "The grant".
+and only this watch reads it. See decision `opus-grant-expires` (an Opus grant expires within 24 hours).
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file

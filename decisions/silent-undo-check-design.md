@@ -54,7 +54,7 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 
 **Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
 failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
-(ci-unknown-is-red-and-dedup). `merge.py` refuses on unknown, because its merge cannot be taken back. The
+(ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
 way out that does not depend on the check is the owner flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. It is logged and never excuses a finding.
 

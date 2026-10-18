@@ -13,8 +13,8 @@ with no snapshot records nothing, so a device booted before the call is never re
 
 The contract pinned here (hooks/sim_boot_record.py must match it):
   - the event is read from `hook_event_name`. Exit is 0 in every case. Stdout is empty unless the
-    ruling 5 boot check failed (see below).
-  - ruling 5, boot check: after a Bash `simctl boot` or an MCP `launch`, each device that went
+    boot check failed (see below).
+  - boot check (decision sim-boot-is-verified): after a Bash `simctl boot` or an MCP `launch`, each device that went
     shut-down -> booted is checked: `xcrun simctl bootstatus <UDID>` exits 0 AND `xcrun simctl io
     <UDID> screenshot <file>` exits 0. A fail runs `simctl shutdown <UDID>` then `simctl boot
     <UDID>` once, then checks again. A healthy boot writes nothing to stdout. A retry that passes
@@ -497,7 +497,7 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(self.read_records(), [])
 
 
-    # ------------------------------------------------------------------ ruling 5, boot check
+    # ------------------------------------------------------------------ boot check (sim-boot-is-verified)
 
     OFF = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
     ON = [(U1, "Idle Pro", "Booted", TYPE_PRO)]
@@ -547,7 +547,7 @@ class SimBootRecordTests(unittest.TestCase):
                 note = out["hookSpecificOutput"]["additionalContext"].lower()
                 self.assertIn("again", note, "the note does not say the device was booted again")
                 self.assertNotIn("decision", out)
-                # Ruling 5: the record goes in before the check, and a retry adds a second line.
+                # sim-boot-is-verified: the record goes in before the check, and a retry adds a second line.
                 records = self.read_records()
                 self.assertEqual([r["udid"] for r in records], [U1, U1])
                 self.assertEqual([str(r["launchd_pid"]) for r in records], ["2001", "3001"],

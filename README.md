@@ -191,7 +191,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   self-heal. When it does not, check the environment's network access is not blocking the three
   hosts above.
 * **The subagent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
-  `decisions/subagent-model-cap.md` for the guarded override and its required expiry field.
+  `opus-grant-expires` for the guarded override and its required expiry field.
 * **Other repositories cannot use `actions/` after this repository becomes private.** Open
   Settings, then Actions, then General, then Access. Set "Accessible from repositories owned by
   the user".

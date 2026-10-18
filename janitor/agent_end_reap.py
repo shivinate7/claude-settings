@@ -28,7 +28,7 @@ a sibling trash name, then starts a detached child that deletes the trash. The h
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
-Worktrees (owner rulings 2026-10-15, 23:01 CDT): when the gates above hold for the whole worktree,
+Worktrees (decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
@@ -294,7 +294,7 @@ WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
 
-OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision agent-end-reap-stops-what-a-finished-agent-left (own tree waits 30 idle min); a later agent end removes it
+OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision when-a-worktree-may-be-removed (own tree waits 30 idle min); a later agent end removes it
 
 
 def reap_worktrees(target: str, deadline: float):
