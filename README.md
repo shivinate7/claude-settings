@@ -143,9 +143,7 @@ merge --dev ...         run the checkout's own tree, not origin main
 * **Where the rest is written.** The flow is `confirm` in `merge/merge.py`. The rulings are
   in these decisions:
   * merge-config-defaults (merge needs no config file)
-  * merge-follows-the-prs-base (the PR's own base drives every step)
   * merge-waits-on-every-check (check first, then claim; never merge on a running or failing check)
-  * merge-lock-names-its-holder (the lock is a ref on origin and names its holder)
   * merge-needs-a-proven-head (a head with only skipped checks is unproven)
   * ci-wait-reads-run-status (the wait reads status, never `gh run watch`)
   * merge-net-retry (retry a network error or a rate limit, then stop)

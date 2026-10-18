@@ -43,7 +43,7 @@ Timing:
   idle wait, up to 300 s.
 - The one-day sweep deletes records a day past their last beat. It skips a session that `claude agents`
   lists as live. It deletes records only when that list is a valid JSON array. A valid empty list counts
-  as real. An unreadable check is not a death (`liveness-read-is-platform-specific-and-unreadable-is-not-death`).
+  as real. An unreadable check is not a death (`verification-report-unknown-reads`).
 
 Privacy:
 
