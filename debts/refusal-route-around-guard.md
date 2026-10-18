@@ -12,3 +12,7 @@
 - Deny a shell command that names a path the same agent was refused. This judges commands, which that decision rejected.
 
 Closed when a red case writes a refused path by shell and the guard denies it.
+
+## Ruling
+
+Owner: prose only for now. One evasion is measured, and the reviewer caught it.

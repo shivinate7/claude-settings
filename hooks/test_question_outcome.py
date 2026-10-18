@@ -1375,6 +1375,28 @@ def case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark():
           isinstance(cap, int) and len(kept) > cap - 100, len(kept))
 
 
+def case_rl9_the_repos_own_records_all_fit_the_ruling_budget():
+    """The alarm (owner ruling 2026-10-18): this repo's own decisions/ and debts/ grow, and the
+    judge must see every ruling. Red when record growth outruns RULINGS_MAX, until the budget is raised."""
+    name = "caseRL9 the repo's own tree: no record is left out of the rulings section"
+    if not need_module(name):
+        return
+    root = os.path.dirname(HERE)
+    with_ruling = 0
+    for kind in qo.RULINGS_DIRS:
+        folder = os.path.join(root, kind)
+        for n in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+            if n.endswith(".md"):
+                with open(os.path.join(folder, n), encoding="utf-8", errors="replace") as f:
+                    with_ruling += bool(qo._ruling_text(kind, f.read())[1])
+    section, titles = qo._rulings(root)
+    left_out = re.search(re.escape(qo.RULINGS_LEFT_OUT).replace(re.escape("%d"), r"(\d+)"), section)
+    check(name + ": the tree holds records with a ruling", with_ruling > 0, with_ruling)
+    check(name + ": the section has no left-out line", left_out is None, left_out and left_out.group(0))
+    check(name + ": every record with a ruling is in the section", len(titles) == with_ruling,
+          "%d of %d included" % (len(titles), with_ruling))
+
+
 # --------------------------------------------------------------------------- goal format
 # Owner ruling 2026-10-13: `You want:` is renamed `Goal:`, and the problem sentence opens with
 # `Problem:`. The prompt carries the two rule bullets, read from output-styles/shiv-stylisms.md.
@@ -2858,6 +2880,7 @@ def main():
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
                  case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
                  case_rl2b_the_same_stem_in_decisions_and_debts_keeps_two_ids_and_each_flag_cites_its_own_title,
+                 case_rl9_the_repos_own_records_all_fit_the_ruling_budget,
                  case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records):
         case()
     if LOAD_ERROR is None:
