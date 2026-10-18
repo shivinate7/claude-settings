@@ -99,10 +99,11 @@ tool_uses = None
 records_after_last_human = None
 read_transcript = None
 read_turn = None
+is_git_work_tree = None
 
 
 def _ensure_transcript_helpers():
-    global is_last_human, tool_uses, records_after_last_human, read_transcript, read_turn
+    global is_last_human, tool_uses, records_after_last_human, read_transcript, read_turn, is_git_work_tree
     if tool_uses is not None:
         return
     here = os.path.dirname(os.path.abspath(__file__))
@@ -115,6 +116,8 @@ def _ensure_transcript_helpers():
     )
     is_last_human, tool_uses, records_after_last_human, read_transcript = _ilh, _tu, _rah, _rt
     read_turn = _rtn
+    from md_sweep import is_git_work_tree as _igwt  # the one home of this walk
+    is_git_work_tree = _igwt
 
 
 class _GitFailure(Exception):
@@ -337,17 +340,6 @@ def _unwrap(value):
 
 
 # ------------------------------------------------------------------ resolving a home: value
-
-def is_git_work_tree(path):
-    current = os.path.realpath(path)
-    while True:
-        if os.path.exists(os.path.join(current, ".git")):
-            return True
-        parent = os.path.dirname(current)
-        if parent == current:
-            return False
-        current = parent
-
 
 def _run_git(cwd, args, input_text=None):
     """Run one git call, `--literal-pathspecs` always set. Return the finished process.
