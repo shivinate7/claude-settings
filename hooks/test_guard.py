@@ -13384,8 +13384,9 @@ def ov_scope_check():
 
 
 def ov_parallel_check(workers=6, rounds=5):
-    """Two calls that race for one one-act pass: exactly one gets it. The pass is a rename, so the
-    loser finds nothing to take. Several workers and rounds make a check-then-delete fail here."""
+    """Calls that run together on one one-act pass: exactly one is allowed, and the rest are refused.
+    How often this case catches a check-then-delete race is unmeasured: the guard processes start
+    tens of milliseconds apart, and the race window is far shorter."""
     config = ov_config("parallel")
     problem = ov_want(*ov_kill(config, "ov-parallel-warm", 0), "deny", "machine-wide-kill")
     if problem:

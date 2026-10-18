@@ -341,6 +341,12 @@ def ov_files(cfg):
                   for folder, _, names in os.walk(cfg) for name in names)
 
 
+def ov_pass_files(cfg):
+    """The files under state/override/. A grant may log to guard.log or write other state, so the
+    cases that want "no pass" look only here."""
+    return [f for f in ov_files(cfg) if f.startswith(os.path.join("state", "override") + os.sep)]
+
+
 # (name, prompt, kind, how long the pass lasts)
 OV_GRANTS = [
     ("`override` is a one-act pass that ends after 10 minutes", "override", "once", timedelta(minutes=10)),
@@ -382,8 +388,8 @@ def case_override_off():
     before = ov_pass(cfg)
     proc = ov_type(cfg, "override off")
     check("override: `override off` removes a timed pass",
-          before is not None and proc is not None and ov_pass(cfg) is None and not ov_files(cfg),
-          "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_files(cfg)))
+          before is not None and proc is not None and ov_pass(cfg) is None and not ov_pass_files(cfg),
+          "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
     cfg = ov_cfg()
     ov_type(cfg, "override")
     before = ov_pass(cfg)
@@ -394,7 +400,7 @@ def case_override_off():
     proc = ov_type(cfg, "override off")
     check("override: `override off` with no pass is quiet and writes nothing",
           proc is not None and proc.returncode == 0 and "Traceback" not in proc.stderr
-          and not ov_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_files(cfg)))
+          and not ov_pass_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_pass_files(cfg)))
 
 
 # Each of these holds the word `override`, and none of them is the whole prompt. The notice forms are
@@ -417,8 +423,8 @@ def case_override_not_whole_prompt():
         cfg = ov_cfg()
         proc = ov_type(cfg, prompt)
         check("override: grants nothing for " + name,
-              proc is not None and proc.returncode == 0 and not ov_files(cfg),
-              "files %r" % (ov_files(cfg),))
+              proc is not None and proc.returncode == 0 and not ov_pass_files(cfg),
+              "files %r" % (ov_pass_files(cfg),))
 
 
 def case_override_corrupt_file_replaced():
@@ -445,11 +451,12 @@ def case_override_corrupt_file_replaced():
 
 def case_override_session_id_stays_inside():
     # The session id names the pass file. An id that climbs out must not write outside state/override/.
-    for session in ("../escape", "..\\escape", "a/b"):
+    # guard.log at the top of the config directory is not a pass file, so a grant may write it.
+    for session in ("../escape", "../../escape", "..\\escape", "a/b"):
         cfg = ov_cfg()
         proc = ov_type(cfg, "override", session=session)
         stray = [f for f in ov_files(cfg)
-                 if os.path.dirname(f) != os.path.join("state", "override")]
+                 if f != "guard.log" and os.path.dirname(f) != os.path.join("state", "override")]
         check("override: session id %r writes no file outside state/override" % session,
               proc is not None and proc.returncode == 0 and not stray, "files %r" % (ov_files(cfg),))
 
