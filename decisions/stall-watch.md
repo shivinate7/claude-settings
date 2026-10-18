@@ -14,10 +14,19 @@ guard rule, so the watcher does the waiting and the session is told once.
   `run_in_background` true. It sets no permission decision, so no permission changes.
 - The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
   still sees it. Allow rules still match a rewritten command.
-- The shell gives the watcher the pid of `&`. In sh and bash a `{ }` group runs in a forked copy of the
-  shell, so the STALL report steps down through that copy and names the job's own pid. A pipeline has no
-  single pid: the report lists each member's pid and leaves the wrapper shell out, so stopping every
-  listed pid ends the job (owner ruling, 2026-10-18).
+- The STALL report names the pids to stop, so stopping every one ends the job (owner ruling,
+  2026-10-18). The shell gives the watcher the pid of `&`. In sh, bash and zsh a `{ }` group runs in a
+  forked copy of the shell, which has the same command line. Per shape, the report names:
+  - One command: its own pid. sh and bash step down through the copy. zsh runs the command without a
+    copy, so the pid of `&` is the command.
+  - A sequence, a subshell or an `exec`: the command that runs now.
+  - A pipeline, nested ones too: each member's pid, and no shell copy.
+  - A loop of builtins only: the shell copy that runs it.
+  - A command where `while`, `until` or `for` starts a command (the hook's `--loop 1`): the shell copy
+    that runs the loop, because the loop starts each body command again. A process tree cannot tell a
+    loop from a sequence, so the hook reads the command text with the stdlib shell tokenizer.
+  - Limit: stopping a loop's copy leaves its current body command running. The report's process table
+    lists that command.
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
   running and the watcher never stops it.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
