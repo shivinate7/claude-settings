@@ -15,7 +15,7 @@
 6. When the step cannot move or install, it fails loudly. It prints one line that says the install did not run and names what to
    do. It exits non-zero, so the merge tool reports FAILED. The merge stays. A merge run from a worktree made before this
    change cannot find the script, so the tool reports FAILED. When the local main does not move, the install runs from the old
-   main and the tool reports the failed move.
+   main and the tool reports the failed move and exits non-zero (owner ruling, undated).
 
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its
 checked-out lane branch, so unreviewed hooks would go live.
