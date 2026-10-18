@@ -27,6 +27,7 @@ PATTERNS = {
     "date": re.compile(r"\b20\d\d-\d\d-\d\d\b"),
     "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
 }
+REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
 
 
@@ -47,7 +48,7 @@ def added_lines(base):
     fork = git("merge-base", base, "HEAD").strip()
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork, "--", "*.py")
     added, path = {}, None
-    for row in diff.splitlines():
+    for row in diff.split("\n"):
         if row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
         elif path and (m := HUNK.match(row)):
@@ -68,7 +69,7 @@ def narrated_lines(path):
     for tok in tokens:
         if tok.type == tokenize.COMMENT:
             yield tok.start[0], tok.string
-    rows = data.decode("utf-8", "replace").splitlines()
+    rows = re.split(r"\r\n|\r|\n", data.decode("utf-8", "replace"))
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body:
@@ -89,7 +90,7 @@ def main(argv=None):
                 if n in lines:
                     for name, pat in PATTERNS.items():
                         for m in pat.finditer(text):
-                            print("%s:%d: %s: %s" % (path, n, name, m.group(0)))
+                            print("%s:%d: %s: %s (%s)" % (path, n, name, m.group(0), REMEDY))
                             hits += 1
     except Unread as e:
         print("UNKNOWN: %s (base %s)" % (e, args.base), file=sys.stderr)
