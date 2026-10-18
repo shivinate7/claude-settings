@@ -47,7 +47,7 @@ CLEAN = [
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
-NON_BREAKS = [" ", " ", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85"]
+NON_BREAKS = ["\u2028", "\u2029", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85"]
 
 REMEDY = "say what and why; the history goes in git or the decision"
 
