@@ -20,8 +20,7 @@ The `detached-launch` rule in hooks/guard.py also refuses these shapes:
 - `disown` in command position, on any line.
 - The same shapes inside the script of `sh -c` or `bash -c`.
 
-The remedy tells the agent to use `run_in_background`. Each heredoc body is dropped first, because an `&`
-inside it is code.
+The remedy tells the agent to use `run_in_background`.
 
 ### Part 2. The sweep takes the deepest checkout
 
@@ -34,11 +33,9 @@ checkout. It leaves those folders to janitor/agent_end_reap.py.
 
 ### Part 3. The reaper
 
-`janitor/agent_end_reap.py` is a hook. It runs on SubagentStop only and reads one hook payload.
-`agent_id` gives the target, `<primary>/.claude/worktrees/agent-<agent_id>`. The reaper finds the
-primary checkout from the payload `cwd` with `guard.primary_checkout`. The target must have the shape
-`.claude/worktrees/<name>`, must exist, and must not be a primary checkout. An agent id must match
-`[A-Za-z0-9_-]{1,64}`.
+`janitor/agent_end_reap.py` runs on SubagentStop only. The payload `agent_id` gives the target,
+`<primary>/.claude/worktrees/agent-<agent_id>`. The target must exist, have the shape
+`.claude/worktrees/<name>`, and not be a primary checkout.
 
 The reaper stops one process only when each read below answers a confirmed yes:
 
@@ -68,24 +65,26 @@ The owner's constraints hold:
 Owner ruling, 2026-09-27: the reaper stops each orphaned tree inside an ended agent's worktree, not
 only listeners. Part 3 targets only the ending agent's tree.
 
-The guard's ownership change (owner ruling, 2026-10-10) changes the guard's kill rule
-only. The reaper's reads stay as above. See `a-kill-by-pid-needs-an-owned-pid`.
+Owner ruling, 2026-10-10: the guard's ownership change changes the guard's kill rule only. The reaper's
+reads stay as above (`a-kill-by-pid-needs-an-owned-pid`).
+
+Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
+(`sweep._read_all_cwds_macos`, one `lsof -d cwd -Fpn`). A failed or empty read returns None, which means
+keep. Reason: a reap that hit the 60 s hook cap sent no signal and left a server running. The batch
+timeout is 30 s (`agent_end_reap.BATCH_TIMEOUT`), below the hook cap.
 
 ### Part 4. The worktree is removed at agent end
 
 Owner rulings, 2026-10-15 and 2026-10-16, including "Wait 30 min too" (2026-10-16 00:47 CDT).
 
-Rule. At each SubagentStop, the reaper removes each finished agent's worktree that is idle 30 min or
+At each SubagentStop, the reaper removes each finished agent's worktree that is idle 30 min or
 more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the
 others. A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree
-its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree.
+its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The
+wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a
+removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
 
-Idle is defined once, in `unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
-
-Why 30 min for the own tree too: a follow-up message to a finished agent resumes it in its
-own worktree. A removed worktree makes the agent stop (decision
-an-agent-outside-its-home-tree-must-stop, an agent outside its tree stops). The wait keeps
-follow-ups working.
+Idle is defined once, in `unattended-sweep-stops-proven-orphans`.
 
 The 19:43 CDT rulings (2026-10-15): stop the finished agent's own shells, then remove the tree, even with
 git-ignored files. The second half holds. The first half is not built: the agent's own
@@ -98,11 +97,11 @@ build output, packages or `.env.local`.
 
 A worktree is removed only when all of these hold:
 
-- it is idle for the Rule's limit;
+- it is idle for the limit above;
 - it is clean;
 - it is pushed;
 - it is unlocked;
-- no live session uses it (the constraint in Part 3);
+- no live session uses it (Part 3 read 2);
 - no process has a cwd inside it.
 
 A read that cannot tell keeps the worktree.
@@ -113,19 +112,12 @@ Related, same ruling:
 - An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and
   test-author agent definitions say so.
 
-### The reap reads every cwd in one batch
-
-Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
-(`sweep._read_all_cwds_macos`, one `lsof -d cwd -Fpn`). A failed or empty read returns None, which means
-keep. Reason: a reap that hit the 60 s hook cap sent no signal and left a server running. The batch
-timeout is 30 s (`agent_end_reap.BATCH_TIMEOUT`), below the hook cap.
-
 ### The sweep removes a finished agent worktree
 
 Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`)
 removes a finished agent's worktree in every repo. It ADDS to the removals of
-`unattended-sweep-stops-proven-orphans` (an unattended sweep removes only proven orphans).
-It never narrows them. It removes a tree only when all of these hold:
+`unattended-sweep-stops-proven-orphans`. It never narrows them. It removes a tree only when all of these
+hold:
 
 - Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
 - It is clean: no uncommitted and no untracked file.

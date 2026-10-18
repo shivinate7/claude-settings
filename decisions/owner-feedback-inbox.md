@@ -22,10 +22,9 @@ item of a burst and lost the rest.
   4. The judge. While capture is open, each message that does not open with `fb` and does not close
      capture is saved first. Then a detached child (`hooks/feedback_judge.py`) asks a Sonnet judge
      (`claude-sonnet-5-5`, through `decision_watch.invoke_model`) whether it still belongs to the burst.
-     On `{"feedback": false}` the child adds the item `- fb-auto-<time> [note] -> judged not feedback`
-     under that message and closes capture, only while that message is still the last one captured. An
-     error, a timeout, an odd answer or a late answer changes nothing: capture stays open. The judge
-     never drops a message.
+     On `{"feedback": false}` the child adds a note item "judged not feedback" under that message and
+     closes capture, only while that message is still the last one captured. An error, a timeout, an odd
+     answer or a late answer changes nothing: capture stays open. The judge never drops a message.
 - **Notices.** A message that starts with a tag in `question_outcome.MACHINE_TAGS` is agent or system
   text. It is never captured or judged. It does not close capture, and it does not reset the quiet-time
   clock.
@@ -33,7 +32,7 @@ item of a burst and lost the rest.
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. Messages from other sessions
   are not captured.
 - **Jot, not solve.** For each captured message, the session writes one or more items. Each item has an
-  id (such as `fb-0958-2`), one kind, and a home. The work can wait. The jotting cannot.
+  id, one kind, and a home. The work can wait. The jotting cannot.
 - **Kinds and their homes.**
   - `ruling`: a decision on a question. Home: the handoff's NO HOME YET list, then a record.
   - `task`: work to do. Home: the handoff's next steps, or the repo's todo.
