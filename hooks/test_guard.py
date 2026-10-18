@@ -1822,6 +1822,7 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
    "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
 # A body `cd` is a live line when a stray `EOF` closes the body early, so the reset after the closer runs in the dirty tree.
+# The body never runs, so this deny is a bandaid, kept under the no-hole ruling (hold-unsafe-after-round-3).
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -1988,6 +1989,7 @@ sh("per-file allow: restore --staged --worktree of one modified file",
 # one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
 # checkout behind the lane. Chained with the cd and the python, that ask step still denies (ask-alone):
 # the python is a second real step.
+# The ask reason is not pinned to the -C form: the deny sends the agent to the lone step, whose own ask names it.
 chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask step",
             "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
             cwd=GITMAIN)
@@ -3817,6 +3819,7 @@ for _label, _form in (
     sh("heredoc r3-bd: a kill in the body of %s, denies" % _label, _form, "deny", "machine-wide-kill", cwd=PROJ)
 
 # eval, source and `.` run a heredoc that a `<( )`, `$( )` or backtick reads, and bash executes its body.
+# Not pinned: `source $( )`, because its output is a file name, so no body runs.
 for _label, _form in (
         ("source <( )", "source <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
         ("dot <( )", ". <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
@@ -8193,7 +8196,7 @@ for _dev in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "CON"):
        "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
 
 # F1 to F4: each case is a frozen write that reaches the guard as data, so each case names the form in
-# its name, and each DENIES. A pipe into an interpreter fails closed.
+# its name, and each DENIES. A pipe into an interpreter fails closed by design: the interpreter may run the text.
 #
 # F1: `_runs_a_file` compared raw words, so a quoted, empty, escaped or variable operand read as a
 # script file, and the text piped into it became data.
