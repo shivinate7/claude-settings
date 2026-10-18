@@ -36,7 +36,7 @@ The owner chose the patch check over a check of the lines on main today. This co
 - `--branches` reaps branches only. It holds every worktree's branch, and refuses the repository if git gives no worktree list.
 - `--root PATH` names the repository by any path inside it. A linked worktree is a valid path.
 
-**Leftover folders are deleted only when proven twice.** A husk is a real folder under `.claude/worktrees/` that git does not list and that holds only names the repository gives in `huskNames`. The repository knows its own build output; the sweep does not. Only `--confirm` deletes, and only after the proof runs again right before the delete. The sweep never follows a link (a Windows junction counts as a link). Any error, and an empty process table, keeps the folder (`build-dirs-reaped-at-agent-end`).
+**Leftover folders are deleted only when proven twice.** A husk is a real folder under `.claude/worktrees/` that git does not list and that holds only names the repository gives in `huskNames`. The repository knows its own build output; the sweep does not. Only `--confirm` deletes, and only after the proof runs again right before the delete. The sweep never follows a link (a Windows junction counts as a link, `build-dirs-reaped-at-agent-end`). Any error, and an empty process table, keeps the folder.
 
 **The sweep never runs code a repository supplies.** A repository states its wishes in `.claude/janitor.json`, read as data. A repository that supplies code to a frozen tool can do everything that tool can do.
 
@@ -49,6 +49,7 @@ The owner chose the patch check over a check of the lines on main today. This co
 **A reaped branch leaves a tombstone.** Before the delete, the sweep writes `refs/janitor/reaped/<branch>` at the tip and appends one line to a restore log: repository, branch, commit id, time. The commits stay reachable, so `git gc` cannot take them. The purge drops a tombstone after 90 days, aged by the restore log's own timestamp, never by the ref's mtime. The 90 days outlast git's own expiry of an unreachable reflog entry.
 
 **Liveness.** Liveness comes from `~/.claude/sessions/*.json`. A record counts as live only when the id is alive and the recorded start time still matches, so a recycled id cannot inherit a dead session's claim.
+
 **How the sweep is proven.**
 
 - Each refusal gets a test arm that violates it. Every arm asserts that its subject set is not empty before it asserts a verdict, and each assertion is mutated to show that it fails.
