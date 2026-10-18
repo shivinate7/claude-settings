@@ -29,6 +29,11 @@ Owner answer, 2026-10-17 16:04 CDT:
 
 - Open findings no longer go under a "Holes, named" section. Each becomes a debt, or one line in `debts/notes.md`, pointing to its decision (`roles-holes-are-debts`).
 
+Owner rulings, 2026-10-17 23:46 CDT:
+
+- The ci-hygiene skill gets a step: when a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after. The decision `guard-split-by-family` is deleted: its build is done and that step was its last unbuilt part.
+- `debts/` is the one home for deferred work. `deferred/` folds into `debts/` after the cull ends: the cull bars file moves until then. The question judge is then pointed at `debts/`.
+
 ## Why
 
 The tree carries more records than a session can read. A cull keeps the rulings in force and drops the rest. The protected outcome: a session finds the current ruling fast, and no stale text misleads it.
