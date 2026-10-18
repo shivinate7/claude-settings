@@ -7,10 +7,8 @@ GUARD_UNDER_TEST=<copy> and CLAUDE_CONFIG_DIR=<temp dir>. The suite must go red
 (a nonzero exit backed by at least one FAIL line). A mutation the suite does not
 catch is "survived", and any survivor fails this run.
 
-A RED SUITE IS NOT ENOUGH. A nonzero exit plus any red line used to count as "killed", even
-when every red line belonged to some OTHER case than the one the mutation's label names. A
-mutant that breaks the waiter rule could die on an unrelated shared-tree case and still count
-as caught, which proves nothing about the rule its label names. Every mutation below therefore
+A RED SUITE IS NOT ENOUGH. A mutant could die on a case unrelated to the rule its label
+names, which proves nothing about that rule. Every mutation below therefore
 carries a fifth field: the case name (or a distinctive fragment of it) that MUST appear among
 the suite's own FAIL lines. A mutant whose red lines miss that name is "WRONG CAUSE", kept
 distinct from "survived", and fails this run exactly as a survivor does. The field is mandatory:
@@ -24,17 +22,10 @@ mutation either way.
 The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
 (MUTATE_JOBS overrides). Each mutant gets its own guard copy and its own config directory, so
 the runs share nothing but the read-only fixture tree the suite builds under its own temp
-root. MEASURED 2026-09-19 on a 4-core machine: 38 mutants serial, 14 min 8 s (22 s each);
-47 mutants parallel, 4 min 29 s. The suite itself spawns guard.py once per case, which is
-where the time goes.
+root. The suite itself spawns guard.py once per case, which is where the time goes.
 
 Run:
     python hooks/mutate_guard.py
-
-Ported from a prior run at
-.../scratchpad/mutate3.py (fourteen mutations), plus five added for rules
-guard.py grew since that run: the live-stream rule, the waiter rule (Rule 9),
-the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 """
 
 import os

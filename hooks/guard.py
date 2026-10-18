@@ -118,22 +118,14 @@ A merge into main is allowed and never logged by the guard.
 with `--ours`, `--theirs` or `--merge` during an unresolved merge, rebase, cherry-pick or revert
 picks a conflict side. It discards no work, so `shared-tree` passes it.
 
-Narrowed 2026-10-14 after a study of 399 denies (most right, the rest false alarms): a read
-named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a value
-of `-m` or `-F` is never a flag; a write whose `-C`, `--git-dir`, `cd` or cwd sits under the
-temp folder is a throwaway and passes; `fetch` writes only a `src:dst` whose dst is a branch;
-a redirect named inside quotes is text; the refusal names its step ("step N of M, the push").
+A read named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a
+value of `-m` or `-F` is never a flag. A write whose `-C`, `--git-dir`, `cd` or cwd sits under
+the temp folder is a throwaway and passes. `fetch` writes only a `src:dst` whose dst is a
+branch. A redirect named inside quotes is text. The refusal names its step ("step N of M, the
+push").
 
-Every refusal names its rule and says what to do instead. A remedy never names
-the refused command or the refused path, because a remedy that repeats the
-target reads as permission to run it (CLAUDE.md, Git paragraph). The matched
-text goes to the log instead, so a person can still see what fired.
-
-This file is ported from two working guards, and the comments that record a
-MEASURED defect are kept, because the measurement is the argument.
-
-  job-cost-reporting  .claude/hooks/pretooluse_guard.py   shared trees
-  q_max               .claude/hooks/pretooluse_guard.py   the environment wall
+Every refusal names its rule and says what to do instead (`git-remedy-never-names-target`).
+The matched text goes to the log, so a person can still see what fired.
 
 No override tokens. A permission prompt is the grant. An "ask" decision puts the
 answer in the owner's hands.
