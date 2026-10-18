@@ -32,7 +32,7 @@ Owner answer, 2026-10-17 16:04 CDT:
 Owner rulings, 2026-10-17 23:46 CDT:
 
 - The ci-hygiene skill gets a step: when a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after.
-- `debts/` is the one home for deferred work. `deferred/` folds into `debts/` after the cull ends: the cull bars file moves until then. The question judge is then pointed at `debts/`.
+- `debts/` is the one home for deferred work. `deferred/` is folded into `debts/`, and the question judge reads `debts/` in place of it.
 
 ## Why
 

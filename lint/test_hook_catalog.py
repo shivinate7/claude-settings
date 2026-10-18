@@ -15,6 +15,9 @@ Interface the generator must meet. The builder builds to this.
 - `--check`: exit 0 and print nothing when docs/catalog.md equals the render (CRLF normalized).
   Exit 1: one line per problem, naming the offender (stale page, empty source, missing row).
   Exit 2: the path of an input it cannot read (settings.json, the model table, a file it names).
+- A description cell (What it does) longer than CELL_CAP characters is cut to at most CELL_CAP
+  characters and ends in an ellipsis (U+2026). CELL_CAP is a named constant in lint/hook_catalog.py.
+  A cut never splits a backtick span, and every row keeps its cells.
 - Sources, read from the root:
   - settings.json `hooks`: one row per registration (event, matcher, `if`, command or prompt).
   - A command names its script as `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`. Source: a .py
@@ -83,11 +86,11 @@ second script.
   docs/records.md and never reads settings.json or the model table. A root with a part and no
   settings.json is still exit 2 (F20).
 - Records, read from the root: the `<!-- rule:<id> -->` markers in CLAUDE.md, and the .md files in
-  decisions/, debts/, deferred/ and plans/. A README.md in a folder is no record. Other files and a
+  decisions/, debts/ and plans/. A README.md in a folder is no record. Other files and a
   missing folder are ignored. A file the generator cannot read is exit 2 naming it. An empty record,
   or a debt with no What, is a problem: exit 1 naming the file.
 - Page: one `## ` section per kind, in this order, only when it has a row: Mandates, Rulings, Build
-  designs, Unsorted decisions, Debts, Deferred, Plans. Each holds a table headed Slug | Gist | Link.
+  designs, Unsorted decisions, Debts, Plans. Each holds a table headed Slug | Gist | Link.
   Slug: the rule id, or the file name without .md. Link: `../CLAUDE.md` or `../<folder>/<slug>.md`.
   Rows: Mandates in CLAUDE.md order, every other kind sorted by slug. A pipe in a gist is written \\|.
 - Rulings: Kind: process. Build designs: Kind: build. Unsorted decisions: no Kind line, or a Kind
@@ -99,14 +102,14 @@ second script.
   under the first `## Ruling` or `## The ruling`, else under `## The question`, else the first
   paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
   text stays as written, so a decision whose paragraph opens with bold text (the real
-  one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
+  one-shared-record-stamp does) keeps it. Debt: the What. Plan: the first line, its
   leading # dropped.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
   or "Old ruling", in any case. The other five fail only where they open a block: the text of a
   heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
   marker itself. "was:" fails where it opens a block, or where the word "old" comes earlier in the
   same block ("the old wording was: ..."). A bare "no longer" is no marker. The failure is one line per
-  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
+  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/ and
   plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
   comments are not special: their lines are read as prose, so history hidden in a comment fails when
   it opens a block. A continuation line of a wrapped paragraph does not open a block.
@@ -510,7 +513,7 @@ def row_for(rows, key):
 # ---- the records page: readers and fixture texts ------------------------------------------------
 
 RECORDS_COLUMNS = ["Slug", "Gist", "Link"]
-SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans"]
+SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans"]
 RECORDS_PAGE = os.path.join(ROOT, "docs", "records.md")
 LINK_TARGET = re.compile(r"\]\(([^)]*)\)")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
@@ -583,7 +586,6 @@ LOOSE = ("# Loose note\n\nThis note has no kind and no\nruling heading. It wraps
 TITLED = "# Just a title\n\n## Why\n\nBecause.\n"
 DEBT = ("# Gap one\n\n- **What.** The check misses one case. It also misses a second.\n"
         "- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover both.\n")
-WAITING = "# Waiting for a thing\n\n**What waits.** The thing.\n"
 PLAN = "# Plan: do a thing\n\nOne command does it.\n"
 RULES = ("# How I work\n\n**Building.** Never guess an answer the code should give you.<!-- rule:b-one --> "
          "Surface ambiguity instead\nof resolving it silently. Say why.<!-- rule:b-two -->\n\n"
@@ -595,7 +597,7 @@ def with_records(extra=None):
     spec = clean()
     spec.update({"CLAUDE.md": RULES, "decisions/ruled.md": RULED, "decisions/built.md": BUILT,
                  "decisions/loose.md": LOOSE, "decisions/titled.md": TITLED, "debts/gap-one.md": DEBT,
-                 "deferred/waiting.md": WAITING, "plans/plan-a.md": PLAN})
+                 "plans/plan-a.md": PLAN})
     for rel, text in (extra or {}).items():
         if text is None:
             spec.pop(rel, None)
@@ -917,7 +919,6 @@ class RecordsPage(Tree):
             "Build designs": ["built"],
             "Unsorted decisions": ["loose", "subagent-model-cap", "titled"],
             "Debts": ["gap-one"],
-            "Deferred": ["waiting"],
             "Plans": ["plan-a"],
         })
 
@@ -928,7 +929,6 @@ class RecordsPage(Tree):
             ("Unsorted decisions", "loose"): "This note has no kind and no ruling heading.",
             ("Unsorted decisions", "titled"): "Just a title",
             ("Debts", "gap-one"): "The check misses one case.",
-            ("Deferred", "waiting"): "Waiting for a thing",
             ("Plans", "plan-a"): "Plan: do a thing",
             ("Mandates", "b-one"): "Never guess an answer the code should give you.",
             ("Mandates", "b-two"): "Surface ambiguity instead of resolving it silently.",
@@ -940,7 +940,7 @@ class RecordsPage(Tree):
 
     def test_a3_each_row_links_to_its_file(self):
         folder = {"Rulings": "decisions", "Build designs": "decisions", "Unsorted decisions": "decisions",
-                  "Debts": "debts", "Deferred": "deferred", "Plans": "plans"}
+                  "Debts": "debts", "Plans": "plans"}
         rows = self.rows()
         self.assertTrue(rows)
         for r in rows:
@@ -965,9 +965,9 @@ class RecordsPage(Tree):
         self.assertNotIn("README", got["Debts"])
 
     def test_a6_one_slug_in_two_kinds_gets_two_rows(self):
-        got = listed(self.rows({"decisions/shared.md": RULED, "deferred/shared.md": WAITING}))
+        got = listed(self.rows({"decisions/shared.md": RULED, "debts/shared.md": DEBT}))
         self.assertIn("shared", got["Rulings"])
-        self.assertIn("shared", got["Deferred"])
+        self.assertIn("shared", got["Debts"])
 
     def test_a7_a_decision_gist_comes_from_its_ruling_else_its_question(self):
         extra = {"decisions/g%d.md" % i: text for i, (_name, text, _gist) in enumerate(GIST_CASES)}
@@ -1082,7 +1082,6 @@ class RecordsStale(Tree):
                 root, "debts/gap-one.md", DEBT.replace("The check misses one case.", "The check misses two cases.")),
             "a decision is added": lambda root: put(root, "decisions/new.md", LOOSE),
             "a decision gains a Kind line": lambda root: put(root, "decisions/loose.md", LOOSE + "\nKind: process\n"),
-            "a deferred file is added": lambda root: put(root, "deferred/new.md", WAITING),
             "a plan is added": lambda root: put(root, "plans/new.md", PLAN),
             "a rule marker is added": lambda root: put(root, "CLAUDE.md", RULES + "\nShip it.<!-- rule:b-four -->\n"),
             "a rule marker is deleted": lambda root: put(root, "CLAUDE.md", RULES.replace("<!-- rule:b-three -->", "")),
@@ -1228,7 +1227,6 @@ class RecordsHistory(Tree):
 
     def test_c2_every_record_folder_and_claude_md_is_read(self):
         cases = [
-            ("deferred/old.md", "# Old\n\nSuperseded: by the new plan.\n", "Superseded: by the new plan."),
             ("plans/old.md", "# Plan\n\n## Old ruling\n\nText.\n", "## Old ruling"),
             ("debts/old.md", DEBT + "\nPreviously: the check ran.\n", "Previously: the check ran."),
             ("CLAUDE.md", RULES + "\nOverruled: the old rule text.\n", "Overruled: the old rule text."),
@@ -1408,7 +1406,7 @@ class RealRecords(unittest.TestCase):
     def test_r10_every_record_file_has_one_row_and_a_link_that_resolves(self):
         rows = self.rows()
         folders = (("decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("debts", ("Debts",)),
-                   ("deferred", ("Deferred",)), ("plans", ("Plans",)))
+                   ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
             # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
@@ -1488,6 +1486,173 @@ class Helpers(unittest.TestCase):
         from hook_catalog import RECORDS_INTRO
         self.assertTrue(RECORDS_HEADER.strip(), "RECORDS_HEADER is empty")
         self.assertTrue(RECORDS_INTRO.startswith(RECORDS_HEADER), (RECORDS_HEADER, RECORDS_INTRO[:40]))
+
+
+# ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
+# Decision catalog-cells-never-cut: the cap sits above the longest current cell, so no cell loses text.
+# A cap stays only as a ceiling for growth. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
+# are never edited. The cap is one named constant in lint/hook_catalog.py, CELL_CAP. The cases import it,
+# so a new value moves every case with it. No case copies the number.
+
+ELLIPSIS = "…"
+PROSE = "alpha beta gamma delta "
+JUDGE_KEY = "Judge this AskUserQuestion call: $ARGUMENTS"
+
+
+def cell_cap():
+    """CELL_CAP from the generator. A missing name fails the case by its name."""
+    try:
+        from hook_catalog import CELL_CAP
+    except ImportError as err:
+        raise AssertionError("lint/hook_catalog.py has no CELL_CAP, the one named cap on a description cell: %s" % err)
+    return CELL_CAP
+
+
+def prose(n):
+    """Plain prose of exactly n characters that ends in a letter, so flattening it keeps its length."""
+    text = (PROSE * (n // len(PROSE) + 2))[:n]
+    return text[:-1] + "e" if text.endswith(" ") else text
+
+
+def filler(n):
+    """A judge body of at least n characters."""
+    sentence = "Check each question and option against the brief it cites. "
+    return sentence * (n // len(sentence) + 1)
+
+
+def what_of(out, key):
+    """The What it does cell of the row keyed key in a rendered page, pipes unescaped."""
+    return row_for(page_rows(out), key)["What it does"]
+
+
+class CellCap(Tree):
+    """A description cell longer than CELL_CAP is cut to at most CELL_CAP characters and ends in an ellipsis.
+    The cut keeps the start of the source, never splits a backtick span, and leaves every row its cells."""
+
+    def render(self, tree_files):
+        code, out, err = generator(self.tree(tree_files), "--print")
+        self.assertEqual(code, 0, out + err)
+        return out
+
+    def render_skill(self, text):
+        return self.render(files(extra={"skills/alpha/SKILL.md": skill_md("description: " + text)}))
+
+    def assert_cut(self, cell, source, floor=True):
+        """The cell ends in the ellipsis, keeps the start of the source, and fits the cap. floor=False when the
+        cut must fall before a span longer than the cap, so the cell may be short."""
+        self.assertTrue(cell.endswith(ELLIPSIS), "not cut: %d chars, and no ellipsis at the end" % len(cell))
+        self.assertTrue(" ".join(source.split()).startswith(cell[:-1]), "the cut rewords the source: %r" % cell)
+        cap = cell_cap()
+        self.assertLessEqual(len(cell), cap, "%d chars, over the cap of %d" % (len(cell), cap))
+        if floor:
+            self.assertGreater(len(cell), cap // 2, "the cut keeps too little: %d chars at a cap of %d" % (len(cell), cap))
+
+    def assert_span_cut(self, out, key, source, floor=True):
+        """A cut that would split a backtick span falls before the span: the cell has no backtick, and the row keeps its cells."""
+        cell = what_of(out, key)
+        self.assert_cut(cell, source, floor)
+        self.assertNotIn("`", cell, "the cut keeps or opens a backtick span: %r" % cell[-30:])
+        rows = [line for line in out.split("\n") if line.startswith("| `%s`" % key)]
+        self.assertEqual(len(rows), 1, out)
+        self.assertEqual(len(split_cells(rows[0])), len(COLUMNS), "the cut leaves an unbalanced pipe: " + rows[0])
+
+    def test_e1_the_cap_is_one_named_positive_integer_in_the_generator(self):
+        cap = cell_cap()
+        self.assertIsInstance(cap, int)
+        self.assertGreater(cap, 0)
+
+    def test_e2_a_skill_description_over_the_cap_is_cut_and_ends_in_an_ellipsis(self):
+        text = prose(2 * cell_cap())
+        self.assert_cut(what_of(self.render_skill(text), "skills/alpha"), text)
+
+    def test_e3_a_mod_description_over_the_cap_is_cut(self):
+        text = prose(2 * cell_cap())
+        out = self.render(files(plugins={"tw@claude-settings": True}, extra={
+            "mods/tw/.claude-plugin/plugin.json": json.dumps({"description": text}),
+            "mods/tw/SOURCE.md": "repo and commit go here\n",
+        }))
+        self.assert_cut(what_of(out, "mods/tw"), text)
+
+    def test_e4_a_judge_prompt_over_the_cap_is_cut(self):
+        body = filler(2 * cell_cap())
+        prompt = JUDGE_KEY + "\n" + body + "Block only on a clear breach of the brief."
+        out = self.render(files(hooks={"PreToolUse": [{"matcher": "AskUserQuestion", "hooks": [judge(prompt=prompt)]}]}))
+        self.assert_cut(what_of(out, JUDGE_KEY), body)
+
+    def test_e5_a_short_description_renders_unchanged(self):
+        # Pins that a cell under the cap is never touched.
+        self.assertEqual(what_of(self.render(files()), "skills/alpha"), "Use when testing alpha.")
+
+    def test_e6_a_description_of_exactly_the_cap_is_unchanged_and_one_more_character_is_cut(self):
+        cap = cell_cap()
+        self.assertEqual(what_of(self.render_skill(prose(cap)), "skills/alpha"), prose(cap))
+        cell = what_of(self.render_skill(prose(cap + 1)), "skills/alpha")
+        self.assertTrue(cell.endswith(ELLIPSIS), "%d chars at the cap plus one: no ellipsis" % len(cell))
+        self.assertLessEqual(len(cell), cap)
+
+    def test_e7_a_span_longer_than_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = "ab `x " + "c" * cap + " | " + "d" * 60 + "` " + PROSE * 20  # the span runs past the cap, with a space inside before it
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text, floor=False)
+
+    def test_e12_a_short_span_that_straddles_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = prose(cap - 40) + " `" + "c" * 10 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after, with spaces inside before it
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
+
+    def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):
+        # Scanner rule (building-scanner-respects-strings): #, // and /* inside a code span are text.
+        cap = cell_cap()
+        text = prose(cap - 25) + " `" + "x" * 10 + " // # /* opener " + "y" * 60 + "` " + PROSE * 20  # openers at the cap
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md('description: "%s"' % text)}))
+        self.assert_span_cut(out, "skills/alpha", text)
+
+    def test_e10_a_lone_backtick_in_plain_text_does_not_stop_the_cut(self):
+        cap = cell_cap()
+        text = "Use when a lone ` sits early in plain text, then " + prose(cap * 3)
+        cell = what_of(self.render_skill(text), "skills/alpha")
+        self.assert_cut(cell, text)
+        self.assertIn("a lone ` sits early", cell)
+
+    def test_e11_a_code_span_that_a_folded_line_break_splits_is_one_span(self):
+        # Scanner rule, the multi-line case: a folded frontmatter joins its two lines, so the span is one span.
+        cap = cell_cap()
+        lead = prose(cap - 100)
+        folded = "description: >\n  " + lead + " `" + "c" * 60 + "\n  " + "d" * 60 + "` " + PROSE * 20
+        source = lead + " `" + "c" * 60 + " " + "d" * 60 + "` " + PROSE * 20
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md(folded)}))
+        self.assert_span_cut(out, "skills/alpha", source)
+
+
+class RealCellCap(unittest.TestCase):
+    def test_e8_every_description_cell_of_the_committed_page_is_at_or_under_the_cap(self):
+        if not os.path.exists(PAGE):
+            self.fail("docs/catalog.md does not exist yet: the generator writes it")
+        rows = page_rows(read(PAGE))
+        self.assertTrue(rows, "no catalog rows, so the scan proves nothing")
+        cap = cell_cap()
+        over = ["%s %d chars" % (r["Key"], len(r["What it does"])) for r in rows if len(r["What it does"]) > cap]
+        self.assertFalse(over, "over the cap of %d: %s" % (cap, "; ".join(over)))
+
+    def test_e13_no_real_description_cell_is_cut(self):
+        # Decision catalog-cells-never-cut: no cell loses text. Render the real repo at the cap and with
+        # no cap; a row that differs was cut. The lists are zipped, never keyed: two judge rows share a key.
+        import hook_catalog as gen
+        saved = gen.CELL_CAP, gen.ROOT
+        try:
+            gen.ROOT = ROOT
+            capped, problems = gen.render()
+            gen.CELL_CAP = sys.maxsize
+            full, more = gen.render()
+        finally:
+            gen.CELL_CAP, gen.ROOT = saved
+        self.assertEqual(problems + more, [], "the real repo does not render")
+        capped, full = page_rows(capped), page_rows(full)
+        self.assertEqual(len(capped), len(full))
+        self.assertTrue(full, "no catalog rows, so the scan proves nothing")
+        cut = [(len(u["What it does"]), u["Key"]) for c, u in zip(capped, full) if c["What it does"] != u["What it does"]]
+        self.assertFalse(cut, "%d cells cut at the cap of %d; the longest cell is %d chars, so the cap must be at least that: %s" % (
+            len(cut), saved[0], max(len(u["What it does"]) for u in full), "; ".join("%s %d chars" % (k, n) for n, k in sorted(cut, reverse=True))))
 
 
 if __name__ == "__main__":

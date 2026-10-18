@@ -384,18 +384,8 @@ def bare_background_hit(cmd: str) -> str:
     """Return the matched text when ANY segment holds a bare background job (`&` as its own
     token, after the command word) with no pid captured anywhere in the command, else ''.
 
-    MEASURED 2026-09-24 against this machine's own local transcripts (`~/.claude/projects/*/
-    *.jsonl`, read-only): 16571 Bash commands across 116 sessions, 0 ended in a bare trailing
-    `&`. This shape refuses no harmless command this session has actually seen run.
-
-    MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): an earlier version read
-    the LAST segment only, so `cmd &` followed by another line was allowed, and that server
-    outlived the agent. The `&` must come AFTER the command word: a leading `&` is
-    PowerShell's call operator, never a background job.
-
-    MEASURED 2026-09-26 against 13312 distinct local Bash commands in 118 sessions: the
-    any-segment read refused 6 that the old rule allowed. All 6 were an `&` inside a python
-    heredoc body, Python code, not a shell job. So this read drops every heredoc body first.
+    The `&` must come AFTER the command word: a leading `&` is PowerShell's call operator,
+    never a background job. Every heredoc body is dropped first: an `&` there is not a job.
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     if "$!" in cmd:

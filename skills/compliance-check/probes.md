@@ -8,11 +8,11 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | Lint | Command | Reads |
 | --- | --- | --- |
 | `ste_lint.py` | `python3 $P/lint/ste_lint.py --fail-on error --quiet <child *.md>` | STE errors in child prose |
-| `check_record_slugs.py` | `cd <records parent> && python3 $P/lint/check_record_slugs.py decisions/*.md deferred/*.md` | slugs over 32 characters |
+| `check_record_slugs.py` | `cd <records parent> && python3 $P/lint/check_record_slugs.py decisions/*.md debts/*.md` | slugs over 32 characters |
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with `decisions/`, `deferred/` or `debts/`.
+`check_record_slugs.py` matches only paths that start with `decisions/` or `debts/`.
 For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
 file arguments. Its git diff reads this repo's tree, so it cannot target a child.
 
