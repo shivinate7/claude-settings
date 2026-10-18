@@ -1960,7 +1960,30 @@ def _log_unlock(handle) -> None:
         pass
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> None:
+_pass_who = ("", None)  # (session id, agent id) of the call this process judges
+
+
+def set_pass_context(session_id, agent_id) -> None:
+    """Name the session and subagent whose call this process judges, for the owner override pass."""
+    global _pass_who
+    _pass_who = (session_id, agent_id or None)
+
+
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str,
+           passable: bool = True) -> None:
+    """Print a deny or an ask and exit, unless an owner override pass lifts it (decision
+    owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. A rule
+    in override_pass.NEVER, or a call with passable=False, never consults the pass."""
+    if passable:
+        try:  # an import or read failure is no pass: the refusal stands
+            import override_pass
+            lifted = override_pass.take(_pass_who[0], _pass_who[1], rule, override_pass.now())
+        except Exception:
+            lifted = None
+        if lifted:
+            record(tool, lifted, rule, matched)
+            if lifted == override_pass.PASSED:
+                sys.exit(0)
     record(tool, decision, rule, matched)
     print(json.dumps({
         "hookSpecificOutput": {

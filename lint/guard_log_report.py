@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reads ~/.claude/guard.log: one tab-separated line per guard verdict, written by
 hooks/guard_core.py record(). Nobody read it, so a rule that never fires, or fires too often, went unseen.
-Prints per-rule deny/ask/noted counts (a `fixed` STE gate rewrite counts as noted), denies per day,
+Prints per-rule deny/ask/noted counts (a `fixed` STE gate rewrite counts as noted; an `override`
+line, a refusal an owner override pass lifted, adds an override column), denies per day,
 other verdicts verbatim, bad-line count.
 A line ends in the hook's session_id as a sixth field; a five-field line, or "-", is "unknown
 session". --session <id> keeps one session's lines. --by-session adds counts per session."""
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from guard_core import SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
+OVERRIDE = "override"  # a refusal an owner override pass lifted: counted, and a key only when present
 UNKNOWN = "unknown session"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session")
@@ -64,13 +66,14 @@ def summarize(lines, days, now, session=None):
             continue
         if decision == "fixed":
             decision = "noted"  # an STE gate rewrite: counted as a note, its STE codes are its rule
-        if decision not in COUNTED:
+        if decision not in COUNTED + (OVERRIDE,):
             out["other"].append(row.line)
             continue
         row = out["by_rule"].setdefault(rule, dict.fromkeys(COUNTED, 0))
-        row[decision] += 1
+        row[decision] = row.get(decision, 0) + 1
         by_rule = out["by_session"].setdefault(label, {})
-        by_rule.setdefault(rule, dict.fromkeys(COUNTED, 0))[decision] += 1
+        cell = by_rule.setdefault(rule, dict.fromkeys(COUNTED, 0))
+        cell[decision] = cell.get(decision, 0) + 1
         if decision == "deny":
             out["per_day"][day] += 1
     return out
@@ -78,14 +81,20 @@ def summarize(lines, days, now, session=None):
 
 def render(s, by_session=False):
     rows = sorted(s["by_rule"].items(), key=lambda kv: (-kv[1]["deny"], kv[0]))
-    out = ["| rule | deny | ask | noted |", "|---|---|---|---|"]
-    out += ["| %s | %d | %d | %d |" % (r, c["deny"], c["ask"], c["noted"]) for r, c in rows]
+    # The override column shows only once some pass lifted a refusal, so a log with none reads as before.
+    cols = COUNTED + ((OVERRIDE,) if any(OVERRIDE in c for _, c in rows) else ())
+
+    def table(lead, items):
+        head = lead + list(cols)
+        out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+        return out + ["| " + " | ".join(list(keys) + [str(c.get(k, 0)) for k in cols]) + " |"
+                      for keys, c in items]
+
+    out = table(["rule"], [((r,), c) for r, c in rows])
     if by_session:
-        out += ["", "| session | rule | deny | ask | noted |", "|---|---|---|---|---|"]
         flat = [(label, r, c) for label, rules in s["by_session"].items() for r, c in rules.items()]
         flat.sort(key=lambda t: (-t[2]["deny"], t[0], t[1]))
-        out += ["| %s | %s | %d | %d | %d |" % (label, r, c["deny"], c["ask"], c["noted"])
-                for label, r, c in flat[:BY_SESSION_ROWS]]
+        out += [""] + table(["session", "rule"], [((label, r), c) for label, r, c in flat[:BY_SESSION_ROWS]])
         if len(flat) > BY_SESSION_ROWS:
             out.append("... and %d more" % (len(flat) - BY_SESSION_ROWS))
     out += ["", "| day | denies |", "|---|---|"]

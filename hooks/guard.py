@@ -128,8 +128,10 @@ Every refusal names its rule and says what to do instead. The remedy never names
 command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
-No override tokens. A permission prompt is the grant. An "ask" decision puts the
-answer in the owner's hands.
+An "ask" decision puts the answer in the owner's hands. The one lift is the owner override pass
+(decision owner-override-pass): the owner types `override` as a whole prompt, and refuse() lets the
+next refused act through, or every refused act for a time. It never lifts `frozen-path`,
+`git-env-set` or a kill of pid 0, 1 or -1.
 """
 
 import importlib
@@ -230,8 +232,8 @@ while True:
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
-            git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, playwright_command_hit,
-            playwright_install_hit,
+            git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
+            playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -1886,6 +1888,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
     previous = None
+    # A kill of pid 0, 1 or -1 anywhere in the command keeps every kill refusal in it out of the
+    # override pass: one pass must not lift a group kill that shares the command.
+    group_kill = any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -1896,10 +1901,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
         previous = tokens
         if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched, not group_kill)
         matched = foreign_pid_kill(tokens, transcript)
         if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched, not group_kill)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
@@ -2360,6 +2365,10 @@ def main() -> None:
         guard_core.set_log_session(payload.get("session_id"))  # the last column of every log line
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
+    try:
+        guard_core.set_pass_context(payload.get("session_id"), payload.get("agent_id"))
+    except Exception:
+        pass  # a guard_core without the setter has no pass: every refusal stands
     try:
         judge(payload)
     except SystemExit:
