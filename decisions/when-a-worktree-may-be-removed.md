@@ -2,9 +2,9 @@
 
 ## The ruling
 
-Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. The unattended run needs merged, or pushed and idle 24 h. A dirty tree is never reaped. A read that cannot tell keeps the tree.
+Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Four routes remove a worktree: the unattended `--confirm` run, and three routes that remove a tree under `.claude/worktrees/agent-*` without both of its conditions. Those three are the agent-end reap, the session-end sweep's agent rule, and the repository's own `reap:worktrees` script. A route removes a worktree only when every read of that route answers a confirmed yes. A read that cannot tell keeps the tree.
+Four routes remove a worktree. One is the unattended `--confirm` run. Three remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap, the session-end sweep's agent rule, and a repo's own `reap:worktrees` script. That script keeps its own tests. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -12,16 +12,16 @@ Every idle limit reads idle the same way: the newest mtime of the worktree's own
 
 | Idle limit | Route | Case it governs | Why this limit |
 |---|---|---|---|
-| 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | The tree is clean and pushed, so no work is at risk. The wait only keeps a follow-up message to the finished agent working. |
+| 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | A follow-up message to a finished agent resumes it in its own worktree. A hook cannot remove the tree its own shells stand in. |
 | 1 hour | Unattended `--confirm` run: the daily job and SessionEnd | Every worktree this route removes, together with the merged-or-pushed test below. | Unrecorded. |
 | 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in every repo. | Unrecorded. |
-| 24 hours | Unattended `--confirm` run | A pushed tree that is not merged. A merged tree goes at 1 hour. | Pushed proves that a copy exists, not that the work is done. A day leaves time to pick the tree up again. |
+| 24 hours | Unattended `--confirm` run | A pushed tree that is not merged. A merged tree goes at 1 hour. | Pushed proves that a copy exists, not that the work is done. The remote keeps every commit. |
 
 Each route keeps its own limit. A clean, pushed agent worktree that is not merged is governed by the agent-end reap (30 min) and the agent rule (4 hours). The unmerged 24-hour limit applies to it only on the unattended run.
 
 ### Safe work
 
-- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below.
+- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below. A repo's own `reap:worktrees` script keeps its own tests. In `q_max` they are: clean, no live process, 24 hours since the last write, and merged or pushed.
 - This covers every worktree reap, locked or not. `--confirm` unlocks, then removes, never with `--force`. If removal fails, the sweep restores the lock.
 - A stale agent lock is judged by the rule in `the-janitor-is-one-machine-wide-sweep`.
 - Owner word, 2026-10-13 15:56 CDT: option A. The janitor's dirty test stays as it is. No junk-pattern change. Reaping dirty trees stays closed. The restore-point rule does not reopen it.
