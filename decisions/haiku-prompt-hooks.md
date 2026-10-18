@@ -14,7 +14,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 | `SendMessage` | `parallelism-no-mid-task-talk` |
 
 - A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-worker`. The SendMessage hook cannot see the receiver's task, so it judges by wording alone.
-- The rules these hooks and the reply judge judge stay `unmechanized` in `lint/rule_mechanisms.json` until a hook catches a real defect.
+- The rules that these hooks and the reply judge read stay `unmechanized` in `lint/rule_mechanisms.json` until a hook catches a real defect.
 - A hook that cries wolf is spent (`verification-cry-wolf-guard-is-spent`). Remove one that blocks good input. The trial review of 2026-10-17 11:33 CDT: the blocking judges stay.
 
 **The judges run on Sonnet** for now (owner ruling 2026-10-12). The owner prefers Haiku at `xhigh`, but a prompt hook takes no effort field. The judges move back to Haiku at `xhigh`, and this record changes in place, when one of these happens:
