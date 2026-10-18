@@ -69,6 +69,7 @@ PAGE = "docs/catalog.md"
 TABLE = "decisions/subagent-model-cap.md"
 INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
+CELL_CAP = 1000  # ceiling on a description cell, in characters, the ellipsis included. It sits above the longest cell, so none is cut (decision catalog-cells-never-cut).
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
 CMD_FLAG = re.compile(r'"\$g"[ \t]+(--[\w-]+)')
@@ -99,10 +100,17 @@ def flat(text):
     return " ".join(text.split())
 
 
-def cell(text):
-    """One table cell: one line, a pipe written \\|, and <tag> text in a code span so a viewer shows it."""
+def cell(text, cap=None):
+    """One table cell: one line, a pipe written \\|, and <tag> text in a code span so a viewer shows it.
+    With cap, a cell over cap characters is cut at a word and ends in an ellipsis, never inside a code span."""
     parts = re.split(r"(`[^`]*`)", flat(text))
     text = "".join(p if p.startswith("`") else re.sub(r"<[^<>\s][^<>]*>", r"`\g<0>`", p) for p in parts)
+    if cap and len(text) > cap:
+        end = max(text.rfind(" ", 0, cap), 0) or cap - 1
+        for span in re.finditer(r"`[^`]*`", text):
+            if span.start() < end < span.end():
+                end = span.start()
+        text = text[:end].rstrip() + "\u2026"
     return text.replace("|", "\\|")
 
 
@@ -421,14 +429,14 @@ def render():
                     problems.append("%s: inline command has no summary in %s under the key %r. Review the "
                                     "summary against the command, then key it so" % (label, INLINE, key))
                 else:
-                    hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text)])
+                    hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text, CELL_CAP)])
                 used.add(key)
                 continue
             path = found.group(1)
             what = script_row(path, label, event, hook.get("command", ""))
             if what:
                 model, effort = models.get(path, NO_MODEL)
-                hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what)])
+                hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what, CELL_CAP)])
         elif kind in ("prompt", "agent"):
             prompt = hook.get("prompt", "")
             key = first_sentence(prompt)
@@ -436,7 +444,7 @@ def render():
                 problems.append("%s: prompt has no first sentence" % label)
                 continue
             hook_rows.append([key_cell(key), "judge", event, cell(matcher), cell(cond), hook.get("model") or "unset", "n/a",
-                              cell(judge_text(prompt, key))])
+                              cell(judge_text(prompt, key), CELL_CAP)])
         else:
             problems.append("%s: hook type %r has no catalog reader" % (label, kind))
 
@@ -458,7 +466,7 @@ def render():
         if not text:
             problems.append("%s: no text under the first heading of README.md, and no plugin.json description with a SOURCE.md" % base)
             continue
-        mod_rows.append([key_cell("mods/" + name), "mod", "-", "-", "-", "not listed", "not listed", cell(text)])
+        mod_rows.append([key_cell("mods/" + name), "mod", "-", "-", "-", "not listed", "not listed", cell(text, CELL_CAP)])
 
     skill_rows = []
     for name in skill_names(os.path.join(ROOT, "skills")):
@@ -466,7 +474,7 @@ def render():
         if not text:
             problems.append("skills/%s: SKILL.md has no description in its frontmatter" % name)
             continue
-        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "none", cell(text)])
+        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "none", cell(text, CELL_CAP)])
 
     page = INTRO % {"regen": REGEN}
     page += table("Hooks and judges", hook_rows) + table("Mods", mod_rows) + table("Skills", skill_rows)

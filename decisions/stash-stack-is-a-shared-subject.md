@@ -23,5 +23,9 @@ of the worker's own. It names no forbidden action. Reason: the harness's worktre
 `apply` and `drop`, which this rule forbids in a shared checkout. That reminder is not in this
 repository and is not changed here.
 
+`git stash -h` and `git stash --help` pass over a dirty shared tree: they print usage and read no
+stack and no tree. The allow holds only when the help flag is the sole argument after `stash`.
+`git stash -h list`, `stash push -h`, `stash -u -h` and every other form keep their verdict.
+
 Kind: process
 Home: hooks/guard_shared_tree.py

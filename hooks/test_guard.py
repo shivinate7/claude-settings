@@ -1747,6 +1747,42 @@ sh("stash export: over an empty stack in a dirty checkout takes nothing, as on m
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
 sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
    VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+# STASH HELP FLAGS (owner ruling 2026-10-17). `stash -h` and
+# `stash --help` allow over a dirty shared tree when the flag comes first after `stash`: the flag
+# prints usage and reads no stack and no tree. Every other shape stays a push. `push -h` stays
+# denied because the ruling names the first flag only. Git's own output for `push -h` is
+# unmeasured here, and the verdict does not depend on it.
+sh("stash help: -h over real uncommitted work allows", VCS + " stash -h", "allow", cwd=SUBJDIRTY)
+sh("stash help: --help over real uncommitted work allows", VCS + " stash --help", "allow",
+   cwd=SUBJDIRTY)
+sh("stash help pin: a bare stash over real uncommitted work still denies like a push",
+   VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u over real uncommitted work still denies like a push",
+   VCS + " stash -u", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash push -h still denies, the flag is not first after stash",
+   VCS + " stash push -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -- -h denies, the -h is a pathspec",
+   VCS + " stash -- -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u -h still denies, the flag is not first after stash",
+   VCS + " stash -u -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash # -h is a bare stash in the shell, still denies",
+   VCS + " stash # -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: a help call chained with a bare stash still denies",
+   VCS + " stash -h && " + VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# A help flag with anything after it keeps main's verdict: the flag is skipped and the next word decides
+# (measured on main, 2026-10-18, these cases already pass there). The action word keeps its side. A
+# second flag, or a word that is no action, reads as a push.
+sh("stash help pin: stash -h list reads as list, allowed over real uncommitted work",
+   VCS + " stash -h list", "allow", cwd=SUBJDIRTY)
+sh("stash help pin: stash -h pop reads as pop, denied with the stack remedy",
+   VCS + " stash -h pop", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash help pin: stash --help -h reads as a push, still denies",
+   VCS + " stash --help -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -h -h reads as a push, still denies",
+   VCS + " stash -h -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash --help x reads as a push, still denies",
+   VCS + " stash --help x", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
