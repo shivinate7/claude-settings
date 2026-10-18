@@ -1051,17 +1051,16 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 
 
 # --------------------------------------------------------------------------- rulings in the judge input
-# The judge reads the Ruling sections of the session repo's decisions/ and deferred/ records. The repo
+# The judge reads the Ruling sections of the session repo's decisions/ and debts/ records. The repo
 # is the hook payload's `cwd`. A question the owner already settled is refused, and the reason cites the
 # record by id and title. The rulings block adds at most RULINGS_MAX chars to the prompt. These cases stub
 # the model. They pin what the judge is given and what the deny says. The model makes the split between a
 # settled question and a request to change a ruling, so no case here proves that split.
 #
 # Contract the hook must match (test-author proposal; the decision record names it):
-# - Rulings come from payload["cwd"]: decisions/*.md and deferred/*.md under it.
-# - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
+# - Rulings come from payload["cwd"]: decisions/*.md and debts/*.md under it.
+# - A decision's or debt's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
-# - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
 # - Each ruling is shown with its record id, <folder>/<stem> (owner ruling 2026-10-17).
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
 #   holds the id and the record's H1 title, and names no absolute path.
@@ -1080,11 +1079,11 @@ FENCE_TEXT = "\n".join([
     "FENCE-SURVIVES after the fence, still in the ruling.", "",
     "## Holes, named", "",
     "AFTERRULING-HOLES body.", ""])
-BETA_DEFERRED = "\n".join([
+BETA_DEBT = "\n".join([
     "# Beta waits for the owner", "",
-    "**What waits.** A thing that waits.", "",
-    "**Why it waits.** Owner, 2026-10-06: BETA-DEFERRAL-WORD build it last.", "",
-    "**Trigger that brings it back.** When the owner asks.", ""])
+    "**What.** A thing that waits.", "",
+    "## Ruling", "",
+    "Owner, 2026-10-06: BETA-DEBT-WORD build it last.", ""])
 
 
 def fresh_repo(tag, files):
@@ -1128,7 +1127,7 @@ def run_guarded(name, payload):
 
 
 def case_rl1_judge_input_holds_the_ruling_sections_only():
-    name = "caseRL1 judge input: Ruling sections of decisions/ and deferred/, no other section"
+    name = "caseRL1 judge input: Ruling sections of decisions/ and debts/, no other section"
     if not need_module(name):
         return
     heads = ["The ruling", "Ruling (owner, 2026-10-03)", "The rulings", "The ruling, 2026-10-11 (owner)",
@@ -1139,7 +1138,7 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
         ("Why", "NOTRULING-WHY body."), ("The ruling", "RLMARK-SKIP body."),
         ("The question", "NOTRULING-QUESTION body."), ("Holes, named", "AFTERRULING-HOLES body.")])
     files["decisions/rl-fence.md"] = FENCE_TEXT
-    files["deferred/rl-beta.md"] = BETA_DEFERRED
+    files["debts/rl-beta.md"] = BETA_DEBT
     repo = fresh_repo("rl1", files)
     with model_stub(ALLOW) as stub:
         run_guarded(name, ruling_payload(fresh_session("rl1"), [question(GOOD_Q, LABELS)],
@@ -1155,8 +1154,31 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
     check(name + ": keeps a code-fenced ## line inside a Ruling section, and the text after the fence",
           "FENCE-SURVIVES" in prompt, "")
     check(name + ": keeps an apostrophe in a ruling", "Don't skip the check." in prompt, "")
-    check(name + ": holds the Why-it-waits paragraph of a deferred record", "BETA-DEFERRAL-WORD" in prompt, "")
-    check(name + ": shows the deferred record id rl-beta", "rl-beta" in prompt, "")
+    check(name + ": holds the Ruling of a debt record", "BETA-DEBT-WORD" in prompt, "")
+    check(name + ": shows the debt record id debts/rl-beta", "debts/rl-beta" in prompt, "")
+
+
+def case_rl1b_a_debt_ruling_section_is_read_and_the_rest_of_the_debt_is_not():
+    name = "caseRL1b judge input: the ## Ruling of a debts/ file is read, its other text is not"
+    if not need_module(name):
+        return
+    debt = "\n".join(["# Disk guard waits", "",
+                      "**What.** NOTRULING-DEBT-LEAD body.", "",
+                      "## Ruling", "",
+                      "Owner, 2026-10-11: RLDEBT-BODY build Part 1 first.", "",
+                      "## Notes", "",
+                      "NOTRULING-DEBT-NOTES body.", ""])
+    repo = fresh_repo("rl1b", {"debts/rl-disk.md": debt})
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl1b"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": holds the Ruling of the debt", "RLDEBT-BODY" in prompt, "")
+    check(name + ": labels it debts/rl-disk with its title",
+          "Ruling of record debts/rl-disk (Disk guard waits)" in prompt, "")
+    for mark in ("NOTRULING-DEBT-LEAD", "NOTRULING-DEBT-NOTES"):
+        check(name + ": omits %s, which is not in the Ruling section" % mark, mark not in prompt, mark)
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
@@ -1167,7 +1189,7 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
              "decisions/rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "deferred/rl-beta", "Beta waits for the owner")):
+            ("debt", "debts/rl-beta.md", BETA_DEBT, "debts/rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1189,13 +1211,13 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
 # two distinct ids, so the cite cannot pick the wrong record's title.
 DUP_FILES = {
     "decisions/rl-dup.md": decision_text("Decision dup record", [("The ruling", "RL8-DEC-BODY: retries never wait.")]),
-    "deferred/rl-dup.md": "\n".join(["# Deferred dup record", "",
-                                     "**Why it waits.** Owner, 2026-10-06: RL8-DEF-BODY waits for the owner.", ""]),
+    "debts/rl-dup.md": "\n".join(["# Debt dup record", "", "## Ruling", "",
+                                  "Owner, 2026-10-06: RL8-DEBT-BODY waits for the owner.", ""]),
 }
 
 
-def case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title():
-    name = "caseRL2b same stem in decisions/ and deferred/: two folder/stem ids, each FLAG cites its own title"
+def case_rl2b_the_same_stem_in_decisions_and_debts_keeps_two_ids_and_each_flag_cites_its_own_title():
+    name = "caseRL2b same stem in decisions/ and debts/: two folder/stem ids, each FLAG cites its own title"
     if not need_module(name):
         return
     repo = fresh_repo("rl8", DUP_FILES)
@@ -1206,11 +1228,11 @@ def case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_fla
     check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
     check(name + ": the decision is labeled decisions/rl-dup with its own title",
           "Ruling of record decisions/rl-dup (Decision dup record)" in prompt, "")
-    check(name + ": the deferred record is labeled deferred/rl-dup with its own title",
-          "Ruling of record deferred/rl-dup (Deferred dup record)" in prompt, "")
-    check(name + ": both rulings' text reaches the judge", "RL8-DEC-BODY" in prompt and "RL8-DEF-BODY" in prompt, "")
-    for rid, title, other in (("deferred/rl-dup", "Deferred dup record", "Decision dup record"),
-                              ("decisions/rl-dup", "Decision dup record", "Deferred dup record")):
+    check(name + ": the debt is labeled debts/rl-dup with its own title",
+          "Ruling of record debts/rl-dup (Debt dup record)" in prompt, "")
+    check(name + ": both rulings' text reaches the judge", "RL8-DEC-BODY" in prompt and "RL8-DEBT-BODY" in prompt, "")
+    for rid, title, other in (("debts/rl-dup", "Debt dup record", "Decision dup record"),
+                              ("decisions/rl-dup", "Decision dup record", "Debt dup record")):
         sub = "%s (FLAG %s)" % (name, rid)
         with model_stub(({"verdict": "FLAG", "record": rid, "why": WHY}, None)):
             _code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
@@ -1236,7 +1258,7 @@ def case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records():
     check(name + ": the FLAG is still denied", reason is not None, out)
     reason = reason or ""
     check(name + ": the bare id is not cited: no title of either record",
-          "Decision dup record" not in reason and "Deferred dup record" not in reason, reason)
+          "Decision dup record" not in reason and "Debt dup record" not in reason, reason)
     check(name + ": the deny keeps the judge's why", WHY in reason, reason)
 
 
@@ -2828,13 +2850,14 @@ def main():
     for case in cases:
         case()
     for case in (case_rl1_judge_input_holds_the_ruling_sections_only,
+                 case_rl1b_a_debt_ruling_section_is_read_and_the_rest_of_the_debt_is_not,
                  case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title,
                  case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed,
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
                  case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
-                 case_rl2b_the_same_stem_in_decisions_and_deferred_keeps_two_ids_and_each_flag_cites_its_own_title,
+                 case_rl2b_the_same_stem_in_decisions_and_debts_keeps_two_ids_and_each_flag_cites_its_own_title,
                  case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records):
         case()
     if LOAD_ERROR is None:

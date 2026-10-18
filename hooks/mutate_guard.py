@@ -1217,7 +1217,7 @@ MUTATIONS = [
     ("bare-merge: a stamp with a merge block reads as not using the merge tool",
      '"merge" in config', 'False', "guard",
      'bare-merge: gh pr merge in a repo with a merge block asks'),
-    ("cite-by-id: the deferred folder is no record folder",
+    ("cite-by-id: the debts folder is no record folder",
      '"|".join(map(re.escape, names))', 're.escape(names[0])', "guard",
      'cite-by-id: a -am cluster denies'),
     ("cite-by-id: the record folders are read from nowhere",
