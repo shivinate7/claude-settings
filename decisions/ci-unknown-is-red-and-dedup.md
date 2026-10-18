@@ -2,7 +2,7 @@
 
 ## The ruling
 
-- A lint that cannot read its input prints UNKNOWN. Locally it exits 0. When env `CI` is set it exits non-zero, because the CI exit code is the verdict (`verification-report-unknown-reads`, report a read that could not run as unknown). Only `lint/check_record_slugs.py` has this shape. `harness-scope.sh` fails safe by running the harness. The other lints exit 1 on a failed read.
+- A lint that cannot read its input prints UNKNOWN. Locally it exits 0. When env `CI` is set it exits non-zero, because the CI exit code is the verdict (`verification-report-unknown-reads`, report a read that could not run as unknown). Only `lint/check_record_slugs.py` and `lint/check_silent_undo.py` have this shape. `harness-scope.sh` fails safe by running the harness. The other lints exit 1 on a failed read.
 - OS-independent suites and pure lints run on ubuntu only: rule audit (suite and lint), record slugs, mod version bumps, landed dirs, agent models, STE lints, zizmor.
 - The ruling census suite stays on every OS: it tests macOS `/var` symlinks and Windows backslash and `normcase` paths.
 - Suites that touch paths, processes, shells, launchd, schtasks, symlinks or encoding run on every OS. When unsure, a suite stays on all OSes.

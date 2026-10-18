@@ -20,4 +20,4 @@ bind its port, and a stale lease refuses falsely).
 Reason: worktrees shared port 5173 with reuse on, and a lane passed on another lane's server.
 
 Kind: process
-Home: skills/compliance-check/SKILL.md
+Home: skills/compliance-check/probes.md
