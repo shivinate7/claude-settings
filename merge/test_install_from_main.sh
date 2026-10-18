@@ -429,7 +429,7 @@ case11() {
 }
 
 # ---- Case 12: link mode, the pinned checkout moves from A to B while the links are loaded -----
-# Record install-set. A link in ~/.claude points into <clone>-live, and the move
+# A link in ~/.claude points into <clone>-live, and the move
 # is the git switch in this helper, which writes the files one at a time. Link mode carries the
 # placeholder in every guard file, so guard.py's INSTALL_ID check cannot see a mix here: the case
 # samples the loads itself. The fixture's guard_core.py and guard_sib.py carry a marker that differs
@@ -566,8 +566,8 @@ first_start_id() { grep -w start "$1" 2>/dev/null | sed -n 's/.* id=\([^ ]*\).*/
 
 # ---- Case 14: no symlink rights -> the pinned checkout stays usable; the run installs or refuses ----
 # The pin is behind main. The first move renames the plain pin, then point_at needs a link. With no
-# link rights the old helper stopped there: the pin path was gone, no install ran, and the pointer
-# in CLAUDE.md dangled. Accepted: the pin moves in place and the install runs, or the run refuses
+# link rights the helper must not stop there: the pin path would be gone, no install would run, and the pointer
+# in CLAUDE.md would dangle. Accepted: the pin moves in place and the install runs, or the run refuses
 # before it moves anything. The shim ln fails on every call, so no real link is made.
 case14() {
   name="case14: no symlink rights: the pinned checkout stays usable, and the run either installs or refuses before any move"
@@ -609,7 +609,7 @@ case14() {
 }
 
 # ---- Case 15: another run holds the install lock -> the helper waits, refuses, moves nothing ----
-# Record install-set: the pin move holds the lock the installers hold. A lock file
+# The pin move holds the lock the installers hold. A lock file
 # with a fresh mtime is a live run's, so this run waits CLAUDE_SETTINGS_LOCK_WAIT seconds, then exits
 # non-zero with nothing written. The lock is not this run's, so the run must leave it as it is.
 case15() {
@@ -794,7 +794,7 @@ EOF
 end_exits() { grep -w end "$1" 2>/dev/null | grep "id=$2 " | sed -n 's/.* exit=\([^ ]*\).*/\1/p' | sort -u; }
 
 # ---- Case 19: run B waits on the lock, main moves X -> Y meanwhile; B must not move the pin back to X ----
-# Record install-set. The helper reads main's commit before it takes the lock, so
+# The helper reads main's commit before it takes the lock, so
 # a run that waits on the lock can act on a commit that is no longer main when it gets the lock. The
 # lock is a fake holder (case15's pattern), which keeps the race deterministic. The case plays run A's
 # part: main moves to Y, the pin moves to Y, and the lock is let go. B is the real run, and it started
