@@ -484,3 +484,4 @@
 - feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch-stop-check
+- guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/harness-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
