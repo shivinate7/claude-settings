@@ -113,6 +113,7 @@ The raise outlives the turn that wrote it. Two parts guard it. Both key on
   reports UNKNOWN and asks the owner to read the file by hand.
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
+The catalog cell cap (`CELL_CAP`) sits above the longest cell, and no cell is cut. It is a ceiling for growth only.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.
 
 Kind: process
