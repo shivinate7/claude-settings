@@ -98,7 +98,7 @@ def pointer_checkout() -> str:
     return os.path.normcase(os.path.realpath(target))
 
 
-# `--git-dir` NAMES WHERE HEAD LIVES. MEASURED 2026-09-19 with real git: from an unrelated
+# `--git-dir` NAMES WHERE HEAD LIVES. From an unrelated
 # directory, `git --git-dir=<X>/.git switch other` moved HEAD inside X from `main` to `other`, with
 # no `-C`, no `cd` and no `--work-tree` anywhere on the line. The git directory alone decides whose
 # HEAD a call moves, so the pointer rule reads it and the shared-tree rule does not.

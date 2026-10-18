@@ -7,8 +7,7 @@ Modes:
   after 10 minutes of quiet, or when a judge says a prompt is not feedback.
 - --subagent: At SubagentStart, gives the subagent the time in US Central as context.
 
-Owner ruling 2026-10-13: sessions speak times in US Central, 24-hour clock. See decision
-local-time-central. Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
+Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
 Plain stdout is context for UserPromptSubmit. SubagentStart takes context only as JSON, so
 `--subagent` prints `hookSpecificOutput` with `additionalContext` (Claude Code hooks reference).
 The US rule is coded here, not read from zoneinfo: Windows Python often has no tz database.
@@ -18,8 +17,7 @@ This hook is also the owner feedback inbox's capture (decision owner-feedback-in
 prompt whose first word is `fb` or `fb:` opens capture. While open, a prompt that starts with `fb done`
 or `fb: done` (any case, any whitespace between the words) closes it, and the rest of that prompt is
 not saved. A prompt that ends with a line `fb done` (same match) is saved without that line and closes
-capture in the same message, whether capture was closed (the prompt opens with `fb`) or open (owner
-ruling 2026-10-14). Capture also ends by itself: when the last captured owner message is more than GAP old, and
+capture in the same message, whether capture was closed (the prompt opens with `fb`) or open. Capture also ends by itself: when the last captured owner message is more than GAP old, and
 when the Sonnet judge says a prompt is not feedback. Every prompt is saved first. A detached child
 (feedback_judge.py) judges it, off the prompt path: the call takes 8 s or more. On a not-feedback
 answer the child adds a note item under that message and closes capture, if no newer message was

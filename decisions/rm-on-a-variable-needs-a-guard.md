@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt. In bypass mode no allow rule clears that prompt, but a removal with every expansion guarded `${NAME:?}` runs without one, and a `PermissionRequest` hook can answer the prompt that remains.
+Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt (owner ruling 2026-10-11). In bypass mode no allow rule clears that prompt, but a removal with every expansion guarded `${NAME:?}` runs without one, and a `PermissionRequest` hook can answer the prompt that remains.
 
 1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` only in the shape Claude Code prompts on: a variable, then `/`, then a glob, another variable, a slash, a quote, or the end. Examples: `rm -rf $S/$d`, `rm -rf "$D"/*`, `rm -rf $D/`. So `rm -rf "$ROOT/dist"` is not refused. A `..` right after the variable, as in `rm -rf "$S"/../*`, is refused with the literal-path reason, because it can empty the cwd. The refusal offers one of two remedies:
    - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`, backtick or glob. With the values put in, the target is not `/`, home, a home parent, the cwd or a cwd parent, and not a glob directly under one of them. The command holds no `cd`, `pushd` or `popd`. The other conditions are in `hooks/guard_rm_var.py`.

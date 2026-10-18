@@ -93,7 +93,7 @@ def apply_mutant(tree: str, old: str, new: str) -> str:
 def safe_name(label: str) -> str:
     """Turn a mutation label into a filesystem stem that stays unique, even case-insensitively.
 
-    MEASURED: two real labels in hooks/mutate_guard.py's own MUTATIONS differ only in the case
+    Two real labels in hooks/mutate_guard.py's own MUTATIONS differ only in the case
     of one letter. One reads "-D", the other reads "-d", inside the branch-delete flags. An
     alnum-to-underscore mapping alone keeps letter case, so both produced the identical name on
     a case-insensitive filesystem (Windows): one file, one config directory, two mutant runs
@@ -133,8 +133,8 @@ def skip_reason(only_on):
 def report_verdict(label: str, code, red, required: str) -> str:
     """Classify and print one mutant's verdict. Returns "survived", "wrong_cause", or "killed".
 
-    A nonzero exit plus any red line used to count as "killed", even when every red line
-    belonged to some OTHER case than the one the mutation's label names. `required` is the case
+    A nonzero exit plus any red line is not proof, because every red line may belong to some OTHER
+    case than the one the mutation's label names. `required` is the case
     name (or a distinctive fragment of it) that must appear among the suite's own FAIL lines
     before a kill counts as proof; a red suite that misses it is WRONG CAUSE, not KILLED.
     A WRONG CAUSE also prints the red lines it actually saw, bounded by WRONG_CAUSE_LINES_SHOWN, because a bare count says

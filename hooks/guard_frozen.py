@@ -189,8 +189,8 @@ def is_project_config(path: str, cwd: str) -> bool:
 # path is its source, because guessing wrong on `mv` loses the file. `cp` FROM a frozen path to a
 # path outside the frozen set only reads it, and is allowed (`_copy_reads`). Deliberate over-blocking elsewhere, narrow in scope.
 #
-# MEASURED in q_max on 2026-09-09 with a POSIX-only list: `Set-Content`, `Out-File`, `Add-Content`
-# and `Remove-Item` each wrote a frozen path unrefused. Matching folds case, as PowerShell does.
+# The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
+# well as the POSIX commands. Matching folds case, as PowerShell does.
 MUTATING_COMMAND = (
     r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
@@ -204,7 +204,7 @@ def writes_to(path: str, cmd: str) -> bool:
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
     mutates its arguments. Everything else is a mention.
 
-    MEASURED in q_max on 2026-08-20: reading the TARGET of the redirect is what separates
+    Reading the TARGET of the redirect is what separates
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.

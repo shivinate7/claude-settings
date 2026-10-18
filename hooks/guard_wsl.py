@@ -1,8 +1,7 @@
 """The guard's WSL family: the one allowed way to launch Linux tests through WSL.
 
-guard.py is the only entry point. Owner ruling 2026-10-13: an
-agent may run only a fixed list of test commands through WSL. Every other WSL form is refused,
-whatever the role.
+guard.py is the only entry point. An agent may run only a fixed list of test commands
+through WSL (decision wsl-allow-list). Every other WSL form is refused, whatever the role.
 """
 import fnmatch
 import re

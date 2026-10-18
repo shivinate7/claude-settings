@@ -3,13 +3,12 @@
 
 THE DEFECT THIS CLOSES. The PreToolUse STE gate (ste_gate.py) only sees a Write, Edit, or
 MultiEdit call on a *.md path. A markdown file written through Bash never passes through
-that gate. The earlier version of this hook chased the hole by matching SHAPES in the Bash
-command text: a heredoc, a `>` redirect, `sed -i`, a `python -c` string, and more. That list
-can only grow, never finish. `python3 gen.py`, `bash gen.sh`, `pandoc -o notes.md`, and
-`make docs` were all invisible to it, because the hole is the class "any program not on the
+that gate. A list of command SHAPES (a heredoc, a `>` redirect, `sed -i`, a `python -c`
+string) can only grow, never finish. `python3 gen.py`, `bash gen.sh`, `pandoc -o notes.md`, and
+`make docs` match none of them, because the hole is the class "any program not on the
 list," not one shape.
 
-This hook now checks the ACT, not the command shape: a markdown file under `cwd` whose mtime
+This hook checks the ACT, not the command shape: a markdown file under `cwd` whose mtime
 is newer than this turn's last human message, kept only when it is also dirty against HEAD in
 a git work tree. It never reads a command string.
 

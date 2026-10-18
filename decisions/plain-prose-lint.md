@@ -9,7 +9,7 @@ Owner: a lint rule either blocks or does not exist. A rule nobody can see is not
 
 - A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may block. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
 - Errors stay for five codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat),
-  STE013 (double negative), STE020 (label length) and STE021 (bad escape).
+  STE013 (double negative), STE020 (label length: a button, label or aria-label is capped at 4 words, owner ruling) and STE021 (bad escape: a UI escape is line-level and names a rule and a reason, owner ruling).
 - Six codes are advisory and never block: STE003 (nominalization), STE007 (Latin abbreviation), STE008
   (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that"). The nudge is
   temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (note `ste-into-agent-briefs`).

@@ -2,9 +2,7 @@
 """Checks that landed-dirs.txt, install.sh, install.ps1, and the guard's
 CONFIG_FROZEN_DIRS (in hooks/guard*.py or a hooks/guard_*.py sibling) agree on the set of directories that land under ~/.claude.
 
-Four places used to hardcode this set independently (drift already cost commit 9c1efab, which
-pruned install.sh land_dir() calls the source no longer defined). Now there is one manifest,
-landed-dirs.txt at the repo root. install.sh and both lists in install.ps1 read it at their own
+One manifest, landed-dirs.txt at the repo root, holds this set. install.sh and both lists in install.ps1 read it at their own
 runtime, so they cannot drift from it by construction; this check instead confirms each site is
 still wired to the manifest and has not quietly reverted to a hardcoded list. hooks/guard*.py
 keeps CONFIG_FROZEN_DIRS as a literal on purpose (see the comment beside it there), so this

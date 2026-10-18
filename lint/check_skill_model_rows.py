@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when decisions/subagent-model-cap.md lacks one row per skill under skills/.
 
-Owner ruling 2026-10-13: the model-per-role table has one row per skill, each saying
+The model-per-role table has one row per skill, each saying
 "no model pin; runs on the caller's model". A skill is a folder directly under skills/ that
 holds SKILL.md, as in lint/check_agent_models.py. A row is a table line whose first cell is
 skill `NAME`. NAME must equal the folder name. Rows inside a fenced block or a multi-line HTML

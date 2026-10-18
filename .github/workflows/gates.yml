@@ -62,8 +62,7 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     needs: scope
-    # Green runs took 13.7-17.8 min (12 runs); two runs were cancelled at 18m10s with every step
-    # green (2026-10-17). Cap 36 = 2x the slowest green run. A bandaid: suite growth is the cause.
+    # Cap 36 min = 2x the slowest green run. A bandaid: suite growth is the cause (debt gates-job-near-timeout).
     timeout-minutes: 36
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -346,8 +345,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
-    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s), before install-set.test.ps1 joined. That
-    # test took 81 s to 156 s on a dev laptop, so 10 min leaves room for a slow runner.
+    # Cap 10 min leaves room for install-set.test.ps1 on a slow runner (figures: debt measured-time-table).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -371,14 +369,13 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
-  # checkout-detection suite is the only gate whose result depends on either, and it
-  # was once green on Linux while 8 of its 18 cases failed on a real Mac. gates-macos
+  # checkout-detection suite is the only gate whose result depends on either. gates-macos
   # below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
-    # Slowest of the last 10 green PR runs, 2026-10-07 (42 s); 5 min leaves room for a slow runner start.
+    # Cap 5 min leaves room for a slow runner start (figures: debt measured-time-table).
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -411,7 +408,7 @@ jobs:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_macos == 'true' || github.event_name != 'pull_request' }}
-    # About 2x the slowest green run measured 2026-10-02 (10 min 17 s).
+    # Cap 25 min = about 2x the slowest green run (figures: debt measured-time-table).
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
