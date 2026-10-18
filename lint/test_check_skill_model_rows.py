@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for lint/check_skill_model_rows.py. Run: python3 lint/test_check_skill_model_rows.py
 
-Owner ruling (2026-10-13): decisions/subagent-model-cap.md gets one row per skill under skills/.
+decisions/subagent-model-cap.md gets one row per skill under skills/.
 Each row says "no model pin; runs on the caller's model". These cases pin the check that enforces it.
 
 Interface the check must meet (the builder builds to it):
@@ -119,7 +119,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_clean_run_prints_nothing(self):
-        # Red: the check prints a blank line on a clean run today (item 5, 2026-10-13 review).
+        # A clean run prints nothing, not a blank line.
         files = skills("alpha")
         files[RECORD] = record([row("alpha")])
         code, out = run(files)
@@ -238,7 +238,7 @@ class Coverage(unittest.TestCase):
 
 
 class Fences(unittest.TestCase):
-    """Items 1 and 2 of the 2026-10-13 review: fence length, and mid-line comment openers."""
+    """Fence length, and mid-line comment openers."""
 
     def test_fence_closes_only_on_a_fence_at_least_as_long(self):
         # Red: a 4-backtick (or 4-tilde) fence must not close on a 3-character line inside it.
@@ -366,10 +366,10 @@ class OpenFences(unittest.TestCase):
 
 
 class Folders(unittest.TestCase):
-    """Items 3, 4 and 6 of the 2026-10-13 review: exact SKILL.md, dot folders, unreadable folders."""
+    """Exact SKILL.md, dot folders, unreadable folders."""
 
     def test_skill_md_name_is_exact_case(self):
-        # Red on Windows, where NTFS matches skill.md to SKILL.md. Green on a case-sensitive FS.
+        # NTFS matches skill.md to SKILL.md, so the check must compare the name exactly.
         files = {"skills/lc/skill.md": "lowercase name, not a skill\n"}
         files[RECORD] = record([])
         code, out = run(files)

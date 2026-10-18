@@ -90,7 +90,7 @@ await test('stale: a missing updatedAt is never fresh and never a row', () => {
   same(rowsFor([], [[ID, e]]), [], 'rows')
 })
 
-// Re-pinned in review round 1 (decision): a stamp more than 30 s ahead of now is not fresh.
+// A stamp more than 30 s ahead of now is not fresh.
 await test('clock skew: an entry stamped up to 30 s ahead shows; more than 30 s ahead is not fresh', () => {
   assert.equal(lib.isFresh({ at: NOW + 30_000 }, NOW), true, 'exactly 30 s ahead should show')
   assert.equal(lib.isFresh({ at: NOW + 30_001 }, NOW), false, 'just over 30 s ahead should not be fresh')
@@ -720,7 +720,7 @@ await test('safe-stop: a handoff path over 300 characters is named whole', async
   assert.ok(out.text.includes(long), `plan cuts the handoff path: ${out.text.slice(0, 120)}`)
 })
 
-// ---- review round 1 pins (PR 380): permission order, git readiness, hook speed, targets, safe-stop, agents, polling, writes
+// ---- permission order, git readiness, hook speed, targets, safe-stop, agents, polling, writes
 
 await test('permission: an approved ask clears when the tool call resolves, not before', async () => {
   const h = await start()
@@ -749,7 +749,7 @@ await test('git: a failed readiness read makes the reading unknown, so no update
   }
 })
 
-// Re-pointed in review round 2: the boundary is pinned on readiness(); the host case uses a stuck reader.
+// The boundary is pinned on readiness(); the host case uses a stuck reader.
 // An idle session re-reads git on each beat, so a working reader keeps the reading fresh.
 await test('git: a reading 59 s and 60 s old still counts; 60.001 s old is unknown (pure)', () => {
   const e = lib.readEntry(raw({ rt: NOW }))
@@ -925,7 +925,7 @@ await test('read cap: above 200, the pane gives the true count not shown and nev
   assert.ok(texts.includes('+210 more not shown'), `pane says ${JSON.stringify(texts.filter(t => t.includes('more')))}, want +210`)
 })
 
-// ---- review round 2 pins (PR 380): heartbeat git reads while idle
+// ---- heartbeat git reads while idle
 
 await test('heartbeat: an idle session with a working git reader stays update-ready after 10 minutes of beats', async () => {
   const h = await start()
@@ -965,7 +965,7 @@ await test('heartbeat: a failing git read makes the reading unknown, so no updat
   }
 })
 
-// ---- review round 3 pins (PR 380)
+// ---- safe-stop, hook speed, resume, late git reads, sweep
 
 const CLEAN_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n', stderr: '' }
 const DIRTY_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n1 .M N... 100644 100644 100644 a b a.ts\n', stderr: '' }
@@ -1079,9 +1079,9 @@ await test('permission ask with no tool id writes nothing to the store', async (
   same(h.writes, [], 'store writes for an ask with no id')
 })
 
-// ---- review round 4 pins (PR 380)
+// ---- sweep, clear, git back-off, config folder
 
-// A pure helper the builder must export; the name is this test's choice (see the report).
+// A pure helper the module must export.
 const need = name => {
   if (!(name in lib)) throw new Error(`missing export ${name}`)
   return lib[name]

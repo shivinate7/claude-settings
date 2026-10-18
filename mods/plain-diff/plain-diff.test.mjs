@@ -1,5 +1,5 @@
-// Review round 1 (PR 375) pins for plain-diff. Run: node mods/plain-diff/plain-diff.test.mjs  (stdlib only)
-// Seams the builder must add. Names fixed here.
+// Pins for plain-diff. Run: node mods/plain-diff/plain-diff.test.mjs  (stdlib only)
+// Seams the mod exposes. Names fixed here.
 //   hooks/lib.mjs
 //     isSecretPath(path) -> boolean
 //     looksSecret(diffText) -> boolean
@@ -21,7 +21,7 @@
 //     one module-level limiter shared by all runs; git base = diffBase(rev-parse HEAD succeeds)
 // Decisions pinned here: match is case-sensitive; drive letter and slashes normalised;
 // a trailing slash on repoRoot is ignored; docs/secrets-policy.md is not flagged by name.
-// Review round 2 (PR 375) pins, R2-1 .. R2-8. Seams the builder adds in round 2:
+// Pins R2-1 .. R2-8. More seams:
 //   hooks/lib.mjs
 //     gitDiffArgs(base) -> argv after 'git'; must carry '--src-prefix=a/' and '--dst-prefix=b/'
 //     headerLine({ files, add, del, truncated }) -> string; truncated gives 'Diff truncated: some files are not shown'
@@ -436,7 +436,7 @@ await test("F8 register: a model failure shows 'No note: api-error'", async () =
   assert.ok((await t.rows()).includes('No note: api-error'))
 })
 
-// ---------- Review round 2 (PR 375) ----------
+// ---------- R2 pins ----------
 // Failure messages stay ASCII, so the verdict tool can print them on any console.
 const show = s => JSON.stringify(s).replace(/[^\x20-\x7e]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 const BEARER = 'Bearer ' + 'abcdefghij' + 'klmnopqrst' // Bearer + 20 token chars
@@ -594,8 +594,8 @@ await test('R2-7 register: a truncated git result shows the truncation line in t
 })
 
 
-// ---------- Review round 3 (PR 375) ----------
-// Seams the builder adds in round 3:
+// ---------- R3 pins ----------
+// More seams:
 //   hooks/lib.mjs: looksSecret rewritten without catastrophic backtracking; it must accept lines with
 //     trailing text (';', ',', '#', '//') and a quoted value, and must still skip `const API_KEY = process.env.API_KEY;`.
 //     gitDiffArgs(base) carries '-c', 'core.fsmonitor=false' and '--no-textconv' and '--no-ext-diff'.

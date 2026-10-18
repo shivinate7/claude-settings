@@ -2,8 +2,8 @@
 """Fixture suite for lint/check_silent_undo.py. Run: python3 lint/test_check_silent_undo.py
 
 Every case builds a throwaway repo with a local `origin` and asks the check for a verdict.
-Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
-(banchi, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
+Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
+merge that drops a parent's added line.
 """
 import contextlib, io, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
@@ -250,7 +250,7 @@ class Debt19(unittest.TestCase):
 
 
 class Stale(unittest.TestCase):
-    """The owner's incident, single-parent form: main gained lines after the branch was cut, and
+    """Single-parent form: main gained lines after the branch was cut, and
     the branch carries a version without them. A rebase moves the cut to the rebase base, and that
     commit is read. The dates do not set the window."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
@@ -359,7 +359,7 @@ class Stale(unittest.TestCase):
 
 
 class Value(unittest.TestCase):
-    """A stale value overwrite is the incident in its smallest form: A changed one value line, and
+    """A stale value overwrite in its smallest form: A changed one value line, and
     the branch carries the old one back. Similar lines must not hide it."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
     PAIRS = [("retries = 4", "retries = 5"), ("ten minutes", "one hour")]
@@ -991,11 +991,10 @@ class Reply:
 
 
 class SharedLineRead(unittest.TestCase):
-    """q_max PR 869 (claude-settings a7b8d7d, 2026-10-14): the merge tool reported `merge d9b46148a drops
-    2 line(s) that parent 92d4ed8f2 added`, for record D-618 (past-price search reads words first). That
-    file is byte-identical at the merge and at that parent, and the claim commit on top does not touch
-    it. The two lines are main's, and the merge keeps them: no drop. A read that fails is no text. It may
-    end the check as UNKNOWN, but it must never become a drop, and two windows of one merge must agree."""
+    """A file is byte-identical at the merge and at the parent that added its two lines, and the claim
+    commit on top does not touch it. The two lines are main's, and the merge keeps them: no drop. A read
+    that fails is no text. It may end the check as UNKNOWN, but it must never become a drop, and two
+    windows of one merge must agree."""
 
     DEC = "docs/decisions/fixture-shared-line.md"
     HEAD_TXT = "---\nid: D-618\n---\n\n```refs\ncode: src/a.ts\n```\n\n"
@@ -1249,16 +1248,15 @@ class SpawnCount:
 
 
 class DropsLinesHint(unittest.TestCase):
-    """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing, and
-    the refusal said nothing about it: claude-settings (2026-10-14) and q_max PRs 869 and 874 each lost a full merge run
-    to it. A refusal now names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
+    """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing.
+    A refusal names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
     only beside a finding: a misplaced line with no finding prints nothing (no hint and no note). Where check() puts the
     hint (problems or notes) is not pinned: each case reads both, and the printed cases read the output."""
 
     HINT = "not as a trailer"
     CO = "Co-Authored-By: Someone <someone@example.com>"
     WHY = "Drops-lines: app.txt -- the owner wants Card back"
-    ABOVE = "Bring Card back\n\n%s\n\n%s" % (WHY, CO)  # the incident: its own paragraph above Co-Authored-By
+    ABOVE = "Bring Card back\n\n%s\n\n%s" % (WHY, CO)  # its own paragraph above Co-Authored-By
     IN_BODY = "Bring Card back\n\nWhy:\n%s\nthe rest of the why\n\n%s" % (WHY, CO)  # a line inside a body paragraph
     RIGHT = "Bring Card back\n\nWhy.\n\n%s\n%s" % (WHY, CO)  # one last paragraph: git parses it
     run_main = PrintedFindings.run_main
@@ -1305,7 +1303,7 @@ class DropsLinesHint(unittest.TestCase):
         self.assertNotIn(self.r.sh("rev-parse", "HEAD")[:7], text)  # the culprit, not the head
 
     def test_a_misplaced_line_in_any_paragraph_is_refused_with_a_hint(self):
-        """Rows: the line in its own paragraph above Co-Authored-By (the incident), and a line inside a body paragraph."""
+        """Rows: the line in its own paragraph above Co-Authored-By, and a line inside a body paragraph."""
         for msg in (self.ABOVE, self.IN_BODY):
             with self.subTest(msg=msg):
                 self.r = base_repo()
@@ -1389,7 +1387,7 @@ class DropsLinesHint(unittest.TestCase):
         self.assertIn("app.txt", str(cm.exception))  # the refusal holds
         self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
 
-    # ------------------------------------------------ round 2: reads of the message that the first cases did not stress
+    # ------------------------------------------------ reads of the message
 
     def test_a_folded_parsed_trailer_does_not_hide_a_misplaced_line(self):
         """A trailer value folded onto a continuation line is one trailer. It must not pass for a second Drops-lines line."""
@@ -1446,7 +1444,7 @@ class DropsLinesHint(unittest.TestCase):
         self.assertGreater(fault.hits, 0, "the faulted read never ran")
         self.assertIn("app.txt", str(cm.exception))
 
-    # ------------------------------------------------ round 3: the repo's config, and the cost of the read
+    # ------------------------------------------------ the repo's config, and the cost of the read
 
     def test_a_fixed_grep_pattern_type_in_the_repo_config_does_not_hide_the_hint(self):
         """grep.patternType=fixed makes `git log --grep` read its pattern as a literal string. A hint that filters
@@ -1485,7 +1483,7 @@ class DropsLinesHint(unittest.TestCase):
 
     def test_the_hint_costs_a_constant_number_of_git_spawns_at_fifty_candidates(self):
         """50 commits each hold a misplaced line. Reading them must not cost a git process per commit: at most 2 in all.
-        A count of spawns, not a time. `misplaced` is the hint's read, named in the round 2 review."""
+        A count of spawns, not a time. `misplaced` is the hint's read."""
         r = self.r
         r.sh("checkout", "-q", "-b", "many")
         for i in range(50):
@@ -1613,7 +1611,7 @@ class RecordsPage(unittest.TestCase):
         self.assertIn("wrote docs/records.md", run.stdout, run.stdout + run.stderr)
 
     def test_a_head_generator_never_judges_the_page_when_upstream_has_none(self):
-        """Limit 1, round 3 of review: with no generator on the base, the page is judged by the merge tool's own
+        """With no generator on the base, the page is judged by the merge tool's own
         generator. Here the base has no lint/ folder. The head ships its own generator, which drops the debt rows, and
         regenerates the page with it. The tool's generator still writes the debt row, so the head's page differs and
         is refused. If the head's generator were the oracle, the page would match it and pass."""

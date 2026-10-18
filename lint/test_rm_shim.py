@@ -210,7 +210,7 @@ class Shim(unittest.TestCase):
 
     def test_unset_does_not_refuse_the_fake_home(self):
         # The case above cannot go red on a shim that ignores the gate: its target is safe anyway.
-        # The owner ruling (2026-10-11): outside a Claude session the shim must do nothing.
+        # Outside a Claude session the shim must do nothing.
         r = self.rm("-rf", self.home, claude=False)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(self.home))
