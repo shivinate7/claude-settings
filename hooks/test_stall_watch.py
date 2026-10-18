@@ -55,7 +55,7 @@ MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch
 PY = sys.executable
 SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-")
 PIDS = set()
-MARKS = []  # tokens in job commands that no other process carries, so reap() finds a stray job
+MARKS = []  # tokens in job shells' argv that no other process carries, so reap() finds a stray job
 CASES = []
 
 PID_RE = re.compile(r"\bpid\b\W{0,3}(\d+)")
