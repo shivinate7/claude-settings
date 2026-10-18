@@ -150,7 +150,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`decisions/playwright-install-once.md`](../decisions/playwright-install-once.md) |
 | `precompact-handoff` | Auto-compact drops detail. | [`decisions/precompact-handoff.md`](../decisions/precompact-handoff.md) |
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
-| `question-judge-reads-rulings` | The question judge (question-outcome-check) reads the repo's decision and deferred records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
+| `question-judge-reads-rulings` | The question judge (question-outcome-check) reads the repo's decision and debt records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
 | `question-outcome-check` | A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`. | [`decisions/question-outcome-check.md`](../decisions/question-outcome-check.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
@@ -183,6 +183,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. | [`decisions/agents-get-standing-rules.md`](../decisions/agents-get-standing-rules.md) |
 | `an-agent-outside-its-home-tree-must-stop` | An agent whose worktree is gone must stop and report. | [`decisions/an-agent-outside-its-home-tree-must-stop.md`](../decisions/an-agent-outside-its-home-tree-must-stop.md) |
 | `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`decisions/bare-merge-asks.md`](../decisions/bare-merge-asks.md) |
+| `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`decisions/catalog-cells-never-cut.md`](../decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`decisions/ci-wait-reads-run-status.md`](../decisions/ci-wait-reads-run-status.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`decisions/claude-md-change-is-flagged.md`](../decisions/claude-md-change-is-flagged.md) |
 | `guard-reads-wrapped-commands` | The guards judge the command a wrapper runs, not the raw text. | [`decisions/guard-reads-wrapped-commands.md`](../decisions/guard-reads-wrapped-commands.md) |
@@ -196,39 +197,31 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`debts/agent-end-log-loses-row.md`](../debts/agent-end-log-loses-row.md) |
+| `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
+| `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
-| `deferred-fold-unbuilt` | `debts/` is the one home for deferred work, but the repo still holds `deferred/`. | [`debts/deferred-fold-unbuilt.md`](../debts/deferred-fold-unbuilt.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`debts/install-set-reads-held-file.md`](../debts/install-set-reads-held-file.md) |
+| `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
+| `merge-revert-cancels-running-ci` | `wait_checks` returns on the first red check while other jobs still run. | [`debts/merge-revert-cancels-running-ci.md`](../debts/merge-revert-cancels-running-ci.md) |
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`debts/pinoff1-freshness-flaky.md`](../debts/pinoff1-freshness-flaky.md) |
+| `playwright-rows-measure` | Unmeasured: whether the Playwright rows in `hooks/test_guard.py` still stop a real mistake. | [`debts/playwright-rows-measure.md`](../debts/playwright-rows-measure.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
+| `push-head-mismatch-trap` | `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. | [`debts/push-head-mismatch-trap.md`](../debts/push-head-mismatch-trap.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
+| `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`debts/refusal-route-around-guard.md`](../debts/refusal-route-around-guard.md) |
+| `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`debts/sharables-adopts-the-stamp.md`](../debts/sharables-adopts-the-stamp.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
+| `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`debts/stamp-shallow-depth-two.md`](../debts/stamp-shallow-depth-two.md) |
+| `three-skill-findings` | Two fixes for `skills/compliance-check` wait for the owner. | [`debts/three-skill-findings.md`](../debts/three-skill-findings.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`debts/verdict-pipe-drops-line.md`](../debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
-
-## Deferred
-
-| Slug | Gist | Link |
-|---|---|---|
-| `banchi-build-steps` | Banchi build steps are not claimed by the shared stamp | [`deferred/banchi-build-steps.md`](../deferred/banchi-build-steps.md) |
-| `build-disk-guard` | Low-disk guard refuses builds below 20 GB | [`deferred/build-disk-guard.md`](../deferred/build-disk-guard.md) |
-| `measured-time-table` | A measured-time table for machine steps | [`deferred/measured-time-table.md`](../deferred/measured-time-table.md) |
-| `merge-retarget-before-merge` | A base change just before the merge command is not caught | [`deferred/merge-retarget-before-merge.md`](../deferred/merge-retarget-before-merge.md) |
-| `playwright-rows-measure` | A measure of the Playwright guard rows | [`deferred/playwright-rows-measure.md`](../deferred/playwright-rows-measure.md) |
-| `push-head-mismatch-trap` | A push of HEAD to a branch of another name is not guarded yet | [`deferred/push-head-mismatch-trap.md`](../deferred/push-head-mismatch-trap.md) |
-| `refusal-route-around-guard` | No guard stops an agent that routes around a refusal | [`deferred/refusal-route-around-guard.md`](../deferred/refusal-route-around-guard.md) |
-| `sharables-adopts-the-stamp` | claude-sharables adopts the stamp, not a claim-command setting | [`deferred/sharables-adopts-the-stamp.md`](../deferred/sharables-adopts-the-stamp.md) |
-| `stamp-shallow-depth-two` | The stamp check does not read a shallow checkout | [`deferred/stamp-shallow-depth-two.md`](../deferred/stamp-shallow-depth-two.md) |
-| `ste-into-agent-briefs` | The STE writing standard moves into agent briefs | [`deferred/ste-into-agent-briefs.md`](../deferred/ste-into-agent-briefs.md) |
-| `three-skill-findings` | The compliance-check skill has two findings that wait | [`deferred/three-skill-findings.md`](../deferred/three-skill-findings.md) |
-| `undo-check-rename-alarm` | The silent-undo check flags a rename that main edited | [`deferred/undo-check-rename-alarm.md`](../deferred/undo-check-rename-alarm.md) |
-| `windows-temp-sweep` | A sweep of idle session temp folders on Windows | [`deferred/windows-temp-sweep.md`](../deferred/windows-temp-sweep.md) |
+| `windows-temp-sweep` | A session's temp folder, `%LOCALAPPDATA%\Temp\claude<project><session id>\`, is never deleted. | [`debts/windows-temp-sweep.md`](../debts/windows-temp-sweep.md) |
 
 ## Plans
 

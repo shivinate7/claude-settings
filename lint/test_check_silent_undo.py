@@ -1571,9 +1571,9 @@ class RecordsPage(unittest.TestCase):
         r.sh("checkout", "-q", "-b", "oops")
         with open(os.path.join(r.dir, "lint", "hook_catalog.py"), encoding="utf-8", newline="") as f:
             text = f.read()
-        old = 'RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")'
+        old = 'RECORD_FOLDERS = ("decisions", "debts", "plans")'
         self.assertIn(old, text)  # a no-op edit would make a false red
-        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "deferred", "plans")')})
+        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "plans")')})
         self.regenerate(r)
         self.commit_all(r, "drop the debts from the records page")
         with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
@@ -1629,11 +1629,11 @@ class RecordsPage(unittest.TestCase):
         r.sh("checkout", "-q", "-b", "oops")
         with open(self.TOOL, encoding="utf-8", newline="") as f:
             text = f.read()
-        old = 'RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")'
+        old = 'RECORD_FOLDERS = ("decisions", "debts", "plans")'
         self.assertIn(old, text)  # a no-op edit would make a false red
         with open(os.path.join(HERE, "check_skill_model_rows.py"), encoding="utf-8", newline="") as f:
             skill_rows = f.read()  # the generator imports it; without it the head's generator crashes and fails closed
-        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "deferred", "plans")'),
+        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "plans")'),
                         "lint/check_skill_model_rows.py": skill_rows})
         self.run_generator(r, os.path.join(r.dir, "lint", "hook_catalog.py"))
         with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:

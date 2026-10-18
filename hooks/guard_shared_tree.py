@@ -66,7 +66,7 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-STASH_READ_ACTIONS = {"list", "show"}
+STASH_READ_ACTIONS = {"list", "show", "help"}
 # `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
 # tree, so the working tree is their subject. Every other action that is not a read TAKES an
 # entry off the stack, so the stack is theirs.
@@ -102,7 +102,8 @@ def stash_action(args) -> str:
     A bare `git stash`, `git stash -u`, `git stash -- <path>` and `git stash -m <msg>` all push,
     the same as `git stash push`. Options are skipped, and an option that takes a value skips its
     value too (stash_option_takes_next_word). The first word left is the action when git knows
-    it. After `--` the call is a push, because a pathspec follows.
+    it. After `--` the call is a push, because a pathspec follows. A sole `-h` or `--help` is
+    the action `help`, a read. Any other call with a help flag keeps its verdict.
 
     A plain word that is no known action is NOT a push in git: `git stash <path>` with no `--`
     is refused ("subcommand wasn't specified; 'push' can't be assumed", measured). The guard
@@ -113,6 +114,8 @@ def stash_action(args) -> str:
     import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
     args = list(args)
+    if args in (["-h"], ["--help"]):
+        return "help"  # Owner ruling 2026-10-17: a sole help flag prints usage and reads nothing.
     i = 0
     while i < len(args):
         arg = args[i]
@@ -150,13 +153,9 @@ def stash_discards(args) -> bool:
     `list` and `show` read the stash and change nothing, so they pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
-    OWNER'S RULING, 2026-09-19, which repeals the earlier exemption for `apply` and `pop`. The
-    old argument was MEASURED and correct on its own facts: git refuses to overwrite a modified
-    file rather than clobber it (2026-09-17, `git stash apply` aborted with "Please commit your
-    changes or stash them before you merge" and left the file untouched). It was wrong about the
-    SUBJECT. The thing at risk in an `apply` or a `pop` is not this tree. It is the shared stack.
-    The entry consumed may belong to another session, and a tree with nothing in it is exactly
-    when that theft leaves no trace.
+    `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
+    consumed may belong to another session, and a tree with nothing in it is exactly when that
+    theft leaves no trace.
     """
     return stash_action(args) not in STASH_READ_ACTIONS
 
@@ -301,7 +300,6 @@ RESET_HEAD_TARGETS = ("", "HEAD")
 # list, the read would narrow to it, and a delete of everything else would pass on an empty
 # answer. A wrong PASS is the one failure this layer must not have.
 CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}
-PATHSPEC_FROM_FILE = "--pathspec-from-file"
 
 
 def named_pathspecs(subcommand: str, args):

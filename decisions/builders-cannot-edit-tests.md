@@ -19,7 +19,7 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line 
 - `record-writer`: logged when the diff holds anything but a `.md` file. The write tool denies it. The model ruling is in `subagent-model-cap`.
 - Each write refusal names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`).
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).
-- A refusal is final: an agent never writes a refused path another way. This is prose only (owner), in `agents/builder.md` and `agents/test-author.md`. Deferred item `refusal-route-around-guard` holds the forced-guard option.
+- A refusal is final: an agent never writes a refused path another way. This is prose only (owner), in `agents/builder.md` and `agents/test-author.md`. Debt `refusal-route-around-guard` holds the forced-guard option.
 
 **Test paths and test config.** The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them.
 

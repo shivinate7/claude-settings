@@ -94,9 +94,6 @@ ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+commit|gh\s+pr\s+create)\b")
 ENV_MESSAGE_ARG = re.compile(
     r"""(?P<flag>(?:-m|--message|--title|--body)(?:=|\s+))"""
     r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')""")
-# The text ahead of a substitution that sits inside a message argument, so a substitution that
-# only prints text there is text.
-ENV_IN_MESSAGE = re.compile(r"(?:-m|--message|--title|--body)(?:=|\s+)\"(?:[^\"\\]|\\.)*$")
 
 
 def _blank_messages(segment: str) -> str:
