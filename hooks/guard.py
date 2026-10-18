@@ -124,7 +124,8 @@ the temp folder is a throwaway and passes. `fetch` writes only a `src:dst` whose
 branch. A redirect named inside quotes is text. The refusal names its step ("step N of M, the
 push").
 
-Every refusal names its rule and says what to do instead (`git-remedy-never-names-target`).
+Every refusal names its rule and says what to do instead. The remedy never names the refused
+command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
 No override tokens. A permission prompt is the grant. An "ask" decision puts the
