@@ -56,7 +56,7 @@ Stays in Banchi:
 - Its generators, called through `regenerate`: the decision index, the `docs/map.py`
   renumber, and the derived tests page.
 - Build steps, numbered by hand and refused through `unclaimed`
-  (note `banchi-build-steps`).
+  (debt `banchi-build-steps`).
 - The docs-audit `id claims` row, and the rule that only a named Orchestrator merges.
 
 Banchi then calls the tool from `make merge`, and runs mode `check` in `check.yml`. It deletes
