@@ -93,7 +93,6 @@ else:
 # (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 from _transcript import last_human_epoch, head_moved_since  # noqa: E402
-from md_sweep import is_git_work_tree  # noqa: E402  the one home of this walk
 
 # THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it
 # caps each python run itself (PY_MS there), so no Stop row timeout bounds it now. In split
@@ -287,6 +286,17 @@ def _run_git(cwd, args, timeout=GIT_TIMEOUT):
         )
     except Exception:
         return None
+
+
+def is_git_work_tree(cwd):
+    current = os.path.realpath(cwd)
+    while True:
+        if os.path.exists(os.path.join(current, ".git")):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
 
 
 def git_status_entries(cwd):
