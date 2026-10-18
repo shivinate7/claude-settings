@@ -3355,7 +3355,7 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
-# Ruling item 1 (decisions/rm-on-a-variable-needs-a-guard.md): a binding written AFTER a wrapper
+# Ruling item 1 (decision rm-on-a-variable-needs-a-guard): a binding written AFTER a wrapper
 # still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
 # never ${NAME:?}. Red on 50d9f57: the `later` scan sees only the inner text of the wrapper.
 sh("rm-var: a binding after sh -c names a literal path, not ${OLDPWD:?}",
@@ -6785,13 +6785,13 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
-# Named limits, no case: `gh api -X POST .../pulls`, `hub pull-request`, and short-flag clusters
-# such as `-dt x` (refused, a rare false alarm).
+# Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
+# `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
 # =========================================================================== 5b. the merge gate
 #
-# Decision `merge-waits-on-every-check`. A merge made outside the merge tool is refused while the head has
+# The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
 

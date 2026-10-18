@@ -921,7 +921,7 @@ class SentenceSplitBoldTests(unittest.TestCase):
 
 class DecisionGlossCollapseTests(unittest.TestCase):
     """STE001 must not count the words a gloss tool inserts after a citation
-    (decisions/ste-lint-gloss-collapse.md). A hermetic fixture folder stands
+    (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
     in for a real `docs/decisions/`, so this needs no other repository.
     """
 
