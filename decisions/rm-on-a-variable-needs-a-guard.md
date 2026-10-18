@@ -16,7 +16,12 @@ Bypass-mode sessions must not wait on the owner for Claude Code's critical-path 
    - Each NAME is assigned once, in the same command, to a literal. `_rm_target_bad` in `hooks/guard.py` says the literal is not a critical path. That function is the one home.
    - The command binds no other name. `IFS` and `PATH` are refused outright, bound or expanded: a bound `IFS` splits an unquoted expansion into two targets, and a bound `PATH` picks the `rm` that runs.
 
-   Every other request prints nothing, and the prompt reaches the owner unchanged.
+   Every other request prints nothing. The prompt reaches the owner unchanged. These still prompt, on purpose:
+   - the `for d in …; do rm -rf "${S:?}/${d:?}"; done` form;
+   - `export S=`, a value set twice, `/bin/rm`, `command rm`, `rm --recursive`;
+   - a redirect, `|| true`, `&`, a trailing slash on the target, and a prefix assignment `S=x rm`.
+
+   A non-recursive `rm "${S:?}"/a` is allowed.
 3. A bare variable target, such as `rm -rf "$d"`, is not refused. Claude Code does not treat it as a critical path.
 
 Kind: process

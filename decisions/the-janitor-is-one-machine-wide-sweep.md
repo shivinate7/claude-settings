@@ -24,7 +24,7 @@ The owner chose the patch check over a check of the lines on main today. This co
 
 **Every automatic run leaves a trace.**
 
-- A `--confirm` run appends one line per repository to `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl`: removed worktrees, reaped branches, free disk bytes. A preview writes nothing.
+- A `--confirm` run appends one line per repository to `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl`: removed worktrees, reaped branches, free disk bytes. A preview writes nothing. The report prints free disk when a run removed anything.
 - The sweep lists entries under `<root>/.claude/worktrees/` that git does not register as strays. It never deletes them.
 - Idle is git's admin-file idle time, not folder mtime. The sweep removes a worktree with git and never calls a repository's WorktreeRemove hook.
 
@@ -34,6 +34,7 @@ The owner chose the patch check over a check of the lines on main today. This co
 
 - `--tier1` prunes stale registrations and deletes husks. It is the one mode that acts without `--confirm`, and it removes only proven junk.
 - `--branches` reaps branches only. It holds every worktree's branch, and refuses the repository if git gives no worktree list.
+- `--root PATH` names the repository by any path inside it. A linked worktree is a valid path.
 
 **Leftover folders are deleted only when proven twice.** `find_husks` finds a real folder under `.claude/worktrees/` that git does not list and that holds only names the repository gives in `huskNames`. The repository knows its own build output; the sweep does not. Only `--confirm` deletes, and only after the proof runs again right before the delete. The sweep never follows a link and walks only the repository's own `.claude/worktrees`. Any error, and an empty process table, keeps the folder. On Windows, `sweep.is_link` reads a junction from the reparse-point flag (`build-dirs-reaped-at-agent-end`).
 
