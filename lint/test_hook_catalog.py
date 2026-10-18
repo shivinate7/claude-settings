@@ -1494,15 +1494,14 @@ class Helpers(unittest.TestCase):
 
 
 # ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
-# Owner ruling 2026-10-17 11:45 CDT. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
+# Owner ruling 2026-10-18 01:10 CDT: the cap sits above the longest current cell, so no cell loses text today.
+# A cap stays only as a ceiling for growth. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
 # are never edited. The cap is one named constant in lint/hook_catalog.py, CELL_CAP. The cases import it,
 # so a new value moves every case with it. No case copies the number.
 
 ELLIPSIS = "…"
 PROSE = "alpha beta gamma delta "
-FILLER = "Check each question and option against the brief it cites. " * 18  # a judge body, over 1000 chars
 JUDGE_KEY = "Judge this AskUserQuestion call: $ARGUMENTS"
-JUDGE_PROMPT = JUDGE_KEY + "\n" + FILLER + "Block only on a clear breach of the brief."
 
 
 def cell_cap():
@@ -1518,6 +1517,12 @@ def prose(n):
     """Plain prose of exactly n characters that ends in a letter, so flattening it keeps its length."""
     text = (PROSE * (n // len(PROSE) + 2))[:n]
     return text[:-1] + "e" if text.endswith(" ") else text
+
+
+def filler(n):
+    """A judge body of at least n characters."""
+    sentence = "Check each question and option against the brief it cites. "
+    return sentence * (n // len(sentence) + 1)
 
 
 def what_of(out, key):
@@ -1561,20 +1566,23 @@ class CellCap(Tree):
         self.assertIsInstance(cap, int)
         self.assertGreater(cap, 0)
 
-    def test_e2_a_908_char_skill_description_is_cut_and_ends_in_an_ellipsis(self):
-        self.assert_cut(what_of(self.render_skill(prose(908)), "skills/alpha"), prose(908))
+    def test_e2_a_skill_description_over_the_cap_is_cut_and_ends_in_an_ellipsis(self):
+        text = prose(2 * cell_cap())
+        self.assert_cut(what_of(self.render_skill(text), "skills/alpha"), text)
 
-    def test_e3_a_426_char_mod_description_is_cut(self):
+    def test_e3_a_mod_description_over_the_cap_is_cut(self):
+        text = prose(2 * cell_cap())
         out = self.render(files(plugins={"tw@claude-settings": True}, extra={
-            "mods/tw/.claude-plugin/plugin.json": json.dumps({"description": prose(426)}),
+            "mods/tw/.claude-plugin/plugin.json": json.dumps({"description": text}),
             "mods/tw/SOURCE.md": "repo and commit go here\n",
         }))
-        self.assert_cut(what_of(out, "mods/tw"), prose(426))
+        self.assert_cut(what_of(out, "mods/tw"), text)
 
-    def test_e4_a_long_judge_prompt_is_cut(self):
-        out = self.render(files(hooks={"PreToolUse": [{"matcher": "AskUserQuestion",
-                                                       "hooks": [judge(prompt=JUDGE_PROMPT)]}]}))
-        self.assert_cut(what_of(out, JUDGE_KEY), FILLER)
+    def test_e4_a_judge_prompt_over_the_cap_is_cut(self):
+        body = filler(2 * cell_cap())
+        prompt = JUDGE_KEY + "\n" + body + "Block only on a clear breach of the brief."
+        out = self.render(files(hooks={"PreToolUse": [{"matcher": "AskUserQuestion", "hooks": [judge(prompt=prompt)]}]}))
+        self.assert_cut(what_of(out, JUDGE_KEY), body)
 
     def test_e5_a_short_description_renders_unchanged(self):
         # Green on main on purpose: it pins that a short cell is never touched. A regression pin, not a red case.
@@ -1589,12 +1597,12 @@ class CellCap(Tree):
 
     def test_e7_a_span_longer_than_the_cap_is_cut_before_it(self):
         cap = cell_cap()
-        text = "ab `" + "c" * cap + " | " + "d" * 60 + "` " + PROSE * 20  # the span runs past the cap
+        text = "ab `x " + "c" * cap + " | " + "d" * 60 + "` " + PROSE * 20  # the span runs past the cap, with a space inside before it
         self.assert_span_cut(self.render_skill(text), "skills/alpha", text, floor=False)
 
     def test_e12_a_short_span_that_straddles_the_cap_is_cut_before_it(self):
         cap = cell_cap()
-        text = prose(cap - 40) + " `" + "c" * 60 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after
+        text = prose(cap - 40) + " `" + "c" * 10 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after, with spaces inside before it
         self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
 
     def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):
@@ -1630,6 +1638,26 @@ class RealCellCap(unittest.TestCase):
         cap = cell_cap()
         over = ["%s %d chars" % (r["Key"], len(r["What it does"])) for r in rows if len(r["What it does"]) > cap]
         self.assertFalse(over, "over the cap of %d: %s" % (cap, "; ".join(over)))
+
+    def test_e13_no_real_description_cell_is_cut(self):
+        # Owner ruling 2026-10-18 01:10 CDT: no cell loses text today. Render the real repo at the cap and with
+        # no cap; a row that differs was cut. The lists are zipped, never keyed: two judge rows share a key.
+        import hook_catalog as gen
+        saved = gen.CELL_CAP, gen.ROOT
+        try:
+            gen.ROOT = ROOT
+            capped, problems = gen.render()
+            gen.CELL_CAP = sys.maxsize
+            full, more = gen.render()
+        finally:
+            gen.CELL_CAP, gen.ROOT = saved
+        self.assertEqual(problems + more, [], "the real repo does not render")
+        capped, full = page_rows(capped), page_rows(full)
+        self.assertEqual(len(capped), len(full))
+        self.assertTrue(full, "no catalog rows, so the scan proves nothing")
+        cut = [(len(u["What it does"]), u["Key"]) for c, u in zip(capped, full) if c["What it does"] != u["What it does"]]
+        self.assertFalse(cut, "%d cells cut at the cap of %d; the longest cell is %d chars, so the cap must be at least that: %s" % (
+            len(cut), saved[0], max(len(u["What it does"]) for u in full), "; ".join("%s %d chars" % (k, n) for n, k in sorted(cut, reverse=True))))
 
 
 if __name__ == "__main__":
