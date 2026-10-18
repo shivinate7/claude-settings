@@ -1,4 +1,4 @@
-# An Opus grant expires in 24 hours
+# An Opus grant expires within 24 hours
 
 ## The ruling
 
