@@ -283,9 +283,9 @@ class ReportGateTests(unittest.TestCase):
                 self.assertEqual(run.stdout.strip(), "")
 
     def test_58_quoted_git_commit_in_probe_list_passes(self):
-        # MEASURED: a read-only Bash call quoting a probe list, 'git commit -q -m x'
-        # 'git push --quiet', made the old regex-based gate demand a report for a turn
-        # that landed nothing. The words sit inside single quotes, never run as a command.
+        # A read-only Bash call quoting a probe list, 'git commit -q -m x' 'git push --quiet',
+        # landed nothing, so the gate must not demand a report. The words sit inside single
+        # quotes, never run as a command.
         rows = [
             # Catches: a quoted probe list is read as a landing command.
             (
@@ -1053,13 +1053,12 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 
 class PromotedRuleTests(unittest.TestCase):
-    """The owner's ruling of 2026-10-17 (turn the STE lint into a plain-prose lint,
-    decisions/plain-prose-lint.md): a rule either blocks or does not exist, and six advisory
-    codes are the one exception. Five rules block: STE001, STE011, STE013, STE020, STE021. Six are
-    advisory: STE003, STE007, STE008, STE009, STE015, STE017 are warnings that the linter
-    reports and no gate ever blocks on. Each case here proves a rule fires at its severity,
-    the thing a table-row edit alone cannot prove. STE006 and STE018, deleted by the owner's
-    ruling of 2026-09-23, get their own no-finding cases instead, since a deleted rule has no
+    """Plain-prose lint (decisions/plain-prose-lint.md): a rule either blocks or does not exist,
+    and six advisory codes are the one exception. Five rules block: STE001, STE011, STE013,
+    STE020, STE021. Six are advisory: STE003, STE007, STE008, STE009, STE015, STE017 are
+    warnings that the linter reports and no gate ever blocks on. Each case here proves a rule
+    fires at its severity, the thing a table-row edit alone cannot prove. STE006 and STE018 are
+    deleted, so they get their own no-finding cases instead, since a deleted rule has no
     severity left to assert.
     """
 
@@ -1119,13 +1118,13 @@ class PromotedRuleTests(unittest.TestCase):
         self.assert_advisory("They'd finished the work.\n", "STE008")
 
     def test_gendered_pronoun_produces_no_finding(self):
-        # The owner's ruling (2026-09-23): STE018 is deleted outright, not merely
-        # downgraded. A gendered pronoun must raise nothing at all.
+        # STE018 is deleted outright, not merely downgraded. A gendered pronoun must raise
+        # nothing at all.
         findings = self.lint("When a user signs in, he sees the dashboard.\n")
         self.assertEqual(findings, [])
 
     def test_semicolon_produces_no_finding(self):
-        # The owner's ruling (2026-09-23): STE006 is prose-only, with no mechanism.
+        # STE006 is prose-only, with no mechanism.
         # A semicolon must raise nothing at all.
         findings = self.lint("This sentence uses a semicolon; and continues here.\n")
         self.assertEqual(findings, [])
@@ -1146,12 +1145,12 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
 
 
-# Owner ruling 2026-10-17 (turn the STE lint into a plain-prose lint). These errors block:
+# These errors block (plain-prose-lint):
 ERROR_CODES = ("STE001", "STE011", "STE013", "STE020", "STE021")
 # These six are advisory: reported as warnings, never a deny, a rewrite or a failed run.
 ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017")
 # One input per advisory code. Each holds that code's finding and no error finding, and none is
-# text the old fixer rewrote, so a failing run on old code comes from the severity alone.
+# text a fixer rewrites, so a failing run comes from the severity alone.
 ADVISORY_SAMPLES = {
     "STE003": "The team performs a validation of the payload before it saves the record.\n",
     "STE007": "Send the report via email.\n",
@@ -1208,8 +1207,8 @@ def note_text(run):
 
 
 class OneSentenceBudgetTests(unittest.TestCase):
-    """Owner ruling 2026-10-17: one sentence budget of 30 words, procedural or descriptive.
-    The procedural limit of 20 and the descriptive limit of 25 are gone."""
+    """One sentence budget of 30 words, procedural or descriptive. No separate procedural limit
+    of 20 or descriptive limit of 25 exists."""
 
     def lint(self, text, mode):
         config = dict(ste_lint.DEFAULT_CONFIG)
@@ -1223,7 +1222,7 @@ class OneSentenceBudgetTests(unittest.TestCase):
                     self.assertNotIn("STE001", [f.code for f in self.lint(plain_words(n), mode)])
 
     def test_b02_31_words_error_in_both_modes_and_name_the_limit(self):
-        # A guard: green before the ruling and after it. The message states the one limit.
+        # The message states the one limit.
         for mode in ("descriptive", "procedural"):
             with self.subTest(mode=mode):
                 hit = [f for f in self.lint(plain_words(31), mode) if f.code == "STE001"]
@@ -1267,8 +1266,8 @@ class OneSentenceBudgetTests(unittest.TestCase):
                 self.assertIn("split", reason.lower())
 
     def test_b06b_the_deny_note_does_not_call_an_advisory_rule_an_error(self):
-        # The deny text ends in a note that lists the rules that block. After the ruling it names
-        # none of the six advisory rules, or the writer is told to fix what no gate checks.
+        # The deny text ends in a note that lists the rules that block. It names none of the six
+        # advisory rules, or the writer is told to fix what no gate checks.
         run, out = run_write_gate(plain_words(31))
         self.assertEqual(out.get("permissionDecision"), "deny")
         note = out["permissionDecisionReason"].lower()
@@ -1304,8 +1303,8 @@ class OneSentenceBudgetTests(unittest.TestCase):
 
 
 class AdvisoryCodesTests(unittest.TestCase):
-    """Owner ruling 2026-10-17: STE003, STE007, STE008, STE009, STE015 and STE017 are reported
-    and never block: not the linter's exit code, not the gate, not the sweep, not CI."""
+    """STE003, STE007, STE008, STE009, STE015 and STE017 are reported and never block: not the
+    linter's exit code, not the gate, not the sweep, not CI."""
 
     def test_a01_each_advisory_code_is_reported_as_a_warning_and_the_cli_exits_zero(self):
         for code, text in ADVISORY_SAMPLES.items():
@@ -1318,8 +1317,7 @@ class AdvisoryCodesTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
 
     def test_a02_the_gate_notes_an_advisory_code_and_neither_denies_nor_rewrites(self):
-        # Owner's nudge ruling (orchestrator call 4): an advisory must be seen. The write goes
-        # ahead, unchanged, with a note that names the code.
+        # An advisory must be seen. The write goes ahead, unchanged, with a note that names the code.
         for code, text in ADVISORY_SAMPLES.items():
             with self.subTest(code=code):
                 run, out = run_write_gate(text)
@@ -1393,8 +1391,7 @@ class AdvisoryCodesTests(unittest.TestCase):
 
 
 class KeptErrorCodesTests(unittest.TestCase):
-    """Owner ruling 2026-10-17: STE001, STE011, STE013, STE020 and STE021 stay errors. A guard:
-    green before the ruling and after it."""
+    """STE001, STE011, STE013, STE020 and STE021 are errors."""
 
     def test_k01_each_kept_code_is_an_error_and_the_cli_exits_one(self):
         for code, (suffix, text) in KEPT_SAMPLES.items():
@@ -1418,16 +1415,13 @@ class MdSweepTests(unittest.TestCase):
     """Fixtures for lint/md_sweep.py (Stop): the markdown sweep that judges the ACT, not the
     command shape. A file counts when its mtime is newer than the last human message and,
     in a git work tree, it is also dirty against HEAD. Most fixtures below no longer put a
-    meaningful command in the transcript, because the new predicate never reads one. Each
+    meaningful command in the transcript, because the predicate never reads one. Each
     fixture instead controls two things directly: the file's content and mtime on disk, and
     the last human record's `timestamp`.
 
-    Fixtures test_23 through test_53 are the 31 fixtures this class held before the rewrite.
-    None were deleted. Each is reworked to exercise the new predicate. Several of the old
-    command-shape fixtures collapse onto the same new behavior, so they now vary the FILE
-    side instead: filename case, nesting, suffix, and git state. Fixtures test_54 onward are
-    new: they close the defect this rewrite targets, and they cover the false-positive risks
-    the new predicate opens.
+    Fixtures test_23 through test_53 vary the FILE side: filename case, nesting, suffix, and
+    git state. Fixtures test_54 onward close the command-text defect and cover the
+    false-positive risks the predicate opens.
     """
 
     ERROR_TEXT = "This sentence is not unclean, and that trips the STE013 rule.\n"
@@ -1543,9 +1537,8 @@ class MdSweepTests(unittest.TestCase):
                 self.assertIn("STE013", json.loads(run.stdout).get("reason", ""))
 
     def test_25b_advisory_findings_never_block_the_sweep_but_are_reported(self):
-        # Owner ruling 2026-10-17: STE003, STE007, STE008, STE009, STE015 and STE017 are warnings.
-        # A file holding only these does not block, and the sweep names the code in a note
-        # (orchestrator call 4: an advisory must be seen).
+        # STE003, STE007, STE008, STE009, STE015 and STE017 are warnings. A file holding only
+        # these does not block, and the sweep names the code in a note, since an advisory must be seen.
         for code, text in ADVISORY_SAMPLES.items():
             with self.subTest(code=code):
                 self._fresh_root()
@@ -1803,8 +1796,7 @@ class MdSweepTests(unittest.TestCase):
         # A real work tree, `.git` present on disk, but every git subprocess call fails: a
         # broken `GIT_DIR` reproduces a stale `index.lock` or any other git-side failure. The
         # file is clean against HEAD, with a freshly touched mtime, so it must not block
-        # whether git works or not. Before the fix this branch widened to a plain mtime-only
-        # walk on git failure, and a clean-but-new file wrongly blocked.
+        # whether git works or not.
         self._init_git()
         self._write_md("notes.md", self.ERROR_TEXT)
         self._git_commit_all()
@@ -2406,9 +2398,8 @@ class SteGateUICopyTests(unittest.TestCase):
 
 
 class UICopyRoundTwoTests(unittest.TestCase):
-    """Round 2 of the front-end copy lint: the owner's rulings R1 (label tags from a
-    per-repo config key) and R2 (a UI escape is line-level and names a rule and a
-    reason), and the reviewer's findings on 8209f62."""
+    """Front-end copy lint: label tags come from a per-repo config key, and a UI escape is
+    line-level and names a rule and a reason."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -3439,8 +3430,7 @@ class MdSweepLogTests(unittest.TestCase):
 #
 # Guards: two processes appending to one guard.log at the same time keep every line, each exactly
 # once. Each writes APPEND_N lines, so 2 x APPEND_N must land. record() takes a lock around each
-# write, so a Windows append cannot overwrite another writer's line. (Before the lock, a two-process
-# probe on a Windows PC kept about 3810 of 4000 lines, measured 2026-10-13.) Linux does not lose these
+# write, so a Windows append cannot overwrite another writer's line. Linux does not lose these
 # lines, so a green on Linux proves nothing about the Windows path.
 # Two writers are cased: guard_core.record, and the STE gate's logger (lint/_transcript.guard_logger),
 # which reaches record through the same locked append. The one-writer case is the control: it must stay green.
@@ -3513,7 +3503,7 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         self.assertTrue(got == sorted(want), "missing %d line(s)" % len(set(want) - set(got)))
 
     def test_two_record_writers_keep_every_line(self):
-        # Rows: one writer is the control, green on main, so a red elsewhere is the race. Two
+        # Rows: one writer is the control, so a red elsewhere is the race. Two
         # guard_core.record writers are the one append every guard, gate and sweep line goes
         # through. Two STE gate loggers reach record through the same locked append.
         rows = [

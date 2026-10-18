@@ -284,7 +284,7 @@ def one_row_map(kind, reason=None):
 class JudgmentKindTests(unittest.TestCase):
     """`judgment`: an unmechanized rule whose reason says no check can judge it. Same reason
     floor as `unmechanized`, its own pin JUDGMENT_EXPECTED, passed as `judgment_expected`.
-    Owner ruling 2026-10-16. `unmechanized` never reads `ref`, so no ref case is pinned."""
+    `unmechanized` never reads `ref`, so no ref case is pinned."""
 
     def reason_problems(self, problems):
         # Only a reason check says these words. "unknown mechanism kind 'judgment'" does not.

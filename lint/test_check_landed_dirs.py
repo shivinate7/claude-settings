@@ -31,7 +31,7 @@ def move_frozen_dirs_to_sibling(tree):
     """Cut the CONFIG_FROZEN_DIRS literal (its comments included) out of whichever hooks/guard*.py
     holds it, and write it to a new sibling module. The check must still find it there: a moved
     literal is not a drift. The holder is searched for, not named, so the literal may sit in
-    guard.py or in any guard_<family>.py (PR4 moved it to guard_frozen.py)."""
+    guard.py or in any guard_<family>.py."""
     for path in sorted(glob.glob(os.path.join(tree, "hooks", "guard*.py"))):
         with open(path, encoding="utf-8") as f:
             text = f.read()

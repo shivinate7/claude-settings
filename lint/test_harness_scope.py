@@ -161,7 +161,7 @@ class Scope(unittest.TestCase):
         for p in ("README.md", "decisions/some-record.md"):
             self.assertFlags(run([p]), want_false=["guard"])
 
-    # Round 2 hole: lint/guard_log_report.py imports hooks/guard_core.py at load, and decision_watch
+    # lint/guard_log_report.py imports hooks/guard_core.py at load, and decision_watch
     # reads guard.log through it at run time. So a change to it must select the same jobs as
     # lint/_transcript.py, the other module the decision watch loads (the rules at its line 36, 51).
     def test_guard_log_reader_change_selects_the_jobs_of_the_transcript_reader(self):
@@ -222,7 +222,7 @@ class Scope(unittest.TestCase):
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
 
-    # Review round 1: mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
+    # mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
     # and the Mod tests run that test. The lint/* rule sets `code` only, so a diff naming only the lint
     # file would skip its test.
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):

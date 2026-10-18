@@ -3,11 +3,11 @@
 
 Run: python3 lint/test_hook_catalog.py -v
 
-Owner ask (2026-10-13, 22:25 CDT): one readable page that says, for each hook, judge and mod,
-what it does and which model and effort it runs on. The page is generated, never kept by hand.
-Owner add (22:26 CDT): skills are in scope too. Their source is the frontmatter description.
+One readable page says, for each hook, judge and mod, what it does and which model and effort
+it runs on. The page is generated, never kept by hand. Skills are in scope too. Their source is
+the frontmatter description.
 
-Interface the generator must meet. The builder builds to this.
+Interface the generator must meet.
 - lint/hook_catalog.py, stdlib only, Python 3.11. Root: the repo root, or env HOOK_CATALOG_ROOT
   (same layout). Every fixture case sets HOOK_CATALOG_ROOT to a temp tree.
 - No argument: write docs/catalog.md. `--print`: write the render to stdout, exit 1 while a problem
@@ -26,7 +26,7 @@ Interface the generator must meet. The builder builds to this.
   - A command that names no script is inline. Its text is the one-line value in
     lint/hook_catalog_inline.json under its sidecar key: its label (the event, then ` matcher=<m>` and
     ` if=<c>` when present), then ` #` and the first 8 hex digits of the SHA-256 of the command text
-    (ruling: a changed command changes its key, so it fails --check until its summary is keyed).
+    (a changed command changes its key, so it fails --check until its summary is keyed).
     Its row key is `inline: <label>`. A key with no value, an empty or multi-line value, a key
     written twice, or a sidecar key that matches no inline command is a problem. A missing sidecar is a problem
     too: exit 1, never exit 2.
@@ -47,26 +47,23 @@ Interface the generator must meet. The builder builds to this.
   mods/<name> (mod), skills/<name> (skill). A pipe inside a cell is written \\|.
   Event, Matcher and If are "-" when absent. Mods and skills have no event, matcher or if.
 
-Red on main: the generator and the page do not exist. Real-repo cases R1-R9 read this repo.
+Real-repo cases R1-R9 read this repo.
 Fixture cases F1-F29 run the generator on temp trees, so a generator that is silent for every
-input fails them. F25-F29 are round 2: F25 and F28 pin the Modes and duplicate-key checks, F26 and F27 pin
-the hash-keyed sidecar ruling, and F29 pins the orphan check.
+input fails them. F25 and F28 pin the Modes and duplicate-key checks, F26 and F27 pin
+the hash-keyed sidecar, and F29 pins the orphan check.
 Unit cases U1-U4 pin the table and sentence helpers used here.
 
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
 are hand scanners; they get the comment-opener, lone-quote and multi-line-string cases (F2-F6,
 F11-F16). JavaScript is not scanned, so the multi-line template-literal case does not apply.
 
-Records page, lane records-index, round 1. Owner ruling 2026-10-14 10:59 CDT: "live updating index
-for this and all repos, and it needs to delete old/stale rulings and rewrite in place, never store
-a history that's overruled". Cases A, B, C, D and R10-R13 pin it; U5-U7 pin the readers they use.
-Interface the generator must meet. The builder builds to this. One home: the same generator, no
-second script.
+Records page: a live index for this and all repos. It deletes stale rulings and rewrites in place,
+and never stores an overruled history. Cases A, B, C, D and R10-R13 pin it; U5-U7 pin the readers
+they use. Interface the generator must meet. One home: the same generator, no second script.
 - No argument writes every page it owns: docs/catalog.md and docs/records.md. `--check` checks both:
   a missing or stale page, or a problem, is exit 1 and names the page or the offender. `--print`
-  stays the catalog page only (R7). F18, F19, F26 and F27 now publish with a no-argument run, so
-  they stay green on 1ac9851 and on the build.
-- Merge-time rebuild, owner ruling 2026-10-14 13:18 CDT. The shared merge tool (merge/merge.py,
+  stays the catalog page only (R7). F18, F19, F26 and F27 publish with a no-argument run.
+- Merge-time rebuild. The shared merge tool (merge/merge.py,
   cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
   head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
   page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
@@ -113,12 +110,11 @@ second script.
   plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
   comments are not special: their lines are read as prose, so history hidden in a comment fails when
   it opens a block. A continuation line of a wrapped paragraph does not open a block.
-  What I chose, and why. Measured on 1ac9851 over those files: this rule fires on 0 lines, and "was:"
-  has 0 hits in all of them. The plain rule "the marker appears anywhere in the prose" fires on 30
-  lines in 21 files, almost all of them behaviour prose ("the guard no longer crashes"), CI runs
-  ("cancels superseded runs"), or a rule quoted by name. That would cry wolf on day one. The cost:
-  kept history that says "(superseded by the floor, kept as evidence)" mid-sentence is not caught. A
-  debt's What describing a gap may say "no longer", and it opens with its "**What.**" label.
+  Why the marker must open a block: the plain rule "the marker appears anywhere in the prose" would
+  fire on behaviour prose ("the guard no longer crashes"), CI runs ("cancels superseded runs"), and
+  a rule quoted by name. That would cry wolf. The cost: kept history that says "(superseded by
+  the floor, kept as evidence)" mid-sentence is not caught. A debt's What describing a gap may say
+  "no longer", and it opens with its "**What.**" label.
 - Scanner cases (rule building-scanner-respects-strings), the markdown form. A comment opener, a
   quote or a backtick inside code or a fence must not hide, or invent, a marker, a heading, a Kind
   line or a rule marker. A multi-line fenced block is the multi-line-template-literal case. A lone
@@ -176,8 +172,8 @@ def inline_label(event, matcher, cond):
 
 
 def sidecar_key(label, command):
-    """The sidecar key of an inline command, per the ruling: its label, " #", then the first 8 hex digits
-    of the SHA-256 of its command text. Written here from the ruling, not imported from the generator."""
+    """The sidecar key of an inline command: its label, " #", then the first 8 hex digits
+    of the SHA-256 of its command text. Written here from the spec, not imported from the generator."""
     return "%s #%s" % (label, hashlib.sha256(command.encode("utf-8")).hexdigest()[:8])
 
 
@@ -438,7 +434,7 @@ class RealRepo(unittest.TestCase):
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
     def test_r9_session_start_refresh_command_is_byte_identical_to_main(self):
-        # F1 ruling: the refresh stays inline. A move into a script gates recovery on an install.
+        # The refresh stays inline. A move into a script gates recovery on an install.
         # Equal as the JSON decodes, which is the exact text the harness runs.
         commands = [hook.get("command") for event, matcher, _cond, hook in registrations()
                     if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
@@ -797,8 +793,8 @@ class Fixtures(Tree):
         self.assertEqual(row["What it does"], "Says one plain thing.")
         self.assertEqual((row["Event"], row["Model"], row["Effort"]), ("Notification", "no model", "n/a"))
 
-    # Round 2 cases, F25-F29. The sidecar key is the label, " #", and 8 hex digits of the command's SHA-256.
-    # F25 and F28 pin the builder's Modes and duplicate-key checks. F29 pins the orphan check.
+    # Cases F25-F29. The sidecar key is the label, " #", and 8 hex digits of the command's SHA-256.
+    # F25 and F28 pin the Modes and duplicate-key checks. F29 pins the orphan check.
 
     def test_f25_one_script_under_two_flags_does_not_share_one_summary(self):
         # A script registered twice with different flags. Under exit 0 the two rows may not show the
@@ -817,7 +813,7 @@ class Fixtures(Tree):
                             "both registrations show one summary: " + rows[0]["What it does"])
 
     def test_f26_changed_inline_command_fails_check_until_its_summary_is_keyed(self):
-        # Ruling: a changed command changes its sidecar key. --check fails, and names the new key, until a
+        # A changed command changes its sidecar key. --check fails, and names the new key, until a
         # person reviews the summary and keys it to the new text. Then the page matches and the check passes.
         def settings(text):
             hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [{"type": "command", "command": text}]}])
@@ -1030,7 +1026,7 @@ class RecordsPage(Tree):
         self.assertIn("decisions/bad.md", out + err)
 
     def test_a15_a_short_first_ruling_block_gives_the_question_sentence(self):
-        # Red on 6fb3ac0 for the three short-block rows. Kind: process throughout. A ruling's first block of under 4 words
+        # Kind: process throughout. A ruling's first block of under 4 words
         # ("Yes.", "Owner, 2026-10-11:") gives the first sentence of "## The question". A 4-word block stays (green pin).
         cases = [
             ("a bare yes", "Does the gate run first? It does.", "Yes.", "Does the gate run first?"),
@@ -1047,8 +1043,8 @@ class RecordsPage(Tree):
                 self.assertEqual(got.get("r%d" % i), gist)
 
     def test_a16_the_notes_file_in_debts_is_no_record(self):
-        # Owner ruling 2026-10-17 11:56 CDT: a finding too unlikely to hit is one line in the notes file, not a debt.
-        # Red on 26cfc87f: the notes file has no **What.** line, so the page is refused (PR 497 merge).
+        # A finding too unlikely to hit is one line in the notes file, not a debt. The notes file has no
+        # **What.** line, and the page must not refuse it.
         notes = "# Notes\n\n- A finding too unlikely to hit. Decision: none.\n"
         root = self.tree(with_records({"debts/notes.md": notes}))
         code, out, err = generator(root)
@@ -1119,7 +1115,7 @@ class RecordsStale(Tree):
         self.publish(root)
         self.assertEqual(self.records_text(root), before)
 
-    # Merge-time rebuild (owner ruling 2026-10-14 13:18 CDT): the merge rewrites the page, so a pull request
+    # Merge-time rebuild: the merge rewrites the page, so a pull request
     # run does not fail on a stale one. The stamp engine reads a pull request run from GITHUB_BASE_REF or a
     # GITHUB_REF under refs/pull/, and each alone counts.
     PULL_REQUEST_RUNS = ({"GITHUB_BASE_REF": "main"}, {"GITHUB_REF": "refs/pull/12/merge"},
@@ -1167,7 +1163,7 @@ class RecordsStale(Tree):
         self.assertIn("debts/empty.md", out + err)
 
     def test_b10_the_catalog_page_stays_strict_on_a_pull_request(self):
-        # Regression pin, green on 1ac9851: the ruling covers the records page only.
+        # The pull request waiver covers the records page only.
         root = self.published()
         put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
         code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
@@ -1307,7 +1303,7 @@ class RecordsHistory(Tree):
         self.assertEqual(gists["roles-remove-override-file"], "Remove the file when the raise is no longer needed.")
 
     def test_c12_words_that_only_look_like_a_marker_do_not_fail(self):
-        # Red on 6fb3ac0 for each prose line below: none is overruled text. The control line must still fail the check,
+        # None of the prose lines below is overruled text. The control line must still fail the check,
         # so a detector gone silent cannot pass this case.
         for line in ["The flag was: on.", "No longer used: the old flag.", "Previously-run tests stay green."]:
             with self.subTest(line):
@@ -1318,8 +1314,8 @@ class RecordsHistory(Tree):
         self.assert_history(with_records({"decisions/old.md": old_decision("Old ruling: allow it.")}), "decisions/old.md:7")
 
     def test_c13_only_in_force_opens_a_no_longer_marker(self):
-        # Review round 2, records-index. "No longer" marks overruled text only as "No longer in force". The first three
-        # lines were markers until the orchestrator dropped them (red on d027e3d). The fourth is a bare "No longer".
+        # "No longer" marks overruled text only as "No longer in force". The first three lines are not
+        # markers. The fourth is a bare "No longer".
         for line in ["No longer holds: the rule.", "No longer applies: the flag.", "No longer valid: the flag.", "No longer checks the flag."]:
             with self.subTest(line):
                 root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
@@ -1395,8 +1391,8 @@ class OtherRepos(Tree):
 
 @unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
 class RealRecords(unittest.TestCase):
-    """The committed page against the real records. Red until the builder writes docs/records.md. Skipped on a pull
-    request run (owner ruling 2026-10-14 13:18 CDT: the merge rebuilds the page); run on a laptop and on a push to main."""
+    """The committed page against the real records. Skipped on a pull request run (the merge rebuilds the
+    page); run on a laptop and on a push to main."""
 
     def rows(self):
         if not os.path.exists(RECORDS_PAGE):
@@ -1409,7 +1405,7 @@ class RealRecords(unittest.TestCase):
                    ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            # debts/notes.md is the notes tier, no record (owner ruling 2026-10-17 11:56 CDT): a row for it is an extra.
+            # debts/notes.md is the notes tier, no record: a row for it is an extra.
             # Compared by path: a decisions/notes.md is still a record and needs its row.
             names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
                            if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")

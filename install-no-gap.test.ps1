@@ -4,7 +4,7 @@
 #
 # The defect: with no symlink rights, install.ps1 deletes each landed copy and then copies it
 # again. Between the two steps the file is absent. The gate hooks fail closed on a missing
-# script, so every session is refused for as long as the gap lasts (incident 2026-10-13).
+# script, so every session is refused for as long as the gap lasts.
 #
 # The main case runs install.ps1 once, then re-runs it 20 times against a scratch clone and a
 # scratch CLAUDE_CONFIG_DIR, with copy mode forced. Each re-run changes both hook files to the other
@@ -565,9 +565,8 @@ try {
     Check "lock1: run 2 keeps the person's SKILL.md content at the skill dir or in a .bak" $SkillKept
 
     # ---- hooks-whole: no live hook file is ever seen truncated (temp, then rename) --------------
-    # Owner ruling 2026-10-14 (install-atomic, arbiter 03:41). The installer writes each file to a
-    # temp name and renames it into place, so a reader sees the old file or the new one, never a
-    # half-written one. An in-place rewrite keeps the file's identity. A rename into place gives it a
+    # The installer writes each file to a temp name and renames it into place, so a reader sees
+    # the old file or the new one, never a half-written one. An in-place rewrite keeps the file's identity. A rename into place gives it a
     # new identity. So in a re-run that changes a hook file's text, each hook file that changes must
     # get a new identity, and the new text must land (non-vacuous). Two routes: install.ps1 run 2 in
     # copy mode, and the post-merge hook install.ps1 writes into .git\hooks, run by git's sh.
