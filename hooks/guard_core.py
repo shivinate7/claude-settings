@@ -1445,8 +1445,7 @@ SESSION_LIVE_TOLERANCE_MS = 60000
 
 # `_process_start_ms` returns this sentinel, never `None`, when the read itself could not tell
 # whether the process is alive or dead. `None` stays reserved for a CONFIRMED dead pid, so a
-# caller can never coerce "I could not tell" into "it is dead." See
-# `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+# caller can never coerce "I could not tell" into "it is dead."
 PROCESS_START_UNREADABLE = object()
 
 
@@ -1521,8 +1520,7 @@ def _process_start_ms(pid: int):
     """Return a live process's start time in epoch milliseconds. Return `None` when the pid is
     CONFIRMED not running (dead). Return `PROCESS_START_UNREADABLE` when the read could not
     tell either way. A caller must never fold the third state into the second: an unreadable
-    read is not proof of death. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+    read is not proof of death.
 
     POSIX: `ps -o lstart=` prints the start time in THIS machine's own local clock, with no
     timezone marker at all. Read it with `time.mktime`. That call turns a naive `struct_time`
@@ -1649,8 +1647,7 @@ def worktree_live_session(target: str):
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
     confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
-    this read exists to avoid. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`."""
+    this read exists to avoid."""
     records = session_records()
     if records is None:
         return None

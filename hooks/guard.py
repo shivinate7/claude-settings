@@ -63,7 +63,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec denies. A push that reaches the default branch asks.
                        (stale-safe-force-push)
-  env-file             deny. Any read or write of an environment file. (env-file-wrappers)
+  env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, or the read
                        could not run. `--auto` too. (merge-needs-a-proven-head)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
@@ -663,7 +663,7 @@ def agent_home_record_path(where: str, agent_id: str):
 def read_agent_home(where: str, agent_id: str):
     """Return the recorded home for `agent_id`, `''` when no record exists yet, or None when the
     record could not be read at all (no git, no common dir, an unreadable file). `None` is
-    UNKNOWN, never a hit: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md."""
+    UNKNOWN, never a hit."""
     path = agent_home_record_path(where, agent_id)
     if not path:
         return None
@@ -695,8 +695,7 @@ def agent_worktree_home(payload, cwd: str):
       "none"      no valid `agent_id` on the payload: the orchestrator, or a call this rule does
                   not judge at all.
       "unknown"   an `agent_id` is present, but the home record could not be read (no git, no
-                  common directory, an unreadable file). Allowed, never a hit (Decision:
-                  liveness-read-is-platform-specific-and-unreadable-is-not-death).
+                  common directory, an unreadable file). Allowed, never a hit.
       "no-record" the record reads clean and holds nothing, and this call's own `cwd` is not the
                   agent's worktree shape either: a non-isolated agent. Allow everything.
       "home"      `home` names the agent's recorded worktree, whether just written on this call

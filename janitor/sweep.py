@@ -34,8 +34,7 @@ covers, and reaps it ONLY when every one of these reads answers a confirmed yes:
 it is orphaned (a per-OS read, never a guess); no live Claude session has a cwd in that same
 checkout (guard.py's own tested oracle, never a second copy of it); and it is owned by the
 current user. An unreadable answer to any one of those three means KEEP, the same fail-closed
-shape guard.py's own liveness oracle already uses (decisions/liveness-read-is-platform-specific-
-and-unreadable-is-not-death.md). `--confirm` signals a reapable pid by NUMBER alone, never by a
+shape guard.py's own liveness oracle already uses. `--confirm` signals a reapable pid by NUMBER alone, never by a
 name or a command-line pattern (CLAUDE.md: "Never kill a process you did not start. Treat
 `pkill -f` and `lsof -t` as machine-wide."), and this sweep never escalates past that one signal
 on its own.
@@ -829,9 +828,8 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
 # `_process_start_ms` already established: a confirmed answer (True/False), or `None` when the
 # read itself could not tell. `None` is never coerced into a confident answer by this file. A
 # caller that receives `None` from any of these always keeps, never reaps -- see
-# decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md, which states this
-# rule for a different read, and CLAUDE.md's "report a read that could not run as unknown, never
-# as clear or broken", which states it for every read.
+# CLAUDE.md's "report a read that could not run as unknown, never as clear or broken", which
+# states it for every read.
 
 
 def list_listeners():
@@ -1198,8 +1196,7 @@ def is_orphan(pid: int):
     """True when PID is confirmed orphaned. False when it is confirmed NOT orphaned (a real
     parent pid was read, and that parent is alive with no later creation time than PID's own).
     None when some read along the way could not tell -- reported as `unreadable-subject` by
-    every caller in this file, never coerced into a confident answer either way (decisions/
-    liveness-read-is-platform-specific-and-unreadable-is-not-death.md).
+    every caller in this file, never coerced into a confident answer either way.
 
     POSIX: PID's own PPid is 1 (`/proc/PID/status` on Linux, `ps -o ppid=` on macOS). A
     subreaper (`PR_SET_CHILD_SUBREAPER`) adopts with ITS OWN pid, never 1, so this stays
