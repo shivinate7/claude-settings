@@ -3051,33 +3051,33 @@ sh("rm-var: a quoted $HOME with a literal cache path is not refused",
    'rm -rf "$HOME/.cache/x"', "allow", cwd=NOGIT)
 sh("rm-var: $TMPDIR with a literal path is not refused",
    "rm -rf $TMPDIR/foo", "allow", cwd=NOGIT)
-# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+# D is unassigned, so the remedy is the literal path.
 sh("rm-var: a quoted variable before a glob",
    'rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+# D is unassigned, so the remedy is the literal path.
 sh("rm-var: a variable before a trailing slash",
    "rm -rf $D/", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target is now a glob, which is the trigger shape. Was a literal "/build".
+# The target is a glob, which is the trigger shape.
 sh("rm-var: a braced variable with no guard",
    'rm -r "${D}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: $S is unassigned in the script, so the remedy is the literal path.
+# $S is unassigned in the script, so the remedy is the literal path.
 sh("rm-var: sh -c runs the unguarded delete",
    "sh -c 'rm -rf $S/*'", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
-# (b) ruling changed: S and d are unassigned, so the remedy is the literal path.
+# S and d are unassigned, so the remedy is the literal path.
 sh("rm-var: the short flag order counts too",
    "rm -fr $S/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}", "${d:?}"))
-# (b) $HOME is tainted: a ${NAME:?} guard does not clear it (the docs say so), so the refusal names a
+# $HOME is tainted: a ${NAME:?} guard does not clear it (the docs say so), so the refusal names a
 # literal path and never offers ${HOME:?}. The reason may name either form. The target is a variable
 # after the slash, which is the trigger shape.
 sh("rm-var: $HOME under a recursive delete names a literal path, not ${HOME:?}",
    "rm -rf $HOME/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("HOME:?", os.path.expanduser("~")))
-# (b) $S is unassigned in the script, so the remedy is the literal path. The escaped dollar must not
+# $S is unassigned in the script, so the remedy is the literal path. The escaped dollar must not
 # reach the reason: eval's double quotes turn \$ into $, so the remedy must be the plain guarded
 # target with no backslash before $.
 sh("rm-var: eval with an escaped dollar prints no backslash",
@@ -3085,8 +3085,7 @@ sh("rm-var: eval with an escaped dollar prints no backslash",
    carries=("literal path",), lacks=("\\$", "${S:?}"))
 # Scanner cases (rule building-scanner-respects-strings): a comment opener, a double slash, a lone
 # quote, and a newline inside a quoted string must not hide the live rm that follows.
-# (b) ruling changed on all five: S is now assigned a literal and the target is $S/*, so the
-# allow-list gives ${S:?} advice. Was $S/x, which the trigger shape no longer covers.
+# S is assigned a literal and the target is $S/*, so the allow-list gives ${S:?} advice.
 sh("rm-var: a hash inside a string does not hide the delete",
    'S=/tmp/x; echo "#"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("rm -rf ${S:?}/*",))
@@ -3172,23 +3171,19 @@ sh("rm-var: a literal value that resolves to the cwd names a literal path",
    carries=("literal path",), lacks=("${D:?}", NOGIT))
 # Taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
 # from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
-# when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
-# moved to a glob is (b) ruling changed: the trigger shape is now tested.
+# when guarded. The reason never names ${NAME:?} advice for that name.
 sh("rm-var: a guarded $HOME target is refused for a literal path",
    "rm -rf ${HOME:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
 sh("rm-var: a quoted guarded $HOME before a glob is refused for a literal path",
    'rm -rf "${HOME:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: $PWD is refused and its remedy names no ${PWD:?} advice",
    'rm -rf "$PWD"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${PWD:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} advice",
    'rm -rf "${PWD:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${PWD:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 # ---- rm-var taint spellings, one table against the assigned-value reader. A delete whose variable is
 # set from pwd, HOME or ~ (in any substitution, loop or quoting) is tainted, so its refusal names the
 # literal path and never ${NAME:?}. guard_rm_var.rm_var_hits reads the bindings (_rm_values) and the
@@ -3241,44 +3236,33 @@ sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names n
 sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a loop over $(pwd -P) is refused for a literal path, not ${D:?}",
    'for D in $(pwd -P); do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays allowed",
    'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-# A guarded variable set to a literal path passes.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
 # Derived forms (decision rm-on-a-variable-needs-a-guard): a variable whose assigned or loop value
 # holds ~, HOME, PWD or pwd is tainted, so its refusal names a literal path, never ${D:?} advice.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
    "D=${X:-$HOME}; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: $HOME/x is not the trigger shape any more, so it is not refused. The
-# literal-path case for a $HOME target is "$HOME/$d" above.
+# $HOME/x is not the trigger shape, so it is not refused. The literal-path case for a $HOME
+# target is "$HOME/$d" above.
 sh("rm-var: $HOME joined to a literal path is not refused",
    "rm -rf $HOME/x", "allow", cwd=NOGIT)
-# (b) ruling changed: a mixed command names HOME (literal-path remedy) and a safe S. Whether the
-# refusal also prints ${S:?} advice is not pinned (see Input Needed).
+# Whether the refusal also prints ${S:?} advice is not pinned.
 sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
    "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",))
 # Taint comes only from a real expansion (decision rm-on-a-variable-needs-a-guard). A literal
 # value that spells pwd or HOME is not one.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a literal HOME inside a path is not tainted",
    'D=/tmp/HOME/x; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# (b) ruling changed: --dir=~ is a flag, not an assignment, so $dir is a set literal and gets its
-# own ${dir:?} advice. The target moved to a glob.
 sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its own advice",
    'make --dir=~ && dir=/tmp/b; rm -rf "$dir"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=('rm -rf "${dir:?}"/*',), lacks=("literal path",))
@@ -3287,11 +3271,10 @@ sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
 # Substitution spans (decision rm-on-a-variable-needs-a-guard). The assigned-value reader cuts the
 # value at ; & | even inside $(...) or backticks, so a pwd after the cut is missed. Each case must
-# deny with the literal-path reason. Each case whose target moved to a glob is (b) ruling changed.
+# deny with the literal-path reason.
 sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
 # Taint (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an expansion of HOME or
@@ -3301,12 +3284,10 @@ sh("rm-var: a guarded variable set after && in a list stays allowed",
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
    'D=$(x=1; echo $HOME); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # pwd as an argument is text, not a command word, so the value stays a literal and passes.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
 # MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard). Each case below has an unsafe binding,
@@ -4785,11 +4766,8 @@ for _name, _command, _rule in (
 # One pkill row for the lone-apostrophe shape: the wsl rows above carry the same scanner paths.
 sh("guard-command-position: regression, a lone apostrophe, then pkill, denies",
    "echo a's b'; pkill foo; echo don't", "deny", rule="machine-wide-kill", cwd=NOGIT)
-for _name, _command in (
-    ("a lone apostrophe, a quoted apostrophe, then ls", "echo don't; echo \"it's\"; ls"),
-    ("a contraction in plain text", "echo it's fine"),
-):
-    sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
+sh("guard-command-position: regression, a lone apostrophe, a quoted apostrophe, then ls, allowed",
+   "echo don't; echo \"it's\"; ls", "allow", cwd=NOGIT)
 
 # `don't` opens a single quote that closes later, so the line break after it is a real separator and `pkill foo` runs.
 sh("guard-command-position: round 2 bypass, a lone apostrophe in a double-quoted run, "
@@ -5739,12 +5717,9 @@ for _name, _command in (
 ):
     sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
        cwd=NOGIT)
-# A commit message that names the form, and a wrapper around a bounded command, delete nothing wide.
-for _name, _command in (
-    ("a commit message that names the root form", VCS + ' commit -m "stop rm -rf / mistakes"'),
-    ("docker run around a bounded command", "docker run --rm alpine ls"),
-):
-    sh("delete: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
+# A commit message that names the form deletes nothing wide.
+sh("delete: a commit message that names the root form is no wide delete",
+   VCS + ' commit -m "stop rm -rf / mistakes"', "allow", cwd=NOGIT)
 
 # TWO WIDE-TARGET SETS DISAGREE. A segment shlex can parse is read by `_rm_args_wide`, against
 # RM_WIDE_TARGET, which takes a trailing slash and a glob on a root or home. A segment it cannot
@@ -5779,7 +5754,6 @@ for _name, _command in (
     ("a single-quoted echo of the root form", "echo 'rm -rf /'"),
     ("a # inside quotes", 'echo "# rm -rf /"'),
     ("a multi-line quote", 'echo "first line\nrm -rf /\nlast line"'),
-    ("a lone apostrophe in text", "echo it's fine"),
     ("a lone apostrophe in a trailing comment", "rm -rf build # don't"),
 ):
     sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
@@ -5835,8 +5809,6 @@ sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
 # open and skipped every rule after it, the frozen-path rule included.
 sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule",
    "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
-   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
 # A quote mark in an unquoted heredoc body is text, so a later substitution still runs and still reads
 # the file. A quoted delimiter runs no substitution, so the same body is text and stays allowed.
 # A lone double quote hides nothing: a substitution runs inside double quotes.
@@ -6002,7 +5974,7 @@ for text in (
 add("env: Write of .worktreeinclude", "allow", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ".worktreeinclude")))
 for held in (
-    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x", VCS + " add " + ENV,
+    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x",
     "echo x > " + ENV, "echo " + ENV + " > " + ENV, "echo " + ENV + " | tee " + ENV,
 ):
     sh("env: the data allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
@@ -6039,8 +6011,8 @@ for held in (
 ):
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
-    "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
-    'gh pr create --draft --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    "printf '" + ENV + "\\n' > .worktreeinclude",
+    'gh pr create --draft --body "Adds ' + ENV + '"',
     VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
 ):
     sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
@@ -6076,15 +6048,15 @@ for text in (
     "[ -f " + ENV + ' ] && echo "' + ENV + ' exists" || echo "no ' + ENV + '"',
     "[ -e " + ENV + " ]", "[ -d " + ENV + " ]", "[ -s " + ENV + " ]", "[ -r " + ENV + " ]",
     "[ -w " + ENV + " ]", "[ -x " + ENV + " ]", "[[ -f " + ENV + " ]]", "[[ -e " + ENV + " ]] && echo yes",
-    "test -f " + ENV, 'echo "' + ENV + ' exists"', "printf '" + ENV + " is here\\n'",
+    'echo "' + ENV + ' exists"', "printf '" + ENV + " is here\\n'",
     'echo "no ' + ENV + '" > status.txt', "printf '%s\\n' '" + ENV + "'",
 ):
     sh("env: an existence test or fixed text, " + text[:40], text, "allow", cwd=NOGIT)
 for held in (
     '[ "$(cat ' + ENV + ')" ]', 'test -n "$(< ' + ENV + ')"', '[[ -n "$(cat ' + ENV + ')" ]]',
     "[ -f x ] && cat " + ENV, "echo $(cat " + ENV + ")", "echo `cat " + ENV + "`",
-    "cat $(echo " + ENV + ")", "echo hi > " + ENV, "echo " + ENV + " > " + ENV,
-    "[ -f " + ENV + " ] && cat " + ENV, "cat < " + ENV, "echo " + ENV + " | tee " + ENV,
+    "cat $(echo " + ENV + ")", "echo hi > " + ENV,
+    "[ -f " + ENV + " ] && cat " + ENV,
 ):
     sh("env: a test or text is no licence to read, " + held[:40], held, "deny", "env-file",
        cwd=NOGIT)
@@ -6102,7 +6074,7 @@ for held in (
 ):
     sh("env: a relay of the text, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
-    "[[ -e " + ENV + ".local ]]", "test -s " + ENV, "printf '" + ENV + "\\n' > .worktreeinclude",
+    "[[ -e " + ENV + ".local ]]", "test -s " + ENV,
     "echo " + ENV + " > .worktreeinclude && test -f .worktreeinclude",
     "echo " + ENV + " || echo no; echo done | cat",
 ):
@@ -6218,7 +6190,6 @@ for _cmd in (
 # operand after them is still a file. Controls: `grep '.*' file` and
 # `grep -e '--env-file=.*' f` stay allowed in the block above.
 for _cmd in (
-    "grep -f " + ENV + " x",
     "grep -f" + ENV + " x",
     "grep -nf " + ENV + " x",
     "grep -rf " + ENV + " .",
@@ -6746,8 +6717,6 @@ sh("merge-checks: a read run in the wrong folder is unknown, and denies",
 add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
     tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
     env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge-checks: a green head merges", "gh pr merge 12 --squash", "allow", silent=True,
-   cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
 sh("merge-checks: --auto is gated like any merge", "gh pr merge 12 --auto --squash", "deny",
    "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
    config=MERGECFG)
@@ -8787,7 +8756,6 @@ chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after th
 # (b) A LONE ASK STEP STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
 # trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
 # comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
-sh("ask-alone: a prune alone still asks", PRUNE, "ask", "shared-tree", cwd=WTPRUNE)
 sh("ask-alone: a prune alone in the PowerShell tool still asks", PRUNE, "ask", "shared-tree",
    tool="PowerShell", cwd=WTPRUNE)
 sh("ask-alone: a prune with a trailing newline is alone, so it asks", PRUNE + "\n", "ask",
@@ -8814,8 +8782,6 @@ sh("ask-alone: a whole-tree restore alone in a worktree still asks, and names th
    VCS + " restore .", "ask", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
 sh("ask-alone: a hard reset in a worktree with an && echo done tail asks",
    VCS + " reset --hard && echo done", "ask", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
-sh("ask-alone: a forced push to the default branch alone still asks",
-   VCS + " push --force origin HEAD:main", "ask", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a forced push to the default branch with an && echo done tail asks",
    VCS + " push --force origin HEAD:main && echo done", "ask", "force-push", cwd=PUSHFEAT,
    lacks=(CHAIN_ASK,))

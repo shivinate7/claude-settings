@@ -79,6 +79,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `building-scanner-respects-strings` | Scan source code with the language's own parser or tokenizer when the repo has one. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-land-design-or-abandon` | A capability no user can reach is not built. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-memory-is-short-term` | Memory stays on, as short-term notes. | [`CLAUDE.md`](../CLAUDE.md) |
+| `building-comments-say-why` | Comment only what complex code does and why. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-cite-id-plus-gloss` | Cite a record by id plus a short gloss, like "D12, short titles for records". | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-never-explain-in-paragraph` | Never explain a rule in a paragraph. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-rewrite-superseded-in-place` | Rewrite superseded text in place. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -221,6 +222,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`debts/refusal-route-around-guard.md`](../debts/refusal-route-around-guard.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`debts/sharables-adopts-the-stamp.md`](../debts/sharables-adopts-the-stamp.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
+| `stall-wrapper-loses-exit-code` | A background command that prints nothing for 300 s gets a STALL report, even when it is healthy, such as `python3 hooks/test_guard.py`. | [`debts/stall-wrapper-loses-exit-code.md`](../debts/stall-wrapper-loses-exit-code.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`debts/stamp-shallow-depth-two.md`](../debts/stamp-shallow-depth-two.md) |
 | `three-skill-findings` | Two fixes for `skills/compliance-check` wait for the owner. | [`debts/three-skill-findings.md`](../debts/three-skill-findings.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`debts/verdict-pipe-drops-line.md`](../debts/verdict-pipe-drops-line.md) |
