@@ -412,7 +412,6 @@
 - node-file-server-unchecked: node <file> under run_in_background is not refused without an until: note, because the roster cannot tell a server script from a one-off script (hooks/guard_stream.py). Decision: background-needs-end-note
 - timeout-moved-server-unchecked: A foreground server the harness moves to background at its 120 s timeout is not checked, because the background-end rule reads the call at start (hooks/guard_stream.py). Decision: background-needs-end-note
 - dead-run-extended-lock-blocks: A run that dies after a lock extension leaves a lock held up to 1200 s. other runs wait until it expires, and merge --unlock clears it (merge/merge.py). Decision: none
-- judge-cap-drops-old-rulings: Measured 2026-10-14: 87 rulings, 100,887 chars. at the 60,000-char RULINGS_MAX cap, the 5 oldest are left out (hooks/question_outcome.py). Decision: question-judge-reads-rulings
 - stdin-python-read-as-code: Quoted cap keys or frozen paths piped into python, py or wrappers deny even when the text is data. only pure printers (echo, cat, grep, wc, jq) make it data (hooks/guard_frozen.py). Decision: frozen-path-resolves-shell-vars
 - split-reader-misses-cd-forms: split_segments misses $'...', $(...), backticks, cd "$DIR" and previous-folder forms (cd ~-, cd -, Set-Location +/-), so a hidden cd is skipped (hooks/guard.py, hooks/guard_core.py). Decision: none
 - silent-undo-oracle-hides-cause: When the records page generator fails, the silent-undo check reports only hunk reversed and drops stderr. the generator run has no timeout (lint/check_silent_undo.py generated_page). Decision: records-index-at-merge
@@ -485,3 +484,4 @@
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch-stop-check
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/harness-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
+- judge-reads-related-only: a judge that sees only the records a question touches, so the prompt stays small as rulings grow; owner interested 2026-10-18. Decision: question-judge-reads-rulings

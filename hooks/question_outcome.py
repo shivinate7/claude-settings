@@ -29,9 +29,9 @@ Per question with two or more options (a clarifying question passes first):
   is fenced and labeled with its record id (`<folder>/<stem>`) and H1 title. A question the owner already
   settled is FLAGged with the record id, and the deny reason gives the id and title, never an absolute path. A
   question that asks to change a ruling passes. Each ruling is cut to RULING_CAP chars at a
-  sentence end. The section holds at most RULINGS_MAX chars, the most recently changed records
-  first (one git log call; file mtime when git fails); older rulings are left out, and a mark
-  says how many. A ruling under another heading is not read.
+  sentence end. The section holds at most RULINGS_MAX (95,000) chars. Every record fits today
+  (81,511 chars, 103 records), the most recently changed first (one git log call; file mtime
+  when git fails). Past the budget the oldest are left out, and a mark says how many. A ruling under another heading is not read.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
 - The judge reads each option on one line: its label, description and preview, each defanged and
@@ -100,7 +100,7 @@ def _loose_line(label):
 
 GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
 
-RULINGS_MAX = 60000  # chars the rulings section (intro, blocks, mark) adds to the prompt
+RULINGS_MAX = 95000 # chars the rulings section (intro, blocks, mark) adds to the prompt
 RULING_CAP = 800  # chars of one ruling; a longer one is cut at a sentence end
 RULING_CUT = " [ruling cut]"
 RULINGS_DIRS = ("decisions", "deferred")
