@@ -12,7 +12,10 @@ this machine.
 
 ## What it never does
 
-The sweep never touches a remote. It runs no push, and no fetch.
+The sweep never pushes. It reads each remote with `git ls-remote`. In each
+repository it judges, except with `--tier1` or past the run deadline, it first
+runs `git fetch --prune --no-tags`, in a preview too. The fetch moves
+remote-tracking refs only: no local branch, no tag, no working tree.
 
 The sweep never stops a program a live session still needs. It can stop three
 kinds. The first is an orphaned TCP listener inside a repository or worktree this
@@ -119,7 +122,9 @@ nothing.
 
 The sweep keeps a worktree with a commit that is on no remote branch, and the
 reason is `unpushed`. This holds for every worktree, locked or not. A detached
-HEAD counts. A repository with no remote keeps every worktree.
+HEAD counts. A repository with no remote keeps every worktree. A failed fetch
+adds `: fetch failed` to the reason of a tree kept as `unreadable-subject`. It
+keeps no other tree. The sweep judges other trees on the refs as they stand.
 
 Every `--confirm` run adds two more keeps. A tree that is not merged is kept
 until it has been idle long enough, and the reason is `unmerged`. A tree with
