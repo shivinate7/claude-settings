@@ -194,7 +194,11 @@
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
+- override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants a pass. Decision: owner-override-pass
+- override-once-not-bound: a one-act pass lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a hole). Decision: owner-override-pass
 - override-removal-unreminded: nothing reminds an agent to remove a raised subagent-cap file early; only expiry reverts it (hooks/config_watch.py)
+- override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_pass_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_pass_context. Decision: owner-override-pass
+- override-veto-no-mutants: no mutant covers never_passed, take or the veto path. Decision: owner-override-pass
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)
@@ -454,7 +458,7 @@
 - one-shared-record-stamp-left-out: The stamp engine leaves out build steps, debts, the flat-file fallback when ORDER.json is missing, branch-side reads (--stale, --unclaim, --landed, --porcelain, merging()), and folder/prefix forms with no pending form. Decision: one-shared-record-stamp
 - stale-safe-force-push-sha-lease: A lease with a sha guards only the one ref it names. the design accepts this, and git's own lease plus --force-if-includes still protects where the guard reads no push. Decision: stale-safe-force-push
 - stall-watch-windows-stop-check: Windows is not covered by the stall hook (it returns nothing when os.name is not posix). the Stop-time check reports a background shell left open. Decision: stall-watch
-- stall-watch-quiet-job: A command that prints progress forever is never reported, even when stuck. A quiet healthy job is the debt `stall-wrapper-loses-exit-code` (the stall watch cuts off a healthy silent run). Decision: stall-watch
+- stall-watch-quiet-job: A command that prints progress forever is never reported, even when stuck. A quiet healthy job gets a STALL report, and the wrapper keeps exit 3 (owner ruling, 2026-10-18 15:15 CDT). Decision: stall-watch
 - stall-watch-log-and-child: After a stall report the temp-directory log stays and nothing removes it. a command that backgrounds its own child is not watched (the guard denies that shape). Decision: stall-watch
 - stall-watch-backslash: A trailing backslash continuation or an odd run of backslashes at the end of a command: the hook probes /bin/sh and doubles the last backslash when sh keeps it literal. Decision: stall-watch
 - build-dirs-reap-limits: A crashed agent whose SubagentStop never fires keeps its build output until build-disk-guard lands, as does scratchpad derived data. a resumed agent rebuilds cold. on Windows a link swapped in between rename and delete is not covered. Decision: build-dirs-reaped-at-agent-end
