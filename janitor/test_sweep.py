@@ -5145,10 +5145,12 @@ class AgentWorktreeReapTests(unittest.TestCase):
     # ---- (k) `git fetch --prune` at the start of the run
 
     def second_clone(self):
-        """Another machine's clone of origin, on main, with a commit identity."""
+        """Another machine's clone of origin, on main. `-b main` because origin is a bare repo
+        whose HEAD names the platform's default branch: where that is not main, a plain clone
+        lands on an unborn branch and has no main to push."""
         origin = run_vcs(self.repo, "remote", "get-url", "origin").stdout.strip()
         path = os.path.join(self.base, "c2")
-        cloned = subprocess.run([VCS, "clone", "-q", origin, path], capture_output=True,
+        cloned = subprocess.run([VCS, "clone", "-q", "-b", "main", origin, path], capture_output=True,
                                 text=True, timeout=30)
         require(cloned.returncode == 0, "clone of origin failed: " + cloned.stderr.strip())
         return path
@@ -5165,8 +5167,9 @@ class AgentWorktreeReapTests(unittest.TestCase):
         require(run_vcs(other, *IDENT, "merge", "-q", "--ff-only", "FETCH_HEAD").returncode == 0,
                 "the second clone could not take the tree's commit onto main")
         self.commit(other, "elsewhere.txt")
-        require(run_vcs(other, "push", "-q", "origin", "main").returncode == 0,
-                "the second clone could not push main")
+        pushed = run_vcs(other, "push", "-q", "origin", "main")
+        require(pushed.returncode == 0,
+                "the second clone could not push main: " + pushed.stderr.strip())
         newest = run_vcs(other, "rev-parse", "HEAD").stdout.strip()
         require(newest in run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
                 "origin does not list the new commit")
@@ -5185,8 +5188,9 @@ class AgentWorktreeReapTests(unittest.TestCase):
         require(run_vcs(other, "checkout", "-q", "-b", "lane-stale").returncode == 0,
                 "the second clone could not branch")
         self.commit(other, "stale.txt")
-        require(run_vcs(other, "push", "-q", "origin", "lane-stale").returncode == 0,
-                "the second clone could not push lane-stale")
+        pushed = run_vcs(other, "push", "-q", "origin", "lane-stale")
+        require(pushed.returncode == 0,
+                "the second clone could not push lane-stale: " + pushed.stderr.strip())
         require(run_vcs(self.repo, "fetch", "-q", "origin").returncode == 0, "fetch failed")
         require(run_vcs(self.repo, "branch", "--no-track", "lane-stale",
                         "origin/lane-stale").returncode == 0, "could not branch lane-stale locally")
@@ -5236,8 +5240,9 @@ class AgentWorktreeReapTests(unittest.TestCase):
                 "could not add the second remote")
         other = self.second_clone()
         self.commit(other, "side.txt")
-        require(run_vcs(other, "push", "-q", side, "HEAD:refs/heads/side").returncode == 0,
-                "the second clone could not push to the second remote")
+        pushed = run_vcs(other, "push", "-q", side, "HEAD:refs/heads/side")
+        require(pushed.returncode == 0,
+                "the second clone could not push to the second remote: " + pushed.stderr.strip())
         newest = run_vcs(other, "rev-parse", "HEAD").stdout.strip()
         require(newest in run_vcs(self.repo, "ls-remote", "--heads", "side").stdout,
                 "the second remote does not list the new commit")
