@@ -541,15 +541,24 @@ class Host:
     OPEN_LIMIT = 1000  # gh pr list stops at 30 rows without --limit
 
     def open_heads(self):
-        """-> {head branch name: head sha} of the open pull requests. A failed read, or one that may be cut short, raises Stop:
-        never an empty set, which would say no PR is open."""
-        c, out = self.gh(["pr", "list", "--state", "open", "--json", "headRefName,headRefOid", "--limit", str(self.OPEN_LIMIT), *self._repo_args()], self.cwd)
+        """-> {head branch name: (head sha, PR base)} of the open pull requests. A failed read, or one that may be cut short,
+        raises Stop: never an empty set, which would say no PR is open. A head with two open PRs (a backport, or a fork's
+        branch of the same name) gets base None, so it is never one lane's own PR. Each later row is kept under name:index,
+        a key no branch can have, so its base still counts."""
+        c, out = self.gh(["pr", "list", "--state", "open", "--json", "headRefName,headRefOid,baseRefName", "--limit", str(self.OPEN_LIMIT), *self._repo_args()], self.cwd)
         if c:
             raise Stop("gh pr list failed: " + out)
         rows = json.loads(out)
         if len(rows) >= self.OPEN_LIMIT:
             raise Stop(f"gh pr list returned {len(rows)} open pull requests, the most it was asked for")
-        return {d["headRefName"]: d["headRefOid"] for d in rows}
+        heads = {}
+        for i, d in enumerate(rows):
+            name, row = d["headRefName"], (d["headRefOid"], d["baseRefName"])
+            if name in heads:
+                heads[name] = (heads[name][0], None)
+                name = f"{name}:{i}"
+            heads[name] = row
+        return heads
 
     def required_names(self):
         """The required check names. Never empty: an empty list would pass the wait without a read."""
@@ -985,19 +994,20 @@ def lane_tips(wt, base_ref, sha):
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return []
 
-def cut_lanes(root, lanes, commit, host=None, skip=(), keep=()):
+def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
     One line per lane, never a silent drop. A lane tip that no head sits at has moved or is gone. Kept, with a line why:
-    a name in `keep`; one with an open PR at another sha than its tip (none is deleted when that read fails); one whose
+    a name in `keep`; the base of an open PR (a stacked PR); one with an open PR at another sha than its tip, or at its
+    tip with another base than `base`, the batch's base (a backport); none when the open-PR read fails; one whose
     tip is in `commit` neither by id nor by patch, or whose proof could not run. A name in `skip` is no lane.
-    The delete is leased to the tip. Never fails the merge."""
+    The delete is leased to the tip. Each lane has its own try. Never fails the merge."""
     try:
         import guard_core  # hooks/guard_core.py: the one home of the cherry test
         c, out = git(root, "ls-remote", "--heads", "origin")
         if c:
             say("merge: no lane branch is deleted: the heads on origin could not be read: " + (out.splitlines() or ["?"])[-1])
             return
-        rows = [l.split("	", 1) for l in out.splitlines()]
+        rows = [l.split("\t", 1) for l in out.splitlines()]
         heads = {r[1].removeprefix("refs/heads/"): r[0] for r in rows if len(r) == 2 and r[0] in lanes}
         for tip in lanes:
             if tip not in heads.values():
@@ -1012,30 +1022,36 @@ def cut_lanes(root, lanes, commit, host=None, skip=(), keep=()):
         if not todo:
             return
         try:
-            opened = host.open_heads()  # {head name: head sha}
-        except Exception:  # unreadable: delete nothing
-            opened = None
-        if not isinstance(opened, dict):
+            opened = host.open_heads()  # {head name: (head sha, PR base)}
+            pr_bases = {pb for _, pb in opened.values()}
+        except Exception:  # unreadable or malformed: delete nothing
             opened = None
         for b in todo:
-            tip = heads[b]
-            why = None
-            if opened is None:
-                why = "the open PRs could not be read."
-            elif b in opened and opened[b] != tip:  # a PR at the tip itself is the lane's own PR, merged a moment ago
-                why = "it has an open PR."
-            else:
-                a = git(root, "merge-base", "--is-ancestor", tip, commit)[0]
-                if a == 1:
-                    proven = guard_core.branch_cherry_empty(root, commit, tip)
-                    why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
-                elif a:
-                    why = "the proof could not run."
-            if why:
-                say(f"merge: lane origin/{b}: kept: {why}")
-                continue
-            c, out = git(root, "push", "-q", "origin", f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}")
-            say(f"merge: lane origin/{b}: " + ("deleted." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+            try:
+                tip = heads[b]
+                why = None
+                if opened is None:
+                    why = "the open PRs could not be read."
+                elif b in pr_bases:
+                    why = "it is the base of an open PR."
+                elif b in opened and opened[b][0] != tip:
+                    why = "it has an open PR."
+                elif b in opened and opened[b][1] != base:  # at the tip with the batch's base: the lane's own PR, merged a moment ago
+                    why = f"its open PR at the tip has another base, {opened[b][1]}." if opened[b][1] else "it has more than one open PR."
+                else:
+                    a = git(root, "merge-base", "--is-ancestor", tip, commit)[0]
+                    if a == 1:
+                        proven = guard_core.branch_cherry_empty(root, commit, tip)
+                        why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
+                    elif a:
+                        why = "the proof could not run."
+                if why:
+                    say(f"merge: lane origin/{b}: kept: {why}")
+                    continue
+                c, out = git(root, "push", "-q", "origin", f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}")
+                say(f"merge: lane origin/{b}: " + (f"deleted at {tip[:9]}." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+            except Exception as e:  # one lane's failure never stops the next lane
+                say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
     except Exception as e:  # a lane cleanup never fails a merge that landed
         say(f"merge: the lane cleanup stopped: {type(e).__name__}: {e}")
 
@@ -1098,7 +1114,10 @@ def load_config(root, base, path):
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
     ne = lambda v: isinstance(v, str) and v.strip()
-    plain_name = lambda v: ne(v) and not re.search(r"\s", v) and not v.startswith(("refs/", "origin/"))  # a branch name as `git ls-remote` lists it
+    # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
+    # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.
+    plain_name = lambda v: (ne(v) and not re.search(r"[\s*?\[:~^\\]|\.\.|^-", v) and not v.startswith(("refs/", "origin/"))
+                            and git(root, "check-ref-format", "--branch", v) == (0, v))
     rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
     for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
                   (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
@@ -1345,7 +1364,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if m.get("deleteBranch"):
             cut_branch(root, branch, sha)
             if lanes:
-                cut_lanes(root, lanes, commit, host, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []))
+                cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []))
         return 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
