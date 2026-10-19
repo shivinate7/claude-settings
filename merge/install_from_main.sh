@@ -6,17 +6,17 @@
 # Windows (MINGW, MSYS, CYGWIN) runs install.ps1; elsewhere install.sh.
 # A step that cannot move or install prints one stderr line naming the fix and exits 1.
 #
-# The move never exposes a mix (owner ruling 2026-10-15, install-set). The new main is checked out
+# The move never exposes a mix (merge-reinstalls-from-main). The new main is checked out
 # in a fresh worktree <clone>-live-<commit>, and <clone>-live becomes a link to it by one rename of
 # the link. A reader that loads through the ~/.claude links sees the old tree or the new one. The
 # old worktree stays until the next move. The first move from a plain <clone>-live directory (as
 # install.sh makes it) renames that directory to <clone>-live-<its commit> first; between the two
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
-# writes the files one at a time (debt pin-switch-in-place-mix, a live reader can see a mix there).
+# writes the files one at a time (a live reader can see a mix there).
 # The run tests for link rights before it moves anything, so a host without them never loses the
 # pin path.
-# The run takes the install lock the installers take (owner ruling 2026-10-15, install-set): one
+# The run takes the install lock the installers take (install-hooks-whole): one
 # install at a time. It reads main's commit only once it holds the lock, so a run that waited never
 # moves the pin back to an older main. It holds the lock through the installer, and hands the
 # installer its id as CLAUDE_SETTINGS_LOCK_TOKEN; the lock file holds that id, so the installer

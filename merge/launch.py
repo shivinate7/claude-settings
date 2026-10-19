@@ -4,7 +4,7 @@
 Fetches origin main, runs merge/merge.py from a detached temporary worktree at that SHA, and
 fast-forwards the checkout only when it is on main, clean and behind. When fresh code cannot
 be proven, prints a warning block and runs the checkout's own tree. --dev runs the checkout's
-own tree and nothing else. Plan: plans/shared-merge-tool.md, "The fresh-code guard".
+own tree and nothing else. README: "The `merge` command".
 """
 import os, shutil, stat, subprocess, sys, tempfile
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: report-shape gate.
+"""At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error.
 
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.
@@ -29,8 +29,8 @@ from _transcript import is_last_human, tool_uses  # noqa: E402
 # and past the pre-subcommand options that take a value (`-C <dir>`, `--git-dir=<path>`, and
 # the rest of `GIT_OPT_WITH_VALUE`) to the subcommand it actually runs. lint/ and hooks/ land
 # side by side, both under the repo root and under ~/.claude, so the hop from one to its
-# sibling holds in both places. MEASURED: the old regex `LANDING_COMMAND.search(cmd)` read
-# the raw command text and could not tell a quoted probe string, or a heredoc body, from an
+# sibling holds in both places. A regex over
+# the raw command text cannot tell a quoted probe string, or a heredoc body, from an
 # actual git write. See decisions/predicate-is-the-act.md.
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 try:

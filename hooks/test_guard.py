@@ -41,6 +41,8 @@ import sys
 import tempfile
 import threading
 import time
+from collections import namedtuple
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -75,6 +77,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
+    "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the subagent model cap",
@@ -89,6 +92,7 @@ FAMILIES = {
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
+    "override": "the owner override pass: one act or a timed pass, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "misc": "anything outside a tagged section",
 }
@@ -181,14 +185,8 @@ def _timing_report():
             print("  %8.2f  %s" % (secs, label))
         print("  %8.2f  total" % sum(totals.values()))
 
-# A case's input carries a Windows-only shape. Each shape names the guard.py code it reaches,
-# read on 2026-10-10 (line numbers are guard.py's):
-#   a backslash: slash() L195; the PowerShell escape L307-313; is_test_rel L4903
-#   a drive letter: the subst and mapped-drive identity L1966-1970; a drive root L3170
-#   a Git Bash drive spelling, /c/...: the nt mapping in _rm_real L5724 (read 2026-10-12)
-#   .exe, .cmd, .ps1 names: L483, L894, L2628, L3296, L4997; the *.test.ps1 suites L4684
-#   NUL and $null: L824; cmd /c and cmd.exe: L2893, L3213-3220
-#   PowerShell, its verbs and taskkill: L320, L2615-2628, L2853-2913, L3933, L3966
+# A case's input carries a Windows-only shape: a backslash, a drive letter, .exe/.cmd/.ps1 names, NUL or
+# $null, cmd /c, or PowerShell with its verbs and taskkill.
 WINDOWS_SHAPE = re.compile(
     r"\\|(?<![A-Za-z])[A-Za-z]:[\\/]|\.(?:exe|cmd|ps1)\b|\bnul\b|\$null\b|\bcmd(?:\.exe)?\s+/c\b"
     r"|(?<![\w./-])/[A-Za-z](?=/|[\s;\"']|$)"
@@ -272,8 +270,7 @@ def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None,
         carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
-# ASK ALONE (incident 2026-10-14 10:51 CDT: an optional `git worktree prune`, chained with two more
-# steps, sent the whole command to the owner as one permission prompt). A command that holds a step
+# ASK ALONE. A command that holds a step
 # the guard would ASK on, chained with other steps by `&&`, `||`, `;`, `|` or a newline, is DENIED to
 # the agent, and the remedy says to run that step alone or drop it. A lone ask step still asks, and a
 # deny anywhere in the command still wins. Owner ruling 2026-10-15 (decision ask-steps-run-alone): a
@@ -388,11 +385,28 @@ BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
 # guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
 # sits on `feat` with origin/HEAD naming trunk (so main is an ordinary branch there), PUSHNOHEAD
 # has no origin/HEAD at all (the main/master fallback), PUSHDETACHED has no current branch.
+# PUSHDANGLING sits on `feat`; its origin/HEAD names origin/gone, a ref that does not exist, and
+# origin/main does exist (owner's read order 2026-10-16: origin/HEAD when it resolves, then origin/main).
 PUSHFEAT = os.path.join(ROOT, "pushfeat")
 PUSHMAIN = os.path.join(ROOT, "pushmain")
 PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
+# PUSHTRUNKLOCAL is PUSHTRUNK plus a LOCAL branch named origin/trunk. There `git symbolic-ref --short`
+# prints the ambiguous `remotes/origin/trunk`, which once blanked the default branch's name.
+PUSHTRUNKLOCAL = os.path.join(ROOT, "pushtrunklocal")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# PUSHSAMETAG sits on main and holds a TAG named main. There the short symbolic-ref read of HEAD
+# prints the ambiguous `heads/main`, which once hid the default branch from a lease push of HEAD.
+PUSHSAMETAG = os.path.join(ROOT, "pushsametag")
+PUSHDANGLING = os.path.join(ROOT, "pushdangling")
+# Where origin/HEAD does not name the branch, main AND master stay protected. PUSHNOHEADMAIN has
+# origin/main and no origin/HEAD. PUSHONLYMASTER has origin/master and no origin/HEAD (local main
+# exists, as in any checkout). PUSHUPSTREAM has two remotes: origin/HEAD names develop,
+# upstream/HEAD names main, and `feat` tracks upstream/main with push.default upstream. A push
+# reads the PUSHED remote's default branch, never origin's.
+PUSHNOHEADMAIN = os.path.join(ROOT, "pushnoheadmain")
+PUSHONLYMASTER = os.path.join(ROOT, "pushonlymaster")
+PUSHUPSTREAM = os.path.join(ROOT, "pushupstream")
 # push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
 # named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
 PUSHUP = os.path.join(ROOT, "pushup")
@@ -890,9 +904,11 @@ def build_fixtures():
     write(os.path.join(PROJ, ".claude", "hooks", "g.py"), "# hook\n")
     write(os.path.join(PROJ, "src", "app.py"), "print(1)\n")
     # The clone of claude-settings. Its own settings.json is the SOURCE the install script copies,
-    # so it must stay editable. The two marker files are what tell the clone from a config folder.
+    # so it must stay editable. The marker files tell the clone from a config folder, and the install
+    # script is the one that makes the pin, so a folder beside a clone that holds it is a pin.
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
+    write(os.path.join(CLONE, "merge", "install_from_main.sh"), "# install\n")
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
@@ -906,14 +922,13 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    # merge.py's shared_deadline (3f07b06) splits one budget across the read's three calls, so a
+    # merge.py's shared_deadline splits one budget across the read's three calls, so a
     # delay only a little past the per-call figure that used to be the cutoff no longer exhausts
     # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
     # whole shared budget on its own, whichever call absorbs the time.
     make_fake_gh(GHSLOW, "main", delay=20)
-    # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
-    # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
-    # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
+    # 3.5s per call stands in for real gh latency (3.0-3.9s): slower than the 3s MERGE_READ_TIMEOUT,
+    # nowhere near a hang.
     make_fake_gh(GHWARM, "main", delay_s=3.5)
     # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
     # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
@@ -970,9 +985,8 @@ def _build_gitmain():
     # which, so no fake will do.
     #
     # BOTH TREES CARRY REAL UNCOMMITTED WORK. The four worktree cases below are about the
-    # deny-or-ask SPLIT, and the rule now reads the subject first, so a clean tree there would
-    # pass on the empty subject and prove nothing about the split. That is the PR #30 defect in
-    # its general form: a fixture that passes for a reason it was not built to test.
+    # deny-or-ask SPLIT, and the rule reads the subject first, so a clean tree there would
+    # pass on the empty subject and prove nothing about the split.
     run_vcs(GITMAIN, "init", "-q", "-b", "main", ".")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
     write(os.path.join(GITMAIN, "docs", "DEBTS.md"), "base\n")
@@ -1250,8 +1264,9 @@ def _build_push():
     materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
-                                (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
-                                (PUSHDETACHED, "main", None)):
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
+                                (PUSHSAMETAG, "main", "main")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1264,6 +1279,67 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    run_vcs(PUSHSAMETAG, "tag", "main")
+    if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHSAMETAG needs a tag named main that "
+                 "makes the short read of HEAD print an ambiguous name")
+
+    run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
+    if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
+            or run_vcs(PUSHTRUNKLOCAL, "symbolic-ref", "-q", "--short",
+                       "refs/remotes/origin/HEAD").stdout.strip() == "origin/trunk"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHTRUNKLOCAL needs a local branch "
+                 "origin/trunk that makes `symbolic-ref --short` print an ambiguous name")
+
+    # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
+    # order gives main as the default branch.
+    make_repo(PUSHDANGLING, {"base.txt": "base\n"})
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+    run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
+    if (run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/HEAD^{commit}").returncode == 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/main^{commit}").returncode != 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHDANGLING needs a dangling origin/HEAD "
+                 "and a live origin/main")
+
+    # origin/HEAD unset, one remote branch: origin/main (PUSHNOHEADMAIN) or origin/master (PUSHONLYMASTER).
+    for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
+                                         (PUSHONLYMASTER, "master", "main")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + remote_branch + "^{commit}").returncode != 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + absent + "^{commit}").returncode == 0):
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin/%s, no origin/%s and "
+                     "no origin/HEAD" % (where, remote_branch, absent))
+
+    # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
+    make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
+    for remote, default in (("origin", "develop"), ("upstream", "main")):
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
+        run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
+                "refs/remotes/%s/%s" % (remote, default))
+    run_vcs(PUSHUPSTREAM, "checkout", "-q", "-b", "feat")
+    run_vcs(PUSHUPSTREAM, "config", "push.default", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.remote", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.merge", "refs/heads/main")
+    if (run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip()
+            != "refs/remotes/origin/develop"
+            or run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/upstream/HEAD").stdout.strip()
+            != "refs/remotes/upstream/main"
+            or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
+                 "upstream/HEAD -> main and feat tracking upstream")
 
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
@@ -1435,8 +1511,8 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND]
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHUP, PUSHUPSELF, PUSHNOUP,
-              PUSHMATCH], _build_push)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -1620,7 +1696,7 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
 # THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
-# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# stash-stack-is-a-shared-subject, the stash stack is shared). Git may omit `push` before `--`, before a pathspec after `--`, and
 # before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
 # A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
 # These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
@@ -1667,6 +1743,42 @@ sh("stash export: over an empty stack in a dirty checkout takes nothing, as on m
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
 sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
    VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+# STASH HELP FLAGS (owner ruling 2026-10-17). `stash -h` and
+# `stash --help` allow over a dirty shared tree when the flag comes first after `stash`: the flag
+# prints usage and reads no stack and no tree. Every other shape stays a push. `push -h` stays
+# denied because the ruling names the first flag only. Git's own output for `push -h` is
+# unmeasured here, and the verdict does not depend on it.
+sh("stash help: -h over real uncommitted work allows", VCS + " stash -h", "allow", cwd=SUBJDIRTY)
+sh("stash help: --help over real uncommitted work allows", VCS + " stash --help", "allow",
+   cwd=SUBJDIRTY)
+sh("stash help pin: a bare stash over real uncommitted work still denies like a push",
+   VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u over real uncommitted work still denies like a push",
+   VCS + " stash -u", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash push -h still denies, the flag is not first after stash",
+   VCS + " stash push -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -- -h denies, the -h is a pathspec",
+   VCS + " stash -- -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -u -h still denies, the flag is not first after stash",
+   VCS + " stash -u -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash # -h is a bare stash in the shell, still denies",
+   VCS + " stash # -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: a help call chained with a bare stash still denies",
+   VCS + " stash -h && " + VCS + " stash", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# A help flag with anything after it keeps main's verdict: the flag is skipped and the next word decides
+# (measured on main, 2026-10-18, these cases already pass there). The action word keeps its side. A
+# second flag, or a word that is no action, reads as a push.
+sh("stash help pin: stash -h list reads as list, allowed over real uncommitted work",
+   VCS + " stash -h list", "allow", cwd=SUBJDIRTY)
+sh("stash help pin: stash -h pop reads as pop, denied with the stack remedy",
+   VCS + " stash -h pop", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash help pin: stash --help -h reads as a push, still denies",
+   VCS + " stash --help -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash -h -h reads as a push, still denies",
+   VCS + " stash -h -h", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash help pin: stash --help x reads as a push, still denies",
+   VCS + " stash --help x", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
@@ -1705,21 +1817,15 @@ sh("subject: show reads the entry without taking it", VCS + " stash show stash@{
    cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
-# `_run_dir` BYPASSES, found in review of the token-based rewrite. Both send the command's cwd
-# to SUBJDIRTY (real, dirty) and name SUBJCLEAN (real, clean) as a directory the command text
-# ATTACHES or MENTIONS, never one it actually runs in. The real subject stays SUBJDIRTY, so both
-# still deny. MEASURED against the reviewed head: both wrongly read the subject as SUBJCLEAN and
-# ALLOWED a real `reset --hard` over the dirty tree.
+# `_run_dir` cases: the cwd is SUBJDIRTY (real, dirty) and the command only ATTACHES or MENTIONS SUBJCLEAN, so both deny.
 sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it names no tree",
    VCS + " -C" + SUBJCLEAN + " status; " + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the outer shell",
    "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
-# ---- r3-bd (try 3, the bandaid). A body `cd` that main's walk keeps as a live line: a stray `EOF` line closes
-# the body early there, so the reset after the closer runs in the dirty tree. The body never runs here, so this
-# deny is main's own reading, kept under the owner's no-hole ruling (hold-unsafe-after-round-3). Without the
-# bandaid the reset runs in the clean lane and allows. Retired by debt heredoc-run-other-path.
+# A body `cd` is a live line when a stray `EOF` closes the body early, so the reset after the closer runs in the dirty tree.
+# The body never runs, so this deny is a bandaid, kept under the no-hole ruling (hold-unsafe-after-round-3).
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -1861,14 +1967,13 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
 sh("worktree: a cd into the worktree, then the reset, asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN,
    lacks=(CHAIN_ASK,))
-# DATA, NOT A DISCARD. The same class as the model-cap data cases: a reset named inside a JSON payload
-# piped to python runs nothing in the lane, so it allows. Pinned, not red: this one passes today.
+# DATA, NOT A DISCARD. A reset named inside a JSON payload piped to python runs nothing in the lane, so it allows.
 sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
    + "' | python hooks/guard.py", "allow", cwd=GITWT)
 
-# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
-# clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
+# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decision
+# agent-worktree-discard-is-noted). In a linked worktree, a checkout or restore that names only FILES writes the
 # lane's own change to those files, so it runs with no ask. A folder, a glob, `.`, and a whole-tree
 # reset keep the ask. A shared checkout denies every form here. Each case is tagged "per-file", so
 # MUTATE_ONLY=per-file runs this block alone. The fixtures are real: fixtures/a.json,
@@ -1886,8 +1991,8 @@ sh("per-file allow: restore --staged --worktree of one modified file",
    VCS + " restore --staged --worktree f.txt", "allow", cwd=GITWT)
 # one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
 # checkout behind the lane. Chained with the cd and the python, that ask step still denies (ask-alone):
-# the python is a second real step. The old pin that the ask reason names the -C form is dropped: a
-# deny that says "run it alone" sends the agent to the lone step, whose own ask still names that form.
+# the python is a second real step.
+# The ask reason is not pinned to the -C form: the deny sends the agent to the lone step, whose own ask names it.
 chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask step",
             "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
             cwd=GITMAIN)
@@ -1935,7 +2040,7 @@ sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore
 sh("per-file branch switch: checkout main in a worktree keeps today's answer",
    VCS + " checkout main", "allow", cwd=GITWT)
 
-# THE DISCARD FORMS THAT JOIN THE RULE (decisions/stash-push-is-clone-wide.md, "These discard forms
+# THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
 # named file. The shared checkout denies each one. Each case is tagged "per-file".
 
@@ -2009,7 +2114,7 @@ sh("per-file allow: -C names the shared checkout first and a worktree last, from
    VCS + " -C " + slash(GITMAIN) + " -C " + slash(GITWT) + " checkout -- f.txt", "allow",
    cwd=NOGIT)
 
-# THE LAST THREE BULLETS (decisions/stash-push-is-clone-wide.md, "These discard forms join the
+# THE LAST THREE BULLETS (decision agent-worktree-discard-is-noted, "These discard forms join the
 # rule"): each -C, every operand of restore as a path, and a pathspec the guard cannot read. Each
 # case is tagged "per-file".
 
@@ -2049,7 +2154,7 @@ sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout 
 sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
    "ask", "shared-tree", cwd=GITWT)
 
-# SECOND SET (decisions/stash-push-is-clone-wide.md, "These discard forms join the rule"). The
+# SECOND SET (decision agent-worktree-discard-is-noted, "These discard forms join the rule"). The
 # operand before `--` is a path, and the clean file after `--` must not hide it. keep.txt is clean
 # in every tree; f.txt is dirty in the shared checkout and in the lane.
 sh("per-file deny: restore f.txt -- keep.txt in the shared checkout, operand before --",
@@ -2072,10 +2177,10 @@ sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from
    lacks=(CHAIN_ASK,))
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
-# IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
-# checkout. The lane and the shared checkout both hold f.txt dirty, so a per-file restore is an
-# allow in the lane and a deny in the shared checkout. The segment text repeats, and the segment
-# lookup finds the FIRST copy, so the second call is judged in the lane. These MUST be red today.
+# IDENTICAL SEGMENTS (decision agent-worktree-discard-is-noted, section "Named files in a linked
+# worktree"): each git call is judged in its own checkout. The lane and the shared checkout both hold
+# f.txt dirty, so a per-file restore allows in the lane and denies in the shared checkout, even when the
+# segment text repeats.
 sh("per-file deny: cd lane; restore f.txt; cd shared; the same restore f.txt, joined by ;",
    "cd " + slash(GITWT) + "; " + VCS + " restore f.txt; cd " + slash(GITMAIN) + "; "
    + VCS + " restore f.txt", "deny", "shared-tree", cwd=NOGIT)
@@ -2092,18 +2197,15 @@ sh("per-file deny: cd lane && git -C . restore f.txt && cd shared && the same -C
 sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . restore",
    "cd " + slash(GITWT) + "; " + VCS + " -C . restore f.txt; cd " + slash(GITMAIN) + "; "
    + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
-# CONTROL, green on the base. Both calls stay in the lane, so the repeat is an allow and the fix
-# must not turn a lane-only repeat into a deny.
+# CONTROL. Both calls stay in the lane, so the repeat stays an allow.
 chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same restore f.txt, a cd keeps the ask, chained it denies",
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
 # heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
-# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. Both
-# arms are RED on ae09e58: the restore is judged in the lane, not the shared checkout, so the
-# verdict is ask, not deny. A lone quote inside a shell `#` comment does not desync, so the python
-# body keeps its quote outside any comment.
+# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. A lone
+# quote inside a shell `#` comment does not desync, so the python body keeps its quote outside any comment.
 sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
    "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
    "deny", "shared-tree", cwd=GITWT)
@@ -2111,11 +2213,10 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
    "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
    + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
 
-# SYNC LOSS RULING (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
+# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
 # segments, every later segment is judged as the shared checkout, so a later discard of a dirty
 # file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
-# checkout. RED on 6c20c07: the walk's last cd is the lane, so the restore is judged there.
-# Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask step, not a
+# checkout. Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask step, not a
 # deny step. Each is chained, so each denies as a chained ask step (ask-alone).
 chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask step",
             "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
@@ -2181,8 +2282,8 @@ sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from
    cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
-# The chdir flags only name the shared checkout, so they still ask. The controls stay allowed.
+# per-file restore in the shared checkout from the lane by a spelling the guard must still read.
+# The chdir flags only name the shared checkout, so they still ask. The control stays allowed.
 _SH = slash(GITMAIN)
 for _label, _cmd in (
     ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
@@ -2190,20 +2291,16 @@ for _label, _cmd in (
 ):
     sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
        "ask", "shared-tree", cwd=GITWT)
-sh("per-file allow: late probe control, a plain restore f.txt in the lane",
-   VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
-# KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
-# The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
-# worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
+# Kill cases for mutate_guard: a quoted refspec and a quoted force in a commit message are verdicts.
 sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
    VCS + " push origin \"+main\" $'it\\'s'", "ask", cwd=GITWT)
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
    VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
 
-# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
+# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
 # not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
 # Near misses must still ask or deny, proven against real git state, not a path guess.
@@ -2271,10 +2368,16 @@ sh("heredoc: a body fed to a shell stays under inspection",
    "bash <<EOF\n" + VCS + " stash\nEOF", "deny", "shared-tree", cwd=NOGIT)
 # A DENY IN A PYTHON BODY STILL DENIES, one command or not (owner ruling 2026-10-14 22:25). The delimiter
 # `E-F` is read as the whole word. HEREDOC_HEADER reads `E` alone, so the cat case below holds no closer:
-# its body runs to the end, is dropped, and the stash after it is never judged. RED TODAY: that cat case.
+# its body runs to the end, is dropped, and the stash after it is never judged.
 sh("heredoc: a stash push in a python body still denies, in one command",
    "python3 - <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
+# An interpreter word that ends a name (`ts-node`, `node.cmd`) keeps its body in view too: INTERPRETER_HEREDOC
+# reads the word after `-` and before `.cmd`. The impeccable rule reads only shell bodies, so a stash is the probe.
+for _header in ("ts-node -", "babel-node -", "git-bash.exe -c", "node.cmd -"):
+    sh("heredoc: a stash push in a %s body still denies" % _header.split()[0],
+       _header + " <<'PY'\n" + VCS + " stash push -u -m lane\nPY", "deny", "shared-tree", cwd=GITWT,
+       carries="stash stack")
 sh("heredoc: a python heredoc with the delimiter E-F, then a stash push, still denies",
    "python3 - <<E-F\nx = 1\nE-F\n" + VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT,
    carries="stash stack")
@@ -2283,14 +2386,13 @@ sh("heredoc: a cat heredoc with the delimiter E-F, then a stash push, denies",
    carries="stash stack")
 
 
-# ---- r1-hd (review round 1), shared-tree family. H1: a python body under a backslash, single-quoted or
-# double-quoted delimiter, closed at EOF, then a stash push. The python body stays in view, so both heads deny.
+# H1: a python body under a backslash, single-quoted or double-quoted delimiter, closed at EOF,
+# then a stash push. The python body stays in view.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a stash push, denies" % _label,
        "python3 - <<" + _open + "\nx\nEOF\n" + VCS + " stash push -u -m lane", "deny", "shared-tree",
        cwd=GITWT, carries="stash stack")
 # H2: a cat heredoc piped to a shell, closer EOF-X. The stash push is in the body, which the shell runs.
-# RED ON THE LANE HEAD: the body is dropped and the push is hidden. DENY ON MAIN: main closes at EOF.
 for _shell in ("sh", "bash"):
     sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a stash push in the body, denies" % _shell,
        "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + VCS + " stash push -u -m lane\nEOF-X", "deny", "shared-tree",
@@ -2311,11 +2413,7 @@ sh("work-tree: the spaced form is read the same way",
    VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
    cwd=SUBJCLEAN)
 
-# ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
-# or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
-# header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
-# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
-# PINNED cases already deny or allow, and a fix must keep them so.
+# A git act hides behind a glued `(git` or `$(git`, or a heredoc header in quoted text, a comment or a here-string.
 for _name, _command in (
     ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
     ("a glued subshell before stash", "(" + VCS + " stash push -u -m lane)"),
@@ -2450,7 +2548,7 @@ sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", 
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
 # DATA, NOT A PRUNE. A prune named inside a JSON payload piped to python, at the same stale record,
-# changes no record, so it allows. Pinned, not red: this one passes today.
+# changes no record, so it allows.
 sh("worktree prune data: a prune named in a JSON payload piped to python, at a stale record, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " worktree prune"}})
    + "' | python hooks/guard.py", "allow", cwd=WTPRUNE)
@@ -2607,7 +2705,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 2. machine-wide kills
 FAMILY = "kill"
 
-sh("kill: pkill by pattern", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill by pattern denies", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -2779,6 +2877,40 @@ sh("kill: pgrep piped into xargs kill", "pgrep -f node | xargs kill", "deny",
 sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | xargs kill -l",
    "allow", cwd=NOGIT)
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
+
+# Four ways to stop a process by port, or every
+# process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
+# a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
+# same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
+# never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
+# a dev server holds a port, so each is a mistake it could make. `kill -KILL -1` and `kill -s KILL -1`
+# are the same hole as `kill -9 -1`; they were found while verifying the finding, not named in it.
+for _name, _command in (
+    ("a pid list made by lsof -t", "kill $(lsof -t -i :3000)"),
+    ("a pid list made by lsof -ti behind a signal", "kill -9 $(lsof -ti :3000)"),
+    ("a pid list made by lsof -t, backtick form", "kill `lsof -t -i :3000`"),
+    ("fuser -k by port", "fuser -k 3000/tcp"),
+    ("fuser -k bundled with -n", "fuser -kn tcp 3000"),
+    ("npx kill-port", "npx kill-port 3000"),
+    ("npx kill-port behind a flag", "npx --yes kill-port 3000"),
+    ("kill-port on the path", "kill-port 3000"),
+    ("every process behind a signal number", "kill -9 -1"),
+    ("every process behind a signal name", "kill -KILL -1"),
+    ("every process behind -s", "kill -s KILL -1"),
+):
+    sh("kill: " + _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: every process behind a signal number, with the root unknown", "kill -9 -1", "deny",
+   "machine-wide-kill", cwd=NOGIT, no_root=True)
+# The matchers read the COMMAND WORD, so a tool named in text, and a read of a port, stay allowed:
+# `fuser` without -k lists the holders, and kill-port in a quoted message is text.
+sh("kill: fuser without -k only lists the holders", "fuser -v 3000/tcp", "allow", cwd=NOGIT)
+sh("kill: grep for kill-port in a file is no kill", 'grep -n "kill-port" package.json', "allow",
+   cwd=NOGIT)
+# A pid list read from a file the session wrote
+# is no pattern kill, so the new `$(lsof -t ...)` match must not widen to every substitution.
+sh("kill: a pid list read from a file is no pattern kill", "kill $(cat f)", "allow", cwd=NOGIT)
+sh("kill: a commit message that names fuser -k and kill-port is no kill",
+   VCS + ' commit -m "docs: refuse fuser -k and kill-port"', "allow", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
 sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", tool="PowerShell",
    cwd=NOGIT)
@@ -2878,9 +3010,7 @@ sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "a
 # item 1). A recursive rm whose target has an unguarded variable, then "/", then a glob, another
 # variable, a slash, a quote, or the end, is refused: Claude Code's prompt shape. A literal after
 # the slash is not refused. The remedy is ${NAME:?} only when every such name is safe (the
-# allow-list), else a literal path that prints no expanded path. INCIDENT 2026-10-10 to 10-11: 7 of
-# 24 Bash prompts were rm on a $var path, 5 of them `S=...; for d in ...; do rm -rf $S/$d`.
-# Cases marked "(b) ruling changed" were re-pointed to the 2026-10-11 ruling.
+# allow-list), else a literal path that prints no expanded path.
 sh("rm-var: a loop deletes under an unguarded variable",
    "S=/tmp/x; for d in a b; do rm -rf $S/$d; done", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("rm -rf ${S:?}/${d:?}",))
@@ -2924,44 +3054,41 @@ sh("rm-var: a quoted $HOME with a literal cache path is not refused",
    'rm -rf "$HOME/.cache/x"', "allow", cwd=NOGIT)
 sh("rm-var: $TMPDIR with a literal path is not refused",
    "rm -rf $TMPDIR/foo", "allow", cwd=NOGIT)
-# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+# D is unassigned, so the remedy is the literal path.
 sh("rm-var: a quoted variable before a glob",
    'rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+# D is unassigned, so the remedy is the literal path.
 sh("rm-var: a variable before a trailing slash",
    "rm -rf $D/", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target is now a glob, which is the trigger shape. Was a literal "/build".
+# The target is a glob, which is the trigger shape.
 sh("rm-var: a braced variable with no guard",
    'rm -r "${D}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: $S is unassigned in the script, so the remedy is the literal path.
+# $S is unassigned in the script, so the remedy is the literal path.
 sh("rm-var: sh -c runs the unguarded delete",
    "sh -c 'rm -rf $S/*'", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
-# (b) ruling changed: S and d are unassigned, so the remedy is the literal path.
+# S and d are unassigned, so the remedy is the literal path.
 sh("rm-var: the short flag order counts too",
    "rm -fr $S/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}", "${d:?}"))
-# (b) ruling changed: $HOME is tainted, so the remedy is the literal path, never ${HOME:?}. The
-# target is now a variable after the slash, which is the trigger shape. Was "$HOME/.cache".
-# REVIEW FINDING: $HOME is not cleared by a ${NAME:?} guard (the docs say so), so the refusal names
-# a literal path and never offers ${HOME:?}. The reason may name either form.
+# $HOME is tainted: a ${NAME:?} guard does not clear it (the docs say so), so the refusal names a
+# literal path and never offers ${HOME:?}. The reason may name either form. The target is a variable
+# after the slash, which is the trigger shape.
 sh("rm-var: $HOME under a recursive delete names a literal path, not ${HOME:?}",
    "rm -rf $HOME/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("HOME:?", os.path.expanduser("~")))
-# (b) ruling changed: $S is unassigned in the script, so the remedy is the literal path. The
-# escaped dollar must not reach the reason. Was ${S:?}/x advice.
-# REVIEW FINDING: eval's double quotes turn \$ into $, so the remedy must be the plain guarded target
-# with no backslash before $.
+# $S is unassigned in the script, so the remedy is the literal path. The escaped dollar must not
+# reach the reason: eval's double quotes turn \$ into $, so the remedy must be the plain guarded
+# target with no backslash before $.
 sh("rm-var: eval with an escaped dollar prints no backslash",
    'eval "rm -rf \\$S/*"', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("\\$", "${S:?}"))
 # Scanner cases (rule building-scanner-respects-strings): a comment opener, a double slash, a lone
 # quote, and a newline inside a quoted string must not hide the live rm that follows.
-# (b) ruling changed on all five: S is now assigned a literal and the target is $S/*, so the
-# allow-list gives ${S:?} advice. Was $S/x, which the trigger shape no longer covers.
+# S is assigned a literal and the target is $S/*, so the allow-list gives ${S:?} advice.
 sh("rm-var: a hash inside a string does not hide the delete",
    'S=/tmp/x; echo "#"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("rm -rf ${S:?}/*",))
@@ -3045,25 +3172,21 @@ sh("rm-var: a git toplevel value names a literal path",
 sh("rm-var: a literal value that resolves to the cwd names a literal path",
    'D=%s; rm -rf "$D"/*' % NOGIT, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", NOGIT))
-# Named limits, taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
+# Taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
 # from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
-# when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
-# moved to a glob is (b) ruling changed: the trigger shape is now tested.
+# when guarded. The reason never names ${NAME:?} advice for that name.
 sh("rm-var: a guarded $HOME target is refused for a literal path",
    "rm -rf ${HOME:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
 sh("rm-var: a quoted guarded $HOME before a glob is refused for a literal path",
    'rm -rf "${HOME:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: $PWD is refused and its remedy names no ${PWD:?} advice",
    'rm -rf "$PWD"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${PWD:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} advice",
    'rm -rf "${PWD:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${PWD:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 # ---- rm-var taint spellings, one table against the assigned-value reader. A delete whose variable is
 # set from pwd, HOME or ~ (in any substitution, loop or quoting) is tainted, so its refusal names the
 # literal path and never ${NAME:?}. guard_rm_var.rm_var_hits reads the bindings (_rm_values) and the
@@ -3111,86 +3234,69 @@ def rm_var_taint_reader_case():
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
-# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+# Taint (decision rm-on-a-variable-needs-a-guard): a pwd command in $(...) or backticks taints,
+# with any flags or path.
 sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
    'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a loop over $(pwd -P) is refused for a literal path, not ${D:?}",
    'for D in $(pwd -P); do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays allowed",
    'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-# A guarded variable set to a literal path passes.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, derived forms: a variable whose assigned or loop value holds ~, HOME, PWD or pwd is
-# tainted, so its refusal names a literal path, never ${D:?} advice.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+# Derived forms (decision rm-on-a-variable-needs-a-guard): a variable whose assigned or loop value
+# holds ~, HOME, PWD or pwd is tainted, so its refusal names a literal path, never ${D:?} advice.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
    "D=${X:-$HOME}; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
-# (b) ruling changed: $HOME/x is not the trigger shape any more, so it is not refused. The
-# literal-path case for a $HOME target is "$HOME/$d" above.
+# $HOME/x is not the trigger shape, so it is not refused. The literal-path case for a $HOME
+# target is "$HOME/$d" above.
 sh("rm-var: $HOME joined to a literal path is not refused",
    "rm -rf $HOME/x", "allow", cwd=NOGIT)
-# (b) ruling changed: a mixed command names HOME (literal-path remedy) and a safe S. Whether the
-# refusal also prints ${S:?} advice is not pinned (see Input Needed).
+# Whether the refusal also prints ${S:?} advice is not pinned.
 sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
    "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",))
-# Ruling changed (rm-on-a-variable-needs-a-guard, named limits). Taint comes only from a real
-# expansion. A literal value that spells pwd or HOME is not one.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
-sh("rm-var: a literal value that spells pwd is not tainted",
-   'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+# Taint comes only from a real expansion (decision rm-on-a-variable-needs-a-guard). A literal
+# value that spells pwd or HOME is not one.
 sh("rm-var: a literal HOME inside a path is not tainted",
    'D=/tmp/HOME/x; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# (b) ruling changed: --dir=~ is a flag, not an assignment, so $dir is a set literal and gets its
-# own ${dir:?} advice. The target moved to a glob.
 sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its own advice",
    'make --dir=~ && dir=/tmp/b; rm -rf "$dir"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=('rm -rf "${dir:?}"/*',), lacks=("literal path",))
 sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
-# Named limits, substitution spans. The assigned-value reader cuts the value at ; & | even inside
-# $(...) or backticks, so a pwd after the cut is missed. Each case must deny with the literal-path
-# reason. Each case whose target moved to a glob is (b) ruling changed.
+# Substitution spans (decision rm-on-a-variable-needs-a-guard). The assigned-value reader cuts the
+# value at ; & | even inside $(...) or backticks, so a pwd after the cut is missed. Each case must
+# deny with the literal-path reason.
 sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
    'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
-# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
-# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
-# with the literal-path reason and never name ${D:?}.
+# Taint (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an expansion of HOME or
+# PWD, anywhere in the command taints every variable it assigns. The guard reads no $(…) span, so
+# quotes and ; inside the span cannot hide the source. Each case must deny with the literal-path
+# reason and never name ${D:?}.
 sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
    'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
    'D=$(x=1; echo $HOME); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 # pwd as an argument is text, not a command word, so the value stays a literal and passes.
-# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
-# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
-# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
-# value whose path is the home folder or the cwd, so the refusal names the literal path and never
-# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard). Each case below has an unsafe binding,
+# a value the guard cannot read, or a value whose path is the home folder or the cwd, so the
+# refusal names the literal path and never ${NAME:?}. Each case must be refused. A pass, or a
+# crash that exits 0, is a FAIL.
 HOME = os.path.expanduser("~")
 sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
    'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
@@ -3236,9 +3342,9 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
-# Ruling item 1 (decisions/rm-on-a-variable-needs-a-guard.md): a binding written AFTER a wrapper
+# Ruling item 1 (decision rm-on-a-variable-needs-a-guard): a binding written AFTER a wrapper
 # still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
-# never ${NAME:?}. Red on 50d9f57: the `later` scan sees only the inner text of the wrapper.
+# never ${NAME:?}.
 sh("rm-var: a binding after sh -c names a literal path, not ${OLDPWD:?}",
    "sh -c 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${OLDPWD:?}",))
@@ -3249,17 +3355,16 @@ sh("rm-var: a binding after eval names a literal path, not ${OLDPWD:?}",
    "eval 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${OLDPWD:?}",))
 # Ruling item 1, home's parents: the parent of home holds home, so a glob under it can empty home.
-# The parent is read from HOME, never fixed, so the case holds on any account. Red on 50d9f57: the
-# target /Users/* is not `home` itself, so the name gets ${D:?}.
+# The parent is read from HOME, never fixed, so the case holds on any account.
 PARENT_OF_HOME = os.path.dirname(HOME)
 sh("rm-var: a variable set to the parent of home names a literal path, not ${D:?}",
    "D=%s; rm -rf $D/*" % PARENT_OF_HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 
 # REDIRECT SHAPES. Claude Code's built-in rm check lost its safeguard when the command also redirected
-# to ~ or a wildcard (changelog 2.1.287, Oct 2026). Each pair is the plain command (a control) and the
-# same command with a redirect. A redirect must not change the verdict the plain command gets. Probed on
-# main (adf0bd7): every shape matched its plain verdict, so these pin that and start green.
+# to ~ or a wildcard (changelog 2.1.287, Oct 2026). Each redirect case has a plain-command control, in
+# this block or in the rm-var and delete sections. A redirect must not change the verdict the plain
+# command gets.
 sh("rm-var redirect: plain $S/x is not refused",
    "rm -rf $S/x", "allow", cwd=NOGIT)
 sh("rm-var redirect: $S/x with a redirect to ~ is not refused",
@@ -3268,9 +3373,6 @@ sh("rm-var redirect: plain quoted $S is not refused",
    'rm -rf "$S"', "allow", cwd=NOGIT)
 sh("rm-var redirect: quoted $S with a stderr redirect to ~ is not refused",
    'rm -rf "$S" 2> ~/err.txt', "allow", cwd=NOGIT)
-sh("rm-var redirect: plain $S/* is refused",
-   "rm -rf $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=("literal path",), lacks=("${S:?}",))
 sh("rm-var redirect: $S/* with an append to ~ is refused",
    "rm -rf $S/* >> ~/.cache/log", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
@@ -3311,15 +3413,13 @@ sh("rm-var redirect: PowerShell plain $S\\* is not refused",
    "Remove-Item -Recurse -Force $S\\*", "allow", tool="PowerShell", cwd=NOGIT)
 sh("rm-var redirect: PowerShell $S\\* with a redirect to $HOME is not refused",
    "Remove-Item -Recurse -Force $S\\* > $HOME\\log", "allow", tool="PowerShell", cwd=NOGIT)
-sh("rm-var redirect: PowerShell plain drive root is refused",
-   "Remove-Item -Recurse -Force C:\\", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
 sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
    "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
-# PR #314 re-review: false alarms. Each one only reads or writes a note, so each is allowed.
+# False alarms: each one only reads or writes a note, so each is allowed.
 sh("playwright: grep for the assignment only reads",
    'grep -rn "PLAYWRIGHT_BROWSERS_PATH=" hooks/ 2>/dev/null', "allow", cwd=NOGIT)
 sh("playwright: a note that mentions the assignment is allowed",
@@ -3330,7 +3430,7 @@ sh("playwright: grep for the PowerShell setter only reads",
    'grep "Set-Item env:PLAYWRIGHT_BROWSERS_PATH" -r .', "allow", cwd=NOGIT)
 sh("playwright: a doc heredoc whose body mentions an assignment is allowed",
    "cat > README.md <<'EOF'\nset PLAYWRIGHT_BROWSERS_PATH=/x to override\nEOF", "allow", cwd=NOGIT)
-# PR #314 third review: false alarms, each only writes a log or reads a docs folder.
+# False alarms: each one only writes a log or reads a docs folder.
 sh("playwright: printf into a log names the variable and is allowed",
    "printf 'PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$P\" >> run.log", "allow", cwd=NOGIT)
 sh("playwright: echo into a log names the variable and is allowed",
@@ -3354,18 +3454,18 @@ sh("playwright: Select-String reads the name, allowed",
 sh("playwright: Select-String searches for the setter text with an equals sign, allowed",
    "Select-String -Pattern '$env:PLAYWRIGHT_BROWSERS_PATH = ' f.ps1", "allow",
    tool="PowerShell", cwd=NOGIT)
-# Coordinator ruling: an escaped backslash before a newline is not a continuation, so the kill
+# An escaped backslash before a newline is not a continuation, so the kill
 # rule still sees the pkill on the next line. A variable given to node as an argument is no setting.
 sh("kill: an escaped backslash before a newline is not a continuation, pkill still denies",
    "echo \\\\\npkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("playwright: cross-env passes the variable to node as an argument, allowed",
    "cross-env FOO=1 node x.js PLAYWRIGHT_BROWSERS_PATH=/x", "allow", cwd=NOGIT)
-# PR #314 final review. A backslash before a newline is a PowerShell path end, not a continuation,
-# so each line is its own command. split_segments joined them, and the setter after it went unseen.
+# A backslash before a newline is a PowerShell path end, not a continuation,
+# so each line is its own command.
 sh("control: a PowerShell path ending in a backslash, then a force push on the next line, denies",
    "Set-Location C:\\tmp\\\ngit push -f origin feat", "deny", "force-push", tool="PowerShell",
    cwd=PUSHFEAT)
-# PR #314 final review. The setter text sits only inside a quoted argument of gh, a command that
+# The setter text sits only inside a quoted argument of gh, a command that
 # sets nothing. pwsh -c is a PowerShell shell, so the whole segment reaches PLAYWRIGHT_PS_SET.
 sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowed",
    r'''pwsh -c "gh pr comment 314 --body 'Do not set \$env:PLAYWRIGHT_BROWSERS_PATH = x'"''',
@@ -3479,7 +3579,7 @@ sh("playwright-install: npm -w takes a workspace name, its install is allowed",
    "npm -w playwright install", "allow", cwd=NOGIT)
 sh("playwright-install: npm --workspace takes a workspace name, its install is allowed",
    "npm --workspace playwright install", "allow", cwd=NOGIT)
-# Round 4 allows, main session. A package manager's own install, a flag's value, and a test
+# Allows: a package manager's own install, a flag's value, and a test
 # filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
 sh("playwright-install: pnpm -C takes a directory, its install is allowed",
    "pnpm -C playwright install", "allow", cwd=NOGIT)
@@ -3630,13 +3730,7 @@ sh("detached: a quoted mention of the shape prints text and starts nothing",
 sh("detached: a grep for Start-Job is not a call to it",
    'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
 
-# ---- a backslash before `&&`, the kill family (lane swn-pwsh-escape). In bash `\&` is a literal
-# `&`, and the second `&` starts a background job, so bash runs the taskkill after it. Round 2 made
-# `\&` text, and the split then never ends a segment at that lone `&`, so the kill is judged inside
-# one segment and allowed. The deny cases are RED on ce4ac8c and deny on a92d509, where the old split
-# cut at `&&`. The PowerShell case is a PIN: PowerShell has no such escape, so it denies on both.
-# The `\;` case is a CONTROL: bash reads `\;` as text, so taskkill is an argument of cd and runs
-# nothing. It allows on ce4ac8c and denies on a92d509, where the old split cut at the `;`.
+# Bash reads `\&` as a literal `&` (the second `&` backgrounds) and `\;` as text; PowerShell has no such escape.
 sh("kill: a bash cd with a backslash before && hides taskkill /IM, denies",
    r"cd C:\x\&& taskkill /F /IM node.exe", "deny", rule="machine-wide-kill", cwd=NOGIT)
 sh("kill: a bash cmd /c with a backslash before && hides taskkill /IM, denies",
@@ -3654,25 +3748,20 @@ sh("heredoc: a machine-wide kill in a python body still denies, in one command",
    "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
 
 
-# ---- r1-hd (review round 1), kill family. H1: a python body under a backslash, single-quoted or
-# double-quoted delimiter, closed at EOF, then a kill. Both heads deny: the python body stays in view.
+# H1: a python body under a backslash, single-quoted or double-quoted delimiter, closed at EOF,
+# then a kill. The python body stays in view.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("heredoc: r1-hd a python heredoc, %s delimiter closed at EOF, then a kill, denies" % _label,
        "python3 - <<" + _open + "\nx\nEOF\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
 # H2: a cat heredoc piped to a shell, closer EOF-X. The kill is in the body, which the shell runs.
-# RED ON THE LANE HEAD: the body is dropped. DENY ON MAIN: main closes at EOF, so the kill reads as a line.
 for _shell in ("sh", "bash"):
     sh("heredoc: r1-hd a cat heredoc piped to %s, closer EOF-X, a kill in the body, denies" % _shell,
        "cat <<EOF-X | " + _shell + "\nx\nEOF\npkill -f node\nEOF-X", "deny", "machine-wide-kill", cwd=PROJ)
-# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a kill in its body.
+# A plain cat heredoc piped to sh, with a kill in its body.
 sh("heredoc: r1-hd a plain cat heredoc piped to sh, a kill in the body, denies (red on main too)",
    "cat <<EOF | sh\npkill -f node\nEOF", "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- r2-hd (review round 2), kill family. A HOLE MAIN LACKS. A heredoc opened inside `$( )`, `<( )` or
-# backticks, or on a line that feeds eval, source, `.` or xargs, reads as a shell body. Each form names a
-# delimiter main misreads (`'EOF-1'`, `\EOF`, `E-F`), so main keeps the body in view and denies. The lane
-# head reads the delimiter as bash does, drops the body, and allows. RED ON THE LANE HEAD, DENY ON MAIN.
-# Measured on main (4112319): main denies every payload of these three forms.
+# A heredoc opened inside `$( )`, `<( )` or backticks, or on a line feeding eval, source, `.` or xargs, is a shell body.
 R2_FORMS = (
     ("source with <( ), an escaped delimiter", "source <(cat <<\\EOF\nBODY\nEOF\n)"),
     ("a heredoc piped to xargs", "cat <<'EOF-1' | xargs -I{} sh -c '{}'\nBODY\nEOF-1"),
@@ -3685,16 +3774,15 @@ R2_EVAL_FORM = ("eval with $( )", "eval \"$(cat <<'EOF-1'\nBODY\nEOF-1\n)\"")
 for _label, _form in R2_FORMS:
     sh("heredoc: r2-hd a kill in the body of a heredoc in %s, denies" % _label,
        _form.replace("BODY", "pkill -f node"), "deny", "machine-wide-kill", cwd=PROJ)
-# SCANNERS (building-scanner-respects-strings), r2-hd. A hash inside double quotes is text, so the header
+# SCANNERS (building-scanner-respects-strings). A hash inside double quotes is text, so the header
 # after it is still a header. A lone apostrophe in a body line is text, so the kill after it is in a body.
 sh("heredoc: r2-hd a hash inside double quotes, then a source heredoc with a kill in the body, denies",
    'echo "a # b" && source <(cat <<\\EOF\npkill -f node\nEOF\n)', "deny", "machine-wide-kill", cwd=PROJ)
 sh("heredoc: r2-hd a lone apostrophe in the body of a source heredoc, then a kill, denies",
    "source <(cat <<\\EOF\necho don't\npkill -f node\nEOF\n)", "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- r3-bd (try 3, the bandaid), kill family. A shell runs each body. Main keeps it in view: its header is one it
-# cannot read (`'EOF-1'`, `\EOF`), or it reads a shorter word that a stray line closes on (`EOF-1` as `EOF`, `"E"OF`
-# as `E`). Head without the bandaid drops the body, so each allows. Each denies on main too.
+# A shell runs each body, and its header is one a reader can misread: a delimiter it cannot read (`'EOF-1'`,
+# `\EOF`), or a shorter word that a stray line closes on (`EOF-1` as `EOF`, `"E"OF` as `E`).
 R3_KILL = "pkill -f node"
 for _label, _form in (
         ("a write then sh, delimiter 'EOF-1'",
@@ -3714,11 +3802,8 @@ for _label, _form in (
 ):
     sh("heredoc r3-bd: a kill in the body of %s, denies" % _label, _form, "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- r3-fed (try 3, `_FED_SHELL`), kill family. eval, source and `.` run a heredoc that a `<( )`, `$( )` or
-# backtick reads, and bash executes its body. The plain delimiter is one no bandaid reads, so main allows these (a
-# hole main lacks, not a parity pin). Head denies. Removing _FED_SHELL turns each red. Not pinned: `source $( )`
-# and `. ` backticks (the output is a file name, so no body runs) and the quoted `"$( )"` kill (allowed on head
-# and main; see the eval form in the r2-hd block above).
+# eval, source and `.` run a heredoc that a `<( )`, `$( )` or backtick reads, and bash executes its body.
+# Not pinned: `source $( )`, because its output is a file name, so no body runs.
 for _label, _form in (
         ("source <( )", "source <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
         ("dot <( )", ". <(cat <<EOF\n" + R3_KILL + "\nEOF\n)"),
@@ -3728,12 +3813,7 @@ for _label, _form in (
     sh("heredoc r3-fed: a kill in the body of a heredoc that %s runs, denies" % _label, _form,
        "deny", "machine-wide-kill", cwd=PROJ)
 
-# ---- heredoc-hole (round 3, lane heredoc-one-step). Two heredocs in one command. The FIRST delimiter is one that
-# main reads SHORT: `E-F` and `"E"OF` and `E'OF'` as `E`, `EOF-1`, `EOF.1` and `EOF{` as `EOF`. Main closes the first body
-# at a line the second body holds, so the payload lands outside every body and main denies it. The lane reads each
-# delimiter whole, keeps the payload in the second body, and that body is a `cat <<EOF2 > x.sh` that `sh x.sh` runs.
-# The lane allows it. Main denies only by that misread: one such body alone allows on main too. So each case is RED on
-# the lane head and DENY on origin/main. One case per delimiter shape. The payload is a kill or a wsl shutdown.
+# Two heredocs in one command: the first delimiter must be read whole, or the payload lands in a body that `sh x.sh` runs.
 HOLE_WSL = "wsl" + " --shutdown"
 for _label, _open, _close, _mw in (
         ("E-F", "E-F", "E-F", "E"),
@@ -3757,8 +3837,7 @@ for _label, _open, _close, _mw in (
 # =========================================================================== 2c. live streams
 FAMILY = "stream"
 #
-# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
-# it outlives the turn and the agent that started it.
+# A follow flag never ends on its own, so it outlives the turn and the agent that started it.
 
 sh("stream: tail -f never ends", "tail -f app.log", "deny", "live-stream", cwd=NOGIT)
 sh("stream: tail -F retries across rotation", "tail -F app.log", "deny", "live-stream", cwd=NOGIT)
@@ -3773,11 +3852,100 @@ sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=N
 sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", "allow",
    tool="PowerShell", cwd=NOGIT)
 
-# BLAST RADIUS of the loop-keyword fix: `live_stream_hit` already reads every token of its
-# segment, not only the first, so a follow flag inside a loop's do-block denied before this fix
-# too. Pinned here so a later change cannot narrow that read back to command position only.
+# A follow flag in a loop's do-block is still the command word's own flag: the loop keyword and the
+# wrappers are skipped before the command word is read. Pinned so reading the command word, not every
+# token, does not let the do-block through.
 sh("stream: tail -f inside a loop's do-block denies unchanged",
    "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
+
+# The rule reads every token of a segment, not the
+# command word, so a command that only NAMES `tail` or `Get-Content` before a flag is a false alarm:
+# a commit message or a note that names the refused form, and `grep ... tail -F`, where -F is grep's
+# fixed-string flag. Claude writes the first two whenever it works on this rule.
+for _name, _command in (
+    ("a commit message that names tail -f", VCS + ' commit -m "Refuse tail -f in the guard"'),
+    ("a commit message that names Get-Content -Wait",
+     VCS + ' commit -m "Refuse Get-Content -Wait on logs"'),
+    ("an echo that names tail -f", 'echo "never tail -f app.log"'),
+    ("grep for tail with -F after the pattern", "grep -rn tail -F hooks/"),
+):
+    sh("stream: false alarm: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
+# A follow behind a wrapper, a path or a later step stays refused (`bash -c` and `ssh host` forms are not pinned).
+for _name, _command in (
+    ("behind sudo", "sudo tail -f app.log"),
+    ("behind env and an assignment", "env X=1 tail -f app.log"),
+    ("by absolute path", "/usr/bin/tail -f app.log"),
+    ("as the second step", "cd logs && tail -f app.log"),
+):
+    sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
+
+# A follow run via a container or pod exec, find -exec, a remote or nested shell, or a wrapper (stdbuf, flock, ...).
+for _name, _command in (
+    ("behind docker exec", "docker exec c tail -f x"),
+    ("behind podman exec", "podman exec c tail -f x"),
+    ("behind kubectl exec and --", "kubectl exec p -- tail -f x"),
+    ("behind find -exec", "find . -exec tail -f {} \\;"),
+    ("behind ssh and docker exec", "ssh host docker exec c tail -f x"),
+    ("behind sh -c around ssh", "sh -c 'ssh host tail -f x'"),
+    ("behind stdbuf", "stdbuf -oL tail -f x"),
+    ("behind unbuffer", "unbuffer tail -f x"),
+    ("behind caffeinate", "caffeinate tail -f x"),
+    ("behind flock", "flock F tail -f x"),
+):
+    sh("stream: tail -f " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# A quoted pattern that names the follow is a search, not a follow.
+sh("stream: grep for the text tail -f in a file is no follow", "grep 'tail -f' notes.txt", "allow",
+   cwd=NOGIT)
+
+# A wrapper with options or a subcommand ahead of the command (`docker run --rm alpine`), or no skip rule (watch, uv run).
+for _name, _command in (
+    ("behind docker run with an option", "docker run --rm alpine tail -f /dev/null"),
+    ("behind docker-compose exec", "docker-compose exec web tail -f log"),
+    ("behind docker compose run", "docker compose run web tail -f log"),
+    ("behind docker compose -f exec", "docker compose -f x.yml exec web tail -f log"),
+    ("behind docker --context exec", "docker --context x exec c tail -f x"),
+    ("behind kubectl run and --", "kubectl run x --image=a -- tail -f /dev/null"),
+    ("behind kubectl exec without --", "kubectl exec pod tail -f x"),
+    ("behind gtimeout", "gtimeout 5 tail -f x"),
+    ("behind watch", "watch tail -f x"),
+    ("behind uv run", "uv run tail -f x"),
+):
+    sh("stream: tail -f " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# A wrapper around a bounded command, and text that names the follow, are no follow.
+for _name, _command in (
+    ("an echo that names the follow", "echo 'tail -f log'"),
+    ("docker run around a bounded command", "docker run --rm alpine ls"),
+    ("uv run around a bounded command", "uv run pytest"),
+    ("kubectl exec around a bounded command", "kubectl exec pod -- cat log"),
+):
+    sh("stream: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
+
+# SCANNER PINS (rule building-scanner-respects-strings) for the fallback that reads a segment shlex
+# cannot parse, word by word (guard_stream.py, live_stream_hit). Three constructs a scanner can
+# get wrong: a comment opener inside quotes, a quoted string over several lines, and a lone
+# apostrophe in plain text (the text of a shell line that is not a quoted string at all).
+# DENY: each construct sits ahead of a real follow, and none may hide it. The `it's`
+# rows leave the segment unparseable, so the fallback reads them.
+for _name, _command in (
+    ("a # inside quotes ahead of it", 'echo "a # b"; tail -f app.log'),
+    ("a # inside quotes and a lone apostrophe ahead of it", 'echo "# x" it\'s; tail -f app.log'),
+    ("a // inside quotes ahead of it", 'echo "a // b"; tail -f app.log'),
+    ("a /* inside quotes ahead of it", 'echo "/* x"; tail -f app.log'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\ntail -f app.log'),
+    ("a multi-line quote and a lone apostrophe ahead of it",
+     'echo "a\nb" it\'s\ntail -f app.log'),
+    ("a lone apostrophe ahead of it", "echo don't; tail -f app.log"),
+    ("a lone apostrophe in a trailing comment", "tail -f app.log # don't"),
+):
+    sh("stream: tail -f behind " + _name + " denies", _command, "deny", "live-stream", cwd=NOGIT)
+# ALLOW: the same constructs around text that follows nothing.
+for _name, _command in (
+    ("a # inside quotes", 'echo "# tail -f app.log"'),
+    ("a multi-line quote", 'echo "first line\ntail -f app.log\nlast line"'),
+    ("a lone apostrophe in text", "echo it's fine"),
+    ("a lone apostrophe in a trailing comment", "tail -n 5 app.log # don't"),
+):
+    sh("stream: scanner: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
 
 
 # =========================================================================== 2c. shell traps
@@ -3911,7 +4079,7 @@ sh("waiter: a loop inside a heredoc body is allowed",
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 
-# Review round 1 on ca4f96d (FAIL). Each refused shape below waits by repeating or by a long
+# Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
 # A bare `&` job is refused first by detached-launch (rule 2b), so the waiter rule is not reached
 # for these two. They pin the refusal; the rule named is the one that fires.
@@ -3944,7 +4112,7 @@ sh("waiter: gh issue list --label watch is allowed", "gh issue list --label watc
 sh("waiter: gh issue create --title watch is allowed", "gh issue create --title watch", "allow",
    cwd=NOGIT)
 
-# Review round 2 on 3f2b435. `-w` is `--web` for `gh pr checks` (open the browser), and
+# `-w` is `--web` for `gh pr checks` (open the browser), and
 # `--watch` has no short form, so `-w` there is not a watcher. A repo flag (`-R o/r`) sits
 # between the command group and its verb, so the verb is not the token after `gh`.
 sh("waiter: gh pr checks -w, --web, in the foreground is allowed", "gh pr checks 5 -w", "allow",
@@ -3989,12 +4157,10 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
 # session waits on CI through the CI-wake hook (it fires after `gh pr ready`; a push starts
 # none). Incident: one `gh run watch` made 131 API calls in 60 s (MEASURED 2026-10-16 06:28
 # UTC), and merges failed on GitHub limits all night. The ruling names `gh run watch` only, so
-# `gh pr checks --watch` stays allowed in the background, as on main.
+# `gh pr checks --watch` stays allowed in the background.
 # Rule name: waiter. Case names start "ci-wait:", so MUTATE_ONLY=ci-wait picks them out.
-# Red on the code before the change: the background deny cases (the guard allows each one), and the
-# two remedy checks (both remedy texts name `gh run watch <id> --exit-status`). Green before and
-# after: the foreground deny cases, the read-only allow cases, and the data cases. They pin that the
-# change refuses no read and no text that only names the command.
+# The read-only allow cases and the data cases pin that no read and no text that only names the
+# command is refused.
 # A refusal's reason may name no pause (`sleep` is in FORBIDDEN_IN_A_REASON) and no settings file.
 CI_WAIT_REMEDY = "CI-wake"  # the remedy names the CI-wake notice
 # The remedy never names the refused call, its flag, or bin/merge: the ruling says Claude's own wait
@@ -4082,9 +4248,8 @@ for _label, _command in (
 # A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is no
 # long-runner case either: the waiter rule refuses it under run_in_background, with or without a
 # note (decision ci-wait-reads-run-status, "Claude's own waits").
-# Rule name: background-end. The deny cases are the red proof on the code before the rule. The allow
-# cases pass on that code too. They pin that the rule refuses no finished job, and that a note does
-# not unlock a rule that already refuses (`tail -f`, live-stream).
+# Rule name: background-end. The allow cases pin that the rule refuses no finished job, and that a
+# note does not unlock a rule that already refuses (`tail -f`, live-stream).
 
 add("background-end: a python http.server under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
@@ -4134,8 +4299,6 @@ add("background-end: a build under run_in_background needs no note, allowed", "a
     cwd=NOGIT, command="npm run build", run_in_background=True)
 add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
-add("background-end: gh run watch under run_in_background is refused by the waiter rule", "deny",
-    "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True)
 add("background-end: a note does not unlock gh run watch, the waiter rule still refuses it",
     "deny", "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True,
     description="until: run 7 ends")
@@ -4148,9 +4311,8 @@ add("background-end: a server named in a multi-line quoted string is data, allow
 add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
     command="# start npm run dev later\necho ready", run_in_background=True)
 
-# Shapes the rule misses on 4d477a4, so each deny below is red there. Each starts a server or
-# watcher that never ends on its own, and each has no note: a flag before the script name, a
-# Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
+# Each starts a server or watcher that never ends on its own, and has no note: a flag before the
+# script name, a Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
 add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="npm --prefix web run dev", run_in_background=True)
@@ -4178,8 +4340,7 @@ add("background-end: py -3 -m http.server under run_in_background with no note i
 add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="cmd /c npm run dev", run_in_background=True)
-# Lane swn-pwsh-escape, review round 2, item 3: a backslash before ; hides the server in a cmd /c
-# script. RED when guard_stream's cmd /c tail (guard_stream:319) is read as bash text.
+# A backslash before ; hides the server in a cmd /c script when the cmd /c tail is read as bash text.
 add("background-end: a cmd /c with a backslash before ; hides npm run dev under run_in_background, denies",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command=r'cmd /c "echo C:\x\; npm run dev"', run_in_background=True)
@@ -4211,9 +4372,7 @@ add("background-end: a server named inside a bash -c string is data, allowed", "
     cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
 
 
-# The deny cases are the red proof on the code before this change: each starts a server or watcher the
-# roster does not name yet. The `--watch=false` and `--watch false` allow cases are red there too, since
-# the guard reads `--watch` in any position. `npm run build-docs` is a pin, allowed before and after.
+# Each deny starts a server or watcher the roster lacked. `--watch=false`, `--watch false`, `npm run build-docs` allow.
 DEVSERVER_DENY = ("background-end", "until:")
 
 add("background-end: bun --watch server.ts under run_in_background with no note is refused",
@@ -4273,12 +4432,7 @@ add("background-end: npm test -- --watch=false under run_in_background needs no 
 add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build-docs", run_in_background=True)
 
-# ---- a backslash before `&&` or `;`, the stream family (lane swn-pwsh-escape). The same cause as
-# the kill block: bash reads `\&` and `\;` as text, so the server after them is one segment and the
-# background-end check misses it. The bash `cd ... && npm run dev` and the bash `pwsh -c` forms are
-# RED on ce4ac8c and deny on a92d509. The PowerShell form is a PIN: it denies on both heads, so the
-# brief's PowerShell shape never reproduced. The live-stream rule reads a whole segment, so it is
-# not moved by the split; that is why the PowerShell `tail -f` cases stay green as well.
+# Bash reads `\&` and `\;` as text, so the server after them is one segment that the background-end check must still see.
 add("background-end: a bash cd with a backslash before && hides npm run dev, denies",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
     command=r"cd C:\x\&& npm run dev", run_in_background=True)
@@ -4294,9 +4448,8 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 #
 # Owner ruling 2026-10-13 15:20: an agent may run a fixed list of Linux test commands through WSL.
 # Allowed: `wsl -e` or `wsl --exec` with a test runner and test paths, from any role. Refused: every
-# other WSL form. A refusal's reason names WSL_RULE. The allow cases pass on the code before the
-# rule, because the guard allows every WSL form today (no WSL token in hooks/guard*.py). They pin
-# the allowed forms so the rule cannot narrow them. The deny cases are the red proof.
+# other WSL form. A refusal's reason names WSL_RULE. The allow cases pin the allowed forms so the
+# rule cannot narrow them.
 FAMILY = "wsl"
 #
 WSL_RULE = "wsl-allow-list"
@@ -4319,6 +4472,33 @@ sh("wsl: wrapped by verdict, node",
    "python bin/verdict wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+
+# Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
+# flag (CI runs the mod tests this way). Plain node runs only its
+# first file, and the rest become argv. So the plain form takes exactly one literal test path. A glob
+# or a second file gives a false green. `--test` keeps its glob and multi-file form.
+sh("wsl: a plain node test file, no --test flag",
+   "wsl -e node mods/x/x.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a glob in a plain node test path is refused",
+   "wsl -e node mods/*/*.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: two test files in a plain node call are refused",
+   "wsl -e node mods/a/a.test.mjs mods/b/b.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test file then a script in a plain node call is refused",
+   "wsl -e node x.test.mjs other.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a flag before the test file in a plain node call is refused",
+   "wsl -e node --inspect x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a --test node path is allowed",
+   "wsl -e node --test mods/*/*.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a plain node script that is not a test",
+   "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node file whose name only starts like a test",
+   "wsl -e node x.test.mjs.evil", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: plain node with an eval flag",
+   'wsl -e node -e "console.log(1)"', "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that climbs",
+   "wsl -e node ../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a plain node test path that is absolute",
+   "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder subagent",
@@ -4407,7 +4587,7 @@ sh("wsl: a lone apostrophe in text does not hide a refused verb",
 sh("wsl: a comment opener in a string does not hide a refused verb",
    "echo \"# note\"; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
 
-# Round 1 (coordinator): launchers by path, WSLENV set in an earlier statement, test paths that
+# Launchers by path, WSLENV set in an earlier statement, test paths that
 # leave the repo, and a glob in a test path. A bare `bash -c` is Git bash and keeps its verdict.
 sh("wsl: a bash.exe launcher by forward-slash path",
    "C:/Windows/System32/bash.exe -c id", "deny", rule=WSL_RULE, cwd=NOGIT)
@@ -4418,6 +4598,8 @@ sh("wsl: the wsl.exe launcher by path, through sh",
 sh("wsl: a distro launcher run id", "ubuntu.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a versioned distro launcher run id", "ubuntu2204.exe run id", "deny", rule=WSL_RULE,
    cwd=NOGIT)
+sh("wsl: a debian distro launcher run id", "debian.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a kali distro launcher run id", "kali.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a bare bash -c is Git bash and keeps its verdict", "bash -c x", "allow", cwd=NOGIT)
 sh("wsl: WSLENV exported in an earlier statement",
    "export WSLENV=PATH/p; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
@@ -4432,7 +4614,7 @@ sh("wsl: a test path with a drive letter",
 sh("wsl: a glob in a test path is allowed",
    "wsl -e node --test mods/*/x.test.mjs", "allow", cwd=NOGIT)
 
-# Round 2 (coordinator): WSLENV named as text is a false alarm; only an assignment refuses. A
+# WSLENV named as text is a false alarm; only an assignment refuses. A
 # dot-led glob segment can expand to `..`, so it refuses too.
 sh("wsl: WSLENV in a file name before a wsl call is a false alarm",
    "cat WSLENV.md; wsl -e node --test a.test.mjs", "allow", cwd=NOGIT)
@@ -4445,13 +4627,7 @@ sh("wsl: a test path whose bracket glob expands to ..",
 sh("wsl: a test path whose dot-led glob expands to ..",
    "wsl -e node --test .*/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 
-# ---- guard-command-position (lane). A refused WSL call hides from the allow list in these ways:
-# a command-position form the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued
-# `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
-# `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
-# that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
-# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
-# refuse or allow, and a fix must keep them so.
+# A WSL call hides behind a form the rule does not unwrap, a value flag, a heredoc header, or a comment opener in quotes.
 for _name, _command in (
     ("exec", "exec wsl --shutdown"),
     ("builtin exec", "builtin exec wsl --shutdown"),
@@ -4516,7 +4692,7 @@ for _name, _command in (
     sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 1 (lane). Each RED case below is a hole on 707f9dd.
+# ---- guard-command-position.
 # A real quote that opens after a letter (`sed -e's/a/b/'`, `cut -d't'`) or closes after one
 # (`x'd'`) is read as a contraction, so the call after it is hidden. A quoted `(wsl` is text, and
 # must allow. A long value flag (`--unset`, `--user`, `--adjustment`, `--max-args`) and the short
@@ -4542,14 +4718,7 @@ for _name, _command in (
     sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 2 (lane). Each RED case below is a hole on 8b6813a.
-# Item 1 is a regression: main denies these, and 8b6813a allows them. A contraction (`a's b'`) is
-# read as a contraction, so the real quote after it is not seen, and the call after that quote is
-# hidden. `sed -e's;a;b;'` holds a real quote, and the call after it must deny. Item 3: a short flag
-# bundled with a value flag (`-Eu`, `-iu`, `-rn`, `-iS`) moves the verb slot onto the value, as a
-# lone `-u` or `-n` does. Item 4 is a false alarm: `env -S` named as echo text is not a wrapper.
-# The pins keep a contraction followed by a real quote in view of the call after it, straight or
-# curly. `$( )` inside a token is known gap 6, and is not covered here.
+# A contraction (`a's b'`) is no quote, so the call after a real quote must deny; a bundled value flag (`-Eu`) shifts the verb slot.
 for _sep, _sep_name in ((";", "a semicolon"), (" && ", "and-and"), (" | ", "a pipe")):
     for _name, _command, _rule in (
         ("a contraction before wsl", "echo a's b'" + _sep + "wsl --shutdown", WSL_RULE),
@@ -4579,8 +4748,8 @@ for _name, _command in (
        rule=WSL_RULE, cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 3 (lane gcp-quote-fix). Each RED case below is a hole
-# on 335c4a9, and origin/main denies it. is_contraction counted every later `'`, so a later
+# ---- guard-command-position.
+# is_contraction counted every later `'`, so a later
 # apostrophe (`don't`, `"it's"`) paired with the contraction's own `'`, and the contraction read
 # hid the refused call after it. The first two groups must deny. The scanner group holds comment
 # openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
@@ -4600,28 +4769,15 @@ for _name, _command, _rule in (
 # One pkill row for the lone-apostrophe shape: the wsl rows above carry the same scanner paths.
 sh("guard-command-position: regression, a lone apostrophe, then pkill, denies",
    "echo a's b'; pkill foo; echo don't", "deny", rule="machine-wide-kill", cwd=NOGIT)
-for _name, _command in (
-    ("a lone apostrophe, a quoted apostrophe, then ls", "echo don't; echo \"it's\"; ls"),
-    ("a contraction in plain text", "echo it's fine"),
-):
-    sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
+sh("guard-command-position: regression, a lone apostrophe, a quoted apostrophe, then ls, allowed",
+   "echo don't; echo \"it's\"; ls", "allow", cwd=NOGIT)
 
-# ---- guard-command-position, round 2 bypass (lane gcp-quote-fix). The first three cases are RED on
-# 39160ee and deny on 103a976. The apostrophe in `don't` opens a single quote that closes inside
-# the double-quoted run, so the line break after it is a real separator and `pkill foo` runs in
-# bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way. The
-# heredoc case is RED on 39160ee and also allows on 103a976: `it's` opens a quote that closes on
-# the line below, so `pkill foo` runs there, and it must deny.
-# The apostrophe in a double-quoted run closes a single quote on the line after, so pkill there is a
-# real separator. One row carries the shape.
+# `don't` opens a single quote that closes later, so the line break after it is a real separator and `pkill foo` runs.
 sh("guard-command-position: round 2 bypass, a lone apostrophe in a double-quoted run, "
    "then pkill on the next line, denies",
    "echo don't \" don't \npkill foo\n \"", "deny", rule="machine-wide-kill", cwd=NOGIT)
 
-# ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The RED case is
-# text `env -S` before the real wrapper: it hides the call after `$(`. It is RED on 1633efa and
-# GREEN on 335c4a9. The two cases after it are PINS: each denies on 1633efa and 335c4a9, and a
-# fix must keep them so.
+# `env -S` is read after a `$(` too: text `env -S` before the real wrapper must not hide the call after `$(`.
 sh("guard-command-position: wsl env -S text before a dollar-paren env -S denies",
    "echo env -S x $(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
@@ -4629,12 +4785,7 @@ sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
 sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
    "(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
 
-# ---- a backslash before `;` or `&&`, the wsl family (lane swn-pwsh-escape). Round 2 made a bash
-# `\` escape the next character, so `\;` and `\&` are text to bash. A nested PowerShell or cmd
-# script is still read by Windows, where `\` is a path separator, so the command after `\;` or
-# `\&&` runs. The four deny cases are RED on ce4ac8c (allowed) and deny on a92d509. The PowerShell
-# form and the scanner cases are PINS that deny on both heads. The echo case is a CONTROL: bash
-# reads `echo a\; wsl` as one echo, so it allows on ce4ac8c and denies on a92d509.
+# In a nested PowerShell or cmd script `\` is a path separator, so the command after `\;` or `\&&` runs.
 sh("wsl: a bash pwsh -c with a backslash path before ; hides wsl --shutdown, denies",
    r'pwsh -c "cd C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a bash cd with a backslash before && hides wsl --shutdown, denies",
@@ -4654,13 +4805,7 @@ sh("wsl: a multi-line pwsh -c string with a backslash before its newline denies 
 sh("wsl: a bash backslash before ; is text, so echo a\\; wsl --shutdown is one echo, allowed",
    r"echo a\; wsl --shutdown", "allow", cwd=NOGIT)
 
-# ---- a nested PowerShell script, the wsl family (lane swn-pwsh-escape, review round 1). The iex and
-# Invoke-Expression arms of nested_script return PowerShell text, but split_segments clears
-# POWERSHELL_CALL before its caller reads the segments. segment_tokens then reads that text with bash
-# rules: the `\;` is text, so wsl --shutdown after it is an argument of echo. RED on 15bd278, deny on
-# 9d7533c. The kill and stream forms of these shapes allow on 9d7533c too, so they are not here.
-# The comment-opener shape below is RED on 15bd278. The lone-apostrophe and line-break shapes are PINS:
-# they deny on both heads, and a fix must keep them so.
+# The iex and Invoke-Expression arms of nested_script return PowerShell text, which must not be read with bash rules.
 PWSH_IEX_SHAPES = (
     ("iex with escaped double quotes", r'iex \"echo C:\x\; %s\"'),
     ("iex with single quotes", r"iex 'echo C:\x\; %s'"),
@@ -4677,7 +4822,7 @@ sh("wsl: a lone apostrophe in a nested iex, then a backslash path, denies wsl --
 sh("wsl: a line break in a nested iex, after a backslash path, denies wsl --shutdown",
    r'pwsh -c "iex \"echo C:\x' + "\\" + "\n" + r'; wsl --shutdown\""', "deny", rule=WSL_RULE,
    cwd=NOGIT)
-# KEEP GREEN. Bash reads each escaped `\;` or `\&` as text, so these allow, and a fix must keep them so.
+# Bash reads each escaped `\;` or `\&` as text, so these allow.
 sh("wsl: a bash -c with a backslash before ; keeps echo one command, allowed",
    r"bash -c 'echo C:\x\; wsl --shutdown'", "allow", cwd=NOGIT)
 sh("wsl: a sed script with a backslash before & is text, allowed",
@@ -4687,25 +4832,23 @@ sh("wsl: a sed script with a backslash before & and a trigger word after it, all
 sh("wsl: a find -exec with a backslash before ; is text, allowed",
    r"find . -name '*.md' -exec grep -l wsl {} \;", "allow", cwd=NOGIT)
 
-# ---- lane swn-pwsh-escape, review round 2, item 3. Each case is RED when the read it names is
-# dropped (the scratch mutants, see the proof): quote_advance:118 for the escaped quote, _split_
-# reading:196 for the backslash-newline, nested_script's cmd /c tail (guard_core:1900). Each DENIES
-# on 2055fd8, so each is green there.
+# Each case pins one read: quote_advance for the escaped quote, _split_reading for the backslash-newline,
+# the cmd /c tail of nested_script.
 sh("wsl: a pwsh -c with an escaped quote before ; hides wsl --shutdown, denies",
    r"""pwsh -c 'echo "a\"; wsl --shutdown'""", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a pwsh -c with a backslash before a line break hides wsl --shutdown, denies",
    'pwsh -c "cd C:\\x\\' + "\n" + 'wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell script, denies",
    r'cmd /c "echo C:\x\; wsl --shutdown"', "deny", rule=WSL_RULE, cwd=NOGIT)
-# The PowerShell tool's own text: a doubled quote in a single-quoted pwsh -c string ends the quote
-# early under the walk, so the `;` reads as quoted. RED on 2055fd8, deny on origin/main.
+# The PowerShell tool's own text: a doubled quote in a single-quoted pwsh -c string must not end the
+# quote early, or the `;` reads as quoted.
 sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
    "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, holes F1 to F3 (red until the builder fixes them).
+# ---- PowerShell quoting, holes F1 to F3.
 # F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
 # PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
-# a backtick that the outer string already consumed. Each DENIES on origin/main.
+# a backtick that the outer string already consumed.
 sh("wsl: a PowerShell comment opener mid-word, then wsl --shutdown, denies",
    "echo a<# ; wsl --shutdown #>", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 sh("wsl: a Bash pwsh -c with a comment opener mid-word, then wsl --shutdown, denies",
@@ -4724,7 +4867,7 @@ sh("wsl: a PowerShell unclosed comment at a token start with no call after it, a
 sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
    "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
 
-# ---- lane pwsh-quote-fix, review round 3, hole F4: a backtick hides the next `;` before an env read.
+# ---- hole F4: a backtick hides the next `;` before an env read.
 # It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
 FAMILY = "env"
 sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
@@ -4754,14 +4897,13 @@ sh("silent-write: merge's own quiet flag needs no redirect at all, MEASURED 2026
    VCS + " merge --quiet feature/x", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-write: rebase's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
    VCS + " rebase -q main", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
-sh("silent-write: a discarded proof of landing, stdout alone",
+sh("silent-write: discarding a write command output denies, stdout alone",
    VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
    VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
-# The backslash-semicolon control (lane swn-pwsh-escape). Round 2 reads `\;` as text, so this is one
-# commit with a silenced redirect. It is denied on ce4ac8c. On a92d509 it was ALLOWED, because the old
-# split cut `foo\` and the unparsable piece failed open. A repo cwd is needed, so this uses the default.
+# The backslash-semicolon control: `\;` is text, so this is one commit with a silenced redirect.
+# A repo cwd is needed, so this uses the default.
 sh("silent-write: a backslash before ; then a silenced commit redirect denies, default cwd",
    VCS + " commit -m foo\\; >/dev/null", "deny", "silent-write")
 sh("silent-write: a tag silenced by a discarded stream, its own flag does not exist",
@@ -4802,7 +4944,7 @@ sh("silent-write: an ordinary read discarding its output is a carve-out",
 sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
    VCS + " commit -m x 2>&1", "allow", cwd=NOGIT)
 
-# Gaps Banchi's scripts/silent-write-guard.py found (red until guard.py closes them).
+# Gaps found in Banchi's scripts/silent-write-guard.py.
 sh("silent-write gap: pull silenced, both streams, with -C",
    VCS + " -C " + NOGIT + " pull --ff-only >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write gap: a fetch that moves a ref (refspec) silenced",
@@ -4836,7 +4978,7 @@ sh("silent-write gap, allow: gh pr view is a read",
 sh("silent-write gap, allow (held, unmeasured): output to a file is not discarded",
    VCS + " commit -m x > /tmp/log 2>&1", "allow", cwd=NOGIT)
 
-# Pipes (Banchi review #666): a write whose pipe tail is silenced is silenced.
+# Pipes: a write whose pipe tail is silenced is silenced.
 sh("silent-write pipe: cat discards the piped output",
    VCS + " commit -m x 2>&1 | cat >/dev/null", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write pipe: tail discards the piped output",
@@ -4860,13 +5002,7 @@ sh("silent-write pipe, allow: a read piped to a discard",
 sh("silent-write pipe, allow: tee prints",
    VCS + " commit -m x | tee /tmp/l", "allow", cwd=NOGIT)
 
-# Narrowed 2026-10-14 (lane silent-write-narrow). Four changes, each pinned below. (1) A read under a
-# write verb stays allowed when silenced: `--help`, `-h`, `tag -l`, `-ln1`, `--list`, `merge-base`,
-# and `--dry-run` (`push -n` too). A flag inside a quoted value is a value, never a flag. (2) A
-# silenced write whose cwd, `-C` target or `cd` target sits under the temp folder is allowed. A real
-# checkout outside it stays denied, and a quiet flag stays denied in both. (3) `fetch -q src:dst` is
-# a write only when dst is under refs/heads/ or refs/remotes/; a short dst resolves to refs/heads.
-# (4) The refusal names its step by kind and position, the flag it hit, and one loud form to run.
+# The narrowed rule: a silenced read, and a temp-folder cwd, stay allowed; `fetch -q src:dst` writes only under refs/.
 
 
 def _build_throwaway():
@@ -4946,8 +5082,6 @@ sh("silent-write real: a quiet push in a real checkout",
    VCS + " push -q", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write real: a quiet merge in a real checkout",
    VCS + " merge -q feature/x", "deny", "silent-write", cwd=GITMAIN)
-sh("silent-write real: a silenced tag create in a real checkout",
-   VCS + " tag v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write real: a throwaway -C, then a quiet push in the real cwd",
    VCS + " -C " + TSLASH + " commit -m x >/dev/null && " + VCS + " push -q",
    "deny", "silent-write", cwd=GITMAIN)
@@ -5025,9 +5159,7 @@ sh("silent-write scanner: a discard named before a space inside an echo string i
    "quote and a comment opener in the same string",
    'echo "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
 
-# Review round 1 (lane silent-write-narrow). Each DENY below is a bypass the narrowed rule lets
-# through on 87d039b, and each ALLOW is a false alarm it raises. Each one is red until the builder
-# closes it. Cases that already pass on 87d039b are marked "hold" and pin behaviour that must stay.
+# Each DENY is a bypass of the narrowed rule, each ALLOW a false alarm. Cases marked "hold" must keep their verdict.
 
 # (a) The quote walk, `unquoted_at`. A `\"` inside double quotes, a `$'...'` string, and a
 # PowerShell backtick escape each end a quote early or late, so a real redirect reads as text.
@@ -5104,7 +5236,7 @@ sh("silent-write remedy: a silenced gh pr merge names gh pr merge, not the git m
    "gh pr merge 5 --merge >/dev/null", "deny", "silent-write", carries="gh pr merge",
    lacks=VCS + " merge 2>&1", cwd=NOGIT)
 
-# (f) Hold: a single command is step 1 of 1. Green on 87d039b, pinned so the step count cannot drift.
+# (f) Hold: a single command is step 1 of 1, pinned so the step count cannot drift.
 sh("silent-write step: a single silenced commit says step 1 of 1",
    VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="step 1 of 1",
    lacks="step 1 of 2", cwd=GITMAIN)
@@ -5117,9 +5249,8 @@ sh("silent-write scanner: a backtick inside a message does not hide a real disca
    VCS + ' commit -m "`x`" >/dev/null', "deny", "silent-write", carries="a redirect silences",
    cwd=GITMAIN)
 
-# Review round 2 (lane silent-write-narrow). Each DENY below is a bypass 3a953bc lets through, and
-# each ALLOW is a false alarm it raises. Each one is red until the builder closes it. The LIMIT cases
-# at the end pin what the guard does not see today, labelled as limits, so the gap stays on record.
+# Each DENY below is a bypass, and each ALLOW is a false alarm. The LIMIT cases
+# at the end pin what the guard does not see, labelled as limits, so the gap stays on record.
 
 # (a) The quote walk, a doubled backslash outside quotes. Two backslashes are one escaped backslash,
 # and the quote after them opens. The walk must not read the pair as an escaped quote.
@@ -5137,7 +5268,7 @@ sh("silent-write scanner: a comment opener inside a doubled-backslash message do
 sh("silent-write scanner: a doubled backslash before a quote in a multi-line message, then a real discard",
    VCS + " commit -m \\\\'line one\nline two' >/dev/null", "deny", "silent-write",
    carries="a redirect silences", cwd=GITMAIN)
-# HOLD: green on 3a953bc, pinned so the walk keeps a lone quote in text from hiding a discard.
+# HOLD: the walk keeps a lone quote in text from hiding a discard.
 sh("silent-write scanner: a lone quote after a doubled backslash does not hide a discard",
    VCS + r" commit -m \\x >/dev/null; echo don't", "deny", "silent-write",
    carries="a redirect silences", cwd=GITMAIN)
@@ -5159,7 +5290,7 @@ sh("silent-write throwaway bypass: a cd on the left of a pipe runs in a subshell
    "cd " + TSLASH + " | cat; " + VCS + " commit -m x >/dev/null",
    "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
 
-# (d) VALUE_FLAGS, round 2. A value flag takes the next token whatever it is, so -h or -n in that
+# (d) VALUE_FLAGS. A value flag takes the next token whatever it is, so -h or -n in that
 # slot is a value, never help or dry-run. The write is real, so the discard denies.
 sh("silent-write read bypass: commit -- ends the options, so -h after it is a pathspec, not help",
    VCS + " commit -s -- -h >/dev/null", "deny", "silent-write", carries="a redirect silences",
@@ -5186,12 +5317,9 @@ sh("silent-write false alarm: commit -mfoo glues its value, so --dry-run after i
 # The five cases below are PowerShell escapes and openers in the silent write. They sit in the ROOT/tmp
 # section, so their NOGIT cwd (under ROOT, outside ROOT/tmp) is not a throwaway. Under the system temp,
 # the throwaway allow decides them, so the case would not test the quote walk.
-# ---- lane swn-pwsh-escape, review round 2, item 2. A PowerShell escape or opener that quote_advance
-# does not read (a backtick outside quotes, a `<# #>` comment, a here-string) flips the quote state, so
-# the silenced commit after it reads as quoted text. MEASURED: on fae948c (the parent of 64a5b09) the
-# backtick, block comment and here-string cases allow. The comment opener in a string and the pin deny.
-# On origin/main 9d7533c all five deny, so those cases do not separate main from the fix. The lone
-# apostrophe is a PIN: it denies on both heads, and a fix must keep it so.
+# A PowerShell escape or opener that quote_advance does not read (a backtick outside quotes, a `<# #>`
+# comment, a here-string) flips the quote state, so the silenced commit after it reads as quoted text.
+# The lone apostrophe must keep denying.
 sh("silent-write: a backtick-escaped quote in PowerShell, then a silenced commit, denies",
    "echo `\"; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
@@ -5208,8 +5336,8 @@ sh("silent-write: a lone apostrophe in PowerShell text, then a silenced commit, 
    "echo don't; " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
 
-# (f) round 3 hole F5. Owner ruling 2026-10-15: these two were pinned allowed as limits, and are now
-# denies. A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
+# (f) Owner ruling 2026-10-15: these two deny.
+# A quote inside $( ) in a message, and a --git-dir under the temp folder, each still hide a
 # discarded commit or merge in a real checkout.
 sh("silent-write: a quote inside $( ) in a message does not hide a discarded commit, denies",
    VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
@@ -5217,14 +5345,13 @@ sh("silent-write: a quote inside $( ) in a message does not hide a discarded com
 sh("silent-write: the PowerShell tool, a quote inside $( ) in a message does not hide a discarded commit, denies",
    VCS + r''' commit -m "$(printf '"')" >/dev/null''', "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=GITMAIN)
-# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the case needs it.
+# Windows only: a Git Bash /tmp path names the temp folder, so the case needs it.
 if os.name == "nt":
     sh("silent-write: a --git-dir under the temp folder does not hide a discarded merge in a real checkout, denies",
        VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "deny", "silent-write",
        carries="a redirect silences", cwd=GITMAIN)
 
-# ---- lane pwsh-quote-fix, review round 3, hole F1 for a silent write. A here-string opener mid-word
-# is text to the lane, so the discarded commit after it is allowed. It is real, so it denies.
+# A here-string opener mid-word must not hide the discarded commit after it.
 sh("silent-write: a PowerShell here-string opener mid-word, then a silenced commit, denies",
    "echo foo@'\nx'; " + VCS + " commit -m x >/dev/null\n'@'", "deny", "silent-write",
    carries="a redirect silences", tool="PowerShell", cwd=NOGIT)
@@ -5308,10 +5435,21 @@ for form, tail in (
 push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
 push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
+# A local branch named origin/trunk must not hide the name origin/HEAD holds: the second case is the
+# same push where that branch is absent.
+push_case("forced to the default branch named by origin/HEAD asks", "--force origin trunk", "ask",
+          cwd=PUSHTRUNK)
+push_case("forced to the default branch asks when a local branch is named origin/trunk",
+          "--force origin trunk", "ask", cwd=PUSHTRUNKLOCAL)
 push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
           "ask", cwd=PUSHNOHEAD)
 push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
           "ask", cwd=PUSHNOHEAD)
+# A tag named main makes the short read of HEAD print `heads/main`. The guard must still read main.
+push_case("a tag named like the branch, a lease push of HEAD on main asks",
+          LEASE.strip() + " origin HEAD", "ask", cwd=PUSHSAMETAG)
+push_case("a tag named like the branch, a bare lease push on main asks", LEASE.strip(), "ask",
+          cwd=PUSHSAMETAG)
 push_case("forced from a detached HEAD, no current branch to resolve, asks",
           "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
 push_case("forced where git cannot be read asks",
@@ -5332,6 +5470,36 @@ push_case("a delete refspec at the default branch asks", "origin :main", "ask")
 push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
 push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
 push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+# A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
+# forms below reach main and ask, exactly as they do where origin/HEAD resolves.
+push_case("a dangling origin/HEAD, a forced push to main asks",
+          "--force-with-lease --force-if-includes origin main", "ask", cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, a delete refspec at main asks", "origin :main", "ask",
+          cwd=PUSHDANGLING)
+push_case("a dangling origin/HEAD, --delete after the remote at main asks", "origin --delete main", "ask",
+          cwd=PUSHDANGLING)
+# Where origin/HEAD does not name the branch (dangling, or unset), main AND master stay protected:
+# the read order finds origin/main, but a repository that has origin/main may still hold master.
+for why, fixture in (("a dangling origin/HEAD", PUSHDANGLING),
+                   ("no origin/HEAD, origin/main present", PUSHNOHEADMAIN)):
+    push_case(why + ", a forced push to master asks",
+              "--force-with-lease --force-if-includes origin master", "ask", cwd=fixture)
+    push_case(why + ", a delete refspec at master asks", "origin :master", "ask", cwd=fixture)
+    push_case(why + ", --delete at master asks", "origin --delete master", "ask", cwd=fixture)
+    push_case(why + ", a delete off the default names allows", "origin :feat", "allow", cwd=fixture)
+push_case("no origin/HEAD, only origin/master present, a delete refspec at main asks", "origin :main",
+          "ask", cwd=PUSHONLYMASTER)
+push_case("no origin/HEAD, only origin/master present, a delete off the default names allows",
+          "origin :feat", "allow", cwd=PUSHONLYMASTER)
+# A push reads the PUSHED remote's default branch (upstream/HEAD -> main), never origin's (develop).
+push_case("another remote, --delete at its default branch asks", "--delete upstream main", "ask",
+          cwd=PUSHUPSTREAM)
+push_case("another remote, --delete at the branch origin names as default allows, it is ordinary there",
+          "--delete upstream develop", "allow", cwd=PUSHUPSTREAM)
+push_case("another remote, a bare lease follows branch.feat.remote to its default branch asks",
+          LEASE.strip(), "ask", cwd=PUSHUPSTREAM)
+push_case("origin with its own origin/HEAD, --delete at its default branch asks", "--delete origin develop",
+          "ask", cwd=PUSHUPSTREAM)
 push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
 push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
 push_case("--no-force-if-includes cancels --force-if-includes",
@@ -5386,7 +5554,7 @@ push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
 # DATA, NOT A PUSH. A forced push to the default branch named inside a JSON payload piped to python
-# runs nothing, so it allows. Pinned, not red: this one passes today.
+# runs nothing, so it allows.
 sh("push: a JSON payload naming a forced push to main, piped to python, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " push --force origin main"}})
    + "' | python hooks/guard.py", "allow", cwd=PUSHMAIN)
@@ -5402,10 +5570,8 @@ sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
 
-sh("push: an ordinary push", VCS + " push", "allow", cwd=NOGIT)
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
-sh("delete: the root", "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home variable", "rm -rf $HOME", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the working directory", "rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
@@ -5483,6 +5649,118 @@ sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"',
 sh("delete: a grep pattern naming the cmd.exe form calls nothing",
    'grep "del /s" notes.md', "allow", cwd=NOGIT)
 
+# The `rm` pattern reads raw text: a target must end
+# at a space or the end, the flags must be one `-rf` cluster, and a quote hides nothing. Three
+# misses and one false alarm, each a form Claude writes.
+#
+# MISSES: a trailing slash or glob on a root or home, the long flags, and `--` before the
+# target. Each is the same act as `rm -rf /` or `rm -rf ~`, which deny.
+for _name, _command in (
+    ("the home directory with a trailing slash", "rm -rf ~/"),
+    ("everything under the root", "rm -rf /*"),
+    ("everything under the home directory", "rm -rf ~/*"),
+    ("the root, long flags", "rm --recursive --force /"),
+    ("the home directory, long flags", "rm --recursive --force ~"),
+    ("the home variable, long flags in the other order", "rm --force --recursive $HOME"),
+    ("the root after --", "rm -rf -- /"),
+    ("the home directory after --", "rm -rf -- ~"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# More misses: a capital R, an extra flag letter after f, and the working directory spelled `./` or
+# `./*` (`rm -rf .` and `rm -rf *` deny).
+for _name, _command in (
+    ("the root, capital R", "rm -Rf /"),
+    ("the home directory, a verbose flag after f", "rm -rfv ~"),
+    ("the working directory as ./", "rm -rf ./"),
+    ("everything in the working directory as ./*", "rm -rf ./*"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# FALSE ALARMS: the text of the command sits inside a quoted argument of another command
+# (a note, a commit message, a grep pattern). The cmd.exe forms above are already read by token.
+for _name, _command in (
+    ("an echo that quotes the root form", 'echo "rm -rf /"'),
+    ("an echo that quotes the home form", "echo 'rm -rf ~'"),
+    ("a commit message that names the root form", VCS + " commit -m 'never run rm -rf / here'"),
+    ("a grep for the root form", 'grep "rm -rf /" notes.md'),
+):
+    sh("delete: " + _name + " calls nothing", _command, "allow", cwd=NOGIT)
+# Reading tokens must still see a delete that sits in a quoted argument of a shell that RUNS it, and
+# behind a wrapper (`ssh host 'rm -rf /'` is not pinned).
+for _name, _command in (
+    ("bash -c", "bash -c 'rm -rf /'"),
+    ("sh -c", 'sh -c "rm -rf ~"'),
+    ("eval", 'eval "rm -rf /"'),
+    ("sudo", "sudo rm -rf /"),
+):
+    sh("delete: the root form behind " + _name + " still denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A named folder stays allowed in every spelling the matches read.
+for _name, _command in (
+    ("a dot-slash folder", "rm -rf ./build"),
+    ("a folder after --", "rm -rf -- build"),
+    ("a folder, long flags", "rm --recursive --force build/"),
+):
+    sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+
+# Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
+for _name, _command in (
+    ("behind find -exec", "find . -exec rm -rf / \\;"),
+    ("behind su -c", "su -c 'rm -rf /'"),
+    ("behind docker exec", "docker exec c rm -rf /"),
+    ("behind flock", "flock F rm -rf /"),
+):
+    sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
+       cwd=NOGIT)
+
+# `docker run --rm alpine` and `docker-compose exec web` have options or a hyphenated name
+# ahead of the real command.
+for _name, _command in (
+    ("behind docker run with an option", "docker run --rm alpine rm -rf /"),
+    ("behind docker-compose exec", "docker-compose exec web rm -rf /"),
+):
+    sh("delete: the root form " + _name + " denies", _command, "deny", "destructive-delete",
+       cwd=NOGIT)
+# A commit message that names the form deletes nothing wide.
+sh("delete: a commit message that names the root form is no wide delete",
+   VCS + ' commit -m "stop rm -rf / mistakes"', "allow", cwd=NOGIT)
+
+# TWO WIDE-TARGET SETS DISAGREE. A segment shlex can parse is read by `_rm_args_wide`, against
+# RM_WIDE_TARGET, which takes a trailing slash and a glob on a root or home. A segment it cannot
+# parse (one lone quote) is read by RM_RAW, against WIDE_TARGET, which takes neither. So `rm -rf ~/`
+# denies and `rm -rf ~/ 'x` allows: the same act, split by an apostrophe.
+for _name, _command in (
+    ("a trailing slash on the home directory, one lone quote", "rm -rf ~/ 'x"),
+    ("a trailing slash on the home directory, a lone apostrophe in text", "rm -rf ~/ it's"),
+    ("everything under the home directory, a lone apostrophe in text", "rm -rf ~/* it's"),
+    ("everything under the root, a lone apostrophe in text", "rm -rf /* it's"),
+    ("the working directory as ./, a lone apostrophe in text", "rm -rf ./ it's"),
+):
+    sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+
+# SCANNER PINS (rule building-scanner-respects-strings) for the fallback that reads a segment shlex
+# cannot parse as raw text (guard_push_delete.py, RM_RAW). The same three constructs as the stream
+# family: a comment opener inside quotes, a quoted string over several lines, and a lone apostrophe
+# in plain text. DENY: each construct sits beside a real delete, and none may hide it.
+for _name, _command in (
+    ("a # inside quotes ahead of it", 'echo "a # b"; rm -rf /'),
+    ("a # inside quotes and a lone apostrophe ahead of it", 'echo "# x" it\'s; rm -rf /'),
+    ("a // inside quotes ahead of it", 'echo "a // b"; rm -rf /'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nrm -rf /'),
+    ("a multi-line quote and a lone apostrophe ahead of it", 'echo "a\nb" it\'s\nrm -rf /'),
+    ("a lone apostrophe ahead of it", "echo don't && rm -rf /"),
+    ("a lone apostrophe in a trailing comment", "rm -rf / # don't"),
+):
+    sh("delete: the root form behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# ALLOW: the same constructs around text that deletes nothing wide.
+for _name, _command in (
+    ("a single-quoted echo of the root form", "echo 'rm -rf /'"),
+    ("a # inside quotes", 'echo "# rm -rf /"'),
+    ("a multi-line quote", 'echo "first line\nrm -rf /\nlast line"'),
+    ("a lone apostrophe in a trailing comment", "rm -rf build # don't"),
+):
+    sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
+
 
 # =========================================================================== 4. environment files
 FAMILY = "env"
@@ -5500,8 +5778,7 @@ add("env: MultiEdit of the file", "deny", "env-file", tool="MultiEdit", cwd=NOGI
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: NotebookEdit of a variant", "deny", "env-file", tool="NotebookEdit", cwd=NOGIT,
     notebook_path=slash(os.path.join(PROJ, ENV + ".ipynb")))
-# The reviewer's own payload, pinned by name. Every refused case is checked for a leaked file
-# name, and this one holds the exact shape the review asked for.
+# Every refused case is checked for a leaked file name; this one holds the exact payload shape.
 add("env: a Write outside the fixtures, and the reason names no file", "deny", "env-file",
     tool="Write", cwd="C:/repo", file_path="C:/repo/" + ENV)
 add("env: Read of the example file", "allow", tool="Read", cwd=NOGIT,
@@ -5535,12 +5812,9 @@ sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
 # open and skipped every rule after it, the frozen-path rule included.
 sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule",
    "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
-   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
-# git-env-glued, round 1: a quote mark in an unquoted heredoc body is text, so a later substitution
-# still runs and still reads the file (RED on 46c3191: the body was read as a quote, which hid it).
-# A quoted delimiter runs no substitution, so the same body is text and stays allowed. The lone
-# double quote is GREEN on 46c3191 (a substitution runs inside double quotes): a pin, not a red case.
+# A quote mark in an unquoted heredoc body is text, so a later substitution still runs and still reads
+# the file. A quoted delimiter runs no substitution, so the same body is text and stays allowed.
+# A lone double quote hides nothing: a substitution runs inside double quotes.
 for _label, _body in (
     ("an apostrophe line, then a $( ) read", "don't\n$(cat " + ENV + ")"),
     ("an apostrophe line, then a backtick read", "don't\n`cat " + ENV + "`"),
@@ -5611,7 +5885,6 @@ for wrapped in (
        cwd=NOGIT)
 sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
-sh("env: timeout /t is still a waiter", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 sh("waiter: timeout 60 over one short sleep is allowed", "timeout 60 sleep 5", "allow",
    cwd=NOGIT)
 sh("waiter: a timeout wrapper does not hide a 30 s sleep, refused", "timeout 60 sleep 30",
@@ -5704,7 +5977,7 @@ for text in (
 add("env: Write of .worktreeinclude", "allow", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ".worktreeinclude")))
 for held in (
-    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x", VCS + " add " + ENV,
+    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x",
     "echo x > " + ENV, "echo " + ENV + " > " + ENV, "echo " + ENV + " | tee " + ENV,
 ):
     sh("env: the data allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
@@ -5741,8 +6014,8 @@ for held in (
 ):
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
-    "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
-    'gh pr create --draft --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    "printf '" + ENV + "\\n' > .worktreeinclude",
+    'gh pr create --draft --body "Adds ' + ENV + '"',
     VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
 ):
     sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
@@ -5778,15 +6051,15 @@ for text in (
     "[ -f " + ENV + ' ] && echo "' + ENV + ' exists" || echo "no ' + ENV + '"',
     "[ -e " + ENV + " ]", "[ -d " + ENV + " ]", "[ -s " + ENV + " ]", "[ -r " + ENV + " ]",
     "[ -w " + ENV + " ]", "[ -x " + ENV + " ]", "[[ -f " + ENV + " ]]", "[[ -e " + ENV + " ]] && echo yes",
-    "test -f " + ENV, 'echo "' + ENV + ' exists"', "printf '" + ENV + " is here\\n'",
+    'echo "' + ENV + ' exists"', "printf '" + ENV + " is here\\n'",
     'echo "no ' + ENV + '" > status.txt', "printf '%s\\n' '" + ENV + "'",
 ):
     sh("env: an existence test or fixed text, " + text[:40], text, "allow", cwd=NOGIT)
 for held in (
     '[ "$(cat ' + ENV + ')" ]', 'test -n "$(< ' + ENV + ')"', '[[ -n "$(cat ' + ENV + ')" ]]',
     "[ -f x ] && cat " + ENV, "echo $(cat " + ENV + ")", "echo `cat " + ENV + "`",
-    "cat $(echo " + ENV + ")", "echo hi > " + ENV, "echo " + ENV + " > " + ENV,
-    "[ -f " + ENV + " ] && cat " + ENV, "cat < " + ENV, "echo " + ENV + " | tee " + ENV,
+    "cat $(echo " + ENV + ")", "echo hi > " + ENV,
+    "[ -f " + ENV + " ] && cat " + ENV,
 ):
     sh("env: a test or text is no licence to read, " + held[:40], held, "deny", "env-file",
        cwd=NOGIT)
@@ -5804,7 +6077,7 @@ for held in (
 ):
     sh("env: a relay of the text, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
-    "[[ -e " + ENV + ".local ]]", "test -s " + ENV, "printf '" + ENV + "\\n' > .worktreeinclude",
+    "[[ -e " + ENV + ".local ]]", "test -s " + ENV,
     "echo " + ENV + " > .worktreeinclude && test -f .worktreeinclude",
     "echo " + ENV + " || echo no; echo done | cat",
 ):
@@ -5836,10 +6109,10 @@ sh("env: the accessor search in the other shell",
    tool="PowerShell", cwd=NOGIT)
 
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the loader rule reads a wrapper only in
+# ---- audit-high (owner ruling 2026-10-13): the loader rule reads a wrapper only in
 # its exact shape. `time`, a loop's `do`, a timeout flag written `--flag=value`, and the Windows
 # spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
-# refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
+# refused as a non-runner. A non-runner stays refused behind any
 # wrapper, and a read stays refused behind any wrapper.
 # One row per wrapper shape: the time keyword and its -p, a `--flag=value` timeout of each name, a
 # Windows launcher path, the py launcher, a loop body, and a quoted apostrophe ahead of a loop.
@@ -5870,8 +6143,8 @@ for _cmd in (
 # does not read quotes, so a quoted pattern with a space leaves a fragment that reads as a path, and
 # `sed`, `awk` and `grep` patterns with a space were refused. A flag's value (`--max-count`,
 # `--context`, `--include`, `rg -g`) and the `-v` assignment of awk are not patterns either. The
-# multi-line shape is the scanner's own case: a quoted string that holds a newline. Each one is red
-# on 13cebec. The shapes the owner named are green controls below.
+# multi-line shape is the scanner's own case: a quoted string that holds a newline. The shapes the
+# owner named are green controls below.
 # Pattern shapes, one row each: a quoted pattern with a space, the scanner's quote and comment
 # openers inside a pattern, a multi-line pattern, the `--` end of flags, a value flag of each kind
 # (`--context` too), and the awk assignment.
@@ -5914,13 +6187,12 @@ for _cmd in (
     sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
        _cmd, "deny", "env-file", cwd=NOGIT)
 
-# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# ---- audit-high (owner ruling 1): a file-reading flag reads the file it names,
 # so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
 # cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
-# operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
+# operand after them is still a file. Controls: `grep '.*' file` and
 # `grep -e '--env-file=.*' f` stay allowed in the block above.
 for _cmd in (
-    "grep -f " + ENV + " x",
     "grep -f" + ENV + " x",
     "grep -nf " + ENV + " x",
     "grep -rf " + ENV + " .",
@@ -5931,8 +6203,7 @@ for _cmd in (
 ):
     sh("audit-high env: a file-reading flag reads its file, " + _cmd[:24], _cmd, "deny", "env-file",
        cwd=NOGIT)
-# ---- audit-high regression (13cebec refused these, 8e69e42 allows them): a sed or awk program
-# flag, or a file operand after a long option, reads the file.
+# A sed or awk program flag, or a file operand after a long option, reads the file.
 for _cmd in (
     "sed --expression=p " + ENV,
     "sed -nf " + ENV + " x",
@@ -5942,16 +6213,15 @@ for _cmd in (
        "deny", "env-file", cwd=NOGIT)
 
 
-# ---- guard-command-position, review round 1 (lane). Two heredoc headers on one line: the first
-# body ends at its delimiter `A`, and the second body follows that line and ends at `B`.
-# The export is in the second body, which `cat >>` writes into the shell rc file, so the guard
-# must deny. A header read that strips the lines after it hides this write (RED on 707f9dd).
+# Two heredoc headers on one line: the first body ends at its delimiter `A`, and the second body
+# follows that line and ends at `B`. The export is in the second body, which `cat >>` writes into the
+# shell rc file, so the guard must deny.
 sh("guard-command-position: playwright, two heredoc headers on one line write the export",
    "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
    "playwright-browsers-path", cwd=NOGIT)
 
-# ---- r1-hd (review round 1), env family. The same H1 and H2 shapes as the kill and shared-tree
-# sections, with a read of the environment file in place of the kill or the stash push.
+# The H1 and H2 shapes of the kill and shared-tree sections, with a read of the environment file in
+# place of the kill or the stash push.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     sh("env: r1-hd a python heredoc, %s delimiter closed at EOF, then an env read, denies" % _label,
        "python3 - <<" + _open + "\nx\nEOF\ncat " + ENV, "deny", "env-file", cwd=PROJ)
@@ -5959,14 +6229,13 @@ for _shell in ("sh", "bash"):
     sh("env: r1-hd a cat heredoc piped to %s, closer EOF-X, an env read in the body, denies" % _shell,
        "cat <<EOF-X | " + _shell + "\nx\nEOF\ncat " + ENV + "\nEOF-X", "deny", "env-file", cwd=PROJ)
 
-# ---- r2-hd (review round 2), env family. The forms of the kill section, with an env read in the body.
+# The forms of the kill section, with an env read in the body.
 for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
     sh("env: r2-hd a heredoc in %s, an env read in the body, denies" % _label,
        _form.replace("BODY", "cat " + ENV), "deny", "env-file", cwd=PROJ)
 
-# ---- r3-bd and r3-fed (try 3), env family. A body with an env read, under a stray `EOF` line, denies as on main.
-# The eval `$( )` and eval backtick forms run their body as code, so an env read there denies too. Main allows the
-# two eval forms (a hole main lacks). Removing _FED_SHELL turns them red.
+# A body with an env read, under a stray `EOF` line, denies. The eval `$( )` and eval backtick forms
+# run their body as code, so an env read there denies too.
 sh("env: r3-bd a body with an env read after a stray EOF line, written then sh, denies as on main",
    "cat <<'EOF-1' > x.sh && sh x.sh\nEOF\ncat " + ENV + "\nEOF-1", "deny", "env-file", cwd=PROJ)
 sh("env: r3-fed an eval $( ) heredoc with an env read in the body, denies",
@@ -5974,10 +6243,8 @@ sh("env: r3-fed an eval $( ) heredoc with an env read in the body, denies",
 sh("env: r3-fed an eval backtick heredoc with an env read in the body, denies",
    "eval `cat <<EOF\ncat " + ENV + "\nEOF\n`", "deny", "env-file", cwd=PROJ)
 
-# ---- heredoc-quote (round 4, lane heredoc-one-step), env family. A delimiter with a backslash or a quote closes
-# at EOF, so the lane takes the body for text and drops it. The header writes the body to x.sh and `sh x.sh`
-# runs it on the same line, so bash runs the substitution. Main reads the delimiter as `E`, keeps the body in
-# view, and denies. RED ON THE LANE HEAD (allows), DENY ON MAIN (measured on 567231e).
+# A delimiter with a backslash or a quote closes at EOF. The header writes the body to x.sh and `sh x.sh`
+# runs it on the same line, so bash runs the substitution.
 for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
     for _form, _body in (("$( )", "$(cat " + ENV + ")"), ("backticks", "`cat " + ENV + "`")):
         sh("env: heredoc-quote: %s delimiter, an env read in %s in the body that sh x.sh runs, denies"
@@ -6108,7 +6375,7 @@ for _cmd in (
     sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",
        cwd=NOGIT)
 
-# Round 1 review of 59f17f8: a set inside a substitution, a backtick, a negation, a wrapper, a
+# A set inside a substitution, a backtick, a negation, a wrapper, a
 # script block, a persistent setter or cmd /c. The guard is for accidental sets, not an attacker, so
 # each form is pinned by name and no more.
 for _cmd in (
@@ -6132,7 +6399,7 @@ sh("git env set: cmd /c set, then a git call, denies",
 sh("git env set: export -n only drops the export attribute, allowed",
    "export -n GIT_DIR", "allow", cwd=NOGIT)
 
-# Round 2 review of 695c944: a set inside a PowerShell block (if, foreach, a pipeline's block, try),
+# A set inside a PowerShell block (if, foreach, a pipeline's block, try),
 # a set in a parenthesised assignment, a set in a pwsh -c string, a set after the value, and a set in
 # a bash heredoc. The heredoc runs its substitution only when the delimiter is unquoted.
 for _cmd in (
@@ -6153,8 +6420,8 @@ sh("git env set: Bash unquoted heredoc runs a substitution with a set, denies",
 sh("git env set: Bash quoted heredoc runs no substitution, allowed",
    "cat <<'EOF'\n$(GIT_DIR=x " + VCS + " init)\nEOF", "allow", cwd=NOGIT)
 
-# git-env-glued, round 1. A PowerShell block opener glued to its word hides the set inside it from
-# the guard (RED on 46c3191). The spaced forms deny in the round 2 block above. One template per
+# A PowerShell block opener glued to its word hides the set inside it from
+# the guard. The spaced forms deny in the PowerShell-block cases above. One template per
 # opener: `@@` takes the set for the deny case and a body that sets nothing for the allow case, so
 # each form has both directions. A glued opener the guard must read, and one it must leave alone.
 # Three openers, one per tokenizer shape: a symbol alias (`%{`), a keyword after a paren (`if (...){`),
@@ -6170,16 +6437,14 @@ for _label, _template in _GLUED_OPENERS:
        cwd=NOGIT)
     sh("git env set: PowerShell, a glued %s block that sets nothing, allowed" % _label,
        _template.replace("@@", "$_"), "allow", tool="PowerShell", cwd=NOGIT)
-# Round 1 review of faa1e35: a glued opener, a space, then the set. 46c3191 denies every one of
-# these, and faa1e35 allows them (a regression, RED on faa1e35): its split leaves an empty token
-# after the brace, so the set no longer follows `{`. The same three openers, a space before the set.
+# The same three openers, a space before the set.
 for _label, _template in _GLUED_OPENERS:
     sh("git env set: PowerShell, a set after a space in a glued %s block, denies" % _label,
        _template.replace("@@", " $env:GIT_DIR='x' "), "deny", GIT_ENV_RULE, tool="PowerShell",
        cwd=NOGIT)
 sh("git env set: Bash, pwsh -c with a space before the set in a glued block, denies",
    """pwsh -c 'if(1){ $env:GIT_DIR="x" }'""", "deny", GIT_ENV_RULE, cwd=NOGIT)
-# Pins, GREEN on 46c3191 and on faa1e35. A double-quoted here-string (`@"..."@`) expands its
+# A double-quoted here-string (`@"..."@`) expands its
 # `$( )`, so a set inside it runs and denies. A single-quoted one (`@'...'@`) is text: the same set
 # in it allows, and so does a double-quoted one that holds no set.
 for _label, _text in (
@@ -6198,7 +6463,7 @@ for _label, _text in (
 ):
     sh("git env set: PowerShell, a single-quoted here-string that holds %s as text, allowed"
        % _label, _text, "allow", tool="PowerShell", cwd=NOGIT)
-# Control, green today: the spaced spelling of the three openers the round 2 block does not cover.
+# Control: the spaced spelling of the three openers the PowerShell-block cases above do not cover.
 for _cmd in (
     "if (0) {1} else {$env:GIT_DIR='x'}",
     "do {$env:GIT_DIR='x'} while (0)",
@@ -6254,8 +6519,7 @@ sh("git env set: Bash, pwsh -c with a glued if block that sets nothing, allowed"
 sh("git env set: Bash, a quoted pwsh -c line that only names a glued set, allowed",
    """echo 'pwsh -c "if(1){$env:GIT_DIR=1}"'""", "allow", cwd=NOGIT)
 
-# Pins for behaviour the glued-block lane must keep (all GREEN on 46c3191, no case held them). The
-# backtick pins are PowerShell: the outer shell takes the escape before pwsh runs the script, and in
+# The backtick pins are PowerShell: the outer shell takes the escape before pwsh runs the script, and in
 # Bash a backtick opens a substitution. The heredoc pins are Bash: an apostrophe in an unquoted body
 # is text, so the later substitution still runs, and a quoted delimiter runs none.
 sh("git env set: PowerShell, pwsh -c with a backtick-escaped $env inside an if block, denies",
@@ -6276,13 +6540,13 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a glued group opener, %s, denies" % _cmd[:12], _cmd, "deny",
        GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
-# Round 1 review of 76b4b0b (guard-speed): a name split by a substitution. The walk reads each
+# A name split by a substitution. The walk reads each
 # `$(...)` as `x`, so `GIT_INDE$(echo X)_FILE` reads as `GIT_INDEx_FILE`, and the case fold makes
-# that the watched name. The raw text holds no whole name, so a quick test of the raw text skips
-# the walk and allows what the walk denied on 46c3191. Each case below is denied there.
-# KNOWN LIMIT: GIT_DIR and GIT_WORK_TREE hold no X, so no substitution builds either name, and
-# the walk allows their split forms on both heads. A bare split assignment with no command after
-# it is allowed on both too (a bare name in capitals is denied only when it is written whole).
+# that the watched name. The raw text holds no whole name, so a quick test of the raw text must not
+# skip the walk.
+# KNOWN LIMIT: GIT_DIR and GIT_WORK_TREE hold no X, so no substitution builds either name, and the
+# walk allows their split forms. A bare split assignment with no command after
+# it is allowed too (a bare name in capitals is denied only when it is written whole).
 _SPLIT = "GIT_INDE$(echo X)_FILE"
 sh("git env set: Bash, a name split by a substitution, export, denies",
    "export %s=/x; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE, cwd=NOGIT)
@@ -6292,24 +6556,23 @@ sh("git env set: PowerShell, a name split by a substitution, New-Item, denies",
    r"New-Item env:%s -Value C:\x\index; python -m pytest" % _SPLIT, "deny", GIT_ENV_RULE,
    tool="PowerShell", cwd=NOGIT)
 
-# Round 2 review of a01afb0 (guard-speed): a name split by a printf directive. `%s` and `%b` with
+# A name split by a printf directive. `%s` and `%b` with
 # no argument print nothing, so the profile gets `GIT_DIR=/x`. The walk drops the directives
 # (`_PRINTF_DIRECTIVE`) before it reads the name, so the raw text holds no whole name and a quick
-# test of the raw text or of a substitution's text skips the walk. Each case below is denied on
-# 46c3191 and allowed on a01afb0.
+# test of the raw text or of a substitution's text must not skip the walk.
 sh("git env set: Bash printf into a profile, a name split by a printf directive, denies",
    r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
-# Round 3 review of 78ba117 (guard-speed): the quick test cannot read a printf directive by a strip
-# over the whole text, in either order with `QUOTE_MARKS`. Each case below is denied on 46c3191 and
-# pins one way a whole-text strip under-matches, so the quick test sends any printf on to the walk.
+# The quick test cannot read a printf directive by a strip over the whole text, in either order with
+# `QUOTE_MARKS`. Each case below pins one way a whole-text strip under-matches, so the quick test
+# sends any printf on to the walk.
 sh("git env set: Bash, a percent sign and a space before a set, no printf, denies",
    "x=5% GIT_DIR=/x " + VCS + " status", "deny", GIT_ENV_RULE, cwd=NOGIT)   # `% G` is no directive
 sh("git env set: Bash printf into a profile, a directive split by adjacent quotes, denies",
    r"printf 'GIT_%''sDIR=/x\n' >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 # KNOWN LIMIT: printf reads `\n` in this argument as a newline, so the file gets `GIT_` and
 # `DIR=/x` and sets nothing. The walk drops `\n` as a directive and denies: a false deny on the
-# safe side, pinned so the speed change keeps the verdict of 46c3191.
+# safe side, pinned.
 sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
    r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
@@ -6358,7 +6621,7 @@ sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
 sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
 sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
 sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
-# Bypasses found in review of PR #316. Each is refused, or allowed, as the owner ruled.
+# Each is refused, or allowed, as the owner ruled.
 for _command in (
     "bash -lc 'gh pr create --title x'", "dash -c 'gh pr create --title x'",
     "echo $(gh pr create --title x)", "echo `gh pr create --title x`",
@@ -6380,13 +6643,13 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
-# Named limits, no case: `gh api -X POST .../pulls`, `hub pull-request`, and short-flag clusters
-# such as `-dt x` (refused, a rare false alarm).
+# Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
+# `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
 # =========================================================================== 5b. the merge gate
 #
-# `git-wait-for-required-checks`. A merge made outside the merge tool is refused while the head has
+# The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
 
@@ -6457,8 +6720,6 @@ sh("merge-checks: a read run in the wrong folder is unknown, and denies",
 add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
     tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
     env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge-checks: a green head merges", "gh pr merge 12 --squash", "allow", silent=True,
-   cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
 sh("merge-checks: --auto is gated like any merge", "gh pr merge 12 --auto --squash", "deny",
    "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
    config=MERGECFG)
@@ -6476,6 +6737,100 @@ sh("merge-checks: a heredoc body that names a merge is data",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 
 
+# =========================================================================== 5c. a bare merge in a repo that uses the merge tool
+#
+# A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
+# tool: no claim, and the local main stays behind (incident claude-sharables 2026-10-06, four merges
+# left the local main four commits behind origin). The guard ASKS, never denies: a broken merge tool
+# leaves a bare merge as the only way out (`verification-recovery-not-gated-on-own-state`; owner
+# ruling, orchestrator call, lane bare-gh-merge-ask). Every other repo state allows, silently: no
+# stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp. The head is green in
+# every case, so merge-checks (5b) says nothing and only this rule can ask. BARE_MERGE is the rule id
+# the ask prints; one edit re-points every case below.
+BARE_MERGE = "bare-merge"
+BARE_SAYS = (("--confirm", "merge tool"),)   # any-of: the ask points at the tool it skips
+STAMPREPO = os.path.join(ROOT, "stamp_merge")        # stamp.json with a merge block
+STAMPNONE = os.path.join(ROOT, "stamp_none")         # a .github folder and no stamp.json
+STAMPNOBLOCK = os.path.join(ROOT, "stamp_noblock")   # stamp.json, valid, no merge block
+STAMPBAD = os.path.join(ROOT, "stamp_bad")           # stamp.json that is not JSON, but holds the word "merge"
+STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: it cannot be read
+STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
+STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
+
+
+def _build_stamp_repos():
+    stamp = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": ["gates"], "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
+    make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
+    make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
+    make_repo(STAMPDIR, {".github/stamp.json/keep": "x\n"})
+    make_repo(STAMPLIST, {".github/stamp.json": '["merge"]\n'})
+    if LINKS_MADE:
+        os.makedirs(os.path.dirname(STAMPLINK), exist_ok=True)
+        os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
+
+
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK],
+             _build_stamp_repos)
+
+_BARE_GATE = dict(env_path=GREEN_ON, config=MERGECFG)
+# ASK: the repo uses the merge tool, and the call skips it.
+sh("bare-merge: gh pr merge in a repo with a merge block asks",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a URL for the pull request asks",
+   "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a cd into the repo names the repo that is read",
+   "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=NOGIT, **_BARE_GATE)
+# The stamp is the repo's, not the folder's: a call from a subfolder, or a cd into one, reads the same repo.
+sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
+   "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
+   **_BARE_GATE)
+sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
+   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+# A cwd that links from outside the repo into it is read where it really is, not where it is spelled.
+if LINKS_MADE:
+    sh("bare-merge: a cwd that is a symlink into a subfolder of the repo asks",
+       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GATE)
+# building-scanner-respects-strings: text in the call's own arguments hides no merge.
+sh("bare-merge: comment openers inside a quoted argument hide no merge",
+   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a lone quote in an argument hides no merge",
+   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
+   'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
+   **_BARE_GATE)
+# A deny of 5b still wins: an ask must not turn a refusal into an ask.
+sh("bare-merge: a pending head in a repo with a merge block still denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# ALLOW: no merge block to read, or no merge made.
+for _name, _where in (
+    ("a repo with no stamp.json", STAMPNONE),
+    ("a stamp.json with no merge block", STAMPNOBLOCK),
+    ("a stamp.json that is not valid JSON", STAMPBAD),
+    ("a stamp.json that cannot be read", STAMPDIR),
+    ("a stamp.json that is JSON but not an object", STAMPLIST),
+):
+    sh("bare-merge: %s allows" % _name, "gh pr merge 12 --squash", "allow", silent=True,
+       cwd=_where, **_BARE_GATE)
+sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
+   silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GATE)
+sh("bare-merge: reading a pull request in a repo with a merge block allows",
+   "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: the merge tool in a repo with a merge block allows",
+   "python3 bin/merge 12 --confirm", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: quoted text that names a merge is text", "echo 'gh pr merge'", "allow",
+   silent=True, cwd=STAMPREPO)
+sh("bare-merge: a heredoc body that names a merge is data",
+   "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
+sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
+   silent=True, cwd=STAMPREPO)
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
@@ -6487,7 +6842,7 @@ CITE = "decisions/one-shared-record-stamp.md"
 # path spelling. A form that only repeats another's branch is not listed.
 for _name, _command in (
     ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
-    ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
+    ("a -am cluster", VCS + ' commit -am "see debts/later-item.md"'),
     ("the long --message=", VCS + ' commit --message="cites ' + CITE + '"'),
     ("a file named by -F", VCS + " commit -F " + slash(MSG_BAD)),
     ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
@@ -6502,12 +6857,28 @@ for _name, _command in (
 sh("cite-by-id: a message file that cannot be read is unknown, and denies",
    VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt", "deny", "cite-by-id",
    carries="could not be read", cwd=NOGIT, config=MERGECFG)
+# AUDIT 2026-10-17 (guard-audit-fixes, finding 7). "An unreadable -F file makes git fail, so allow it"
+# does not hold for these three: the file is unreadable at hook time, and git reads it fine when the
+# command runs. The same command writes it first (a redirect, or the usual `cat > f <<EOF` then
+# `commit -F f`), or the shell makes it (`<(...)`). An unconditional allow would let a message that
+# cites a record path through.
+MSG_MADE = slash(ROOT) + "/msg-made-in-this-command.txt"   # no such file: only the command makes it
+for _name, _command in (
+    ("a file written by a redirect in the same command",
+     "printf 'cites " + CITE + "' > " + MSG_MADE + " && " + VCS + " commit -F " + MSG_MADE),
+    ("a file written by a heredoc in the same command",
+     "cat > " + MSG_MADE + " <<'EOF'\ncites " + CITE + "\nEOF\n" + VCS + " commit -F " + MSG_MADE),
+    ("a message made by a process substitution",
+     VCS + " commit -F <(printf 'cites " + CITE + "')"),
+):
+    sh("cite-by-id: %s is unread at hook time, and denies" % _name, _command, "deny",
+       "cite-by-id", carries="could not be read", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
     ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
-    ("the word deferred and a folder", VCS + ' commit -m "move the deferred items, see decisions/"'),
+    ("the word debts and a folder", VCS + ' commit -m "move the debts around, see decisions/"'),
     ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),
     ("a record path in the add, not the message",
      VCS + " add " + CITE + " && " + VCS + ' commit -m "add the record"'),
@@ -6536,11 +6907,11 @@ for _name, _command in (
 ):
     sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
-# ---- two readings of a lone quote, gcp-heredoc-two-read (round 3 review of the guard pair). Bash
+# ---- two readings of a lone quote. Bash
 # reads `echo it's` as an open single quote, and the line holding only a quote closes it. The
 # commit after them is a real command, and its heredoc body is data. own_heredoc_bodies reads the
-# header on one reading only, so it misses this commit and never judges the body. The -m form with
-# a command substitution is the same hole. Main denies every form here, and these cases pin it.
+# header on one reading only, so it must still judge this commit's body. The -m form with
+# a command substitution is the same shape.
 LONE_PAIR = "echo it's\n'\n"
 sh("cite-by-id: a lone quote pair, then a -F - commit that cites a record denies",
    LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF", "deny", "cite-by-id",
@@ -6556,45 +6927,45 @@ sh("cite-by-id: a lone quote pair, then a -F - commit with a clean body is allow
 # commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
 # from the last paragraph of a commit. A trailer with no ` -- reason` excuses nothing. The reason
 # may not cite a record path. Every other line is still judged by the cite rule.
-DROPS_BODY = "title\n\nbody\n\nDrops-lines: deferred/a.md -- replaced by a decision"
+DROPS_BODY = "title\n\nbody\n\nDrops-lines: debts/a.md -- replaced by a decision"
 sh("cite-by-id: Drops-lines trailer in a commit -m body is allowed",
    VCS + ' commit -m "' + DROPS_BODY + '"', "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines trailer in a heredoc -F - body is allowed",
    VCS + " commit -F - <<'EOF'\n" + DROPS_BODY + "\nEOF", "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: two Drops-lines trailers with two paths are allowed",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n'
-   'Drops-lines: deferred/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- replaced by a decision\n'
+   'Drops-lines: debts/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a prose cite beside a Drops-lines trailer is denied",
-   VCS + ' commit -m "title\n\nbody cites deferred/a.md\n\n'
-   'Drops-lines: deferred/a.md -- replaced by a decision"', "deny", "cite-by-id",
+   VCS + ' commit -m "title\n\nbody cites debts/a.md\n\n'
+   'Drops-lines: debts/a.md -- replaced by a decision"', "deny", "cite-by-id",
    cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines reason that cites a record path is denied",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- see decisions/b.md"', "deny",
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- see decisions/b.md"', "deny",
    "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines trailer in a gh pr create body is denied",
-   'gh pr create --draft --title t --body "title\n\nDrops-lines: deferred/a.md -- replaced by a decision"',
+   'gh pr create --draft --title t --body "title\n\nDrops-lines: debts/a.md -- replaced by a decision"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines key spelled drops-lines: is allowed",
-   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: deferred/a.md -- replaced by a decision"',
+   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: debts/a.md -- replaced by a decision"',
    "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines trailer with no reason is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md"', "deny", "cite-by-id",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md"', "deny", "cite-by-id",
    cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a Drops-lines line in a middle paragraph is denied",
-   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n\n'
+   VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- replaced by a decision\n\n'
    'body after the trailer"', "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
-# Round 2 (owner ruling 2026-10-12). The exemption must blank one path, not the whole token after
+# Owner ruling 2026-10-12. The exemption must blank one path, not the whole token after
 # the key, so a second path in the same token is still judged. The lint reads that token as one path,
 # which excuses no record path. A space before the colon is still the key `Drops-lines`, which
 # `git interpret-trailers` reads and the lint accepts.
 sh("cite-by-id: Drops-lines token with a comma-joined second path is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md,deferred/b.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md,debts/b.md -- replaced"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md;deferred/b.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: debts/a.md;debts/b.md -- replaced"',
    "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
-   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : debts/a.md -- replaced"',
    "allow", cwd=NOGIT, config=MERGECFG)
 
 # ---- lane-by-slug (owner ruling 2026-10-13). A commit message or PR body names a lane by its
@@ -6685,7 +7056,7 @@ for _name, _command in (
        config=MERGECFG)
 
 
-# ---- lane-by-slug, review round 1. The red cases name the shape they pin. A glued short flag
+# ---- lane-by-slug. A glued short flag
 # (-tN16, -t=N16, -bN16, -amN20, -am"x") and a long-option prefix (--mess=, --messa=) carry the
 # message, so they are read. A double-backtick span and a ~~~ fence are quoted text, as a single
 # backtick span and a ``` fence already are. A cat heredoc is no commit message, so only the
@@ -6724,7 +7095,7 @@ for _name, _command in (
 ):
     sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
        config=MERGECFG)
-# ---- lane-by-slug, review round 2. Two commits in one call each take their own heredoc body, so
+# ---- lane-by-slug. Two commits in one call each take their own heredoc body, so
 # a second commit whose segment text repeats the first is still judged on its own body. A header
 # inside quotes is text, and the commit's own header still takes its body. A glued value is never a
 # body: a letter in a glued value is read as a value, not as a flag.
@@ -6795,13 +7166,8 @@ def cite_unread_folders_case():
     return True, "deny: the -F file is unread, and the record folders are unread too"
 
 
-# ---- guard-command-position (lane). A lane number hides from the message scan in these ways: a
-# wrapper the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued `(git`, and value
-# flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
-# quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
-# interpreter-fed body, which shifts the header count so the commit reads another body; and a case
-# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
-# cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
+# A lane number hides from the message scan behind a wrapper the rule does not unwrap, a heredoc header read in quoted
+# text, a comment or a here-string, a `<<word` inside an interpreter-fed body, or a case pattern's `)` inside an open `$(`.
 # Wrapper forms: one row per wrapper walk (a bare form, a value flag, a subshell). The deep set of
 # wrappers lives in the wsl section above, so this block keeps one row for each walk.
 for _name, _command in (
@@ -6826,8 +7192,8 @@ for _name, _command in (
 ):
     sh("guard-command-position: lane %s denies" % _name, _command, "deny", "lane-by-slug",
        cwd=NOGIT, config=MERGECFG)
-# The lone-quote pair of the cite cases, with a lane named in the body (gcp-heredoc-two-read). The
-# lane rule reads the same header, so it shares the hole: a -F - body and a -m $(cat body both hide.
+# The lone-quote pair of the cite cases, with a lane named in the body: a -F - body and a -m $(cat body)
+# both hide it from the same header read.
 sh("guard-command-position: lane, a lone quote pair then a -F - commit naming a lane denies",
    LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\nLane N20 lands\nEOF", "deny", "lane-by-slug",
    cwd=NOGIT, config=MERGECFG)
@@ -6871,6 +7237,396 @@ for _name, _command in (
 sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
    "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+
+# =========================================================================== 5c. the records page
+FAMILY = "records-page"
+#
+# `records-page`. Owner ruling 2026-10-16 10:28 CDT ("Also add a guard"), decision records-index-at-merge.
+# The page docs/records.md is rebuilt only at merge, by the merge tool. A lane never commits a change
+# to it. Incident 2026-10-16: each lane rebuilt the page, and three batches conflicted on it. The guard
+# refuses a lane commit whose page differs from the page on the lane's base. A merge of the base into
+# the lane brings the base's page, so that commit is allowed.
+#
+# THE SEAM. The base is `resolve_default_base(root)` of guard_core (origin/HEAD, then local main, then
+# local master), read at its TIP. The fixture makes local `main` STALE (page v0) while `origin/main`
+# holds page v1, and every lane is cut from the stale `main`. So a guard that reads local `main`, or
+# the merge base, reads v0 and refuses the merge case. A commit is refused only when the page it would
+# hold differs from HEAD's page AND from the base tip's page. Any read that fails is no hit.
+#
+# ALSO PINNED (stage then commit): the hook runs BEFORE the shell chain, so
+# `git add -A && git commit` and `git commit -am` stage the page after the hook has read the index.
+# Those are the usual way an agent commits the page it just rebuilt, so they are pinned here too.
+RECORDS_RULE = "records-page"
+RECORDS_SAYS = ("docs/records.md", "merge", ("drop", "Drop"))   # the rule named plainly, and the remedy
+RECORDS_NEVER = (VCS + " restore", VCS + " reset", VCS + " stash", VCS + " checkout")
+# The rule acts only when the base page opens with the generated header (RECORDS_HEADER of guard_merge),
+# so each fixture page starts with it.
+REC_V0 = "# Records index\nrecords page v0, as the lane was cut\n"
+REC_V1 = "# Records index\nrecords page v1, rebuilt on main\n"
+REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
+RECROOT = os.path.join(ROOT, "recpage")
+RECMAIN = os.path.join(RECROOT, "main")
+# One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
+# the index is per tree.
+REC_LANES = {name: os.path.join(RECROOT, "lane-" + name) for name in (
+    "staged", "staged-edit", "unstaged", "product", "merge", "merge-rebuilt", "copy-base")}
+REC_NOPAGE = os.path.join(RECROOT, "nopage")   # a repository that has no page at all
+REC_NOBASE = os.path.join(RECROOT, "nobase")   # a page change staged, and no origin, main or master
+
+
+def _rec_run(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the records-page fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rec_need(ok, what):
+    if not ok:
+        sys.exit("fixture setup failed in the records-page fixtures: " + what)
+
+
+def _rec_page(where):
+    return os.path.join(where, "docs", "records.md")
+
+
+def _build_records_page():
+    run, need, page = _rec_run, _rec_need, _rec_page
+
+    make_repo(RECMAIN, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(RECMAIN, "checkout", "-q", "-b", "advance")           # main's tip moves the page after the cut
+    write(page(RECMAIN), REC_V1)
+    run(RECMAIN, "commit", "-q", "-am", "main moves the page")
+    run(RECMAIN, "update-ref", "refs/remotes/origin/main", "advance")
+    run(RECMAIN, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(RECMAIN, "checkout", "-q", "main")                    # local main stays at the cut: stale
+    run(RECMAIN, "branch", "-q", "-D", "advance")
+    need(run(RECMAIN, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/main",
+         "origin/HEAD does not resolve to origin/main")
+    need(run(RECMAIN, "show", "origin/main:docs/records.md") == REC_V1.strip(), "origin/main page is not v1")
+    need(run(RECMAIN, "show", "main:docs/records.md") == REC_V0.strip(), "local main page is not v0")
+    for name, where in REC_LANES.items():
+        run(RECMAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+
+    def merged(name):
+        run(REC_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        need(run(REC_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD"),
+             "no merge is in progress in the lane %r" % name)
+
+    def stage(name, rel):
+        run(REC_LANES[name], "add", rel)
+
+    write(page(REC_LANES["staged"]), REC_LANE)           # rebuilt, then staged
+    stage("staged", "docs/records.md")
+    write(page(REC_LANES["staged-edit"]), REC_LANE)      # rebuilt and staged, then a product file edited
+    stage("staged-edit", "docs/records.md")
+    write(os.path.join(REC_LANES["staged-edit"], "src", "app.py"), "x = 3\n")
+    write(page(REC_LANES["unstaged"]), REC_LANE)         # rebuilt, nothing staged
+    write(os.path.join(REC_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    stage("product", "src/app.py")
+    merged("merge")                                      # origin/main merged in: the page is the base's
+    merged("merge-rebuilt")                              # the same merge, then the page rebuilt by hand
+    write(page(REC_LANES["merge-rebuilt"]), REC_LANE)
+    stage("merge-rebuilt", "docs/records.md")
+    write(page(REC_LANES["copy-base"]), REC_V1)          # the base's page copied over, no merge
+    stage("copy-base", "docs/records.md")
+    staged = lambda name: run(REC_LANES[name], "diff", "--cached", "--name-only")   # noqa: E731
+    need(run(REC_LANES["staged"], "show", ":docs/records.md") == REC_LANE.strip(), "staged page is not v2")
+    need(staged("unstaged") == "" and run(REC_LANES["unstaged"], "diff", "--name-only") == "docs/records.md",
+         "the unstaged lane is not 'page edited, nothing staged'")
+    need(staged("product") == "src/app.py", "the product lane stages more than src/app.py")
+    need(staged("staged-edit") == "docs/records.md"
+         and run(REC_LANES["staged-edit"], "diff", "--name-only") == "src/app.py",
+         "the staged-edit lane is not 'page staged, src/app.py edited and unstaged'")
+    need(run(REC_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip(), "the merged lane page is not v1")
+    need(run(REC_LANES["merge-rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
+         "the rebuilt merge lane page is not v2")
+    need(run(REC_LANES["copy-base"], "show", ":docs/records.md") == REC_V1.strip(), "the copy-base page is not v1")
+
+    make_repo(REC_NOPAGE, {"src/app.py": "x = 1\n"})
+    write(os.path.join(REC_NOPAGE, "src", "app.py"), "x = 2\n")
+    run(REC_NOPAGE, "add", "src/app.py")
+    os.makedirs(REC_NOBASE, exist_ok=True)
+    run(REC_NOBASE, "init", "-q", "-b", "trunk", ".")
+    write(page(REC_NOBASE), REC_V0)
+    run(REC_NOBASE, "add", "-A")
+    run(REC_NOBASE, "commit", "-q", "-m", "first")
+    write(page(REC_NOBASE), REC_LANE)
+    run(REC_NOBASE, "add", "docs/records.md")
+    need(run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/main").returncode != 0
+         and run_vcs(REC_NOBASE, "rev-parse", "--verify", "-q", "refs/heads/master").returncode != 0
+         and not run(REC_NOBASE, "remote"), "the nobase repository has a base")
+
+
+lazy_fixture([RECMAIN, REC_NOPAGE, REC_NOBASE, *REC_LANES.values()], _build_records_page)
+
+# Three more repositories. The base is a property of the repository
+# (origin/HEAD, local main, origin/main), so each needs its own, not a worktree of RECMAIN.
+RECMORE = os.path.join(ROOT, "recmore")
+# origin/HEAD names a ref that does not exist, so the base is local `main`, which lags origin/main:
+# local main holds v0, origin/main holds v1. The owner's resolve order stays as it is.
+REC_DANGLE = os.path.join(RECMORE, "dangle")
+REC_DANGLE_LANES = {name: os.path.join(RECMORE, "dangle-" + name) for name in ("merge", "fresh", "rebuilt")}
+# The page was added on main after the lane was cut: HEAD has no page, the base (origin/main) has v1.
+REC_NEW = os.path.join(RECMORE, "new")
+REC_NEW_LANE = os.path.join(RECMORE, "new-lane")
+# The base has no page at all: a lane that creates it is the first adoption.
+REC_ADOPT = os.path.join(RECMORE, "adopt")
+REC_ADOPT_LANE = os.path.join(RECMORE, "adopt-lane")
+# The base page is hand-written: it does not open with the generated header, so the rule is no hit.
+REC_PLAIN = os.path.join(RECMORE, "plain")
+REC_PLAIN_LANES = {name: os.path.join(RECMORE, "plain-" + name) for name in ("staged", "product")}
+
+
+def _build_records_more():
+    run, need, page = _rec_run, _rec_need, _rec_page
+
+    def advance(where, files, origin_head):
+        # origin/main moves on after the lane's cut; local main stays at the cut
+        run(where, "checkout", "-q", "-b", "advance")
+        for rel, text in files.items():
+            write(os.path.join(where, rel), text)
+        run(where, "add", "-A")
+        run(where, "commit", "-q", "-m", "main moves the page")
+        run(where, "update-ref", "refs/remotes/origin/main", "advance")
+        run(where, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head)
+        run(where, "checkout", "-q", "main")
+        run(where, "branch", "-q", "-D", "advance")
+
+    make_repo(REC_DANGLE, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_DANGLE, {"docs/records.md": REC_V1}, "refs/remotes/origin/gone")
+    need(run(REC_DANGLE, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/gone"
+         and run_vcs(REC_DANGLE, "rev-parse", "--verify", "-q", "origin/gone").returncode != 0,
+         "origin/HEAD in the dangle repository does not dangle")
+    need(run(REC_DANGLE, "show", "main:docs/records.md") == REC_V0.strip()
+         and run(REC_DANGLE, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the dangle repository is not 'local main v0, origin/main v1'")
+    for name, where in REC_DANGLE_LANES.items():
+        run(REC_DANGLE, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+    for name in ("merge", "rebuilt"):
+        run(REC_DANGLE_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        need(run(REC_DANGLE_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD"),
+             "no merge is in progress in the dangle lane %r" % name)
+    write(page(REC_DANGLE_LANES["rebuilt"]), REC_LANE)
+    run(REC_DANGLE_LANES["rebuilt"], "add", "docs/records.md")
+    need(run(REC_DANGLE_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip()
+         and run(REC_DANGLE_LANES["rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
+         "the dangle merge lanes hold the wrong staged pages")
+
+    make_repo(REC_NEW, {"src/app.py": "x = 1\n"})
+    advance(REC_NEW, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")
+    run(REC_NEW, "worktree", "add", "-q", "-b", "lane-new", REC_NEW_LANE, "main")
+    write(page(REC_NEW_LANE), REC_LANE)                   # the generator wrote a page: untracked
+    write(os.path.join(REC_NEW_LANE, "src", "app.py"), "x = 2\n")   # and a tracked edit, unstaged
+    need(run(REC_NEW_LANE, "ls-tree", "HEAD", "--", "docs/records.md") == ""
+         and run(REC_NEW_LANE, "ls-files", "--others", "--exclude-standard") == "docs/records.md"
+         and run(REC_NEW_LANE, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the new lane is not 'no page at HEAD, an untracked page, base has v1'")
+
+    make_repo(REC_ADOPT, {"src/app.py": "x = 1\n"})
+    run(REC_ADOPT, "worktree", "add", "-q", "-b", "lane-adopt", REC_ADOPT_LANE, "main")
+    write(page(REC_ADOPT_LANE), REC_LANE)
+    run(REC_ADOPT_LANE, "add", "docs/records.md")
+    need(run(REC_ADOPT_LANE, "ls-tree", "main", "--", "docs/records.md") == ""
+         and run(REC_ADOPT_LANE, "diff", "--cached", "--name-only") == "docs/records.md",
+         "the adopt lane is not 'base has no page, page staged as new'")
+
+    make_repo(REC_PLAIN, {"docs/records.md": "hand-written page v0\n", "src/app.py": "x = 1\n"})
+    advance(REC_PLAIN, {"docs/records.md": "hand-written page v1\n"}, "refs/remotes/origin/main")
+    for name, where in REC_PLAIN_LANES.items():
+        run(REC_PLAIN, "worktree", "add", "-q", "-b", "lane-" + name, where, "main")
+    write(page(REC_PLAIN_LANES["staged"]), "hand-written page v2\n")    # a staged edit of the page
+    run(REC_PLAIN_LANES["staged"], "add", "docs/records.md")
+    write(os.path.join(REC_PLAIN_LANES["product"], "src", "app.py"), "x = 2\n")   # a product edit only
+    run(REC_PLAIN_LANES["product"], "add", "src/app.py")
+    need(not run(REC_PLAIN, "show", "origin/main:docs/records.md").startswith("# Records index")
+         and run(REC_PLAIN_LANES["staged"], "diff", "--cached", "--name-only") == "docs/records.md"
+         and run(REC_PLAIN_LANES["product"], "diff", "--cached", "--name-only") == "src/app.py",
+         "the plain lanes are not 'base page has no header; page staged / product file staged'")
+
+
+lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
+              REC_ADOPT_LANE, *REC_PLAIN_LANES.values()], _build_records_more)
+
+
+def records_deny(name, command, lane, **kw):
+    sh("records-page: %s is refused" % name, command, "deny", RECORDS_RULE, cwd=REC_LANES.get(lane, lane),
+       carries=RECORDS_SAYS, lacks=RECORDS_NEVER, **kw)
+
+
+def records_allow(name, command, cwd, **kw):
+    sh("records-page: %s is allowed" % name, command, "allow", cwd=cwd, **kw)
+
+
+# 1. A staged page that is not the base's page: refused, under Bash and PowerShell, and for a builder.
+records_deny("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
+records_deny("a lane commit of a staged page that differs from the base's, under PowerShell",
+             VCS + " commit -m x", "staged", tool="PowerShell")
+records_deny("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
+             "staged", agent_id="bld1", agent_type="builder")
+# A merge commit is no exemption: only the base's own page rides in on a merge.
+records_deny("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
+# Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
+records_deny("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
+records_deny("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
+             "unstaged", tool="PowerShell")
+records_deny("stage then commit: add -A and commit with an edited page",
+             VCS + " add -A && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add -A and commit with an edited page, under PowerShell",
+             VCS + " add -A; " + VCS + " commit -m x", "unstaged", tool="PowerShell")
+records_deny("stage then commit: add . and commit with an edited page",
+             VCS + " add . && " + VCS + " commit -m x", "unstaged")
+records_deny("stage then commit: add of the page and commit with an edited page",
+             VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
+
+# 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
+records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
+              REC_LANES["product"])
+records_allow("a commit that stages no page change, under PowerShell", VCS + " commit -m x",
+              REC_LANES["product"], tool="PowerShell")
+# The page edited and left unstaged is no commit of the page. A guard that refuses every commit after
+# a lint run is a false alarm.
+records_allow("a plain commit with an edited page left unstaged", VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("a commit of a product file added alone, with an edited page left unstaged",
+              VCS + " add src/app.py && " + VCS + " commit -m x", REC_LANES["unstaged"])
+records_allow("an add of the page, with no commit", VCS + " add docs/records.md", REC_LANES["unstaged"])
+
+# 3. The base's own page: allowed, as a merge of the base into the lane, or as a copy of its page.
+records_allow("a merge commit that brings the base's page", VCS + " commit -m x", REC_LANES["merge"])
+records_allow("a merge commit that brings the base's page, under PowerShell", VCS + " commit -m x",
+              REC_LANES["merge"], tool="PowerShell")
+records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
+# The stage-then-commit forms must hold the same line. A guard that refuses whenever the page on disk
+# differs from HEAD's, with no look at the base, refuses the merge and the remedy: both false alarms.
+for _lane in ("merge", "copy-base"):
+    records_allow("stage then commit: commit -am with the base's page, lane %s" % _lane, VCS + " commit -am x",
+                  REC_LANES[_lane])
+    records_allow("stage then commit: add -A and commit with the base's page, lane %s" % _lane,
+                  VCS + " add -A && " + VCS + " commit -m x", REC_LANES[_lane])
+records_allow("stage then commit: add -A and commit with the base's page, under PowerShell",
+              VCS + " add -A; " + VCS + " commit -m x", REC_LANES["copy-base"], tool="PowerShell")
+
+# 4. Nothing to compare, or git cannot be read: no hit.
+records_allow("a commit in a repository with no page", VCS + " commit -m x", REC_NOPAGE)
+records_allow("a commit of a staged page when the base cannot be read", VCS + " commit -m x", REC_NOBASE)
+records_allow("a commit in a directory that is no repository", VCS + " commit -m x", NOGIT)
+if os.name != "nt":
+    records_allow("a commit of a staged page when git cannot answer", VCS + " commit -m x",
+                  REC_LANES["staged"], env_path=GITBLIND)
+else:
+    skip_case("records-page: a commit of a staged page when git cannot answer is allowed", NO_STAND_IN)
+
+# 5. Text that only names the page is no commit of it.
+for _name, _command in (
+    ("a message that names the page", VCS + ' commit -m "docs/records.md is rebuilt only at merge"'),
+    ("a message that names the page, in a -F heredoc",
+     VCS + " commit -F - <<'EOF'\nthe page docs/records.md is not mine to rebuild\nEOF"),
+    ("an echo of a commit of the page", "echo '" + VCS + " commit -m x docs/records.md'"),
+    ("a log of the page", VCS + " log --oneline -- docs/records.md"),
+    ("a show of the page", VCS + " show origin/main:docs/records.md"),
+    ("a read of the page", "cat docs/records.md"),
+):
+    records_allow(_name, _command, REC_LANES["product"])
+
+# ---- the same two readings of a lone quote, a multi-line quoted message and a comment opener in a
+# string, building-scanner-respects-strings: the guard reads the command for a commit, so a quote or an
+# opener inside a message must neither hide a commit of the page nor invent one.
+records_deny("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
+             "staged")
+records_deny("a commit of a staged page after a comment opener inside a string",
+             'echo "# note // /* x"\n' + VCS + " commit -m x", "staged")
+records_deny("a commit of a staged page with a multi-line quoted message",
+             VCS + ' commit -m "first line\nsecond line"', "staged")
+records_allow("an echo of a commit inside a multi-line quoted string, with a staged page",
+              'echo "first\n' + VCS + ' commit -m x\nlast"', REC_LANES["staged"])
+
+GEN, ADD_A, COMMIT_X = "python3 lint/hook_catalog.py", VCS + " add -A", VCS + " commit -m x"
+# One chain runs the generator, then stages and commits. The hook reads before the chain runs, so the
+# page on disk still equals HEAD's: the generator is what rewrites it. The generator is named by its
+# script, alone, with --records-only, or by a path. `--check` writes nothing.
+for _name, _command, _kw in (
+    ("--records-only", GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, {}),
+    ("no flag", GEN + " && " + ADD_A + " && " + COMMIT_X, {}),
+    ("a path", "python3 /home/dev/claude-settings/lint/hook_catalog.py --records-only && " + ADD_A + " && "
+     + COMMIT_X, {}),
+    ("--records-only, under PowerShell", GEN + " --records-only; " + ADD_A + "; " + COMMIT_X,
+     {"tool": "PowerShell"}),
+):
+    records_deny("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
+                 % _name, _command, "product", **_kw)
+records_allow("a chain that runs the generator with --check, then add -A and commit",
+              GEN + " --check && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain whose commit message names the generator",
+              ADD_A + " && " + VCS + ' commit -m "ran python3 lint/hook_catalog.py --records-only"',
+              REC_LANES["product"])
+records_allow("a chain that only echoes the generator",
+              'echo "' + GEN + ' --records-only" && ' + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+
+# The base is a stale local `main` (origin/HEAD dangles), and the lane merged origin/main: its page is
+# v1, which is origin/main's page, so it is allowed. A page that equals HEAD's, the base's or
+# origin/<base>'s page passes. A hand-rebuilt page is still refused. The chain form from a clean lane is
+# judged before the merge runs.
+_dl = REC_DANGLE_LANES
+records_allow("a merge commit that brings origin/main's page when origin/HEAD dangles", COMMIT_X, _dl["merge"])
+records_allow("a merge commit that brings origin/main's page when origin/HEAD dangles, under PowerShell",
+              COMMIT_X, _dl["merge"], tool="PowerShell")
+records_allow("commit -am after a merge of origin/main when origin/HEAD dangles", VCS + " commit -am x",
+              _dl["merge"])
+records_allow("add -A and commit after a merge of origin/main when origin/HEAD dangles",
+              ADD_A + " && " + COMMIT_X, _dl["merge"])
+records_allow("a merge --no-commit of origin/main and a commit in one chain, origin/HEAD dangling",
+              VCS + " merge --no-commit origin/main && " + COMMIT_X, _dl["fresh"])
+records_deny("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
+
+# The page is untracked at HEAD (the base added it after the lane was cut). `commit -a` never stages an
+# untracked file, so it commits no page. `add -A` and an add of the page do.
+records_allow("commit -am when the page is untracked at HEAD", VCS + " commit -am x", REC_NEW_LANE)
+records_allow("commit -am when the page is untracked at HEAD, under PowerShell", VCS + " commit -am x",
+              REC_NEW_LANE, tool="PowerShell")
+records_allow("a plain commit when the page is untracked at HEAD", COMMIT_X, REC_NEW_LANE)
+records_deny("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
+records_deny("add of the page and commit when the page is untracked at HEAD",
+             VCS + " add docs/records.md && " + COMMIT_X, REC_NEW_LANE)
+
+# A commit that names its paths (`--` or --only) commits those paths and ignores the other staged
+# entries, so a page staged earlier rides in on no such commit. Naming the page itself still refuses.
+records_allow("a commit of src/app.py by path, with the page staged earlier", COMMIT_X + " -- src/app.py",
+              REC_LANES["staged-edit"])
+records_allow("a commit with --only of src/app.py, with the page staged earlier",
+              VCS + " commit --only -m x src/app.py", REC_LANES["staged-edit"])
+records_deny("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
+records_deny("a commit by path that names the page, with the page staged earlier",
+             COMMIT_X + " -- src/app.py docs/records.md", "staged-edit")
+
+# First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
+# page as no hit). A limit, named in the decision's holes.
+records_allow("a lane that creates the page where the base has none", COMMIT_X, REC_ADOPT_LANE)
+records_allow("a chain that runs the generator, then add -A and commit, where the base has no page",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_ADOPT_LANE)
+
+# The generator is read by its command word (or the script of a python interpreter), never by a token that
+# only names it. A reader, a linter, a log and a `--print` run write no page. A tool that runs it as its
+# command word, by a path or through `env`, does.
+records_allow("a chain that lints the generator, then add -A and commit",
+              "ruff check lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that reads the generator with cat, then add -A and commit",
+              "cat lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that logs the generator's history, then add -A and commit",
+              VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --print, then add -A and commit",
+              GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_deny("a chain that runs the generator as its own command word, then add -A and commit",
+             "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator through env, then add -A and commit",
+             "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
+
+# The rule acts only when the base page opens with the generated header. A hand-written base page is no
+# hit: a staged edit of it, and a generator chain over it, pass.
+records_allow("a commit of a staged page edit where the base page is hand-written", COMMIT_X,
+              REC_PLAIN_LANES["staged"])
+records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
+              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
@@ -6916,6 +7672,143 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
    "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
+# OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
+# reads the frozen file, so it is allowed. A copy INTO a frozen path, a copy between two frozen
+# paths and a `mv` of a frozen file stay denied: `mv` takes the file away, and a copy writes into
+# the frozen set.
+sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /tmp/guard.bak",
+   "allow", cwd=NOGIT)
+sh("frozen: cp FROM the frozen settings to scratch is a read",
+   "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: cp from a frozen path TO a frozen path still denies",
+   "cp " + CFG_HOOK + " " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM a frozen hook still denies", "mv " + CFG_HOOK + " /tmp/guard.bak", "deny",
+   "frozen-path", cwd=NOGIT)
+# A LINK IS NOT A COPY. `cp -l` and `cp -s` (also `-a` with either, and the long forms) make a hard or
+# symbolic link to the frozen file, so a later write to the new name writes the frozen file. Only a
+# plain copy reads its source.
+sh("frozen: cp -al FROM a frozen hook makes a link, and stays denied",
+   "cp -al " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -l FROM a frozen hook makes a hard link, and stays denied",
+   "cp -l " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --link FROM a frozen hook stays denied",
+   "cp --link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -s FROM a frozen hook makes a symbolic link, and stays denied",
+   "cp -s " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp --symbolic-link FROM a frozen hook stays denied",
+   "cp --symbolic-link " + CFG_HOOK + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A HARD LINK TO A DIRECTORY LINKS EACH FILE IN IT. `cp -al` of the config directory (the test's
+# stand-in for ~/.claude) or `cp -Rl` of its hooks folder gives /tmp/x the frozen files themselves.
+sh("frozen: cp -al of the config directory makes links into it, and stays denied",
+   "cp -al " + slash(CFG) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp -Rl of the frozen hooks folder makes links, and stays denied",
+   "cp -Rl " + slash(os.path.join(CFG, "hooks")) + " /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A redirect of stderr to the null device writes no frozen file. A redirect onto one still denies.
+sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
+   "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
+sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
+   "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
+# no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
+# worktree `<clone>-live-<12 hex>`. The links in ~/.claude load from it, so a write into either one
+# changes what every session runs. The fixture clone is CLONE, so its pin is ROOT/clone-live.
+# ONLY THE TREE THE PIN LINKS TO IS FROZEN. install_from_main.sh makes `<clone>-live` a link to the
+# current stamped tree, and the trees before it stay on disk until pruned. OLD_PIN is one of those.
+LIVE_PIN = CLONE + "-live"
+STAMPED_PIN = CLONE + "-live-abcdef123456"
+OLD_PIN = CLONE + "-live-111111111111"
+LIVE_CLAUDEMD = slash(os.path.join(LIVE_PIN, "CLAUDE.md"))
+STAMPED_GUARD = slash(os.path.join(STAMPED_PIN, "hooks", "guard.py"))
+OLD_GUARD = slash(os.path.join(OLD_PIN, "hooks", "guard.py"))
+write(STAMPED_GUARD, "# pinned\n")
+write(OLD_GUARD, "# old\n")
+try:
+    os.symlink(STAMPED_PIN, LIVE_PIN)
+    PIN_LINKED = True
+except OSError:
+    PIN_LINKED = False   # no link rights: the pin is a plain folder, and the link cases do not run
+write(LIVE_CLAUDEMD, "# pinned\n")
+add("frozen: Write of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, content="rules\n")
+add("frozen: Edit of the live pinned checkout's CLAUDE.md", "deny", "frozen-path", tool="Edit",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD, old_string="# pinned", new_string="# rewritten")
+if PIN_LINKED:
+    add("frozen: Write of a hook in the stamped tree the pin links to", "deny", "frozen-path",
+        tool="Write", cwd=NOGIT, file_path=STAMPED_GUARD, content="# rewritten\n")
+    sh("frozen: sed -i on a hook in the stamped tree the pin links to",
+       "sed -i '' s/a/b/ " + STAMPED_GUARD, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i on the live pinned checkout's CLAUDE.md", "sed -i '' s/a/b/ " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a redirect onto the live pinned checkout's CLAUDE.md", "echo rules > " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp onto the live pinned checkout's CLAUDE.md", "cp /tmp/x.md " + LIVE_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: mv FROM the live pinned checkout's CLAUDE.md still denies",
+   "mv " + LIVE_CLAUDEMD + " /tmp/live.md", "deny", "frozen-path", cwd=NOGIT)
+# A copy OUT of the pin reads it, the same as the copy-out rule above.
+sh("frozen: cp OUT of the live pinned checkout to scratch is a read",
+   "cp " + LIVE_CLAUDEMD + " /tmp/live.md", "allow", cwd=NOGIT)
+add("frozen: Read of the live pinned checkout's CLAUDE.md is allowed", "allow", tool="Read",
+    cwd=NOGIT, file_path=LIVE_CLAUDEMD)
+# NOT THE PIN: the clone itself, a folder whose name only starts with the pin's name, a `-live`
+# folder that belongs to no clone, and a `-live-` folder whose tail is not 12 hex.
+add("frozen: an edit in the clone itself is allowed", "allow", tool="Edit", cwd=CLONE,
+    file_path=slash(os.path.join(CLONE, "CLAUDE.md")), old_string="rules", new_string="rewritten")
+sh("frozen: sed -i on the clone's own CLAUDE.md is allowed",
+   "sed -i '' s/a/b/ " + slash(os.path.join(CLONE, "CLAUDE.md")), "allow", cwd=NOGIT)
+add("frozen: an edit in claude-settings-livestock is allowed", "allow", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clone-livestock", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in an unrelated folder named -live is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "other-live", "CLAUDE.md")),
+    old_string="a", new_string="b")
+add("frozen: an edit in a -live folder whose tail is not 12 hex is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clone-live-scratch", "CLAUDE.md")),
+    old_string="a", new_string="b")
+# THE RECOVERY PATH STAYS OPEN. A broken pin is repaired by running the install by hand, or by
+# running the merge tool, so neither may be gated on the pin being healthy (verification-recovery-
+# not-gated-on-own-state). Each runs from the clone, and each from the pin itself.
+sh("recovery: merge/install_from_main.sh run by hand from the clone is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=CLONE)
+sh("recovery: merge/install_from_main.sh run by hand from the live pin is allowed",
+   "bash merge/install_from_main.sh", "allow", cwd=LIVE_PIN)
+sh("recovery: the merge tool run from the clone is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=CLONE)
+sh("recovery: the merge tool run from the live pin is allowed", "python3 bin/merge 12 --confirm",
+   "allow", cwd=LIVE_PIN)
+# A STAMPED TREE NO LINK POINTS AT IS NOT FROZEN. install_from_main.sh says "move it aside" when a
+# tree is in the way (move_pin), and prune_trees removes the old ones. Neither may be blocked.
+sh("recovery: mv of an old stamped tree that no link points at is allowed",
+   "mv " + OLD_PIN + " /tmp/aside", "allow", cwd=NOGIT)
+sh("recovery: rm -rf of an old stamped tree that no link points at is allowed",
+   "rm -rf " + OLD_PIN, "allow", cwd=NOGIT)
+# A FOLDER IS A PIN ONLY WHEN ITS SIBLING CLONE HOLDS merge/install_from_main.sh, the script that
+# makes the pin (orchestrator call, 2026-10-17). The two marker files alone do not make one, so a
+# sibling with only settings.json, or only install.ps1, leaves `X-live` editable.
+write(os.path.join(ROOT, "clonea", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonea-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloneb", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "cloneb-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "clonec", "settings.json"), "{}\n")
+write(os.path.join(ROOT, "clonec", "install.ps1"), "# install\n")
+write(os.path.join(ROOT, "clonec-live", "CLAUDE.md"), "# not a pin\n")
+write(os.path.join(ROOT, "cloned", "merge", "install_from_main.sh"), "# install\n")
+write(os.path.join(ROOT, "cloned-live", "CLAUDE.md"), "# pinned\n")
+add("frozen: Write of X-live beside a clone with only settings.json stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clonea-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with only install.ps1 stays editable", "allow",
+    tool="Write", cwd=NOGIT, file_path=slash(os.path.join(ROOT, "cloneb-live", "CLAUDE.md")),
+    content="rules\n")
+add("frozen: Write of X-live beside a clone with both markers and no install script stays editable",
+    "allow", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "clonec-live", "CLAUDE.md")), content="rules\n")
+add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
+    "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
@@ -6950,7 +7843,7 @@ add("frozen: an ordinary project file by absolute path", "allow", tool="Write", 
 # config directory as a real symlink into the clone (`~/.claude/hooks/guard.py -> <clone>/
 # hooks/guard.py`). A realpath-only read follows that link OUT of the config directory and
 # wrongly allows the write; `is_frozen` also checks the literal, un-followed path, which stays
-# under the config directory. Found in passing by a reviewer of PR #158.
+# under the config directory.
 SYMFROZEN = os.path.join(ROOT, "symfrozen")
 SYM_CLONE_HOOK = os.path.join(SYMFROZEN, "clone", "hooks", "guard.py")
 SYM_CFG_HOOK = os.path.join(SYMFROZEN, "cfg", "hooks", "guard.py")
@@ -7070,8 +7963,7 @@ sh("frozen: a heredoc writing prose that names the environment file",
 # THE QUOTED SIBLING of the model-cap data cases. The same _shell_write_hit reads a frozen path inside
 # a quoted echo as a write. A quoted path piped into a pure printer is data, and allows (the wc pin
 # below). Piped into an interpreter it denies: an interpreter may run the text, so a pipe into one
-# fails closed, as main does (cap-ask-fix review round 1, the orchestrator's design call). A real
-# cat-write onto that file stays denied.
+# fails closed. A real cat-write onto that file stays denied.
 sh("frozen data: a quoted cat-write onto the config settings, piped to python, denies "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
@@ -7099,7 +7991,7 @@ sh("frozen: var: frozen path read into a safe $OUT",
 sh("frozen: var: write to a safe $OUT", "OUT=/tmp/o; echo hi > $OUT", "allow", cwd=NOGIT)
 sh("frozen: var: write to an unassigned $D", "echo x > $D", "allow", cwd=NOGIT)
 
-# ROUND 2: shapes the first fix missed. P is the frozen path; every command quotes it.
+# P is the frozen path; every command quotes it.
 _P = '"' + CFG_STATE + '"'
 for _n, _c in (
     ("the last assignment wins", 'D=/tmp/o; D=' + _P + '; cp a "$D"'),
@@ -7121,8 +8013,9 @@ sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"'
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
 
-# NO OVERRIDE TOKEN IS A SKELETON KEY, because no override token exists any more. A leftover token
-# from either earlier guard changes nothing.
+# A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
+# assignments that the guard does not read. The one lift is the owner override pass (family
+# `override`): the owner types it as a prompt, and the guard reads it from a state file.
 sh("frozen: a leftover token is not a key to the environment rule",
    "DESTRUCTIVE_OK=1 cat " + ENV, "deny", "env-file", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the frozen rule",
@@ -7134,10 +8027,10 @@ sh("frozen: a leftover token is not a key to the push rule",
 
 
 # THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
-# shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes. They pass on
-# main, which reads every quoted word as code, and they guard a future regression of the data reading.
+# shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes, and they guard
+# a future regression of the data reading.
 # The commit message is the allow shape that reading made data. A heredoc body fed to an interpreter
-# is code, not data: it stays in view, so a shell write it names denies (review round 1, F5).
+# is code, not data: it stays in view, so a shell write it names denies.
 sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
    "[regression pin: passes on main and d7fb2f1]",
    'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
@@ -7152,9 +8045,7 @@ sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fe
    "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
    "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
 
-# ROUND 1 RED (cap-ask-data review). The narrowing reads a quoted word as data, and a word that starts
-# plain as code. Each shape below is a real write. Each DENIES, as main does, and each is red on 9eeb1fc.
-# The F5 pins are the orchestrator's call, not a parity claim with main.
+# The narrowing reads a quoted word as data, a plain word as code. Each shape below is a real write, so each DENIES.
 for _n, _c in (
     ("a quoted sh name", '"sh" -c "cat > ' + CFG_SETTINGS + '"'),
     ("a shell named by a variable", '$SHELL -c "cat > ' + CFG_SETTINGS + '"'),
@@ -7187,8 +8078,8 @@ sh("frozen shell: F5, a python3 heredoc whose body runs an os.system tee, denies
    "python3 <<'EOF'\nimport os\nos.system(\"tee " + CFG_SETTINGS + " < /dev/null\")\nEOF",
    "deny", "frozen-path", cwd=NOGIT)
 
-# COVERAGE (review round 1, green on 9eeb1fc). A comment opener, a multi-line quoted string or a lone
-# apostrophe must neither hide a real write after it, nor turn quoted text that names a write into one.
+# COVERAGE. A comment opener, a multi-line quoted string or a lone apostrophe must neither hide a real
+# write after it, nor turn quoted text that names a write into one.
 sh("frozen shell: a # in double quotes does not hide a real write after it, denies [r1 cov]",
    'echo "# keep" && cat > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: a /* in double quotes does not hide a real write after it, denies [r1 cov]",
@@ -7210,10 +8101,8 @@ sh("frozen data: a // in a multi-line double-quoted string naming a cat-write al
 sh("frozen data: a multi-line commit message with a # naming a cat-write allows [r1 cov]",
    VCS + ' commit -m "line one\n# cat > ' + CFG_SETTINGS + '"', "allow", cwd=NOGIT)
 
-# ROUND 2 RED (cap-ask-data, try 3, review option A). A command that runs its argument as a shell is
-# code, even when the outer command is git, gh, rg, sort or python. Each shape writes the frozen path,
-# so each DENIES, as main does. Red on 6895ae0: the outer command read as a data reader, so its
-# quoted argument stayed data.
+# A command that runs its argument as a shell is code, even when the outer command is git, gh, rg,
+# sort or python. Each shape writes the frozen path, so each DENIES.
 for _n, _c in (
     ("a git -c alias that runs the write", "git -c alias.w='!cat > " + CFG_SETTINGS + "' w"),
     ("a git submodule foreach that runs the write", "git submodule foreach 'cat > " + CFG_SETTINGS + "'"),
@@ -7242,7 +8131,7 @@ sh("frozen shell: r2, a # in a quoted git argument does not hide a write run by 
    "git submodule foreach \"echo '# keep' && cat > " + CFG_SETTINGS + "\"", "deny", "frozen-path",
    cwd=NOGIT)
 
-# ROUND 2 GREEN PINS (cap-ask-data, try 3). Quoted text is data as the value of a named message flag,
+# Quoted text is data as the value of a named message flag,
 # and as the input of a pure printer whose output runs nowhere. Each names the frozen path and allows.
 sh("frozen data: r2, a gh pr create body naming a cat-write onto the config settings, allows [r2 pin]",
    "gh pr create --draft --title \"note\" --body \"cat > " + CFG_SETTINGS + " is refused\"", "allow",
@@ -7261,17 +8150,16 @@ sh("frozen data: r2, a cd then a commit naming a cat-write onto the config setti
 sh("frozen data: r2, a heredoc to notes.md naming a cat-write onto the config settings, allows [r2 pin]",
    "cat > notes.md <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
 
-# ROUND 2 COVERAGE (green on 6895ae0). A multi-line quoted string or an apostrophe must not hide a real
-# write that follows it, under the new reading of a message flag.
+# COVERAGE. A multi-line quoted string or an apostrophe must not hide a real
+# write that follows it, under the reading of a message flag.
 sh("frozen shell: r2 cov, a multi-line commit message before a real write, denies [r2 cov]",
    VCS + " commit -m \"line one\n# two\" ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
-# ROUND 3 (cap-ask-data review, item 4). A program piped into python that reads its program from stdin
+# A program piped into python that reads its program from stdin
 # runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
-# /proc/self/fd/0 and CON forms name the same stdin, and on 8a83d89 each denies (_STDIN_FILES names
-# it). The `python -` twin is a GREEN pin, and the four are GREEN pins too.
+# /proc/self/fd/0 and CON forms name the same stdin (_STDIN_FILES).
 FROZEN_PY_WRITE = "import os; os.system('tee " + CFG_SETTINGS + " </dev/null')"
 sh("frozen stdin: a python program echoed into python -, writes the config settings, denies [r3 pin]",
    "echo \"" + FROZEN_PY_WRITE + "\" | python -", "deny", "frozen-path", cwd=NOGIT)
@@ -7280,10 +8168,8 @@ for _dev in ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "CON"):
        "denies [r3 red]",
        "echo \"" + FROZEN_PY_WRITE + "\" | python " + _dev, "deny", "frozen-path", cwd=NOGIT)
 
-# CAP-ASK-FIX REVIEW ROUND 1: F1 to F4 are holes the branch allowed. Each is a frozen write that reaches
-# the guard as data, so each case names the form in its name. Each case DENIES, and each denies on main.
-# A pipe into an interpreter fails closed, the orchestrator's design call. (The F-letters here are this
-# lane's, not the cap-ask-data F1 to F5 above.)
+# F1 to F4: each case is a frozen write that reaches the guard as data, so each case names the form in
+# its name, and each DENIES. A pipe into an interpreter fails closed by design: the interpreter may run the text.
 #
 # F1: `_runs_a_file` compared raw words, so a quoted, empty, escaped or variable operand read as a
 # script file, and the text piped into it became data.
@@ -7320,8 +8206,7 @@ for _dev in ("/proc/thread-self/fd/0", "//dev/stdin", "/dev/fd/00", "/proc/self/
 # F4: the PowerShell tool reads U+201C and U+201D as double quotes, and reads the text of a `<# #>` block
 # comment as nothing. The guard reads the smart quotes as plain text, so an ASCII quote pair around a
 # Set-Content is data to it. A comment's ASCII quotes can pair the same way, with no smart quote at all.
-# Each shape is a Set-Content that PowerShell runs and the branch reads as echo data. Each DENIES, and
-# each is allowed on 8a83d89 and denied on main.
+# Each shape is a Set-Content that PowerShell runs, so each DENIES.
 _F4_WRITE = "Set-Content -Path " + CFG_SETTINGS + " -Value 1"
 sh("frozen shell: fix F4, an echo whose smart-quoted argument holds a Set-Content onto the config settings, "
    "denies [cap-ask-fix r1 red]",
@@ -7334,10 +8219,9 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
-# ================================================================ 6a-2. cap-ask-fix review round 2 (frozen)
-# Three holes the branch allowed. Each is a frozen write the guard reads as text, so each case names
-# its hole. Each DENIES. Main denies each one too, except the H2 `${F@P}` shape, which main allows as
-# well. The cap-key twins of H2 and H3 are in the model-cap section below.
+# ================================================================ 6a-2. cap-ask-fix (frozen)
+# Each case is a frozen write the guard reads as text, so each case names its hole. Each DENIES. The
+# cap-key twins of H2 and H3 are in the model-cap section below.
 #
 # H1: `_words_of` cuts a word at each quote, so a frozen path with a quote inside it reads as two
 # words, and neither word is a frozen path. One case per writer in hooks/, then one per folder.
@@ -7402,8 +8286,8 @@ sh("frozen shell: fix H3, Set-Alias maps echo to iex, a Set-Content onto the con
    "[cap-ask-fix r2 red]", "Set-Alias echo iex; echo '" + R2_PS_WRITE + "'", "deny", "frozen-path",
    tool="PowerShell", cwd=NOGIT)
 
-# THE FIVE GREEN PINS of this lane (the false-alarm win of round 2). Each names a frozen path or a
-# settings copy in text a reader or a message carries, and each stays allowed.
+# FIVE ALLOW PINS. Each names a frozen path or a settings copy in text a reader or a message carries,
+# and each stays allowed.
 sh("frozen pin: grep -n of a hooks file allows [cap-ask-fix r2 pin]",
    "grep -n \"tee\" " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen pin: jq of the settings file allows [cap-ask-fix r2 pin]",
@@ -7471,10 +8355,14 @@ add("cap: MultiEdit reaching an opus model asks", "ask", "subagent-model-cap", t
     carries=(OPUS,))
 add("cap: a managed settings file is a settings file", "ask", "subagent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
+# The workflow subagent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
+for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
+    add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
+        "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+        content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
 
-# THE EDIT LIST IS READ WHOLE. An earlier version read the first 200 edits, and the review MEASURED
-# the boundary that bought: 199 no-op edits ahead of the lift asked, 200 allowed. This case pins the
-# boundary itself, so a count bound cannot come back unseen.
+# THE EDIT LIST IS READ WHOLE, not the first 200 edits: the lift after 200 no-op edits still asks. This
+# case pins that boundary, so a count bound cannot come back unseen.
 CAP_NOOP_EDITS = [{"old_string": "line %d" % index, "new_string": "row %d" % index}
                   for index in range(200)]
 add("cap: 200 no-op edits ahead of the lift still asks", "ask", "subagent-model-cap",
@@ -7651,12 +8539,11 @@ sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
-# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view (review round 1,
-# F5). So is text piped into an interpreter: the interpreter may run it, so a pipe into one fails closed,
-# as main does (cap-ask-fix review round 1). Incident 2026-10-14: a reviewer's probe piped a JSON tool-call
-# sample holding a cap write into `python hooks/guard.py`, and the owner was asked to approve a call that
-# wrote nothing. The branch allowed that shape; under the design call it denies again, as main does. Whether
-# that friction is acceptable is the owner's call, not the test's. Each case names the write the way a
+# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
+# piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
+# 2026-10-14: a reviewer's probe piped a JSON tool-call sample holding a cap write into
+# `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing. Whether that
+# friction is acceptable is the owner's call, not the test's. Each case names the write the way a
 # probe would: the path, a redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
 sh("cap data: a grep naming a cat-write onto a settings file with the cap key allows",
    "grep -n \"cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" docs/notes.md", "allow", cwd=NOGIT)
@@ -7692,10 +8579,9 @@ chained_ask("cap data: a JSON payload naming a sed -i on a settings file with th
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
    + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("subagent-model-cap",))
 
-# ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asked, as main did.
-# Ask-alone chains the tee, cp and Out-File forms with a step, so those deny. The lone Set-Content asks.
-# Rule 8 reads the whole command for the cap key, so each write names it on its line. Only the value
-# is pinned: main names the path fragment after the space, and this guard names the whole path.
+# A quoted project settings path with a space asks. Ask-alone chains the tee, cp and Out-File forms
+# with a step, so those deny. The lone Set-Content asks. Rule 8 reads the whole command for the cap
+# key, so each write names it on its line. Only the value is pinned.
 CAP_SPACED = slash(os.path.join(ROOT, "my proj", ".claude", "settings.json"))
 chained_ask("cap: a tee onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
    "printf '%s' '" + cap_settings(compact=True) + "' | tee \"" + CAP_SPACED + "\"",
@@ -7711,7 +8597,7 @@ chained_ask("cap: a PowerShell Out-File onto a quoted project settings path with
    "'" + cap_settings(compact=True) + "' | Out-File -FilePath \"" + CAP_SPACED + "\"",
    tool="PowerShell", cwd=NOGIT, carries=("subagent-model-cap",))
 
-# COVERAGE (review round 1, green on 9eeb1fc). On the cap side too: a comment opener, a multi-line quoted
+# COVERAGE. On the cap side too: a comment opener, a multi-line quoted
 # string or a lone apostrophe must neither hide a redirect that writes the cap, nor turn quoted text that
 # names a write into one.
 chained_ask("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
@@ -7749,9 +8635,7 @@ add("cap: a payload with no tool name allows", "allow",
     raw=json.dumps({"tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}))
 
 
-# ROUND 2 RED (cap-ask-data, try 3, review option A). The hidden-shell shapes that write the cap ASK, as
-# main does. Each names the project local settings file and the cap key. Red on 6895ae0: the outer
-# command read as a data reader, so the write inside its argument was never seen.
+# The hidden-shell shapes that write the cap ASK. Each names the project local settings file and the cap key.
 _CAP_WRITE = CAP_KEY + "=" + OPUS + " > " + PROJ_LOCAL
 for _n, _c in (
     ("a git -c alias that runs the write", "git -c alias.w='!echo " + _CAP_WRITE + "' w"),
@@ -7771,8 +8655,8 @@ sh("cap shell: r2, a # in a quoted git argument does not hide a cap write run by
    "git submodule foreach \"echo '# keep' && echo " + _CAP_WRITE + "\"", "ask", "subagent-model-cap",
    cwd=NOGIT)
 
-# ROUND 2 GREEN PINS (cap-ask-data, try 3). The cap key named inside a message flag or a pure printer is
-# data. Each names the cap key and a write, and allows, as the incident shapes did.
+# The cap key named inside a message flag or a pure printer is data.
+# Each names the cap key and a write, and allows, as the incident shapes did.
 sh("cap data: r2, a git commit message naming the cap key and a cat-write, allows [r2 pin]",
    VCS + " commit -m \"note: " + CAP_KEY + ", cat > " + PROJ_LOCAL + " is refused\"", "allow", cwd=NOGIT)
 sh("cap data: r2, a gh pr create body naming the cap key and a cat-write, allows [r2 pin]",
@@ -7785,14 +8669,12 @@ sh("cap data: r2, a cd then a commit naming the cap key and a cat-write, allows 
 sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allows [r2 pin]",
    "cat > notes.md <<'DOC'\n" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\nDOC", "allow", cwd=NOGIT)
 
-# ROUND 2 COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
+# COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
 chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask step [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("subagent-model-cap",))
 
-# ROUND 2, THE CAP-KEY TWINS of H2 and H3 (cap-ask-fix r2). The same shapes, with a cap write held as text.
-# Each shape chains the write with a second step, so the guard DENIES it as ask-alone, never asks. Main
-# measures the same deny for each eval, bash -c, bare $D and H3 shape (a PowerShell Set-Alias too). Main
-# ALLOWS the ${F@P} shape, so that one is red on main as well as on the branch.
+# THE CAP-KEY TWINS of H2 and H3. The same shapes, with a cap write held as text.
+# Each shape chains the write with a second step, so the guard DENIES it as ask-alone, never asks.
 R2_CAP_WRITE = "echo " + CAP_KEY + "=" + OPUS + " > " + PROJ_SETTINGS
 R2_CAP_PS = "Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS
 for _how, _command in r2_printf_forms(R2_CAP_WRITE):
@@ -7806,11 +8688,9 @@ chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the
             "Set-Alias echo iex; echo '" + R2_CAP_PS + "'", tool="PowerShell", cwd=NOGIT,
             carries=("subagent-model-cap",))
 
-# ROUND 3 HOLE (cap-ask-hole). A shell wrapper (bash -c, sh -c, eval) that writes the cap to a project
-# local settings file through an ANSI-C quoted ($'...') path is allowed on the lane head. Main asks.
-# With a quote pair ahead of the write, main denies it as a chained ask step. Each is red on the lane
-# head (allow). A pwsh -c shape did not reproduce: the lane asks or denies every pwsh -c cap write tried.
-# The key and the path are built from pieces here.
+# A shell wrapper (bash -c, sh -c, eval) that writes the cap to a project local settings file through an
+# ANSI-C quoted ($'...') path asks; with a quote pair ahead of the write it denies as a chained ask
+# step. The key and the path are built from pieces here.
 R3_CAP_LINE = CAP_KEY + "=" + OPUS + " > $'" + PROJ_LOCAL + "'"
 for _n in ("bash -c", "sh -c", "eval"):
     sh("cap shell: hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
@@ -7835,12 +8715,6 @@ FAMILY = "ask-alone"
 # The fifth route, rule 8 on a Write/Edit/MultiEdit call, holds one tool call and no chain, so it has
 # no chained form. The re-pointed cases above (named "denies as a chained ask step") cover the
 # cd, export, PowerShell, pipe and `-C` shapes of the same rules.
-#
-# RED TODAY, by design: every case that expects a deny from a lone ask step, every case that expects
-# an ask for a harmless lead or tail (section j), the two round-2 holes at the end of section j, and
-# every case where an ask step stands ahead of a later deny (the ask exits first). GREEN TODAY, by
-# design: the lone asks, the allows, and the deny-before-ask order. Those pin what the build must not
-# change.
 
 PRUNE = VCS + " worktree prune"
 
@@ -7886,7 +8760,6 @@ chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after th
 # (b) A LONE ASK STEP STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
 # trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
 # comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
-sh("ask-alone: a prune alone still asks", PRUNE, "ask", "shared-tree", cwd=WTPRUNE)
 sh("ask-alone: a prune alone in the PowerShell tool still asks", PRUNE, "ask", "shared-tree",
    tool="PowerShell", cwd=WTPRUNE)
 sh("ask-alone: a prune with a trailing newline is alone, so it asks", PRUNE + "\n", "ask",
@@ -7909,14 +8782,10 @@ sh("ask-alone: a heredoc body holding a lone apostrophe is no chain",
 # (c) THE OTHER ASK STEPS, each alone (still asks) and chained with an echo (denies, except the named
 # `&& echo done` tail, which asks: ask-steps-run-alone). The reason
 # names the step by its own text or by the rule that asked for it, and says to run it alone.
-sh("ask-alone: a hard reset alone in a worktree still asks", VCS + " reset --hard", "ask",
-   "shared-tree", cwd=GITWT)
 sh("ask-alone: a whole-tree restore alone in a worktree still asks, and names the -C form",
    VCS + " restore .", "ask", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
 sh("ask-alone: a hard reset in a worktree with an && echo done tail asks",
    VCS + " reset --hard && echo done", "ask", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
-sh("ask-alone: a forced push to the default branch alone still asks",
-   VCS + " push --force origin HEAD:main", "ask", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a forced push to the default branch with an && echo done tail asks",
    VCS + " push --force origin HEAD:main && echo done", "ask", "force-push", cwd=PUSHFEAT,
    lacks=(CHAIN_ASK,))
@@ -7943,9 +8812,9 @@ sh("ask-alone: a settings write that names neither cap variable, chained, allows
 sh("ask-alone: a chain of git reads in a worktree allows",
    VCS + " status && " + VCS + " diff --stat", "allow", cwd=GITWT)
 
-# (e) A DENY ANYWHERE STILL WINS, in either order. Today the ask exits first, so the deny that
-# stands after it in the guard's own rule order (kill, env file, a stash push) never prints. The
-# printed reason is the deny rule's own, and never the ask-alone reason.
+# (e) A DENY ANYWHERE STILL WINS, in either order: a deny that stands after the ask in the guard's own
+# rule order (kill, env file, a stash push) still prints. The printed reason is the deny rule's own,
+# and never the ask-alone reason.
 
 
 def deny_beats(name, command, rule, **kw):
@@ -7970,8 +8839,7 @@ deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
 # (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
-# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are the
-# open items of the debt `ask-step-hidden-in-script`). W is the cap write with no quote in it, so it
+# OR A PIPE TO Out-Null STILL COUNTS. W is the cap write with no quote in it, so it
 # nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
 # redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
 CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
@@ -7998,11 +8866,10 @@ sh("ask-alone: W piped to Out-Null in the PowerShell tool asks",
    CAP_PLAIN + " | Out-Null", "ask", "subagent-model-cap", tool="PowerShell", cwd=PROJ,
    lacks=(CHAIN_ASK,))
 
-# (g) A CHAIN HIDDEN IN ANOTHER INTERPRETER'S SCRIPT (review round 2). Each wrapper runs its argument
-# as a script, so an echo and an ask step inside it are a chain and deny. Today count_steps reads only
-# `sh -c` and `bash -c`, so the chained forms answer ask. `bash -o pipefail -c` hides its script behind
-# a flag, and `eval` is no wrapper at all. The lone forms, with no echo, must still ask: the wrapper's
-# own step is counted once, never twice.
+# (g) A CHAIN HIDDEN IN ANOTHER INTERPRETER'S SCRIPT. Each wrapper runs its argument
+# as a script, so an echo and an ask step inside it are a chain and deny. `bash -o pipefail -c` hides
+# its script behind a flag, and `eval` is no wrapper at all. The lone forms, with no echo, must still
+# ask: the wrapper's own step is counted once, never twice.
 NESTED_FORMS = (
     ("pwsh -Command", 'pwsh -Command "%s"', "; "),
     ("powershell -c", 'powershell -c "%s"', "; "),
@@ -8028,8 +8895,7 @@ sh("ask-alone: an ask step then a bash -c script of one comment is one step, so 
 
 # (i) A SINGLE `&` INSIDE QUOTES IS NO CHAIN. An ampersand in a quoted cap value, in a quoted URL beside
 # the cap write, or beside an escaped double quote is part of one word: each cap write stays one step
-# and asks. The escaped-quote case is red today, because background_steps closes its quote at the \"
-# and then counts the `&` after it.
+# and asks.
 sh("ask-alone: a single & inside a quoted cap value is one step, so it asks",
    'echo "' + CAP_KEY + '=' + OPUS + ' a & b" > settings.local.json', "ask", "subagent-model-cap",
    cwd=PROJ)
@@ -8043,9 +8909,7 @@ sh("ask-alone: an escaped double quote around a single & is one step, so it asks
 # step: a move into a folder (`cd X &&`, PowerShell `Set-Location X;`) or an export (`export NAME=value
 # &&`). After it: an output tail (`| tail -N`, `| head -N`, `| Out-Null`, `&& echo done`, PowerShell
 # `; Write-Host done`). One case per form. The ask steps rotate through the four kinds, and each is
-# built from pieces, so no ask text sits on a shell command line. Each case is RED today: main denies
-# every one as a chained ask step. The deny controls after them stay GREEN: a tail that is itself a
-# command with effects, and a real second step, keep the deny.
+# built from pieces, so no ask text sits on a shell command line.
 ASK_PRUNE = PRUNE
 ASK_DISCARD = VCS + " reset --hard"
 ASK_LEASE = VCS + " push " + LE + "origin HEAD:main"
@@ -8068,8 +8932,7 @@ asks_alone("ask-alone: a Set-Location to the lane's own folder, then the reset, 
 asks_alone("ask-alone: an export before the cap write asks",
            "export LANE_NOTE=ask && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
 # A Windows path is no escaped quote, so its backslashes do not make the lead a step (ruling 2026-10-15
-# 12:00). Try 2 first counted every backslash as a step (b20bce5), so both rows deny there. The paths
-# are raw strings, so `\U` and `\x` reach the guard as typed.
+# 12:00). The paths are raw strings, so `\U` and `\x` reach the guard as typed.
 asks_alone("ask-alone: a cd to a Windows path, then the cap write, asks",
            r"cd C:\Users\x\repo && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
 asks_alone("ask-alone: a PowerShell Set-Location to a Windows path, then the cap write, asks",
@@ -8091,7 +8954,7 @@ asks_alone("ask-alone: the lease push to the default branch, then Write-Host don
 asks_alone("ask-alone: a cd, the prune, then an && echo done tail, asks",
            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && echo done", "shared-tree", cwd=NOGIT)
 
-# DENY CONTROLS (green today, and after the fix). A tail that is a command with effects, and a real
+# DENY CONTROLS. A tail that is a command with effects, and a real
 # second step, are not harmless, so the chain still denies as a chained ask step.
 chained_ask("ask-alone: the discard piped to tee, a command with effects, still denies",
             ASK_DISCARD + " | tee lane.log", cwd=GITWT)
@@ -8100,11 +8963,10 @@ chained_ask("ask-alone: the prune piped to sh, a command with effects, still den
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
 
-# ROUND 2 HOLES (owner review, 2026-10-15). Both are RED today: the lane asks, and both must DENY, as
-# main does. The first: the `\"` inside the echo is an escaped quote, so the `; rm -rf y` after it is
-# a real step. The lane reads the `\"` as a close, so it hides that step and counts only the echo tail.
-# The second: `cd -` moves to the previous folder, which no path in the command names, so it is no
-# harmless lead, and the prune after it is a chained ask step.
+# TWO HOLES (owner review, 2026-10-15). Both must DENY. The first: the `\"` inside the echo is an
+# escaped quote, so the `; rm -rf y` after it is a real step. The second: `cd -` moves to the previous
+# folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
+# chained ask step.
 chained_prune("ask-alone: an escaped quote in an echo tail does not hide a removal after it, the prune denies",
               ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
 chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
@@ -8116,9 +8978,7 @@ FAMILY = "ask-alone"
 #
 # OWNER RULING (2026-10-14 22:25): an inline interpreter script, a `python - <<PY`, `node`, `perl` or
 # `ruby` heredoc, is ONE step, so one command holding an ask step asks once, as a lone ask step does.
-# count_steps counts every body line as a step today, so the same command denies. RED TODAY, by
-# design: the one-command heredocs with an ask step in the body (the first block). GREEN TODAY, by
-# design: the pins below it. A chain before or after the heredoc, a pipe after the header, two
+# A chain before or after the heredoc, a pipe after the header, two
 # interpreter heredocs, and a bash or `ssh host "bash -s"` body still count more than one step. A deny
 # in a body still wins (the shared-tree and kill sections hold those cases).
 LANE_STASH = VCS + " stash push -u -m lane"
@@ -8156,14 +9016,13 @@ sh("ask-alone: a prune inside a multi-line node template literal asks, not denie
 sh("ask-alone: a python body that holds a shell prune only as a # comment is no step, so it allows",
    "python3 - <<'PY'\n# " + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 
-# The delimiter `E-F` is read as the whole word. Today HEREDOC_HEADER reads `E` alone, so this asks
-# nothing, and the first case is RED. The second and third are the pins that a misread would break.
+# The delimiter `E-F` is read as the whole word.
 sh("ask-alone: a one-command python heredoc with the delimiter E-F, holding a prune, asks",
    "python3 - <<E-F\n" + PRUNE + "\nE-F", "ask", "shared-tree", cwd=WTPRUNE)
 chained_prune("ask-alone: a whole-word delimiter E-F, a python body, then a prune, still denies",
               "python3 - <<E-F\nprint(1)\nE-F\n" + PRUNE)
 
-# PINS, GREEN TODAY: each is more than one step, so the prune denies as a chained ask step.
+# Each is more than one step, so the prune denies as a chained ask step.
 chained_prune("ask-alone: a chain before a python heredoc holding a prune still denies",
               "echo hi && python3 - <<'PY'\n" + PRUNE + "\nPY")
 chained_prune("ask-alone: a python heredoc holding a prune, then echo, still denies",
@@ -8187,10 +9046,8 @@ deny_beats("ask-alone: a python body holding a prune and a stash push denies as 
            carries="stash stack")
 
 
-# ---- r1-hd (review round 1), ask-alone family. Each case is red on the lane head unless it says so.
-#
 # H1. A delimiter with a backslash or a quote closes at the word bash reads: `E\OF`, `E'OF'` and `"E"OF`
-# are all `EOF`. The header reads the raw word, so the body never closes. The count drops the body and asks.
+# are all `EOF`.
 for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("double-quoted", '"E"OF')):
     chained_prune("ask-alone: r1-hd a python heredoc, %s delimiter closed at EOF, then a prune, denies" % _label,
                   "python3 - <<" + _open + "\nx\nEOF\n" + PRUNE)
@@ -8205,7 +9062,7 @@ for _shell in ("sh", "bash"):
 chained_prune("ask-alone: r1-hd a python heredoc with no closer, a prune after it, denies",
               "python3 - <<'PY'\nprint(1)\n" + PRUNE)
 
-# THE OWED GREEN CASE. Two prune lines in one python body are one step, so the command asks once.
+# Two prune lines in one python body are one step, so the command asks once.
 sh("ask-alone: r1-hd two prune lines in one python body ask once, not deny",
    "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
 
@@ -8222,15 +9079,12 @@ chained_prune("ask-alone: r1-hd a template literal in a node body closed at E'OF
 sh("ask-alone: r1-hd a prune in a node template literal under a backslash delimiter asks once",
    "node <<E\\OF\nconst s = `\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
 
-# PRE-EXISTING ON MAIN, red on both heads: a plain cat heredoc piped to sh, with a prune in its body.
+# A plain cat heredoc piped to sh, with a prune in its body.
 chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the body, denies (red on main too)",
               "cat <<EOF | sh\n" + PRUNE + "\nEOF")
 
-# ---- r2-hd (review round 2), ask-alone family. Each case is red on the lane head unless it says so.
-#
-# ITEM 1. settle_ask strips the bodies a second time, on text the first strip already cut. A stray line equal
-# to a delimiter (the lone EOF) then opens a phantom body that holds the ask step, so the count drops to one
-# and the command asks. Main counts the stripped text once, and denies. RED ON THE LANE HEAD (asks).
+# settle_ask strips the bodies once: a stray line equal to a delimiter (the lone EOF) must not open a
+# phantom body that holds the ask step.
 chained_ask("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a cap write, denies",
             "cat <<EOF\nbody line\nEOF\n" + CAP_PLAIN + "\nEOF", cwd=PROJ, carries=CAP_STEP)
 chained_prune("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a prune, denies",
@@ -8241,17 +9095,15 @@ for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
     chained_ask("ask-alone: r2-hd a heredoc in %s, a cap write in the body, denies" % _label,
                 _form.replace("BODY", CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
 
-# SCANNER PIN (building-scanner-respects-strings), GREEN ON THE LANE HEAD. A node body holds a template literal
+# SCANNER PIN (building-scanner-respects-strings). A node body holds a template literal
 # across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one step, so it asks
-# once. MAIN DENIES BY DESIGN: the one-step ruling is the lane's, and main counts each body line.
+# once.
 sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
    "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
 
 
-# ---- r3-bd (try 3, the bandaid), ask-alone family. A prune or a push delete in a body that main keeps in view is a
-# second step on main, so the command denies as a chained ask. Without the bandaid the body drops and the command
-# allows or asks alone. The scanner shapes (a comment opener in quotes, a lone apostrophe, a template literal) are
-# pinned here too, so the walk is judged on each.
+# A prune or a push delete in a body that is kept in view is a second step, so the command denies as a chained ask.
+# The scanner shapes (a comment opener in quotes, a lone apostrophe, a template literal) are pinned here too.
 chained_prune("ask-alone: r3-bd a prune after a stray EOF line, written then sh on the next line, denies",
               "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
 chained_prune("ask-alone: r3-bd a prune after a stray EOF line, piped to tee, then bash, denies",
@@ -8348,9 +9200,8 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 # ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
-# by, so a test-author edits them. Red on main: the early warning refused them as product code. The
-# builder case stays green and pins the fix to the test-author: agent_brief.py tells a builder to add
-# mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+# by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
+# tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
 for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
     add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
         file_path=_path, **A)
@@ -8515,8 +9366,8 @@ def _link(target, rel):
     return go
 
 
-# Each reviewer bypass of the old command reader ends in ONE of these trees. The guard never saw
-# the command, only the tree, and every one is red.
+# Each bypass of the command reader ends in ONE of these trees. The guard never sees
+# the command, only the tree.
 BUILDER_RED = [
     ("deleted", _rm("tests/test_a.py")),                      # rm, find -delete, xargs rm, dd
     ("rewritten", _put("tests/test_a.py", "pass\n")),         # sed -i, patch, apply, rsync, bash -c
@@ -8880,7 +9731,7 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
-# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the test-author's own scratch writes.
+# ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
 # scratchpad allowance is the one under_session_scratchpad gives, keyed by the session id the payload
@@ -8907,14 +9758,14 @@ for _tool in ("Edit", "Write"):
 add("audit-high paths: record-writer Write of a temp file in no repo is still refused", "deny",
     rule=RW_RULE, carries=("Markdown", "Report"), tool="Write", file_path=OUTSIDE_TEMP, **RW)
 # The ruling covers ITS OWN session scratchpad. Another session's scratchpad outside every
-# repository is refused too: the outside-repo allowance above does not reach it. Red on 8e69e42.
+# repository is refused too: the outside-repo allowance above does not reach it.
 OTHER_SCRATCH_OUT = os.path.join(ROOT, SCRATCH_OTHER, "scratchpad", "notes", "out.txt")
 for _tool in ("Edit", "Write"):
     add("audit-high paths: test-author %s of another session's scratchpad outside a repo is refused"
         % _tool, "deny", rule=TA, tool=_tool, file_path=OTHER_SCRATCH_OUT, session=SCRATCH_SID, **A)
 # Windows folder names are case-insensitive: `Scratchpad` and `SCRATCHPAD` are the same folder as
 # `scratchpad`, so another session's folder spelled either way is refused there. On Linux and macOS
-# they are different folders, judged as no scratchpad, so allowed. Red on 5535b17 (Windows).
+# they are different folders, judged as no scratchpad, so allowed.
 for _tool in ("Edit", "Write"):
     for _spelling in ("Scratchpad", "SCRATCHPAD"):
         _path = os.path.join(ROOT, SCRATCH_OTHER, _spelling, "notes", "out.txt")
@@ -8923,14 +9774,13 @@ for _tool in ("Edit", "Write"):
             rule=TA if os.name == "nt" else None, tool=_tool, file_path=_path,
             session=SCRATCH_SID, **A)
 # A git clone under the test-author's own scratchpad (PRIVREPO sits under FAKE_SESSION's
-# scratchpad): a write to a file in that clone stays allowed, with the clone as the cwd. Pinned,
-# green on 8e69e42.
+# scratchpad): a write to a file in that clone stays allowed, with the clone as the cwd.
 for _tool in ("Edit", "Write"):
     add("audit-high paths: test-author %s of a file in a clone under its own scratchpad is allowed"
         % _tool, "allow", tool=_tool, file_path=os.path.join(PRIVREPO, "f.txt"),
         session=FAKE_SESSION, **dict(A, cwd=PRIVREPO))
 
-# ---- every path field a write call carries is judged (PR #304 review). The guard picks ONE target,
+# ---- every path field a write call carries is judged. The guard picks ONE target,
 # the first non-empty of file_path, path, notebook_path, so a harmless decoy in file_path hid a real
 # target in another field. Failure classes: false allow (a decoy still passes) and false deny (an
 # all-allowed multi-field call, or a normal single-field call, is blocked).
@@ -8970,7 +9820,7 @@ add("decoy-control: Edit builder, a lone source path is allowed", "allow", tool=
 add("decoy-control: Edit main session, a lone config hook is refused", "deny", rule="frozen-path",
     tool="Edit", cwd=NOGIT, path=CFG_HOOK)
 
-# ---- an earlier field's ASK must not mask a later field's DENY (review gap on PR #306). The write
+# ---- an earlier field's ASK must not mask a later field's DENY. The write
 # loop refused on rule 8's ask at the first settings field and exited, so a deny in a later field
 # was never judged. Every deny now runs over all fields first; the cap ask runs after them. Failure
 # classes: false allow (an ask masks a deny) and false deny (a lone ask becomes a deny).
@@ -9212,16 +10062,12 @@ sh("impeccable bash: the pinned script path, detect, is allowed",
    "skills/impeccable/scripts/impeccable detect src", "allow", cwd=NOGIT)
 
 # impeccable, heredoc bodies. A heredoc body is text, not a run, so the shell reader must not read a
-# body line as a command. On 09c0646 it does, in two ways. A body is KEPT (judged as shell) when an
-# interpreter word sits on the header line, or when a lone quote hides the header; then a body line
-# that starts with the bare word is denied. A PowerShell here-string ends its quote at the first
-# apostrophe, so the rest of the body is read as shell. The field denial of 2026-10-13 was a
-# Python heredoc line that named the word in quotes.
-#   RED  = an allow or deny that 09c0646 gets wrong. It must fail there, for this rule.
-#   KEEP = a deny 09c0646 already gets right. It must stay a deny.
-#   GREEN = an allow 09c0646 already gets right. It must stay an allow.
+# body line as a command. A body is KEPT (judged as shell) when an interpreter word sits on the header
+# line, or when a lone quote hides the header; then a body line that starts with the bare word is denied.
+# A PowerShell here-string ends its quote at the first apostrophe, so the rest of the body is read as shell.
+# A case name ending (red) marks a verdict the rule once got wrong; (green) marks an allow it got right.
 
-# RED: text that names the word is allowed, in a body the guard keeps.
+# Text that names the word is allowed, in a body the guard keeps.
 sh("impeccable heredoc: a python heredoc line naming the word is allowed (red)",
    "python3 - <<'EOF'\nfor f in files:\n    if 'impeccable' in f: continue\nEOF", "allow",
    cwd=NOGIT)
@@ -9237,8 +10083,8 @@ sh("impeccable powershell: a here-string with an apostrophe is allowed (red)",
    "$body = @'\nDon't ship this.\nimpeccable audit ran on the page.\n'@", "allow",
    tool="PowerShell", cwd=NOGIT)
 
-# RED: a body that runs install is denied. An unquoted heredoc runs $(...) and backticks in its body,
-# and an expandable here-string runs $(...). 09c0646 allows all three.
+# A body that runs install is denied. An unquoted heredoc runs $(...) and backticks in its body,
+# and an expandable here-string runs $(...).
 sh("impeccable heredoc: an unquoted body that runs install by substitution is denied (red)",
    "cat > body.md <<EOF\n$(npx impeccable install)\nEOF", "deny", "impeccable-review-only",
    cwd=NOGIT)
@@ -9258,7 +10104,7 @@ sh("impeccable bash: a hash inside a quoted echo does not hide a later install",
    "echo \"# not a comment\" && npx impeccable install", "deny", "impeccable-review-only",
    cwd=NOGIT)
 
-# GREEN: text that names the word, in a body or a string the guard reads as text. These hold today.
+# Text that names the word, in a body or a string the guard reads as text, is allowed.
 sh("impeccable heredoc: a commit message body starting with the word is allowed",
    "git commit -F - <<'EOF'\nfeat: note\n\nimpeccable audit ran on the page; no UI change.\nEOF",
    "allow", cwd=NOGIT)
@@ -9297,14 +10143,12 @@ sh("impeccable powershell: a plain here-string naming the word is allowed",
 sh("impeccable powershell: a hash opener inside a here-string is text",
    "$body = @'\n# impeccable audit\n'@", "allow", tool="PowerShell", cwd=NOGIT)
 
-# impeccable, heredoc bodies, review round 1. RED here means red on eff5b5d. Each body names
+# impeccable, heredoc bodies. Each body names
 # `npx impeccable install`, and each command runs that body: a quoted shell word behind a wrapper
 # flag (`sudo -b "bash"`), behind a message-flag pattern that swallows it (`tool --run-m "sh"`,
 # `ssh -t "bash -s"`), a script a heredoc writes and `bash` runs by name, and `pwsh`.
-#   RED   = a deny that eff5b5d allows.
-#   GREEN = an allow that eff5b5d already gets right. It must stay an allow.
 
-# RED: the run hides behind a wrapper, a message-flag value, a written script, or pwsh.
+# The run hides behind a wrapper, a message-flag value, a written script, or pwsh.
 sh("impeccable heredoc: a sudo flag before a quoted bash word runs the body is denied (red)",
    "sudo -b \"bash\" <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only",
    cwd=NOGIT)
@@ -9323,7 +10167,7 @@ sh("impeccable heredoc: a run.bash written by heredoc and run by bash is denied 
 sh("impeccable heredoc: a pwsh body that names install is denied (red)",
    "pwsh <<'EOF'\nnpx impeccable install\nEOF", "deny", "impeccable-review-only", cwd=NOGIT)
 
-# GREEN: a message body or a file body that names install is text, so it stays an allow.
+# A message body or a file body that names install is text, so it stays an allow.
 sh("impeccable heredoc: a git commit body that names install is allowed (green)",
    "git commit -F - <<'EOF'\nfeat: note\n\nnpx impeccable install is not run here.\nEOF",
    "allow", cwd=NOGIT)
@@ -9391,6 +10235,7 @@ def decide(case):
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
+    env.update(case.get("env") or {})   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
     if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
         env.pop("CLAUDE_GUARD_ROOT_PID")
         env["PATH"] = NOPS
@@ -9955,7 +10800,7 @@ add("floor: start_session naming the full haiku id is denied", "deny", "subagent
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
 
-# ---- Rule 9, Workflow script holes found in review. A role named in a string or label is no role;
+# ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
 add("floor: Workflow role spoofed in the prompt string is denied", "deny", "subagent-model-floor",
     tool="Workflow", script="await agent(\"use agentType: 'reviewer'\", {model:\"haiku\"})")
@@ -11012,8 +11857,7 @@ def worktree_home_bash_alias_case():
 
 
 # Rule 0 reads a Git Bash `/c/` cwd in drive form before every other rule runs (guard.py judge()).
-# Each case below pins the verdict that main (0bdbbcc, the lane's base) gives a `/c/` cwd for one
-# rule that reads cwd. A red case means that verdict moved on this branch. Off Windows, `/c/` is a
+# Each case below pins the verdict a `/c/` cwd gets for one rule that reads cwd. Off Windows, `/c/` is a
 # real folder and the spelling has no meaning, so the cases do not run there.
 C_FORM_OFF_WINDOWS = "a /c/ cwd is read only on Windows, where Git Bash spells the drive that way"
 
@@ -11237,8 +12081,7 @@ MASK_PINS = (
     ('/* say "hi" */ f(\'x\')', "  f(\x000\x00)", ["x"]),
 )
 
-# A quote left open, then 64 KB of escaped quotes. The lexeme must stay linear on this shape:
-# quadratic on 19f3555, which took about 1 s at 16 KB and 15 s at 64 KB.
+# A quote left open, then 64 KB of escaped quotes. The lexeme must stay linear on this shape.
 MASK_LONG_SCRIPT = '"' + '\\"' * 32768
 
 
@@ -11355,7 +12198,7 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
                          mask_pin_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# Time bound (decision rm-on-a-variable-needs-a-guard): 2000 unclosed $( spans must be
 # judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
 # then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
 # same decide() call the main loop uses.
@@ -11414,8 +12257,8 @@ def judge_in_process(command, cwd):
 
 
 # Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
-# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
-# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). One
+# wall-clock case stays live. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
 # slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
@@ -11527,11 +12370,7 @@ LOG_CHECKS_EXTRA.append(("rm-var: 4000 assignments and 4000 targets with pwd sca
                          rm_var_wide_case))
 
 
-# gcp-quote-fix, round 2 speed. A run of apostrophes must be judged in well under the budget.
-# The bound is the CPU time of judge, 1 s, generous on purpose: no wall-clock bound, which flakes
-# on macOS runners. The judge runs in a child process, so a slow judge stops at a 30 s kill guard
-# and fails the case, instead of hanging the suite. The kill guard only stops a hang; it is not the
-# bound.
+# Judge's CPU time (1 s), not wall-clock (flaky on macOS runners), bounds a run of apostrophes; a 30 s kill guard stops a hang.
 APOSTROPHE_CHILD = r'''
 import contextlib, importlib.util, io, json, os, sys, time
 hooks = sys.argv[1]
@@ -11584,7 +12423,7 @@ for _name, _command in (
 # Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
 # POWERSHELL_CALL[0] too. A POSIX backslash-newline is a continuation, and PowerShell ends the
 # segment there, so one text splits two ways. A split made under one flag must not be served to the
-# other. Red on 50d9f57: the second call returns the first call's cached split.
+# other.
 def split_cache_power_shell_case():
     guard = _load_guard_module()
     text = "echo a\\\nb; ls"
@@ -11610,7 +12449,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13, guard-audit-high; decision gate-hooks-fail-closed): a guard
+# audit-high (owner ruling 2026-10-13; decision gate-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
@@ -12246,9 +13085,6 @@ LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never 
                          "verdict", session_log_unwritable_case))
 
 
-# ------------------------------------------- review round 1 (PR 383): red until the builder fixes
-
-
 # A guard_core that lacks set_log_session is covered by the stale-core case below: that case drops
 # this name too, and its call site (guard.py main) fails the same way.
 def session_log_stale_core_case():
@@ -12296,6 +13132,581 @@ def session_log_stale_core_case():
 
 LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names still judges, and "
                          "its line has five fields", session_log_stale_core_case))
+
+
+# --------------------------------------------------------------------------- the owner override pass
+FAMILY = "override"
+#
+# The owner types `override` as a whole prompt, and the guard lets the next refused act through (a
+# one-act pass). `override 15m` or `override 3h` lets every refused act through until the pass ends
+# (a timed pass, no cap, the owner picks the length). hooks/local_time.py grants the pass with
+# override_pass.grant(session_id, prompt, now). refuse() in guard_core.py spends it with
+# override_pass.take(session_id, agent_id, rule, now). The pass file is
+# <config dir>/state/override/<session_id>.json, {"kind": "once" or "timed", "until": ISO-8601}.
+#
+# What a pass does: it covers only the session that typed it. A subagent's call spends only a timed
+# pass. A valid pass makes the guard print nothing, so the normal permission flow runs, and it logs
+# one line with decision `override` and the rule it lifted. What no pass does: lift frozen-path,
+# git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable pass file as a pass.
+#
+# A one-act pass is state that a call uses up, so each case is a story over several guard calls on
+# one fixed clock (LOCAL_TIME_NOW). A single-call `sh` case cannot show "allowed once, then refused
+# again", so each story runs as a log check. Every story first makes the call with no pass and wants
+# the refusal, so a fixture that refuses nothing cannot turn a story green.
+
+OV_T0 = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)  # the clock when a pass is typed
+OV_ONCE_SECONDS = 10 * 60   # a one-act pass that nothing uses ends after this long
+OV_TIMED_SECONDS = 15 * 60  # the length of the timed pass these stories type: `override 15m`
+OV_AGENT = "a0f1e2d3c4b5a6978"  # a subagent's id on the payload, in the shape AGENT_ID accepts
+OV_KILL = "kill $(pgrep -f override-pass-target)"  # refused with no `ps` read, so it runs on Windows too
+
+
+def ov_clock(seconds):
+    """LOCAL_TIME_NOW for a call made `seconds` after OV_T0."""
+    return (OV_T0 + timedelta(seconds=seconds)).isoformat()
+
+
+def ov_config(name):
+    """A config directory of its own, so one story's passes and log never reach another's."""
+    folder = os.path.join(ROOT, "ovcfg", name)
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def ov_pass_path(config, session):
+    return os.path.join(config, "state", "override", session + ".json")
+
+
+# Exit 3 means the module cannot be imported. Any other failure is the module's own.
+OV_GRANT_CHILD = (
+    "import sys\n"
+    "from datetime import datetime\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "try:\n"
+    "    import override_pass\n"
+    "except ImportError as e:\n"
+    "    print('import failed: %s' % e, file=sys.stderr)\n"
+    "    sys.exit(3)\n"
+    "override_pass.grant(sys.argv[2], sys.argv[3], datetime.fromisoformat(sys.argv[4]))\n"
+)
+
+
+def ov_write_pass(config, session, prompt, seconds):
+    """The pass file as the design documents it, for a story that runs while override_pass.py does
+    not import. The story then still reaches the guard and fails there, for the right reason."""
+    path = ov_pass_path(config, session)
+    said = prompt.strip().lower()
+    if said == "override off":
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    named = re.fullmatch(r"override (\d+)([mh]?)", said)
+    if named:
+        kind, length = "timed", int(named.group(1)) * (3600 if named.group(2) == "h" else 60)
+    else:
+        kind, length = "once", OV_ONCE_SECONDS
+    write(path, json.dumps({"kind": kind, "until": ov_clock(seconds + length)}))
+
+
+def ov_type(config, session, prompt, seconds=0):
+    """The owner types `prompt` at OV_T0 + seconds: override_pass.grant runs in a child that reads
+    `config` as its config directory. Returns '' when the module ran, else a note for the story's
+    failure line: the import failed (the pass was written by hand), or the module raised."""
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["LOCAL_TIME_NOW"] = ov_clock(seconds)
+    run = subprocess.run(
+        [sys.executable, "-c", OV_GRANT_CHILD, os.path.dirname(GUARD), session, prompt,
+         ov_clock(seconds)], capture_output=True, text=True, env=env, timeout=60)
+    if run.returncode == 0:
+        return ""
+    if run.returncode == 3:
+        ov_write_pass(config, session, prompt, seconds)
+        return "override_pass.py does not import (%s); the pass was written by hand" % (
+            run.stderr.strip()[-90:])
+    return "override_pass.grant raised: %s" % run.stderr.strip()[-120:]
+
+
+def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
+            temp=None):
+    """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
+    reads as the system temp: a git write under it is a throwaway, and silent-write skips it."""
+    return decide({
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
+        "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
+        "env": {"LOCAL_TIME_NOW": ov_clock(seconds)}, "tool_input": tool_input,
+    })
+
+
+def ov_kill(config, session, seconds, agent_id=None):
+    """The `kill $(pgrep ...)` call: refused by machine-wide-kill with no pass, in any directory."""
+    return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
+
+
+def ov_want(got, reason, want, rule):
+    """'' when (got, reason) is the verdict wanted. An allow must print nothing. A refusal must name
+    its rule; a tuple of rules lists the ones that may name it. Else why not."""
+    if got != want:
+        return "got %s (%s), want %s" % (got, reason[:70], want)
+    if want == "allow" and reason:
+        return "the allow printed %r, want nothing" % reason[:70]
+    names = (rule,) if isinstance(rule, str) else rule
+    if want != "allow" and not any(name in reason for name in names):
+        return "the refusal does not name rule %r: %s" % (rule, reason[:70])
+    return ""
+
+
+def ov_story(steps, note=""):
+    """Run (label, call, want, rule) steps in order. Returns (False, why) at the first miss, else
+    (True, ''). The note says how the pass was typed, so a failure line shows a hand-written pass."""
+    for label, call, want, rule in steps:
+        problem = ov_want(*call(), want, rule)
+        if problem:
+            return False, "%s: %s%s" % (label, problem, ("; " + note) if note else "")
+    return True, ""
+
+
+# The refusals the owner named; each one is refused when no pass exists. (key, what it is, command,
+# cwd, decision, rule, a config directory whose sessions/ folder the story copies in.) The
+# live-session act needs the session record that names this runner's own pid.
+OV_ACTS = (
+    ("branch-unpushed", "a branch delete of a branch whose only copy is local",
+     VCS + " branch -D unmerged-work", BRANCHREPO, "deny", "shared-tree", None),
+    ("worktree-live", "a worktree remove under a live session",
+     VCS + " worktree remove " + slash(WTLIVE), WTMAIN, "deny", "shared-tree", WTLIVECFG),
+    ("worktree-work", "a worktree remove of a tree with uncommitted and untracked work",
+     VCS + " worktree remove " + slash(WTDIRTY), WTMAIN, "deny", "shared-tree", None),
+    ("worktree-locked", "a worktree remove of a locked tree",
+     VCS + " worktree remove " + slash(WTLOCKED), WTMAIN, "deny", "shared-tree", None),
+    ("checkout-path", "a checkout of a path over uncommitted work",
+     VCS + " checkout -- f.txt", SUBJDIRTY, "deny", "shared-tree", None),
+    ("stash-help", "a stash call that reads as a push",
+     VCS + " stash --help -h", SUBJDIRTY, "deny", "shared-tree", None),
+    ("kill-pgrep", "a kill of a pid list that pgrep made",
+     OV_KILL, NOGIT, "deny", "machine-wide-kill", None),
+    ("kill-foreign", "a kill of a pid this session did not start",
+     "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
+    ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
+     VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
+)
+
+
+def ov_act_check(act, timed):
+    """A one-act pass lets the act through once, then it is refused again. A timed pass lets it through
+    every time until the pass ends, and the call at the end instant is refused."""
+    key, _, command, cwd, refused, rule, sessions_from = act
+    kind = "timed" if timed else "once"
+
+    def check():
+        config, session = ov_config("%s-%s" % (kind, key)), "ov-%s-%s" % (kind, key)
+        if sessions_from:
+            materialize(sessions_from)
+            shutil.copytree(os.path.join(sessions_from, "sessions"),
+                            os.path.join(config, "sessions"), dirs_exist_ok=True)
+
+        def call(seconds):
+            return lambda: ov_call("Bash", {"command": command}, cwd, config, session, seconds)
+
+        ok, why = ov_story([("with no pass", call(0), refused, rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first call", call(60), "allow", rule),
+                     ("call just before the end", call(OV_TIMED_SECONDS - 1), "allow", rule),
+                     ("call at the end instant", call(OV_TIMED_SECONDS), refused, rule)]
+        else:
+            steps = [("first call", call(60), "allow", rule),
+                     ("second call, pass spent", call(120), refused, rule)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "%s with no pass, then allowed %s" % (refused, "until the end" if timed else "once")
+    return check
+
+
+for _act in OV_ACTS:
+    for _is_timed in (False, True):
+        _label = ("override: a timed pass lets through %s until it ends" if _is_timed
+                  else "override: a one-act pass lets through %s once, then it is refused again") % _act[1]
+        if _act[0] == "kill-foreign" and os.name == "nt":
+            skip_case(_label, NO_PS)
+        else:
+            LOG_CHECKS_EXTRA.append((_label, ov_act_check(_act, _is_timed)))
+
+
+def ov_once_expiry_check():
+    """A one-act pass that nothing uses ends after 10 minutes: it works just before, and not at the end."""
+    config = ov_config("once-expiry")
+    note = ""
+    for session, seconds, want in (("ov-expiry-before", OV_ONCE_SECONDS - 1, "allow"),
+                                   ("ov-expiry-at-end", OV_ONCE_SECONDS, "deny")):
+        note = ov_type(config, session, "override") or note
+        problem = ov_want(*ov_kill(config, session, seconds), want, "machine-wide-kill")
+        if problem:
+            return False, "call at +%ds: %s; %s" % (seconds, problem, note or "the pass was typed")
+    return True, "allowed at +599 s, refused at +600 s"
+
+
+def ov_corrupt_check():
+    """A pass file the guard cannot read is no pass: the call is refused, never allowed. Garbage text
+    also logs `override-unread`, so the owner can see why the pass did nothing."""
+    config = ov_config("corrupt")
+    for name, body in (
+            ("text", b"not json {"), ("empty", b""), ("list", b"[]"), ("no-until", b'{"kind": "timed"}'),
+            ("bad-kind", b'{"kind": "forever", "until": "2099-01-01T00:00:00+00:00"}')):
+        session = "ov-corrupt-" + name
+        path = ov_pass_path(config, session)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(body)
+        problem = ov_want(*ov_kill(config, session, 60), "deny", "machine-wide-kill")
+        if problem:
+            return False, "a %s pass file: %s" % (name, problem)
+        if name == "text":
+            with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+                mine = [l for l in handle.read().splitlines() if l.endswith("\t" + session)]
+            if not any("override-unread" in l for l in mine):
+                return False, "a text pass file logged no override-unread line: %r" % mine
+    return True, "five unreadable pass files, each refused; garbage text logged override-unread"
+
+
+def ov_scope_check():
+    """A pass covers only the session that typed it. Another session's call, and a call that names no
+    session, are refused. The typing session's pass is still there afterwards."""
+    config = ov_config("scope")
+    for kind, prompt in (("timed", "override 15m"), ("once", "override")):
+        session = "ov-scope-a-" + kind
+        note = ov_type(config, session, prompt)
+        steps = [("another session", lambda: ov_kill(config, "ov-scope-b-" + kind, 60), "deny"),
+                 ("no session id", lambda: ov_kill(config, None, 90), "deny"),
+                 ("the typing session", lambda: ov_kill(config, session, 120), "allow")]
+        for label, call, want in steps:
+            problem = ov_want(*call(), want, "machine-wide-kill")
+            if problem:
+                return False, "a %s pass, %s: %s; %s" % (kind, label, problem, note or "typed")
+    return True, "both kinds: another session and an unnamed one refused, the typing session allowed"
+
+
+def ov_parallel_check(workers=6, rounds=5):
+    """Calls that run together on one one-act pass: exactly one is allowed, and the rest are refused.
+    How often this case catches a check-then-delete race is unmeasured: the guard processes start
+    tens of milliseconds apart, and the race window is far shorter."""
+    config = ov_config("parallel")
+    problem = ov_want(*ov_kill(config, "ov-parallel-warm", 0), "deny", "machine-wide-kill")
+    if problem:
+        return False, "with no pass: " + problem  # also builds every lazy fixture before the threads start
+    for n in range(rounds):
+        session = "ov-parallel-%d" % n
+        note = ov_type(config, session, "override")
+        verdicts = [None] * workers
+        start = threading.Barrier(workers)
+
+        def worker(i):
+            start.wait()
+            verdicts[i] = ov_kill(config, session, 60)[0]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if verdicts.count("allow") != 1 or verdicts.count("deny") != workers - 1:
+            return False, "round %d: %d calls raced for one pass, verdicts %r, want one allow; %s" % (
+                n, workers, verdicts, note or "typed")
+    return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
+
+
+def ov_agent_once_check():
+    """A subagent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
+    config, session = ov_config("agent-once"), "ov-agent-once"
+    rule = "machine-wide-kill"
+    ok, why = ov_story([("subagent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+                         "deny", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("subagent under a one-act pass", lambda: ov_kill(config, session, 60, OV_AGENT), "deny", rule),
+        ("orchestrator, pass unspent", lambda: ov_kill(config, session, 120), "allow", rule),
+        ("orchestrator, pass spent", lambda: ov_kill(config, session, 180), "deny", rule)], note)
+    if not ok:
+        return False, why
+    return True, "the subagent was refused and left the pass; the orchestrator used it once"
+
+
+def ov_agent_timed_check():
+    """A timed pass reaches the owner's subagents as well as the session itself, until it ends."""
+    config, session = ov_config("agent-timed"), "ov-agent-timed"
+    rule = "machine-wide-kill"
+    ok, why = ov_story([("subagent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+                         "deny", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override 15m")
+    ok, why = ov_story([
+        ("subagent, first call", lambda: ov_kill(config, session, 60, OV_AGENT), "allow", rule),
+        ("subagent, second call", lambda: ov_kill(config, session, 120, OV_AGENT), "allow", rule),
+        ("orchestrator", lambda: ov_kill(config, session, 180), "allow", rule),
+        ("subagent at the end instant",
+         lambda: ov_kill(config, session, OV_TIMED_SECONDS, OV_AGENT), "deny", rule)], note)
+    if not ok:
+        return False, why
+    return True, "a subagent is allowed under a timed pass until it ends"
+
+
+def ov_frozen_acts(config, session):
+    """frozen-path and git-env-set refusals. The pass file itself is frozen: a session that could
+    write it could grant itself a pass."""
+    pass_file = slash(ov_pass_path(config, session))
+    return (
+        ("a Write of a config hook", "Write",
+         {"file_path": slash(os.path.join(config, "hooks", "guard.py")), "content": "x"},
+         "frozen-path"),
+        ("a Write of the pass file", "Write", {"file_path": pass_file, "content": "{}"},
+         "frozen-path"),
+        ("a cp onto the pass file", "Bash", {"command": "cp /tmp/x.json " + pass_file},
+         "frozen-path"),
+        ("a command that sets GIT_DIR", "Bash",
+         {"command": "export GIT_DIR=/x; python -m pytest"}, "git-env-set"),
+    )
+
+
+def ov_kill_all_acts(config, session):
+    """A kill of pid 0 (the process group), 1 (init) or -1 (every process) can end the owner's whole
+    machine session. No pass covers it, so a pass that lifts `kill $(pgrep ...)` still refuses these."""
+    return tuple((label, "Bash", {"command": command}, "machine-wide-kill") for label, command in (
+        ("a kill of pid 0", "kill 0"),
+        ("a kill of pid 1", "kill 1"),
+        ("a kill of pid -1", "kill -9 -- -1"),
+        ("a kill of pid -1 with a named signal", "kill -TERM -1"),
+    ))
+
+
+# One act of an exclusion story. `rule` names the refusal (a tuple lists the rules that may name it
+# under a pass); `first` names the refusal with no pass, when the first rule to fire is another
+# one. `want` is the decision: an ask for subagent-model-cap, else a deny.
+OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type temp",
+                   defaults=("deny", None, NOGIT, None, None, None))
+
+
+def ov_act_call(act, config, session, seconds):
+    return ov_call(act.tool, act.tool_input, act.cwd, config, session, seconds, act.agent_id,
+                   act.agent_type, act.temp)
+
+
+def ov_drift_acts(config, session):
+    """A subagent that left its own worktree: worktree-home, rule 0, refuses every call it makes, and
+    no pass lifts it (owner, 18:37 CDT). Each act is refused as worktree-home under a timed pass, with
+    or without another refusal in the same command. A pass that lifted rule 0 would free the subagent."""
+    primary = os.path.join(ROOT, "ovdrift_primary")
+    worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + OV_AGENT)
+    if not os.path.isdir(worktree):
+        make_repo(primary, {"src/app.py": "print(1)\n"})
+        run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + OV_AGENT)
+    ov_call("Bash", {"command": "echo hi"}, worktree, config, session, 0, OV_AGENT)  # records the home
+    hook = slash(os.path.join(config, "hooks", "guard.py"))
+    shell = tuple(OvAct(label, "Bash", {"command": command}, "worktree-home", cwd=primary,
+                        agent_id=OV_AGENT)
+                  for label, command in (
+        ("a drifted subagent's write onto a config hook", "echo x > " + hook),
+        ("a drifted subagent's kill of pid 0", "kill 0"),
+        ("a drifted subagent's command that sets GIT_DIR", "GIT_DIR=/x git status"),
+        ("a drifted subagent's echo", "echo hi"),
+        ("a drifted subagent's kill of a pgrep list", "kill $(pgrep x)"),
+    ))
+    # The cwd is the home; the target is the primary checkout, outside it.
+    write_out = OvAct("a subagent's Write into the primary checkout from inside its worktree", "Write",
+                      {"file_path": os.path.join(primary, "src", "app.py"), "content": "x"},
+                      "worktree-home", cwd=worktree, agent_id=OV_AGENT)
+    return shell + (write_out,)
+
+
+def ov_cap_shell_acts(config, session):
+    """The shell form of subagent-model-cap: a write of the cap variable into the project settings
+    file by echo, printf or a heredoc. It asks with no pass, and no pass lifts it, as for a Write."""
+    line = CAP_KEY + "=opus"
+    return tuple(OvAct(label, "Bash", {"command": command}, "subagent-model-cap", "ask")
+                 for label, command in (
+        ("an echo of the cap variable into the project settings file",
+         "echo " + line + " > " + PROJ_SETTINGS),
+        ("a printf of the cap variable into the project settings file",
+         "printf '%s\\n' " + line + " > " + PROJ_SETTINGS),
+        ("a heredoc of the cap variable into the project settings file",
+         "cat <<'EOF' > " + PROJ_SETTINGS + "\n" + line + "\nEOF"),
+    ))
+
+
+def ov_chain_acts(config, session):
+    """A refusal no pass lifts, in one command with a refusal a pass does lift. Reaching the lifted
+    one must not end the judging before the other, and the one-act pass stays unspent."""
+    hook = "echo x > " + slash(os.path.join(config, "hooks", "guard.py"))
+    silent = VCS + " commit -m x >/dev/null 2>&1; "
+    # The guard reads ROOT/tmp as the system temp, so the NOGIT cwd is no throwaway and a silenced
+    # commit there is refused by silent-write.
+    temp = os.path.join(ROOT, "tmp")
+    return tuple(OvAct(label, "Bash", {"command": command}, rules, first=first, temp=where)
+                 for label, command, rules, first, where in (
+        ("a write onto a config hook", hook, "frozen-path", None, None),
+        ("a pkill, then a write onto a config hook", "pkill -f foo; " + hook,
+         ("machine-wide-kill", "frozen-path"), "machine-wide-kill", None),
+        ("a write onto a config hook, then a pkill", hook + "; pkill -f foo",
+         ("machine-wide-kill", "frozen-path"), None, None),
+        ("a silent commit, then a kill of pid 0", silent + "kill 0",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
+        ("a silent commit, then a kill of pid -1", silent + "kill -9 -1",
+         ("silent-write", "machine-wide-kill"), "silent-write", temp),
+    ))
+
+
+def ov_role_acts(config, session):
+    """The model and role guards stay outside every pass, as frozen paths do: a pass that lifted them
+    would let a subagent pick its own model or edit the tests it is judged by."""
+    return (
+        OvAct("a settings write that lifts the subagent model cap", "Write",
+              {"file_path": PROJ_LOCAL, "content": cap_settings()}, "subagent-model-cap", "ask"),
+        OvAct("a spawn on the Haiku model", "Agent",
+              {"prompt": "do it", "model": "haiku"}, "subagent-model-floor"),
+        OvAct("a builder's third try on Sonnet", "Agent",
+              {"prompt": "Try 3 of 3. Finish the fix.", "model": "sonnet",
+               "subagent_type": "builder"}, "roles-third-try-steps-up"),
+        OvAct("a builder's edit of a test file", "Edit",
+              {"file_path": "src/test_app.py", "new_string": "x = 1"}, "builder-test-edit",
+              agent_id="bld1", agent_type="builder"),
+        OvAct("a test-author's edit of product code", "Edit",
+              {"file_path": "src/app.py", "new_string": "x = 1"}, "test-author-scope",
+              cwd=GITMAIN, agent_id="auth1", agent_type="test-author"),
+        OvAct("a record-writer's edit of a Python file", "Edit",
+              {"file_path": "hooks/guard.py", "new_string": "x"}, "record-writer-scope",
+              agent_id="rw1", agent_type="record-writer"),
+    )
+
+
+def ov_exclusion_check(timed, make_acts, what):
+    """The acts `make_acts` lists stay refused under either kind of pass. A refusal the pass does
+    not lift does not spend it, so the next lifted act still goes through."""
+    kind = "timed" if timed else "once"
+
+    def check():
+        config, session = ov_config("%s-%s" % (what, kind)), "ov-%s-%s" % (what, kind)
+        acts = [OvAct(*act) for act in make_acts(config, session)]
+        for act in acts:
+            problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
+            if problem:
+                return False, "%s with no pass: %s" % (act.label, problem)
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        for act in acts:
+            problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
+            if problem:
+                return False, "%s under a %s pass: %s; %s" % (act.label, kind, problem, note or "typed")
+        problem = ov_want(*ov_kill(config, session, 120), "allow", "machine-wide-kill")
+        if problem:
+            return False, "a lifted act after the excluded refusals: %s; %s" % (problem, note or "typed")
+        return True, "%d excluded refusals stayed; the pass was still there for a lifted act" % len(acts)
+    return check
+
+
+def ov_off_check():
+    """`override off` ends a pass at once, whichever kind it was."""
+    config = ov_config("off")
+    for kind, prompt, spend_first in (("timed", "override 15m", True), ("once", "override", False)):
+        session = "ov-off-" + kind
+        note = ov_type(config, session, prompt)
+        if spend_first:  # a timed pass survives a use; a one-act pass would not
+            problem = ov_want(*ov_kill(config, session, 30), "allow", "machine-wide-kill")
+            if problem:
+                return False, "%s pass, before off: %s; %s" % (kind, problem, note or "typed")
+        note = ov_type(config, session, "override off", 60) or note
+        problem = ov_want(*ov_kill(config, session, 90), "deny", "machine-wide-kill")
+        if problem:
+            return False, "%s pass, after `override off`: %s; %s" % (kind, problem, note or "typed")
+    return True, "both kinds refused after `override off`"
+
+
+def ov_log_check():
+    """A lifted act writes one log line: the decision cell says `override`, the rule cell names the rule
+    that was lifted, and the last cell is the session. lint/guard_log_report.py reads that shape."""
+    config, session = ov_config("log"), "ov-log-session"
+    note = ov_type(config, session, "override 15m")
+    log = os.path.join(config, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    problem = ov_want(*ov_kill(config, session, 60), "allow", "machine-wide-kill")
+    if problem:
+        return False, "the passed call: %s; %s" % (problem, note or "typed")
+    if not os.path.exists(log):
+        return False, "the passed call wrote no log line"
+    with open(log, encoding="utf-8") as handle:
+        lines = [l for l in handle.read().splitlines() if l.strip()]
+    if len(lines) != 1:
+        return False, "expected one line for the passed call, found %d: %r" % (len(lines), lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 6 or fields[2:4] != ["override", "machine-wide-kill"] or fields[5] != session:
+        return False, "the line does not read override + machine-wide-kill + the session: %r" % lines[0]
+    return True, "one line: decision override, rule machine-wide-kill"
+
+
+def ov_no_module_check():
+    """A guard copy that cannot import override_pass never allows on a pass. An import error inside
+    the refusal path would otherwise reach the guard's crash handler, which fails open."""
+    config, session = ov_config("no-module"), "ov-no-module"
+    note = ov_type(config, session, "override 15m")
+    folder = _guard_copy("ov-no-module", None)
+    if os.path.exists(os.path.join(folder, "override_pass.py")):
+        return False, "the scratch copy holds override_pass.py, so the case proves nothing"
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.update(CLAUDE_CONFIG_DIR=config, CLAUDE_GUARD_ROOT_PID=str(os.getpid()),
+               LOCAL_TIME_NOW=ov_clock(60))
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": OV_KILL}, "cwd": NOGIT,
+                          "session_id": session})
+    run = subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+                         capture_output=True, text=True, env=env, timeout=120)
+    got = _decision(run)[0]
+    if got != "deny":
+        return False, "a copy with no override_pass.py gave %s under a pass, want deny; %s" % (
+            got, note or "typed")
+    return True, "a copy with no override_pass.py refuses the call"
+
+
+for _label, _check in (
+    ("override: a one-act pass that nothing uses ends after 10 minutes", ov_once_expiry_check),
+    ("override: an unreadable pass file is no pass, and garbage text logs override-unread",
+     ov_corrupt_check),
+    ("override: a pass covers only the session that typed it", ov_scope_check),
+    ("override: two calls racing for one one-act pass, exactly one gets it", ov_parallel_check),
+    ("override: a subagent never spends a one-act pass", ov_agent_once_check),
+    ("override: a timed pass reaches a subagent until it ends", ov_agent_timed_check),
+    ("override: frozen-path and git-env-set stay refused under a one-act pass",
+     ov_exclusion_check(False, ov_frozen_acts, "frozen")),
+    ("override: frozen-path and git-env-set stay refused under a timed pass",
+     ov_exclusion_check(True, ov_frozen_acts, "frozen")),
+    ("override: a kill of pid 0, 1 or -1 stays refused under a one-act pass",
+     ov_exclusion_check(False, ov_kill_all_acts, "killall")),
+    ("override: a kill of pid 0, 1 or -1 stays refused under a timed pass",
+     ov_exclusion_check(True, ov_kill_all_acts, "killall")),
+    # A one-act pass never reaches a subagent (ov_agent_once_check), so the drifted subagent has
+    # a timed story only.
+    ("override: a drifted subagent stays refused as worktree-home under a timed pass",
+     ov_exclusion_check(True, ov_drift_acts, "drift")),
+    ("override: a refusal no pass lifts stays when chained with one a pass lifts, one-act pass",
+     ov_exclusion_check(False, ov_chain_acts, "chain")),
+    ("override: a refusal no pass lifts stays when chained with one a pass lifts, timed pass",
+     ov_exclusion_check(True, ov_chain_acts, "chain")),
+    ("override: the model and role guards stay refused under a one-act pass",
+     ov_exclusion_check(False, ov_role_acts, "role")),
+    ("override: the model and role guards stay refused under a timed pass",
+     ov_exclusion_check(True, ov_role_acts, "role")),
+    ("override: a shell write of the subagent model cap stays asked under a one-act pass",
+     ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
+    ("override: a shell write of the subagent model cap stays asked under a timed pass",
+     ov_exclusion_check(True, ov_cap_shell_acts, "capshell")),
+    ("override: `override off` ends a pass at once", ov_off_check),
+    ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
+    ("override: a guard copy that cannot import override_pass never allows on a pass",
+     ov_no_module_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
@@ -12757,7 +14168,7 @@ if _UNNAMED or _BAD_LOG:
              % (_UNNAMED, _BAD_LOG))
 
 
-# Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
+# Debt: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
 
 
 # A log check returns (SKIP, note) when it cannot run on this platform. run_cases prints a SKIP line for

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code hook: Simplified Technical English gate.
+"""Before a Write, Edit or MultiEdit of a markdown or UI file, fixes the Simplified Technical English errors it can fix in a markdown file. Denies the write for errors that remain. A UI file is checked, never fixed.
 
-Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file at error
-severity only. Prints JSON when there is something to say. Always exits 0.
+Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file. Errors
+block. Advisory findings (warnings) never block: the gate shows the ones in the changed
+blocks as a note. Prints JSON when there is something to say. Always exits 0.
 
 PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ste_lint.UI_SUFFIXES:
 .tsx, .jsx, .html, .vue): deny the write when the new text has STE errors, and hand the
@@ -37,7 +38,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import paragraph_blocks, format_finding  # noqa: E402
+from _transcript import paragraph_blocks, format_finding, advisory_lines  # noqa: E402
 try:
     from _transcript import guard_logger  # noqa: E402
 except Exception:  # an older _transcript.py beside this script: the gate runs, with no log line
@@ -54,15 +55,14 @@ MD_SUFFIXES = (".md", ".markdown")
 MAX_SHOWN = 5
 ABBREVIATIONS = {"e.g.", "i.e.", "etc.", "al.", "vs.", "cf.", "n.b.", "viz."}
 CLAUSE_WORDS = {"and", "but", "which", "because", "so", "then", "while", "when", "if"}
-NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
-        "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
-        "condition order, omitted 'that'.")
-UI_NOTE = ("UI file: only the copy a user sees is read. Contraction and condition order do not "
-           "apply. A button, label or aria-label holds 4 words at most.")
+NOTE = ("Code in backticks or a fence is exempt. Errors only: a sentence over 30 words, "
+        "bloat, double negative.")
+UI_NOTE = ("UI file: only the copy a user sees is read. A button, label or aria-label holds 4 "
+           "words at most.")
 
 
 def lint(linter, text, suffix=".md", config_from=None):
-    """Return the error-level findings of ste_lint.py on text, as finding dicts, or None
+    """Return the findings of ste_lint.py on text (errors and advisory warnings), as dicts, or None
     when the lint could not run (a timeout, a crash, output that is not JSON). `suffix`
     picks the reader: ste_lint reads a UI suffix as UI copy, and anything else as Markdown.
     `config_from` is the real target path, so the repo's .ste.json still applies."""
@@ -79,7 +79,7 @@ def lint(linter, text, suffix=".md", config_from=None):
             data = json.loads(run.stdout)
         except Exception:
             return None
-    return [f for f in data.get("findings", []) if f.get("severity") == "error"]
+    return data.get("findings", [])
 
 
 # paragraph_blocks and format_finding live in lint/_transcript.py, imported above. This hook,
@@ -352,7 +352,7 @@ def deny_reason(path, findings, text, is_ui):
     lines = []
     for f in findings[:MAX_SHOWN]:
         line = format_finding(f)
-        m = re.search(r"holds (\d+) words\. The \w+ limit is (\d+)", f.get("message") or "")
+        m = re.search(r"holds (\d+) words\. The limit is (\d+)", f.get("message") or "")
         if f.get("code") == "STE001" and m and not is_ui:
             line += '\n  Starts: "%s". %s' % (
                 " ".join(sentence_words(text, f.get("line") or 1))[:60], split_hint(text, f.get("line") or 1, int(m.group(2))))
@@ -363,6 +363,12 @@ def deny_reason(path, findings, text, is_ui):
             "rule's meaning, run `python3 %s --explain <id>`." % (
                 os.path.basename(path), "\n".join(lines), UI_NOTE if is_ui else NOTE,
                 os.path.join(HERE, "ste_lint.py")))
+
+
+def advisory_note(path, findings):
+    """The non-blocking note for advisory findings: one line per rule code."""
+    return "STE advisory for %s (the write goes ahead):\n%s" % (
+        os.path.basename(path), "\n".join(advisory_lines(findings)))
 
 
 def last_reply(hook):
@@ -485,6 +491,10 @@ def main():
             return
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
+        advisory = [f for f in findings if f.get("severity") != "error"]
+        findings = [f for f in findings if f.get("severity") == "error"]
+        if advisory:
+            note = (note + "\n" if note else "") + advisory_note(path, advisory)
         if findings:
             pending.append((tool, "deny", [f.get("code") for f in findings], path,
                             "denied=%d" % len(findings)))
@@ -496,6 +506,9 @@ def main():
         elif fixed_ti:
             pending.append((tool, "fixed", fixed_codes, path, "fixed=%d" % len(fixed_codes)))
             answer(rewrite_output(fixed_ti, note))
+        elif advisory:
+            answer({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note},
+                    "systemMessage": note})
         else:
             answer()
 

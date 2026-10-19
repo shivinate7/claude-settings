@@ -1,52 +1,31 @@
 #!/usr/bin/env python3
 """The machine-wide janitor sweep.
 
-Governed by plans/janitor-build-plan.md. Reaps local branches that hold no unique work and
-removes git worktrees that no session still uses, across every repository the sweep is pointed
-at, or discovers.
+Governed by the-janitor-is-one-machine-wide-sweep. Reaps local branches that hold no unique work
+and removes git worktrees that no session still uses, across every repository the sweep is
+pointed at, or discovers. Removal limits: when-a-worktree-may-be-removed. The orphan stop:
+unattended-sweep-stops-proven-orphans.
 
-WHY THIS IMPORTS hooks/guard.py INSTEAD OF WRITING ITS OWN COPY: hooks/guard.py's PreToolUse
-rule 1 (`branch_delete_subject`, `worktree_remove_subject`, `resolve_default_base`,
-`session_is_live`, the three `branch_*` tests, `worktree_locked`, `porcelain`) already answers
-almost every question this sweep asks, is already exercised by hooks/test_guard.py, and a
-second copy of that logic is the one outcome this build must avoid (plan, "the one outcome to
-avoid"). This module therefore calls guard's own primitives directly for every decision that
-holds a safety property (dirty/locked/live/ancestor/cherry/remote-contains), and keeps its own
-code only for orchestration (which repositories, which branches, which order, the preview
-report, the tombstone, and the 90-day purge) that guard has no reason to know about. Nothing
-here re-derives a keep-or-reap boolean by a path of its own; every boolean comes from guard.
+Every keep-or-reap boolean comes from hooks/guard.py's own primitives (`branch_delete_subject`,
+`worktree_remove_subject`, `resolve_default_base`, `session_is_live`, the `branch_*` tests,
+`worktree_locked`, `porcelain`): dirty, locked, live, ancestor, cherry, remote-contains. Never
+re-derive one here; a second copy of that logic is the outcome to avoid. This module keeps only
+orchestration: which repositories, which branches, which order, the preview report, the
+tombstone, and the 90-day purge.
 
-Preview is the default. Nothing is deleted until `--confirm` is passed. The sweep never touches
-a remote. It never stops a program a live session still needs: the one program it can stop is an
-orphaned TCP listener, left behind inside a repository this sweep already covers, once every
-liveness and ownership read on it comes back a confirmed "yes, reap." See "ORPHANED LISTENERS"
-below for the incident this answers and the reasons behind each read.
+Preview is the default. The run fetches and prunes remote-tracking refs; no branch or worktree is
+deleted until `--confirm` is passed. The sweep never pushes to a remote. The one program it can
+stop is an orphaned TCP listener inside a repository this sweep already covers, once every read on it is a confirmed "yes, reap": it is orphaned (a per-OS read);
+no live Claude session has a cwd in the same checkout (guard.py's own oracle); the current user
+owns it. An unreadable answer to any one of the three means KEEP. `--confirm` signals a reapable
+pid by NUMBER alone, never by a name or a command-line pattern, and never escalates past that
+one signal.
 
-ORPHANED LISTENERS (2026-09-24, macOS). A subagent started `python3 -m http.server 8000` inside
-`( ... & )`. Its own shell exited; pid 1 adopted the server. Its checkout was a linked worktree
-under Claude's own scratch-workspaces directory. The parent later ran `git worktree remove` on
-that worktree while two servers still ran inside it -- deleting files out from under a running
-program. The server bound `[::]:8000`, shadowed the owner's own server on `localhost:8000`, and
-was still running a day later.
-
-This sweep now finds a TCP listener whose cwd sits inside a repository (or worktree) it already
-covers, and reaps it ONLY when every one of these reads answers a confirmed yes:
-it is orphaned (a per-OS read, never a guess); no live Claude session has a cwd in that same
-checkout (guard.py's own tested oracle, never a second copy of it); and it is owned by the
-current user. An unreadable answer to any one of those three means KEEP, the same fail-closed
-shape guard.py's own liveness oracle already uses (decisions/liveness-read-is-platform-specific-
-and-unreadable-is-not-death.md). `--confirm` signals a reapable pid by NUMBER alone, never by a
-name or a command-line pattern (CLAUDE.md: "Never kill a process you did not start. Treat
-`pkill -f` and `lsof -t` as machine-wide."), and this sweep never escalates past that one signal
-on its own.
-
-Before a worktree is removed, this sweep also checks for ANY process at all (not only a
-listener) whose cwd sits inside it, and keeps the worktree, naming the pids, when one is found.
-On Windows this pre-check is the actual fix for the incident above, not a nicety: `git worktree
-remove` against a directory Windows refuses to delete (because a live process still holds it
-open) does a PARTIAL delete there -- files gone, an empty directory left behind, and git still
-lists the worktree as registered. Refusing to call `git worktree remove` at all when a process
-still sits inside is what keeps that partial state from ever happening.
+Before a worktree is removed, the sweep also checks for ANY process (not only a listener) whose
+cwd sits inside it, and keeps the worktree, naming the pids, when one is found. On Windows,
+`git worktree remove` against a directory a live process holds open does a PARTIAL delete
+(files gone, an empty directory left, the worktree still registered). Refusing to call it at all
+keeps that state from happening.
 
 Usage:
     python3 janitor/sweep.py [ROOT ...]                 # preview a sweep of the named roots
@@ -62,9 +41,8 @@ Usage:
 
 With no ROOT and no `--discover`, the sweep reads `janitor.roots` from this repository's own
 settings.json. Absent, it discovers under every one of `~/Developer`, `~/Clones`, `~/src`,
-`~/code`, and `~/repos` that exists on this machine, combined into one list. A measured default
-run once printed "no repositories found" while five real clones sat in `~/Clones`, not
-`~/Developer`. Present but malformed, not a list of strings, the sweep refuses to discover
+`~/code`, and `~/repos` that exists on this machine, combined into one list. Present but
+malformed, not a list of strings, the sweep refuses to discover
 anything and says why. It never guesses at a wish it cannot read. `--discover DIR` bypasses
 `janitor.roots` and the default list entirely. Discovery lists a directory's immediate children
 whose `.git` is a DIRECTORY (an ordinary checkout), never a FILE (a linked worktree of some other
@@ -97,7 +75,7 @@ import guard_core  # noqa: E402  (the preview cache patches the guard reads wher
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)
 TOMBSTONE_REF_PREFIX = "refs/janitor/reaped/"
-TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000  # git's own reflog-retention number; see the plan
+TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000  # git's own reflog-retention number
 
 
 # ------------------------------------------------------------------ discovery
@@ -141,27 +119,15 @@ def discover_repos_multi(roots):
 # and nobody notices. Refusing costs one rerun after the owner fixes the file.
 
 def _scratch_workspace_root_candidates():
-    """Claude Desktop's own scratch-workspace root, one per platform, MEASURED rather than
-    guessed. macOS: `~/Library/Application Support/Claude/scratch-workspaces` (named in this
-    build's brief, from the 2026-09-23 incident). Windows: `%APPDATA%\\Claude\\scratch-
-    workspaces`, with APPDATA read from the environment, never a hardcoded user, so this
-    answers for whoever runs the sweep. Linux: UNKNOWN. Nobody has measured this machine's own
-    layout there, so this adds NOTHING for Linux rather than guess a path that may not exist --
-    the same direction `load_janitor_roots_setting` already takes for any wish it cannot read.
+    """Claude Desktop's scratch-workspace root, one per platform. macOS:
+    `~/Library/Application Support/Claude/scratch-workspaces`. Windows:
+    `%APPDATA%\\Claude\\scratch-workspaces`, with APPDATA read from the environment, never a
+    hardcoded user. Linux: none, because that layout is unmeasured and no path is guessed (the
+    direction `load_janitor_roots_setting` takes for any wish it cannot read).
 
-    MEASURED on a real Windows machine, 2026-09-24, read-only (no code below acts on this):
-    `%APPDATA%\\Claude\\scratch-workspaces` holds `<uuid>\\<uuid>\\scratch-YYYY-MM-DD-xxxxxx`
-    leaf directories. None of six such leaves on this machine held a `.git` file OR directory
-    -- they held ordinary scratch files (templates, scripts), never a checkout. A sibling
-    `%APPDATA%\\Claude\\git-shadow\\<hash>\\shadow-of` file names the REAL external repo a
-    hashed git directory shadows, but that mechanism has no path back to a scratch-workspaces
-    leaf: it runs in the other direction, and nothing under scratch-workspaces referenced it.
-    So `discover_repos`'s existing rule (an immediate child whose `.git` is a directory) finds
-    nothing here, exactly as this build's brief predicted it would, and there is no further
-    checkout-mapping this sweep can act on beneath this root without inventing one. The root is
-    still added: a future scratch-workspaces layout that DOES leave a real linked worktree
-    behind (the incident this build answers was exactly that shape, on macOS) is then covered
-    the day it appears, at no cost today, since an empty root discovers nothing either way."""
+    Those leaves hold scratch files, not checkouts, so `discover_repos` (an immediate child whose
+    `.git` is a directory) finds nothing there today. The root is still added: a linked worktree
+    left behind there is then covered the day it appears, at no cost while it is empty."""
     if sys.platform == "darwin":
         return ("~/Library/Application Support/Claude/scratch-workspaces",)
     if sys.platform.startswith("win"):
@@ -179,21 +145,15 @@ DEFAULT_DISCOVER_ROOT_CANDIDATES = (
 
 def default_discover_roots():
     """Every one of DEFAULT_DISCOVER_ROOT_CANDIDATES that exists on this machine, in that fixed
-    order. Replaces the old single-root guess. This module's docstring names the measured
-    problem. A real machine can have clones split across more than one of these directories.
-    Stopping at the first hit missed the rest.
+    order. Clones can be split across several of these directories, so it does not stop at the
+    first hit.
 
-    `os.path.normpath` fixes a real defect, measured on Windows. Each candidate is written
-    POSIX-style, like `~/Developer`. `os.path.expanduser` only replaces the leading `~`. It
-    never touches the rest of the string.
-
-    On Windows, the `~` becomes a backslash path. The literal `/Developer` suffix stays a
-    forward slash. The result mixes both separators in one path. The same directory, built
-    through `os.path.join` anywhere else in this codebase, uses backslash throughout. Plain
-    string equality then sees two different paths for the same directory.
-
-    `discover_repos_multi` removes duplicates with a `set()`. That is the same plain string
-    match. `normpath` fixes every candidate once, at the one place they all pass through.
+    `os.path.normpath` is applied to each candidate. Each is written POSIX-style, like
+    `~/Developer`, and `os.path.expanduser` replaces only the leading `~`. On Windows the result
+    then mixes both separators in one path, which plain string equality sees as a different path
+    from the same directory built with `os.path.join`. `discover_repos_multi` de-duplicates with
+    a `set()`, a plain string match, so `normpath` fixes every candidate once, where they all
+    pass.
     """
     return [os.path.normpath(path)
             for path in (os.path.expanduser(c) for c in DEFAULT_DISCOVER_ROOT_CANDIDATES)
@@ -404,40 +364,27 @@ def _branch_reap_label(where: str, base: str, branch: str) -> str:
 
 # ------------------------------------------------------------------ the worktree keep rule
 #
-# Same shape: every boolean (dirty, locked, live) is guard's own primitive
-# (guard.porcelain, guard.worktree_locked, guard.worktree_live_session), read in the same order
-# guard.worktree_remove_subject already uses. This function adds only the "which one refused"
-# label. The "never touch the primary checkout" exclusion is NOT here: it is decided in
-# `sweep_repo`, before `decide_worktree` is ever called, by `_is_primary_checkout` below. See
-# that function's docstring for why comparing against the ROOT argument (an earlier version of
-# this file did that, and only that) is not enough.
+# Every boolean (dirty, locked, live) is guard's own primitive (guard.porcelain,
+# guard.worktree_locked, guard.worktree_live_session), read in the order
+# guard.worktree_remove_subject uses. This function adds only the "which one refused" label.
+# The "never touch the primary checkout" exclusion is decided in `sweep_repo`, before
+# `decide_worktree` is called, by `_is_primary_checkout` below.
 
 
 def _is_primary_checkout(entry_path: str):
     """True when `entry_path` IS the repository's one primary checkout, False for a linked
     worktree, None when the read failed.
 
-    THE DEFECT THIS REPLACES: an earlier version of this file compared each worktree entry's
-    real path against the `root` argument `sweep_repo` was called with, and skipped only that
-    one match. That is correct ONLY when `root` already names the primary checkout. Call
-    `sweep_repo` with a LINKED WORKTREE's own path instead (`session_end_sweep.py`'s whole job
-    is to prevent that, by resolving to the primary checkout first, but `sweep.py` itself must
-    not depend on every caller doing that correctly) and the actual primary checkout stops
-    matching `root`, stops being excluded, and gets evaluated by `decide_worktree` like any
-    other worktree -- `REAP removable` when it happens to be clean, unlocked, and not live. A
-    reviewer measured exactly that against a real fixture: `git worktree remove` on the primary
-    tree then failed only because GIT ITSELF refuses to remove a main working tree that way --
-    a refusal this program does not control and must not lean on (CLAUDE.md,
-    "verification-recovery-not-gated-on-own-state"; a guard that depends on someone else's
-    refusal fails the day that refusal changes).
+    Ask git which path is primary; never compare against the `root` argument. `sweep_repo` can be
+    called with a linked worktree's own path, and the real primary checkout would then stop
+    matching `root`, stop being excluded, and be judged like any worktree. Git's own refusal to
+    remove a main working tree is not a guard this program may lean on
+    (verification-recovery-not-gated-on-own-state).
 
-    THE FIX: ask git which path is primary, independent of what `root` was. Every worktree of
-    one clone shares exactly one git directory (`--git-common-dir`); the primary checkout is
-    the one worktree whose OWN git directory (`--git-dir`) equals that shared one. A linked
-    worktree's own git directory is instead a subdirectory of the shared one
-    (`<common>/worktrees/<name>`), so the two never match there. This is the same read
-    `hooks/guard.py.is_worktree` already makes and `hooks/test_guard.py` already exercises, run
-    here per-entry so it answers correctly no matter which worktree `sweep_repo` was pointed at.
+    Every worktree of one clone shares one git directory (`--git-common-dir`). The primary
+    checkout is the one worktree whose OWN git directory (`--git-dir`) equals it. A linked
+    worktree's own git directory is `<common>/worktrees/<name>`, so the two never match. This is
+    the read `hooks/guard.py.is_worktree` makes, run here per entry.
     """
     answer = guard._git(entry_path, "rev-parse", "--git-dir", "--git-common-dir")
     if answer is None or answer.returncode != 0:
@@ -457,9 +404,9 @@ AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+
 
 
 def stale_agent_lock_verdict(reason: str):
-    """True when REASON is a claude agent lock that may go. Two forms, MEASURED: the Agent tool's own
-    lock `claude agent agent-<id> (pid N start <date>)`, and, on this machine since 2026-10-15,
-    `claude agent agent-<id> (pid N)` with no start time. N is the HOST claude process, not the agent.
+    """True when REASON is a claude agent lock that may go. Two forms: the Agent tool's own
+    lock `claude agent agent-<id> (pid N start <date>)`, and `claude agent agent-<id> (pid N)`
+    with no start time. N is the HOST claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
     reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
     process now holds keeps its lock. False when the holder still runs, or the reason is any other
@@ -471,8 +418,7 @@ def stale_agent_lock_verdict(reason: str):
     locked_ms = None
     if start is not None:
         try:
-            # MEASURED: the lock's date is UTC (this machine's own `ps` read 5 hours earlier for
-            # the same pid), so it is read with timegm, never mktime.
+            # The lock's date is UTC, so it is read with timegm, never mktime.
             locked_ms = calendar.timegm(time.strptime(start, "%a %b %d %H:%M:%S %Y")) * 1000
         except Exception:
             return None
@@ -486,6 +432,7 @@ def stale_agent_lock_verdict(reason: str):
     return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
 
 
+_FETCH_FAILED = None  # a set of roots while `main` runs: those whose `fetch --prune` failed
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
 
@@ -497,9 +444,11 @@ def _common_dir_key(path: str):
 
 
 def _live_remote_heads(path: str):
-    """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`,
-    read-only: never a fetch, never a prune), or None when any read failed. Local
-    refs/remotes/* are not used: a branch deleted on the remote leaves its tracking ref behind."""
+    """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`, which
+    moves no ref; the run's own `fetch --prune` is `_fetch_prune`), or None when any read failed.
+    A head whose commit this clone lacks is dropped, because `rev-list` fails on an unknown SHA.
+    A dropped head can sit above a commit the clone has, so dropping it can only make a tree read
+    unpushed, and an unpushed tree is kept unless it is merged. Local refs/remotes/* are not used: they lag the remote."""
     key = _common_dir_key(path)
     if key is None:
         return None
@@ -522,6 +471,18 @@ def _live_remote_heads(path: str):
                 shas = None
                 break
             shas.update(line.split("\t", 1)[0] for line in listed.stdout.splitlines() if "\t" in line)
+    if shas:
+        try:
+            held = subprocess.run(
+                ["git", "-C", path, "cat-file", "--batch-check"],
+                input="".join(sha + "\n" for sha in sorted(shas)),
+                capture_output=True, text=True, timeout=10)
+        except Exception:
+            held = None
+        if held is None or held.returncode != 0:
+            shas = None
+        else:
+            shas -= {line.split()[0] for line in held.stdout.splitlines() if line.endswith(" missing")}
     if _LIVE_HEADS is not None:
         _LIVE_HEADS[key] = shas
     return shas
@@ -575,8 +536,8 @@ def prime_pushed(root: str, entries):
 
 def fully_pushed(path: str):
     """True when every commit on HEAD is reachable from a head the remote lists now (a detached
-    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
-    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
+    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed
+    or rev-list failed. A live SHA missing locally is dropped, not unreadable. Every reap needs it, not only a
     stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
     HEAD is read now; `prime_pushed` may already have settled that commit this run."""
     live = _live_remote_heads(path)
@@ -597,9 +558,9 @@ def fully_pushed(path: str):
     return head not in unpushed
 
 
-STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
-# Owner ruling 2026-10-09 (decisions/unattended-sweep-stops-proven-orphans.md): a pushed, clean,
-# NOT merged tree is removable once it is idle this long.
+STRICT_IDLE_SECONDS = 60 * 60  # a tree needs 1 hour of git quiet
+# A pushed, clean, NOT merged tree is removable once it is idle this long
+# (when-a-worktree-may-be-removed).
 STRICT_UNMERGED_IDLE_SECONDS = 24 * 60 * 60
 
 
@@ -661,7 +622,7 @@ def _strict_keep(where: str, path: str, idle):
     return None
 
 
-AGENT_IDLE_SECONDS = 4 * 60 * 60  # owner ruling 2026-10-14: a finished agent's tree needs 4 hours of quiet
+AGENT_IDLE_SECONDS = 4 * 60 * 60  # a finished agent's tree needs 4 hours of quiet
 
 
 def _is_agent_worktree(where: str, path: str) -> bool:
@@ -673,7 +634,7 @@ def _is_agent_worktree(where: str, path: str) -> bool:
 
 
 def _agent_rule_keep(kept: dict, idle):
-    """The agent rule (owner ruling 2026-10-14). It ADDS removals to the older unattended
+    """The agent rule (when-a-worktree-may-be-removed). It ADDS removals to the older unattended
     rulings and never narrows them. The caller runs it for a tree under `.claude/worktrees/agent-*`
     that those rulings keep (KEPT is their decision), after the clean, lock, session and
     live-ls-remote reads passed. Returns a keep decision, or None when the tree may go: idle 4
@@ -760,23 +721,15 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
             kept = _agent_rule_keep(kept, idle)
         if kept:
             return kept
-    # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
-    # a plain shell sitting in this worktree is just as much a reason `git worktree remove`
-    # must not run as a live Claude session is.
+    # The pre-removal process check. ANY process at all, not only a listener -- a plain shell
+    # sitting in this worktree is just as much a reason `git worktree remove` must not run as a
+    # live Claude session is.
     #
-    # A single PID whose own cwd read fails is OUT OF SCOPE, not a keep -- MEASURED, not the
-    # first guess: on this real Windows machine, 272 of 580 running processes answer `None` to
-    # `process_cwd` (most of them belong to another account, or are otherwise access-
-    # protected). Keeping every worktree on a machine that shape is normal on would make this
-    # pre-check refuse to ever reap anything, on any real machine, which is a worse outcome
-    # than the leak it exists to prevent. This is the SAME direction the original brief already
-    # named for a different read: "A single process of another user, or one that refuses
-    # access, is out of scope. Count it in the report, never act on it" -- extended here from
-    # the owner check to this one too, for the reason just measured, and kept identical on
-    # POSIX and Windows (both dispatch through the same `process_cwd`, with no OS branch here
-    # at all). Only the WHOLE enumeration failing (`processes_in` returning `(None, None)`)
-    # still means keep-everything: that is a different failure, the brief's own words, "if the
-    # whole listing ... or the pre-check enumeration fails."
+    # A single PID whose own cwd read fails is OUT OF SCOPE, not a keep
+    # (unattended-sweep-stops-proven-orphans): keeping on it would refuse to reap anything on a
+    # machine where many processes belong to another account. Same on POSIX and Windows: both
+    # dispatch through `process_cwd`. Only the WHOLE enumeration failing (`processes_in`
+    # returning `(None, None)`) means keep-everything.
     inside, _unreadable = processes_in(path)
     if inside is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
@@ -789,8 +742,8 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     return {"path": path, "action": "reap", "reason": "removable"}
 
 
-# Owner ruling 2026-10-15: at agent end, ANOTHER finished agent's tree needs 30 minutes of quiet.
-# AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
+# At agent end, ANOTHER finished agent's tree needs 30 minutes of quiet
+# (when-a-worktree-may-be-removed). AGENT_IDLE_SECONDS (4 hours) stays the janitor's floor.
 AGENT_END_IDLE_SECONDS = 30 * 60
 
 
@@ -820,7 +773,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
 
 # ------------------------------------------------------------------ orphaned TCP listeners
 #
-# See the module docstring, "ORPHANED LISTENERS", for the incident and the shape of the rule.
+# See the module docstring for the shape of the rule.
 # Every function below is read-only until `send_signal` and `reap_listener`, at the very end of
 # this section: everything before that point only LOOKS, on this one machine, and touches
 # nothing.
@@ -829,15 +782,14 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
 # `_process_start_ms` already established: a confirmed answer (True/False), or `None` when the
 # read itself could not tell. `None` is never coerced into a confident answer by this file. A
 # caller that receives `None` from any of these always keeps, never reaps -- see
-# decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md, which states this
-# rule for a different read, and CLAUDE.md's "report a read that could not run as unknown, never
-# as clear or broken", which states it for every read.
+# CLAUDE.md's "report a read that could not run as unknown, never as clear or broken", which
+# states it for every read.
 
 
 def list_listeners():
     """Return every `[{"pid", "port"}]` this machine currently has a process LISTENing on a TCP
     port for, or `None` when the enumeration itself failed (no per-OS tool answered at all).
-    Stdlib subprocess calls and, on Windows, `ctypes` only -- no psutil, per this build's brief."""
+    Stdlib subprocess calls and, on Windows, `ctypes` only -- no psutil."""
     if sys.platform == "darwin":
         return _list_listeners_lsof()
     if sys.platform.startswith("linux"):
@@ -899,10 +851,8 @@ _SS_PID_RE = re.compile(r"pid=(\d+)")
 
 def _list_listeners_ss():
     """Linux: `ss -ltnp`. Its "Process" column reads like `users:(("python3",pid=1234,fd=6))`;
-    the pid is pulled out with a regex rather than a full parse of that column, the same
-    lightness `_process_owner_sid_windows` elsewhere in this file uses for a Windows structure
-    it only needs one field from. `None` when `ss` itself is missing or refuses to run, so the
-    caller falls back to lsof (Linux ships both, per this build's brief)."""
+    the pid is pulled out with a regex, not a full parse. `None` when `ss` itself is missing or
+    refuses to run, so the caller falls back to lsof."""
     try:
         answer = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=10)
     except Exception:
@@ -928,9 +878,8 @@ def _tcp_table_windows(address_family: int):
     """One call to `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_LISTENER)`, for AF_INET or
     AF_INET6, returning every LISTENing row's (pid, port). Two calls (this function, called
     once per family by `_list_listeners_windows`) because IPv4 and IPv6 use two different row
-    layouts (`MIB_TCPROW_OWNER_PID` vs `MIB_TCP6ROW_OWNER_PID`) -- and the real incident this
-    build answers bound `[::]:8000`, IPv6, so skipping this family would miss the exact shape
-    that was measured. `None` when the API itself refuses (the first, sizing call answers
+    layouts (`MIB_TCPROW_OWNER_PID` vs `MIB_TCP6ROW_OWNER_PID`); skipping IPv6 would miss a
+    listener bound to `[::]`. `None` when the API itself refuses (the first, sizing call answers
     neither 0 nor `ERROR_INSUFFICIENT_BUFFER`, or the second, real call does not answer 0)."""
     import ctypes
 
@@ -1023,10 +972,9 @@ def _process_cwd_macos(pid: int):
 
 def _process_cwd_linux(pid: int):
     """`/proc/PID/cwd` is a symlink to the process's cwd. A cwd whose directory has since been
-    unlinked (exactly the "worktree already removed, process still inside it" case this build
-    exists for) reads back with a literal ` (deleted)` suffix, which is stripped here so the
-    path still matches the worktree it names -- the process is still THERE, the directory
-    entry is just gone."""
+    unlinked reads back with a literal ` (deleted)` suffix, stripped here so the path still
+    matches the worktree it names: the process is still THERE, the directory entry is just
+    gone."""
     try:
         raw = os.readlink("/proc/%d/cwd" % pid)
     except Exception:
@@ -1038,12 +986,11 @@ def _process_cwd_linux(pid: int):
 
 
 def _process_cwd_windows(pid: int):
-    """ponytail: the PEB offsets below are UNDOCUMENTED and 64-bit-process-only (per this
-    build's own brief: github.com/giampaolo/psutil/issues/51,
-    github.com/raskrebs/sonar/pull/57). Any failure at any step answers `None`, never a guess.
-    Upgrade path: `psutil.Process(pid).cwd()` the day this repository allows a third-party
-    dependency for it -- this function exists only because the brief asks for stdlib+ctypes
-    alone.
+    """ponytail: the PEB offsets below are UNDOCUMENTED and 64-bit-process-only
+    (github.com/giampaolo/psutil/issues/51, github.com/raskrebs/sonar/pull/57). Any failure at
+    any step answers `None`, never a guess. Upgrade path: `psutil.Process(pid).cwd()` the day
+    this repository allows a third-party dependency; this function exists because the sweep is
+    stdlib+ctypes only.
 
     `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` -> `NtQueryInformationProcess`
     for the PEB address -> `ReadProcessMemory` of `PEB.ProcessParameters` (offset 0x20 on
@@ -1056,12 +1003,9 @@ def _process_cwd_windows(pid: int):
     kernel32 = ctypes.windll.kernel32
     ntdll = ctypes.windll.ntdll
 
-    # MEASURED bug, fixed here: ctypes guesses a plain 32-bit `c_int` for any argument or
-    # return value it is not told the type of. A real PEB address or heap pointer on a 64-bit
-    # process routinely exceeds that range (MEASURED: 0x4cd39e000, this file's own process) --
-    # silently truncated going IN, or raising `OverflowError` coming OUT. Every handle and
-    # pointer this function touches is typed explicitly so the addresses below are never
-    # mangled by that default.
+    # Type every handle and pointer explicitly: ctypes assumes a 32-bit `c_int` for any argument
+    # or return value it is not told the type of, which truncates (going IN) or raises
+    # `OverflowError` (coming OUT) on a 64-bit PEB address or heap pointer.
     kernel32.OpenProcess.restype = ctypes.c_void_p
     kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
     ntdll.NtQueryInformationProcess.restype = ctypes.c_long
@@ -1126,9 +1070,9 @@ def _process_cwd_windows(pid: int):
 
 
 def process_command(pid: int):
-    """Best-effort, display-only. Never used to decide reap-or-keep (CLAUDE.md: never dry-run a
-    block-list) -- the preview shows it so a human can recognise the program, and a signal is
-    still sent by pid number alone."""
+    """Best-effort, display-only. Never used to decide reap-or-keep
+    (verification-never-dry-run-blocklist) -- the preview shows it so a human can recognise the
+    program, and a signal is still sent by pid number alone."""
     if sys.platform == "darwin":
         return _process_command_posix(pid)
     if sys.platform.startswith("linux"):
@@ -1198,19 +1142,16 @@ def is_orphan(pid: int):
     """True when PID is confirmed orphaned. False when it is confirmed NOT orphaned (a real
     parent pid was read, and that parent is alive with no later creation time than PID's own).
     None when some read along the way could not tell -- reported as `unreadable-subject` by
-    every caller in this file, never coerced into a confident answer either way (decisions/
-    liveness-read-is-platform-specific-and-unreadable-is-not-death.md).
+    every caller in this file, never coerced into a confident answer either way.
 
     POSIX: PID's own PPid is 1 (`/proc/PID/status` on Linux, `ps -o ppid=` on macOS). A
     subreaper (`PR_SET_CHILD_SUBREAPER`) adopts with ITS OWN pid, never 1, so this stays
-    stricter than "parent is dead" on purpose -- the brief: "Do not treat a subreaper as
-    orphaned (stricter is safe)."
+    stricter than "parent is dead" on purpose: a subreaper is not treated as orphaned.
 
-    Windows never re-parents an orphan at all (Raymond Chen, devblogs "Old New Thing",
-    2015-04-03): the recorded ParentProcessId either names a dead process, or names a LIVE one
-    that was created AFTER this pid -- the pid got reused by an unrelated process once the real
-    parent exited, and Windows never updates the child's own stale record of it. Either shape
-    means orphaned. A live parent created BEFORE this pid, the ordinary shape, means not."""
+    Windows never re-parents an orphan: the recorded ParentProcessId either names a dead
+    process, or names a LIVE one that was created AFTER this pid (the pid was reused once the
+    real parent exited). Either shape means orphaned. A live parent created BEFORE this pid,
+    the ordinary shape, means not."""
     if sys.platform == "darwin":
         row = _ps_row(pid)
         if row is not _NO_TABLE:
@@ -1258,15 +1199,13 @@ def _ppid_is_init(text: str):
 
 
 def _is_orphan_windows(pid: int):
-    """MEASURED gap this closes: `guard._process_start_ms_windows` answers a real creation
-    time for a pid that has ALREADY EXITED, as long as anything on the machine still holds one
-    handle open to it (a `subprocess.Popen` object that has not been garbage-collected yet is
-    enough) -- Windows keeps that pid's process object alive as a zombie, exactly like a POSIX
-    zombie, until every handle closes. `OpenProcess` success alone (guard's own oracle, built
-    for a DIFFERENT question -- whether a session's OWN recorded pid is still that same
-    process) is therefore not enough here to tell "parent is dead" from "parent is running":
+    """`OpenProcess` success alone (guard's own oracle, built for a different question) cannot
+    tell "parent is dead" from "parent is running" here. `guard._process_start_ms_windows`
+    answers a real creation time for a pid that has ALREADY EXITED while anything still holds a
+    handle open to it (a `subprocess.Popen` not yet garbage-collected is enough), because
+    Windows keeps the process object alive as a zombie until every handle closes.
     `_process_running_windows` below checks `GetExitCodeProcess` for `STILL_ACTIVE`, which a
-    zombie never answers, before anything is trusted as "the parent is alive."."""
+    zombie never answers, before anything is trusted as alive."""
     parent_pid = _parent_pid_windows(pid)
     if parent_pid is None:
         return None
@@ -1366,8 +1305,8 @@ def _toolhelp_process_entries():
 
 def list_all_pids():
     """Return EVERY pid on this machine right now, or `None` when the enumeration itself
-    failed. Used only by `processes_in`'s pre-removal check: "if the whole listing or the
-    pre-check enumeration fails, KEEP everything and remove no worktree" (this build's brief)."""
+    failed. Used only by `processes_in`'s pre-removal check: if the enumeration fails, KEEP
+    everything and remove no worktree."""
     if sys.platform == "darwin" or sys.platform.startswith("linux"):
         return _list_all_pids_posix()
     if sys.platform.startswith("win"):
@@ -1471,9 +1410,8 @@ def _token_user_sid_windows(pid):
     """PID's own TokenUser SID string, or -- PID `None` -- this sweep's OWN process's SID
     string. `None` on any failure: PEB-adjacent reads on someone else's process routinely
     refuse for the same access-control reason `_process_cwd_windows` does, and that refusal is
-    itself the signal that a process is not ours (brief: "or treat 'PEB read refused' as not
-    ours" -- honoured here by this function answering `None`, which `is_current_user_process`
-    already treats as unreadable rather than a guessed "yes")."""
+    itself the signal that a process is not ours. `is_current_user_process` treats `None` as
+    unreadable, not as a guessed "yes"."""
     import ctypes
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -1542,20 +1480,12 @@ def _token_user_sid_windows(pid):
 def _cwd_under_checkout(cwd: str, checkout_path: str) -> bool:
     """True when CWD sits at or under CHECKOUT_PATH, matched as a normalised path PREFIX.
 
-    `os.path.realpath` first, never `guard._path_identity`'s `os.stat`-based fallback: a git
-    worktree that has ALREADY been removed (brief point 1: "including a worktree path that is
-    already removed") can have nothing left to `os.stat`, and `realpath` never raises for a
-    path that does not exist -- it degrades gracefully to a plain normalised string for the
-    part that is gone, which is exactly `os.path.normpath`'s own behaviour for that case.
-
-    MEASURED why plain `normpath` alone (an earlier version of this function) is not enough
-    while the checkout DOES still exist: on this Windows machine, `tempfile.mkdtemp()`
-    sometimes returns a path through a SHORT (8.3) component (`SHIVAM~1`), while `git
-    worktree list` always reports the LONG form (`ShivamSemwal`) for the identical directory.
-    `normpath` normalises slashes and case but never expands an 8.3 name, so the two never
-    shared a prefix as plain strings -- a real listener's own cwd, read back from the OS, then
-    matched NEITHER form reliably. `realpath` resolves the short form to the long one (or vice
-    versa) whenever the directory still exists, so both sides land on the same spelling."""
+    `os.path.realpath` first, never `guard._path_identity`'s `os.stat`-based fallback: a worktree
+    that has ALREADY been removed has nothing left to `os.stat`, and `realpath` degrades to a
+    plain normalised string for the part that is gone. `normpath` alone is not enough while the
+    checkout DOES exist: on Windows a path can arrive through a SHORT (8.3) component
+    (`SHIVAM~1`) while `git worktree list` reports the LONG form for the same directory, and
+    `normpath` never expands an 8.3 name. `realpath` resolves both to one spelling."""
     try:
         cwd_norm = os.path.normcase(os.path.realpath(cwd)) + os.sep
         target_norm = os.path.normcase(os.path.realpath(checkout_path)) + os.sep
@@ -1566,12 +1496,9 @@ def _cwd_under_checkout(cwd: str, checkout_path: str) -> bool:
 
 def _matching_checkout(cwd: str, checkout_paths):
     """The DEEPEST entry of CHECKOUT_PATHS that CWD sits under, or `None` when it sits under
-    none of them.
-
-    MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): agent worktrees sit
-    under `.claude/worktrees/` INSIDE the primary checkout, and `parse_worktree_list` names the
-    primary first. An earlier version took the first match, so every listener in an agent
-    worktree was judged against the primary checkout and its live session."""
+    none of them. Agent worktrees sit under `.claude/worktrees/` INSIDE the primary checkout,
+    and `parse_worktree_list` names the primary first, so taking the first match would judge a
+    listener in an agent worktree against the primary checkout and its live session."""
     matches = [path for path in checkout_paths if _cwd_under_checkout(cwd, path)]
     if not matches:
         return None
@@ -1579,10 +1506,10 @@ def _matching_checkout(cwd: str, checkout_paths):
 
 
 def _under_agent_worktree(cwd: str) -> bool:
-    """True when CWD sits under a `.claude/worktrees/<name>` checkout. Owner ruling 2,
-    2026-09-27 (the agent-end-reap entry): no session record names a subagent, so the sweep
-    cannot tell a running subagent's worktree from an ended one. It leaves those folders to
-    janitor/agent_end_reap.py, which runs when the harness says the agent ended."""
+    """True when CWD sits under a `.claude/worktrees/<name>` checkout. No session record names a
+    subagent, so the sweep cannot tell a running subagent's worktree from an ended one. It leaves
+    those folders to janitor/agent_end_reap.py (agent-end-reap-stops-what-a-finished-agent-left),
+    which runs when the harness says the agent ended."""
     parts = os.path.normcase(os.path.realpath(cwd)).replace("\\", "/").split("/")
     claude, worktrees = os.path.normcase(".claude"), os.path.normcase("worktrees")
     return any(parts[i] == claude and parts[i + 1] == worktrees and parts[i + 2]
@@ -1623,8 +1550,7 @@ def decide_listener(entry: dict):
     Reapable only when ALL three of these answer a confirmed yes, in this order: orphaned; no
     live Claude session has a cwd in the same checkout (guard.py's own tested oracle, reused
     verbatim, never re-derived here); owned by the current user. Any `None` along the way
-    means keep, reported as `unreadable-subject` -- this build's brief, "An unreadable fact
-    means KEEP." """
+    means keep, reported as `unreadable-subject`."""
     pid = entry["pid"]
     base = dict(entry, command=process_command(pid))
 
@@ -2080,21 +2006,12 @@ def _read_all_cwds_macos(timeout=60):
 def processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
-    when the pid ENUMERATION itself failed -- the brief's own rule: "if the whole listing ... or
-    the pre-check enumeration fails, KEEP everything and remove no worktree."
+    when the pid ENUMERATION itself failed: keep everything and remove no worktree.
 
-    A single pid whose OWN cwd cannot be read is OUT OF SCOPE, never a reason to keep --
-    MEASURED, not the first guess: on a real Windows machine, 272 of 580 running processes
-    answered `None` to `process_cwd` here, almost all of them owned by another account or
-    otherwise access-protected. Naming those as a reason to keep would make this pre-check
-    refuse to ever reap anything, on any real machine, which is a worse outcome than the leak
-    it exists to prevent. `unreadable_pids` is still returned, so a caller MAY report how many
-    were skipped this way, but `decide_worktree` does not let it block a removal -- the same
-    direction the original brief already named for a different read ("A single process of
-    another user, or one that refuses access, is out of scope. Count it in the report, never
-    act on it"), extended here from the owner check to this one, for the measured reason
-    above, and identical on POSIX and Windows: both dispatch through this same `process_cwd`,
-    with no OS branch anywhere in this function."""
+    A single pid whose OWN cwd cannot be read is OUT OF SCOPE, never a reason to keep
+    (unattended-sweep-stops-proven-orphans). `unreadable_pids` is still returned, so a caller
+    MAY report how many were skipped, but `decide_worktree` does not let it block a removal.
+    Identical on POSIX and Windows: both dispatch through this same `process_cwd`."""
     if sys.platform == "darwin":
         table = _all_cwds_macos()
         if table is None:
@@ -2267,14 +2184,14 @@ def _admin_dir(path: str):
 
 
 def _restore_cut_short(where: str, entry: dict):
-    """Owner ruling 2026-10-15, review point 4: `guard._git` stops `git worktree remove` at 10 s, which
+    """`guard._git` stops `git worktree remove` at 10 s, which
     can leave a tree half deleted. `remove_worktree` writes REMOVAL_MARKER before each remove. When
     the marker is there and every dirty line is a deleted tracked file, this writes the missing
     files back from the index (`checkout-index` without -f never overwrites a file that exists), so
     `decide_worktree` sees a clean tree and the next remove finishes the job. No --force anywhere.
     LIMIT: when the cut-short remove already deleted the tree's `.git` file, git cannot read the
     tree, so it is kept as unreadable and needs a person.
-    Review round 2: a failed remove can leave the marker on an intact tree, where a deletion may be
+    A failed remove can leave the marker on an intact tree, where a deletion may be
     a person's own. So the write-back runs only when the lock, session and process checks that
     `decide_worktree` runs after its clean check would pass. Any failed read writes nothing."""
     path = entry["path"]
@@ -2388,7 +2305,8 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
         repo = e.get("repo")
         if not isinstance(repo, str) or not repo:
             return None
-        return (os.path.normcase(os.path.realpath(repo)), e.get("branch"), e.get("commit"))
+        branch = e.get("branch")
+        return (os.path.normcase(os.path.realpath(repo)), branch.lower() if isinstance(branch, str) else branch, e.get("commit"))
 
     unexpired = {row_key(e) for e in entries
                  if isinstance(e.get("time_ms"), (int, float)) and not isinstance(e.get("time_ms"), bool)
@@ -2707,14 +2625,13 @@ def run_repo_reaper(root: str):
     return None
 
 
-# Only the SessionEnd run has a deadline (owner ruling 2026-10-15 15:08 CDT). session_end_sweep.py
-# kills its sweep after min(25 s, the time its hook has left) and passes that number as
-# `--deadline-seconds N`. The budget counts from the start of the pass: the pass judges trees until
-# min(JUDGE_BUDGET_SECONDS, N minus DEADLINE_TAIL_SECONDS) seconds after it started. A tree judged
-# at the last moment still costs about 7.5 s (measured), then the branch, leftover-folder and
-# listener work follows, so the tail is that 7.5 s. Only a run given --deadline-seconds has a
-# budget (session_end_sweep.py passes it); the scheduled job and a person's run have none. A tree
-# the pass did not reach is kept ("not judged: deadline") and the next run judges it.
+# Only the SessionEnd run has a deadline. session_end_sweep.py kills its sweep after min(25 s,
+# the time its hook has left) and passes that number as `--deadline-seconds N`. The budget counts
+# from the start of the pass: the pass judges trees until min(JUDGE_BUDGET_SECONDS, N minus
+# DEADLINE_TAIL_SECONDS) seconds after it started. A tree judged at the last moment still costs
+# about 7.5 s, then the branch, leftover-folder and listener work follows, so the tail is that
+# 7.5 s. The scheduled job and a person's run have no budget. A tree the pass did not reach is
+# kept ("not judged: deadline") and the next run judges it.
 JUDGE_BUDGET_SECONDS = 12
 DEADLINE_TAIL_SECONDS = 7.5
 _now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
@@ -2740,6 +2657,24 @@ def _oldest_idle_first(entries):
     return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
+def _fetch_prune(root: str) -> bool:
+    """`git fetch --prune --no-tags` in ROOT, so the pushed and merged reads see the remote as it
+    is now: its current default branch, and no tracking ref for a head deleted there. It moves
+    only remote-tracking refs, so a preview runs it too. True when it succeeded. A failed fetch
+    does not stop the run: the reads that follow keep each tree they cannot settle. The timeout is
+    10 s, or the time left to the run's deadline when that is less."""
+    left = 10 if _DEADLINE is None else min(10, _DEADLINE - _now())
+    if left <= 0:
+        return False
+    try:  # prompts off: an unattended run never waits on a login window
+        done = subprocess.run(
+            ["git", "-C", root, "fetch", "--prune", "--no-tags"], capture_output=True, timeout=left,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+    except Exception:
+        return False
+    return done.returncode == 0
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
@@ -2760,6 +2695,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         result["refused"] = "opted-out"
         return result
 
+    if mode != "tier1" and not _past_deadline():
+        if not _fetch_prune(root) and _FETCH_FAILED is not None:
+            _FETCH_FAILED.add(root)
     base = guard.resolve_default_base(root)
     if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
@@ -2770,9 +2708,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode != "branches":
         result["pruned"] = prune_registrations(root, confirm)
 
-    # The agent rule (owner ruling 2026-10-14) is the default remover of finished agent trees. A repo
-    # with its own `reap:worktrees` script gets that script instead, run before the list is read so
-    # the trees it removes are not judged; an unreadable package.json turns the rule off.
+    # The agent rule (when-a-worktree-may-be-removed) is the default remover of finished agent
+    # trees. A repo with its own `reap:worktrees` script gets that script instead, run before the
+    # list is read so the trees it removes are not judged; an unreadable package.json turns the
+    # rule off.
     agent_rule = mode == "full" and not attended
     if agent_rule:
         reaper, why = repo_reaper(root)
@@ -2837,6 +2776,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
+        if (decision["action"] == "keep" and decision["reason"] == "unreadable-subject"
+                and _FETCH_FAILED is not None and root in _FETCH_FAILED):
+            decision["reason"] += ": fetch failed"  # the likely cause of an unsettled read
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             if _past_deadline():
@@ -2920,7 +2862,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
 
 
 def print_sweep_report(results, confirm: bool, out=sys.stdout):
-    mode = "CONFIRM: reaping for real" if confirm else "PREVIEW: nothing is deleted"
+    mode = "CONFIRM: reaping for real" if confirm else "PREVIEW: no branch or worktree is deleted"
     print("janitor sweep -- %s" % mode, file=out)
 
     branch_counts = Counter()
@@ -3180,11 +3122,12 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
-    global _LIVE_HEADS, _DEADLINE
+    global _LIVE_HEADS, _DEADLINE, _FETCH_FAILED
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
+    _FETCH_FAILED = set()
     # Only a run given `--deadline-seconds N` has a deadline: the SessionEnd run. The scheduled
-    # job and a person's run judge everything (owner ruling 2026-10-15 15:08 CDT). A NaN is no
+    # job and a person's run judge everything. A NaN is no
     # time left, never no deadline: it compares false against every clock reading.
     n = args.deadline_seconds
     _DEADLINE = None if n is None else _now() + (
@@ -3192,7 +3135,7 @@ def main(argv=None) -> int:
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
-        _LIVE_HEADS = _DEADLINE = None
+        _LIVE_HEADS = _DEADLINE = _FETCH_FAILED = None
         undo()
 
 

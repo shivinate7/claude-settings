@@ -23,7 +23,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class="">         run: python3 hooks/test_ruling_home.py
 </span><span class=""> 
 </span></code></pre></section>
-<section><h2>decisions/every-lint-rule-blocks-or-does-not-exist.md <span class="dim">+7 -0</span></h2><p class="note">This rule now says a check may fix a mistake by itself instead of only blocking it. The fix counts as the check doing its job.</p><pre><code><span class="h">@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
+<section><h2>decisions/plain-prose-lint.md <span class="dim">+7 -0</span></h2><p class="note">This rule now says a check may fix a mistake by itself instead of only blocking it. The fix counts as the check doing its job.</p><pre><code><span class="h">@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
 </span><span class=""> single outcome. A rule nobody can see is not a rule. The owner ruled that a
 </span><span class=""> rule either blocks or does not exist.
 </span><span class=""> 
@@ -805,7 +805,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span></code></pre></details></section>
 <section><h2>lint/test_ste_autofix.py <span class="dim">+800 -0</span></h2><p class="note">This new file holds about 800 lines of tests for the text fixer. Each test feeds in a sample and checks the fixed result.</p><details><summary>Show diff (801 lines)</summary><pre><code><span class="h">@@ -0,0 +1,800 @@
 </span><span class="a">+#!/usr/bin/env python3
-</span><span class="a">+"""Tests for the STE auto-fix in lint/ste_gate.py (plan section C).
+</span><span class="a">+"""Tests for the STE auto-fix in lint/ste_gate.py (decision ste-gate-fixes-not-nags).
 </span><span class="a">+
 </span><span class="a">+The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
 </span><span class="a">+PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.

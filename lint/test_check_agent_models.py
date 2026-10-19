@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fixture suite for lint/check_agent_models.py. Run: python3 lint/test_check_agent_models.py
 
-Owner ruling 2026-10-07: Haiku is allowed only in the agent files for Explore, claude-code-guide,
-test-author and reviewer. Every other agent or skill file keeps the Sonnet floor.
+Haiku is allowed only in the agent files for Explore, claude-code-guide, test-author and reviewer.
+Every other agent or skill file keeps the Sonnet floor.
 Failure classes: false deny (a listed role fails), false allow (another file passes, by name
 collision, case or alias), unreadable frontmatter.
 """

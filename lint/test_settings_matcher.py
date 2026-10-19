@@ -73,7 +73,7 @@ class DecisionJudgeMatch(unittest.TestCase):
                     self.assertNotRegex(path, rx)
 
     def test_owner_paths_still_fire_and_lookalike_folders_do_not(self):
-        # Green pins, owner ruling 2026-10-13. Commit 8f9a500 widened the glob to any depth.
+        # The glob matches a decisions folder at any depth, and no lookalike name.
         for tool in ("Edit", "Write"):
             with self.subTest(tool=tool):
                 cond = decision_judge(tool)["if"]
@@ -84,9 +84,9 @@ class DecisionJudgeMatch(unittest.TestCase):
                     self.assertNotRegex(path, rx)
 
 
-# A prompt or agent hook names its model. Since 2026-10-08 the evaluator has rejected the bare
-# alias "haiku" (stderr unrecognized_model, query_source hook_prompt), so each judge failed and
-# let calls through. A full id starts with "claude-".
+# A prompt or agent hook names its model. The evaluator rejects the bare alias "haiku" (stderr
+# unrecognized_model, query_source hook_prompt), so each judge would fail and let calls through.
+# A full id starts with "claude-".
 JUDGE_TYPES = ("prompt", "agent")
 
 

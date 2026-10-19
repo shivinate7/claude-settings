@@ -1,7 +1,7 @@
 """The guard's push-delete family: a forced push and a wide delete.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -9,8 +9,8 @@ import re
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
-    _strip_heredoc_bodies_unconditionally, basename, resolve_command, segment_tokens,
-    split_segments,
+    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -33,10 +33,11 @@ def _push_config(cwd: str, key: str, overrides=None):
 
 
 def _push_current_branch(cwd: str):
-    answer = guard_core._git(cwd, "symbolic-ref", "-q", "--short", "HEAD") if cwd else None
+    answer = guard_core._git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
-    return answer.stdout.strip()
+    # no `--short`: it prints `heads/<name>` when a tag has the branch's name
+    return answer.stdout.strip().removeprefix("refs/heads/")
 
 
 def _push_bare_destination(cwd: str, overrides=None):
@@ -61,19 +62,21 @@ def _push_bare_destination(cwd: str, overrides=None):
 def _push_default_branches(cwd: str, remote: str):
     """The default branch names, or None when git cannot be read at all.
 
-    `refs/remotes/<remote>/HEAD` answers when it exists. A repository with no such ref falls back
-    to main and master. No readable repository is unknown, and unknown is never safe.
+    `guard_core.read_default_base` answers for the PUSHED remote. A
+    resolved `<remote>/HEAD` names the one branch. Any other answer (HEAD unset, dangling, or a
+    read that did not answer) protects main AND master, plus the name HEAD holds. No readable
+    repository is unknown, and unknown is never safe.
     """
     if not cwd or not os.path.isdir(cwd):
         return None
     repo = guard_core._git(cwd, "rev-parse", "--git-dir")
     if repo is None or repo.returncode != 0:
         return None
-    prefix = "refs/remotes/" + remote + "/"
-    head = guard_core._git(cwd, "symbolic-ref", "-q", prefix + "HEAD")
-    if head is not None and head.returncode == 0 and head.stdout.strip().startswith(prefix):
-        return (head.stdout.strip()[len(prefix):],)
-    return DEFAULT_BRANCH_FALLBACK
+    base, head = guard_core.read_default_base(cwd, remote)
+    named = (head[len(remote) + 1:],) if head else ()
+    if base is not None and base == head:
+        return named
+    return DEFAULT_BRANCH_FALLBACK + named
 
 
 # A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
@@ -209,13 +212,16 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
 # read with backslashes already turned into forward slashes, which is why a drive root reads
 # as `C:/`.
 WIDE_TARGET = (
-    r"(?:/|~|\.|\*|\$HOME|%USERPROFILE%|\$env:USERPROFILE|[A-Za-z]:/?\*?)"
+    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?)"
+)
+# The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
+# in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
+# parse, so an unmatched quote elsewhere in the line does not hide a delete.
+RM_RAW = re.compile(
+    r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+['\"]?"
+    + WIDE_TARGET + r"['\"]?(?:\s|$)"
 )
 DESTRUCTIVE_DELETE = (
-    re.compile(
-        r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+['\"]?"
-        + WIDE_TARGET + r"['\"]?(?:\s|$)"
-    ),
     re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
@@ -223,6 +229,58 @@ DESTRUCTIVE_DELETE = (
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
     ),
 )
+# The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
+# home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
+# `..` are not here: they were allowed before.
+RM_WIDE_TARGET = re.compile(WIDE_TARGET)
+
+
+def _rm_args_wide(args) -> str:
+    """The first wide target of `rm`'s arguments when they hold a recursive AND a force flag, else
+    ''. Long flags count, `--` ends the flags, and one letter cluster may hold R, r and f."""
+    recursive = force = after_dashes = False
+    targets = []
+    for arg in args:
+        if after_dashes or not arg.startswith("-") or arg == "-":
+            targets.append(arg)
+        elif arg == "--":
+            after_dashes = True
+        elif arg.startswith("--"):
+            recursive = recursive or arg == "--recursive"
+            force = force or arg == "--force"
+        else:
+            recursive = recursive or "r" in arg or "R" in arg
+            force = force or "f" in arg
+    if recursive and force:
+        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t)), "")
+    return ""
+
+
+def rm_delete_hit(segment: str) -> str:
+    """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
+    directory or a glob, else ''. Read by tokens: the command word is `rm`, behind its wrappers
+    or a subshell, or inside the script a shell, `eval` or `ssh` hands on. A segment shlex cannot
+    parse is read as raw text."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        found = RM_RAW.search(segment)
+        return found.group(0) if found else ""
+    for start in command_indexes(tokens):
+        if basename(tokens[start]) == "rm":
+            target = _rm_args_wide(tokens[start + 1:])
+            if target:
+                return "rm -rf " + target
+    words, bare = bare_words(segment)
+    for at in sorted(bare):
+        target = basename(words[at]) == "rm" and _rm_args_wide(words[at + 1:])
+        if target:
+            return "rm -rf " + target
+    for script in inner_commands(tokens):
+        for inner in split_segments(script):
+            found = rm_delete_hit(inner)
+            if found:
+                return found
+    return ""
 
 DELETE_REASON = (
     "Rule (shared trees): this deletes a whole root, a home directory or everything a "
@@ -232,9 +290,8 @@ DELETE_REASON = (
 
 # THE CMD.EXE VERBS. `rd`/`rmdir` and `del`/`erase` take slash flags, never `rm`'s or
 # `Remove-Item`'s dash flags, so neither pattern above ever reads them: `/s` is the recurse
-# switch, and `/q` (optional, never required) only silences the confirmation prompt. MEASURED
-# 2026-09-24: `rd /s /q C:\Users\x`, `cmd /c rd /s /q %USERPROFILE%` and `del /s /q C:\*` all
-# passed, on both tool names, though their `rm`/`Remove-Item` twins deny.
+# switch, and `/q` (optional, never required) only silences the confirmation prompt.
+# `rd /s /q C:\Users\x`, `cmd /c rd /s /q %USERPROFILE%` and `del /s /q C:\*` deny, as their twins do.
 #
 # Checked by TOKENS, not by a whole-string search like the two patterns above, so a name sitting
 # inside a quoted argument or a grep pattern never reads as a command: `echo "rd /s /q"` and

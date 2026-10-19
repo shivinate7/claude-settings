@@ -11,7 +11,7 @@ on stdin as UTF-8 bytes. PYTHONUTF8 and PYTHONIOENCODING are unset in the child.
 HOME and USERPROFILE all point into a scratch folder, so no case touches the owner's ~/.claude.
 Each case reads back the exit code, stdout, stderr and the files written.
 
-Seams the builder codes against.
+Seams.
 
 Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A UserPromptSubmit
   hook. Stdin is one JSON object: hook_event_name, session_id, prompt, cwd. Stdout is one
@@ -22,10 +22,9 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
   - While closed, a prompt that starts with `fb done` or `fb: done` opens nothing, even with more
     text after it (`fb done, more text`). That text is a new message to the session, not feedback.
   - A prompt that opens with `fb` and ends with a line `fb done` saves the note and closes capture
-    in that same prompt: no open marker remains, and the next prompt is not saved (owner ruling
-    2026-10-14).
+    in that same prompt: no open marker remains, and the next prompt is not saved.
   - While open, a prompt that starts with `fb done` or `fb: done` closes capture and is not
-    captured, and neither is any text after those words (owner ruling 2026-10-14). Surrounding
+    captured, and neither is any text after those words. Surrounding
     whitespace, trailing punctuation and letter case do not matter: `fb done.`, `FB done`,
     `fb done now` and `fb done, also we should ...` all close. `fb  done` (two spaces) closes too.
     `fb - done` does not close.
@@ -1134,8 +1133,8 @@ SAME_MSG_NOTE = "fb: the gate is too strict on Stop"
 
 
 def case_fb_done_line_at_the_end_closes_in_the_same_message():
-    """Owner ruling 2026-10-14: a message that ends with `fb done` saves the note and closes
-    capture in that same message. Incident: the marker stayed open, so the next message was saved."""
+    """A message that ends with `fb done` saves the note and closes capture in that same
+    message. The marker does not stay open, so the next message is not saved."""
     cfg, sid = new_cfg(), "same-msg"
     p = capture(cfg, sid, SAME_MSG_NOTE + "\nfb done", now=at(0))
     check("same message: hook ran", ran_central(p), p.desc())
@@ -1153,7 +1152,7 @@ def case_fb_done_line_at_the_end_closes_in_the_same_message():
 
 def case_same_message_close_keeps_the_old_controls():
     """Controls: `fb: X` alone opens capture, `fb done` alone closes it, and `fb done` quoted
-    mid-sentence does not close it (today's rule: the close words count only at the start)."""
+    mid-sentence does not close it (the close words count only at the start)."""
     cfg, sid = new_cfg(), "same-msg-controls"
     p = capture(cfg, sid, SAME_MSG_NOTE, now=at(0))
     check("control opener: hook ran", ran_central(p), p.desc())
@@ -1176,8 +1175,8 @@ def case_same_message_close_keeps_the_old_controls():
 
 def case_close_words_count_only_as_a_last_line():
     """`fb done` closes only as the last line of a message. Inside a fence, in inline backticks, or
-    on the same line as other text, it does not close (decision owner-feedback-inbox, the backtick
-    hole; orchestrator pin: `fb: X fb done` does not close)."""
+    on the same line as other text, it does not close (decision owner-feedback-inbox; `fb: X fb done`
+    does not close either)."""
     for sid, text in (("fence-block", "fb: X\n```\nfb done\n```"),
                       ("fence-inline", "fb: X\n`fb done`"),
                       ("one-line", "fb: X fb done")):

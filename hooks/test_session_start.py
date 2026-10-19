@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session-start notice for agent worktrees (owner ruling 2026-10-15). hooks/session_start.sh prints
+"""Session-start notice for agent worktrees. hooks/session_start.sh prints
 one notice when more than 50 `.claude/worktrees/agent-*` worktrees exist. At exactly 50 it prints
 none. Real git repo and real `git worktree add`. The hook runs as the harness runs it: `sh
 session_start.sh` with the session payload on stdin. Stdlib only. Exit 0 on PASS, 1 on FAIL.

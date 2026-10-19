@@ -13,165 +13,131 @@ JSON object on stdin and answers on stdout.
 
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
-  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0
+  refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
+           override pass lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
 all allow the call. A guard bug must never brick a session.
 
-The rules below are the owner's global CLAUDE.md made mechanical. They run in
-one fixed order, and the first match wins.
+The rules below are the owner's global CLAUDE.md made mechanical. Each refusal and each note
+logs its rule name. This index lists every rule name that `refuse()` or `record()` writes,
+in the order `judge_shell` and `judge` check them. The first match wins, unless an override pass
+lifts it: then the call is allowed and no later rule runs, so `never_passed` checks the acts no
+pass lifts first. The reason text of a
+rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
-  0 worktree-home      a call from a subagent (a payload carrying `agent_id`) whose shell `cwd`,
-                       or whose Write/Edit/MultiEdit/NotebookEdit target, sits outside that
-                       agent's own recorded worktree. Always denied. Read/Grep are never judged
-                       here, so a stranded agent can still read and report. No record at all
-                       (a non-isolated agent, or the orchestrator) allows everything.
-  1 shared-tree        a command that throws away work, judged against the STATE OF ITS SUBJECT:
-                       a working tree's uncommitted or untracked files, a deleted branch's only
-                       copy, a removed worktree's files, or a pruned worktree's stale record. An
-                       empty subject passes, an unreadable subject is allowed and logged as
-                       `noted`/`subject-unread`
-  1b pointer-head      a command that moves HEAD off `main` in the POINTER checkout, the one
-                       checkout every session on this machine runs its hooks and its lint from.
-                       Always denied. A move TO `main` restores the invariant and passes.
-  1c silent-write      a `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` whose own
-                       trace is silenced, by a redirect of either stream to a null device, or,
-                       on `push`/`merge`/`rebase` only (MEASURED), by git's own `-q`/`--quiet`
-                       flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
-                       carve-outs. `merge --abort` is carved out, and every read subcommand is
-                       untouched.
-  1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
-                       its path. Denied. See "three git acts" below.
-  1d lane-by-slug      a `git commit` message, a `gh pr create|edit|merge` body, `--title` or
-                       `--subject` that names a lane by a session number (`N20`, `(N16)`). Denied:
-                       name it by branch slug.
-  2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
-                       not a descendant of this session's own `claude` process
-  2b detached-launch   a command that starts a process and detaches it from the session: a
-                       background job inside a subshell (`( cmd & )`), a `nohup`/`setsid`
-                       wrapper, `disown` in command position, a bare background job in
-                       any segment whose pid nothing in the command captures, the same
-                       shapes inside a `sh -c`/`bash -c` script, PowerShell's
-                       `Start-Job`, `Start-Process` with neither `-Wait` nor `-PassThru`, or
-                       `cmd`/`cmd.exe /c start ...` from either shell. Always denied, the same
-                       as rule 2, because a detached process leaves no pid this session can
-                       name to stop it later.
-  2c wsl-allow-list    a `wsl` call that is not `-e`/`--exec` with node --test on *.test.mjs, pwsh
-                       -NoProfile -File *.test.ps1, or python3 on test_*.py (alone on the line, or
-                       behind `python bin/verdict`). Always denied.
-  3 live-stream        a command that follows a stream and never ends on its own
-  3 waiter             a shell segment whose command word is a sleep-and-poll
-  0c git-env-set       a command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE, in either
-                       shell. Reading and unsetting pass, and so does a mention in quoted text.
-                       Always denied (q_max incident, 2026-10-14).
-  4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
-                       with --force or a +refspec, asked when it reaches the default branch.
-    destructive-delete a recursive delete at a root, a home or a glob
-  5 env-file           any read or write of an environment file
-  6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
-                       pending or red, or the read could not run. Denied, `--auto` too.
-    draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
-  7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
-                       `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
-  8 subagent-model-cap a write to a settings file whose content sets or changes
-                       `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
-                       Always asked, never denied.
-  9 subagent-model-floor an `Agent` or legacy `Task` call, or a `Workflow` script `agent()` call,
-                       whose `model` is a Haiku model, by alias or by any full id, unless the
-                       role (`subagent_type` or `agentType`) is in HAIKU_ROLES (exact name, case-sensitive; includes `record-writer`). A `start_session`
-                       naming a Haiku model is always denied. Sonnet is the floor otherwise
-                       (owner ruling 2026-10-07). An agent file's own `model:` key never reaches
-                       this rule, so lint/check_agent_models.py checks the files, from HAIKU_ROLES.
-                       The Workflow scan is static: it reads string-literal `model` and `agentType`
-                       keys in each agent() call's object argument. A model or role set through a
-                       variable, a spread, an alias, a concatenation, a ternary, a computed or
-                       shorthand key, a template `${}` or a regex literal holding a quote is not seen.
+Shell tools (Bash, PowerShell), in judge_shell order:
+  builder-diff, author-diff, writer-diff, role-diff-*
+                       noted. A builder, test-author or record-writer `git commit` or `git push`.
+                       The diff it would send is logged for the reviewer. Never blocks.
+                       SubagentStop (`judge_stop`) logs the same names for the whole diff, and
+                       also role-diff-nocwd, role-diff-main-checkout, role-diff-unresolved and
+                       role-diff-unread.
+                       (builders-cannot-edit-tests)
+  git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
+                       Reading, unsetting, or a mention in quoted text passes. (git-env-set-denied)
+  shared-tree          deny or ask. A command that throws away work, judged against the state of
+                       its subject. An empty subject passes. An unreadable subject is allowed and
+                       noted as `subject-unread`. (stash-stack-is-a-shared-subject,
+                       agent-worktree-discard-is-noted)
+  pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
+                       A move to `main` passes.
+  silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
+                       git's `-q`. The measured carve-outs are the comments above
+                       SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+  impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
+                       (design-skills)
+  cite-by-id           deny. A commit message or PR body that cites a record by its path.
+  lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
+                       (lane-by-slug)
+  machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
+                       this session. (a-kill-by-pid-needs-an-owned-pid)
+  detached-launch      deny. A command that starts a process and detaches it from the session.
+  wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
+  live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  background-end       deny. A background command with no end note. (background-needs-end-note)
+  playwright-browsers-path, playwright-install
+                       deny. (playwright-browsers-path, playwright-install-once)
+  rm-var-unguarded     deny. A recursive delete under an unguarded variable.
+                       (rm-on-a-variable-needs-a-guard)
+  gh-api-method, ln-over-directory
+                       deny. See the comment at rule 3b in judge_shell.
+  destructive-delete   deny. A recursive delete at a root, a home or a glob.
+  force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
+                       refspec denies. A push that reaches the default branch asks.
+                       (stale-safe-force-push)
+  env-file             deny. Any read or write of an environment file.
+  merge-checks         deny. A merge while the head has a check pending or red, or the read
+                       could not run. `--auto` too.
+  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
+                       (records-index-at-merge)
+  frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
+                       `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
+  config-edit          noted. A write to a project's own settings or hooks. See below.
+  subagent-model-cap   ask. A write to a settings file that sets or changes
+                       `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
+                       (subagent-model-cap)
+  ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
+  guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
-A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
-`.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
-one log line with decision `noted` and rule `config-edit`, so a person can see the edit at
-turn end. Nothing is printed for a noted edit; the config-report Stop hook is what surfaces
-it to the transcript. `subject-unread` is logged the same way: an ALLOW that a person still
-gets to see.
+Other tools, in `judge` order:
+  worktree-home        deny. A call from a subagent whose shell cwd or write target is outside its
+                       own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       No record (a non-isolated agent, or the orchestrator) allows everything.
+                       (an-agent-outside-its-home-tree-must-stop)
+  subagent-model-floor, roles-third-try-steps-up
+                       deny. A spawn below the model floor, or a round or try on the wrong model.
+                       The Workflow scan is static. It reads string-literal `model` and
+                       `agentType` keys in each `agent()` call. A model set through a variable,
+                       a spread, an alias, a concatenation, a template `${}`, a ternary, a computed key or a
+                       shorthand key is not seen. A regex literal after `)`, `return` or
+                       `typeof` that holds a quote can hide an `agent()` call.
+                       (subagent-model-cap)
+  merge-checks, draft-pr, impeccable-review-only
+                       deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-cap, simulator-boot-twin
+                       deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       (sweep-shuts-down-idle-simulators)
+  builder-test-edit, test-author-scope, record-writer-scope
+                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+  env-file, frozen-path, config-edit, subagent-model-cap
+                       the write-tool forms of the rules above. Every deny runs over all path
+                       fields of a call before any ask.
 
-Rule 8 stands after rule 7 on purpose. The owner's user settings hold the subagent model cap,
-`CLAUDE_CODE_SUBAGENT_MODEL` with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which stops a session
-passing a model of its own when it starts a subagent. A project's own `.claude/settings.json` and
-`.claude/settings.local.json` override user settings, so the write Decision 7 allows is also the
-write that lifts the cap. The decision is `ask`, never `deny`, because that same write is how an
-Opus worker gets enabled on purpose. The order does the rest: a write under
-`${CLAUDE_CONFIG_DIR:-$HOME/.claude}` is already denied by rule 7 and never reaches rule 8, so
-only the project-scoped case is asked.
+A project's own `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/*`
+are not frozen. They are allowed, and the guard logs one `config-edit` line, so the config-report
+Stop hook can show the edit at turn end. `subject-unread` is logged the same way: an allow that a
+person still gets to see.
 
-That one ask NAMES the requested value and the file. It is not an exception to the remedy rule
-below. A remedy hides the target because repeating it reads as permission to run it, while this
-ask exists to tell the approver WHAT is being turned on and WHERE. An ask that hid both would ask
-nothing. It is also the one reason in this file built from text a tool passed in, so the value and
-the path are cleaned of control characters, cut at a bound, and marked where they were cut: a
-reason that a caller can lengthen or forge lines inside is a reason an approver cannot trust.
+`subagent-model-cap` asks and never denies, because that same write is how an Opus worker is
+enabled on purpose. It stands after `frozen-path`, so only a project-scoped write reaches it. Its
+ask names the requested value and the file, which is not an exception to the remedy rule below:
+the ask tells the approver what is turned on and where. That text comes from a tool call, so the
+value and the path are cleaned of control characters and cut at a bound.
 
-A subject the guard could not read is the fourth such line. The call is allowed, because a
-refusal whose ground could not be read is a guess, and the line names what could not be
-read so a reader can tell "I could not confirm this" from "this destroys something". The
-config-report Stop hook prints those lines for the turn that wrote them.
+A merge into main is allowed and never logged by the guard.
+`hooks/decision_watch.py` names each merge from the transcript at turn end. A `git checkout`
+with `--ours`, `--theirs` or `--merge` during an unresolved merge, rebase, cherry-pick or revert
+picks a conflict side. It discards no work, so `shared-tree` passes it.
 
-A merge into main is allowed and never logged by the guard (decisions/guard-trims-from-the-audit.md,
-guard trims from the 2026-10-02 audit). `hooks/decision_watch.py` names each merge from the
-transcript at turn end. A `git checkout` that carries `--ours`, `--theirs`, or `--merge` while a
-merge, rebase, cherry-pick or revert is unresolved in the tree picks a conflict side; it does not
-discard work, so rule 1 passes it, with no log line of its own. Any other `git checkout` that
-names a path keeps rule 1's ordinary deny or ask.
+A read named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a
+value of `-m` or `-F` is never a flag. A write whose `-C`, `--git-dir`, `cd` or cwd sits under
+the temp folder is a throwaway and passes. `fetch` writes only a `src:dst` whose dst is a
+branch. A redirect named inside quotes is text. The refusal names its step ("step N of M, the
+push").
 
-Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
-git. banchi's `scripts/silent-write-guard.py` carries the measurement this rule ports:
-a coordinator reported work as landed twice in one session when it had not, once because
-a pre-commit refusal went to `/dev/null`, and once because the `git log` that followed
-showed the PREVIOUS commit, indistinguishable at a glance from the one that should have
-landed. A discarding redirect reproduces that on any of the six subcommands below: the
-shell throws the stream away before git gets a say, so a refusal and a proof of landing
-are both gone, together.
+Every refusal names its rule and says what to do instead. The remedy never names the refused
+command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
+The matched text goes to the log, so a person can still see what fired.
 
-git's OWN quiet flag is judged separately, because it is git's choice of what to print,
-not the shell's, and the choice is not the same for every subcommand. MEASURED
-2026-09-19 and 2026-09-20, in throwaway repos, never a shared checkout, all six: `commit`
-carves out, because a hook's refusal and a no-op's message both keep their own stream and
-a nonzero exit, so a silent exit-0 commit is already unambiguous. `push`, `merge`, and
-`rebase` do not carve out: each one's success and its own no-op are BOTH silent at exit 0,
-so the flag erases the one line that told a real write from one that moved nothing. `tag`
-carves out for a sharper reason: it has no `-q` or `--quiet` at all, so the flag is always
-a loud, immediate option-parsing failure, never a silent write. `cherry-pick` carves out
-too: its short form is invalid the same way `tag`'s is, and its long form still prints a
-full commit summary, a full conflict, or a full "nothing to commit" in every state, so
-nothing is silenced either way. A discarding redirect still denies any of the six.
-
-The carve-outs are pinned by fixtures, not left to judgement. `git fetch -q`, every read
-subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
-2>&1` that rule 1b already relies on, all stay allowed, because none of them is in
-`SILENT_WRITE_SUBCOMMANDS`. `git merge --abort` is carved out inside the rule itself: an
-abort lands nothing, so it has no landing to prove. No environment hatch. The permission
-prompt is the grant here, the same as everywhere else in this file.
-
-Narrowed 2026-10-14 after a study of 399 denies (most right, the rest false alarms): a read
-named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a value
-of `-m` or `-F` is never a flag; a write whose `-C`, `--git-dir`, `cd` or cwd sits under the
-temp folder is a throwaway and passes; `fetch` writes only a `src:dst` whose dst is a branch;
-a redirect named inside quotes is text; the refusal names its step ("step N of M, the push").
-
-Every refusal names its rule and says what to do instead. A remedy never names
-the refused command or the refused path, because a remedy that repeats the
-target reads as permission to run it (CLAUDE.md, Git paragraph). The matched
-text goes to the log instead, so a person can still see what fired.
-
-This file is ported from two working guards, and the comments that record a
-MEASURED defect are kept, because the measurement is the argument.
-
-  job-cost-reporting  .claude/hooks/pretooluse_guard.py   shared trees
-  q_max               .claude/hooks/pretooluse_guard.py   the environment wall
-
-No override tokens. The earlier guards carried DESTRUCTIVE_OK, GIT_DISCARD_OK
-and OWNER_MERGE. The decision of this port is that a permission prompt is the
-grant, so the tokens are gone. An "ask" decision puts the answer in the owner's
-hands, which is what the tokens were reaching for.
+An "ask" decision puts the answer in the owner's hands. The one lift is the owner override pass
+(decision owner-override-pass): the owner types `override` as a whole prompt, and refuse() lets the
+next refused act through, or every refused act for a time. It never lifts `frozen-path`,
+`git-env-set`, a kill of pid 0, 1 or -1, the role and model guards (`subagent-model-cap`,
+`subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
+or `worktree-home`. No pass check reaches the missing-module deny, the `settings.json` deny list,
+the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
 """
 
 import importlib
@@ -182,8 +148,7 @@ import sys
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
-# file (decision guard-split-by-family). This
-# file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
+# file. This file's own folder goes first on the path, so a copied guard.py loads its copied siblings.
 _HERE = os.path.dirname(os.path.realpath(__file__))
 if sys.path[:1] != [_HERE]:
     sys.path.insert(0, _HERE)
@@ -252,12 +217,13 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
-            push_target, push_text, push_verdict,
+            push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
-            DRAFT_PR_REASON, MERGE_TOOLS, gh_call_of, git_call_of, merge_call_of, merge_gate,
-            merge_gate_reason, settings_roots, undrafted_pr_create,
+            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of,
+            merge_call_of, merge_gate, merge_gate_reason, records_page_hit, settings_roots,
+            undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -272,8 +238,8 @@ while True:
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
-            git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, playwright_command_hit,
-            playwright_install_hit,
+            git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
+            playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -356,8 +322,7 @@ def __getattr__(name):
 # landing are both gone, together, always.
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
 
-# Gap roster, 2026-10-03. Banchi's scripts/silent-write-guard.py refused these shapes and this
-# shared guard missed them. Each one moves a ref or lands a merge, so each is a write when its
+# Gap roster. Each one moves a ref or lands a merge, so each is a write when its
 # output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
 # names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
 # `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
@@ -465,8 +430,6 @@ def discards_output(segment: str) -> bool:
     return any(unquoted_at(outer, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(outer))
 
 
-# PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
-# away through the pipe's LAST command, and the rule judged only the write's own segment.
 # A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
 # `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
 # `bash -c '...'` stays unparsed, a known gap the owner left.
@@ -700,7 +663,7 @@ def agent_home_record_path(where: str, agent_id: str):
 def read_agent_home(where: str, agent_id: str):
     """Return the recorded home for `agent_id`, `''` when no record exists yet, or None when the
     record could not be read at all (no git, no common dir, an unreadable file). `None` is
-    UNKNOWN, never a hit: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md."""
+    UNKNOWN, never a hit."""
     path = agent_home_record_path(where, agent_id)
     if not path:
         return None
@@ -732,8 +695,7 @@ def agent_worktree_home(payload, cwd: str):
       "none"      no valid `agent_id` on the payload: the orchestrator, or a call this rule does
                   not judge at all.
       "unknown"   an `agent_id` is present, but the home record could not be read (no git, no
-                  common directory, an unreadable file). Allowed, never a hit (Decision:
-                  liveness-read-is-platform-specific-and-unreadable-is-not-death).
+                  common directory, an unreadable file). Allowed, never a hit.
       "no-record" the record reads clean and holds nothing, and this call's own `cwd` is not the
                   agent's worktree shape either: a non-isolated agent. Allow everything.
       "home"      `home` names the agent's recorded worktree, whether just written on this call
@@ -807,9 +769,9 @@ SETTINGS_BASENAMES = ("settings.json", "settings.local.json", "managed-settings.
 # `_FORCE` GREEDILY, so `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` reads as its own key and never as the
 # shorter key followed by stray text. One value pattern covers a JSON pair (`"KEY": "value"`) and a
 # shell assignment (`KEY=value`), because a heredoc body carries either.
-SUBAGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_SUBAGENT_MODEL(?:_FORCE)?")
+SUBAGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?")
 SUBAGENT_CAP_ASSIGN = re.compile(
-    r"(CLAUDE_CODE_SUBAGENT_MODEL(?:_FORCE)?)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9][A-Za-z0-9._\-]*)"
+    r"(CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9][A-Za-z0-9._\-]*)"
 )
 
 # The fields a write tool carries its content in. `old_string` stands before `new_string`, so that
@@ -1225,7 +1187,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     return ""
 
 
-# ---- a message that names a lane by its session number (owner ruling 2026-10-13)
+# ---- a message that names a lane by its session number
 LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
 LANE_QUOTED = re.compile(
     r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
@@ -1261,10 +1223,8 @@ TEST_BASENAME = re.compile(
     # Shell/PowerShell test suites (incident 2026-10-03): `test_*.sh`, `*_test.sh`, `*.test.ps1`,
     # `*.Tests.ps1` (match runs on the lowercased basename, so `.Tests.ps1` arrives as `.tests.ps1`).
     r"|test_.*\.sh|.*_test\.sh|.*\.tests?\.ps1"
-    # 2026-10-07: test_stamp.mjs was refused to a test-author and open to a builder: `test_*.{js,mjs,cjs,ts,jsx,tsx}`.
     r"|test_.*\.(?:[cm]js|[jt]sx?))$")
 # SELF-TEST files (`*-selftest.*`, `*_selftest.*`, `selftest_*.*`) are test paths, except .md notes.
-# Incident 2026-10-02: Banchi self-test files had the role split inverted (builder edited them).
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
@@ -1658,9 +1618,7 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
-# ASK ALONE (owner rulings 2026-10-14 10:52 and 13:18; incident 2026-10-14 10:51 CDT, an optional
-# `git worktree prune` chained with two more steps sent the whole command to the owner as one
-# permission prompt). A step that would ASK is held, not printed, while the other rules run, so a
+# ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
 # `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
 # harmless lead or tail (harmless_steps, below). The deny
@@ -1716,7 +1674,7 @@ def count_steps(text: str) -> int:
     return steps
 
 
-# THE HARMLESS ADDITIONS (owner ruling 2026-10-15, decision ask-steps-run-alone). Two forms are no
+# THE HARMLESS ADDITIONS (decision ask-steps-run-alone). Two forms are no
 # extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
@@ -1838,7 +1796,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             state = False  # an unparsable segment: the paths read above are a guess, keep the ask
         if state is None:
             # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
-            # so a note protects nothing (owner ruling, decisions/guard-that-cries-wolf-is-spent.md).
+            # so a note protects nothing (owner ruling, agent-worktree-discard-is-noted).
             if subcommand != "worktree-remove" or worktree_remove_forced(args):
                 record(tool, "noted", "subject-unread", matched)
             continue
@@ -1870,8 +1828,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             if agent_owned_worktree(root) is True:
                 record(tool, "noted", "shared-tree", matched)
                 continue
-            # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
-            # own change to those files, so no ask.
+            # agent-worktree-discard-is-noted ("Named files in a linked worktree"): named files
+            # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
             ask_step("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
@@ -2017,7 +1975,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
     for segment in split_segments(cmd):
-        matched = cmd_exe_delete_hit(segment)
+        matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     for segment in split_segments(stripped):
@@ -2046,11 +2004,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+        # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
+        if cite_where and uses_merge_tool(cite_where):
+            ask_step("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+
+    # 6c. A lane commit of the generated records page (decision records-index-at-merge).
+    matched = records_page_hit(stripped, cwd)
+    if matched:
+        refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
@@ -2142,8 +2108,8 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 def impeccable_command_hit(raw: str) -> str:
     """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
     and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits are debts impeccable-python-body (a Python, Node, Perl or Ruby
-    body is not read) and impeccable-piped-shell-body."""
+    backticks it runs. The limits: a Python, Node, Perl or Ruby
+    body is not read, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -2237,6 +2203,63 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
 
 
+def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule 0, worktree-home: return the log detail when a subagent's call reaches outside its own
+    worktree, else ''. `status` is "none" for the orchestrator (no `agent_id`) and for tools this
+    rule does not judge; "unknown" when the record could not be read at all, which allows (an
+    unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
+    "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
+    checked here: the agent must still be able to read and report
+    (decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
+    # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
+    # rule sees `cwd` as main does.
+    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
+    if home_status != "home":
+        return ""
+    if tool in SHELL_TOOLS:
+        # The one allowed call is a lone `cd` back into the home (a recovery step).
+        if (path_is_inside(home_cwd, home) is False
+                and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
+            return "shell cwd outside recorded agent home"
+    elif tool in WRITE_TOOLS:
+        for write_target in (write_targets(tool_input) if home_primary else ()):
+            # A relative `file_path` resolves against the CALLER's cwd, the payload's own
+            # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
+            # `is_project_config` for the same reason) joins it before either check.
+            try:
+                resolved_target = _resolved(write_target, home_cwd)
+            except Exception:
+                resolved_target = write_target
+            if (path_is_inside(resolved_target, home_primary) is True
+                    and path_is_inside(resolved_target, home) is False):
+                return "write target outside recorded agent home"
+    return ""
+
+
+def never_passed(payload, tool: str, tool_input: dict, cwd: str) -> bool:
+    """True when the call holds an act no owner override pass lifts (decision owner-override-pass): a
+    git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
+    worktree-home refusal. refuse() asks this before it spends a pass, because a lifted act ends the
+    check."""
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+            or worktree_home_hit(payload, tool, tool_input, cwd)):
+        return True
+    if tool in SHELL_TOOLS:
+        raw = tool_input.get("command", "") or ""
+        stripped = strip_heredoc_bodies(raw)
+        return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+                    or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw)))
+    role = agent_role(payload)
+    for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
+        if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
+                or (is_settings_file(target, cwd) and cap_change_parts(write_content_parts(tool_input)))):
+            return True
+    return False
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -2247,44 +2270,17 @@ def judge(payload) -> None:
         return
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
     # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
-    # and a frozen path stays readable (decisions/guard-trims-from-the-audit.md).
+    # and a frozen path stays readable.
     if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
-    # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
-    # rule sees `cwd` as main does.
-    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
-
-    # 0. Each subagent stays inside its own worktree. `status` is "none" for the orchestrator
-    # (no `agent_id`) and for tools this rule does not judge; "unknown" when the record could
-    # not be read at all, which allows (an unreadable state is never a hit); "no-record" for a
-    # non-isolated agent, which allows everything; "home" once the agent's worktree is known,
-    # from this call or an earlier one. Read/Grep are never checked here: the agent must still be
-    # able to read and report (decisions/an-agent-outside-its-home-tree-must-stop.md).
-    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
-    if home_status == "home":
-        if tool in SHELL_TOOLS:
-            if path_is_inside(home_cwd, home) is False:
-                # The one allowed call is a lone `cd` back into the home (a recovery step).
-                if not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home):
-                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                           "shell cwd outside recorded agent home")
-        elif tool in WRITE_TOOLS:
-            for write_target in (write_targets(tool_input) if home_primary else ()):
-                # A relative `file_path` resolves against the CALLER's cwd, the payload's own
-                # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
-                # `is_project_config` for the same reason) joins it before either check.
-                try:
-                    resolved_target = _resolved(write_target, home_cwd)
-                except Exception:
-                    resolved_target = write_target
-                if (path_is_inside(resolved_target, home_primary) is True
-                        and path_is_inside(resolved_target, home) is False):
-                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                           "write target outside recorded agent home")
+    guard_core.set_pass_veto(lambda: never_passed(payload, tool, tool_input, cwd))
+    # 0. Each subagent stays inside its own worktree.
+    home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
+    if home_hit:
+        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
 
     # 9. The subagent model floor. A spawn that names a Haiku model is denied. The reason names no
     # model; the log holds what the call asked for.
@@ -2402,6 +2398,10 @@ def main() -> None:
         guard_core.set_log_session(payload.get("session_id"))  # the last column of every log line
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
+    try:
+        guard_core.set_pass_context(payload.get("session_id"), payload.get("agent_id"))
+    except Exception:
+        pass  # a guard_core without the setter has no pass: every refusal stands
     try:
         judge(payload)
     except SystemExit:

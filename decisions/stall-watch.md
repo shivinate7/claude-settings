@@ -1,93 +1,57 @@
 # A stalled background command is reported, never stopped
 
-## The question
+## The ruling
 
-A background command can stop making progress. How does the session learn of it, and what
-happens to the command?
+The session learns within minutes that a background command stalled, and diagnoses the cause. The Stop-time check lists stalled shells and never blocks.
+When the stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
+stale cache lock, and the report names the lock file. A stop on a timer would kill a slow but healthy job
+and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
+guard rule, so the watcher does the waiting and the session is told once.
 
-## The ruling (owner, 2026-10-10)
+`hooks/stall_watch.py` does it.
 
-The session must learn within minutes and diagnose the cause. When the stall is reported, the
-stuck command keeps running.
+- The hook (`--hook`, a PreToolUse hook on Bash) returns `updatedInput` only for a call with
+  `run_in_background` true. It sets no permission decision, so no permission changes.
+- The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
+  still sees it. Allow rules still match a rewritten command.
+- The STALL line lists the job's shell and every process under it, parent first, so stopping them in line
+  order ends the job (owner ruling, 2026-10-18). The shell gives the watcher the pid of `&`; in sh,
+  bash and zsh a `{ }` group runs in a forked copy of the shell. The report reads the process table only
+  and never scans the command text. A parent dies before it can start another child. A job with no child
+  (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
+  init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
+- The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
+  running and the watcher never stops it. The wrapper keeps exit 3 after a stall, so the session gets no
+  exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
+  2026-10-18 15:15 CDT).
+- The report tells the session to ask the owner to stop the job. After the report, the job is not a child
+  of the session. The guard denies a stop of a process outside the session, unless the owner's override
+  pass covers it (`owner-override-pass`, the owner's typed pass).
+- A tool that is quiet by design must print a short progress line at least every 120 seconds. The watcher
+  does not change, because a false STALL teaches the reader to scroll past a real one
+  (guard-that-cries-wolf-is-spent). The merge tool prints `merge: waiting on ...` while it waits on checks,
+  and while GitHub still shows the head before the push. `verdict` prints a `still running` line every 120
+  seconds.
 
-## How it works
+## The Stop-time check
 
-`hooks/stall_watch.py` has two modes.
+When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
+lists each background shell that is not finished and whose output file has been quiet longer than the
+age. A shell whose output file is not found is listed as unknown. It prints one systemMessage that tells
+the model to stop the shell or tell the owner.
 
-- Hook (`--hook`, a PreToolUse hook on Bash): for a call with `run_in_background` true, it
-  returns `updatedInput` only. It sets no permission decision, so no permission changes.
-- The rewritten command runs in the harness shell, not in `bash -c`. The original command stays
-  as unquoted top-level shell code inside `{ ... }`. A settings deny rule still sees it, and
-  the shell parses it as it would without the hook. Output goes to a log file in the system
-  temp directory. The shell starts the watcher with the job's pid.
-- Watcher (`--watch-pid`): it streams the log to stdout. Any new byte, also a bare `\r`
-  progress byte, resets the timer. After 300 quiet seconds, it prints a STALL report and exits
-  3. The job keeps running, and its output keeps going to the log. If the job ends first, the
-  watcher exits 0, the shell returns the job's code, and the shell removes the log.
+The hook exits 0 and never blocks. A crash never refuses a call, as advisory hooks stay fail-open
+(`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
+one home (`building-one-home-per-capability`).
 
-The report holds these items:
+- Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
+  number of seconds.
+- A job counts as finished when the transcript holds a completion notice with status completed, failed,
+  killed or stopped (as a user record, or as an attachment record of type queued_command), or a
+  "Successfully stopped task: <ID>" result of a TaskStop call.
 
-- the pid
-- the job and its descendants, with state and elapsed time
-- the open files whose path contains "lock", and the network connections (both from `lsof`,
-  when it is installed)
-- the last 20 output lines
-- the log path
-
-Each `ps` and `lsof` call has a 5-second limit, so the report cannot hang.
-
-The report tells the session to ask the owner to stop the job. After the report, the job is
-not a child of the session, and the guard denies a stop of a process outside the session.
-
-`STALL_WATCH_QUIET` overrides the 300 seconds. Use it for tests and proofs only.
-
-## The incident
-
-In feed-build, a `playwright install` ran 73 minutes unnoticed. A stale cache lock held it. The
-session had no signal that the command was idle. The report names the lock file, so the cause is
-visible at once.
-
-## Rejected
-
-- Stop the command on a timer. A slow but healthy job would die, and the stop loses the state
-  that explains the stall.
-- A polling timer in the session. Rule verification-never-waiter-loop forbids a waiter loop.
-  The watcher does the waiting, and the session is told once.
-- Run the original in `bash -c` with quoting. The deny rules then see one quoted string, and
-  the shell differs from the one the session expects.
-
-## Tools that are quiet by design
-
-A tool that waits with no output must print a short progress line at least every 120 seconds.
-The watcher does not change. A false STALL teaches the reader to scroll past a real one
-(decision guard-that-cries-wolf-is-spent).
-
-- The merge tool prints `merge: waiting on ...` while it waits on checks, and while GitHub
-  still shows the head before the push. Incident, 2026-10-11: PR #332 and PR #333 each drew a
-  false STALL during the CI wait.
-- `verdict` prints `verdict: still running, <elapsed>, log=<path>` every 120 seconds.
-  `VERDICT_HEARTBEAT` sets another whole number of seconds, for tests. Incident, 2026-10-11:
-  a ten-minute background suite drew a false STALL.
-
-## Known limits
-
-- Windows is not covered. The hook returns nothing when `os.name` is not posix.
-- The Stop-time check now exists (`stall-watch-stop-check`, a Stop hook). It reports a background shell left open at turn end. The watcher above still does nothing on Windows.
-- A job that is quiet but healthy is reported, not stopped. The session decides.
-- A command that prints progress forever is never reported, even when it is stuck.
-- After a stall report, the log stays in the temp directory. Nothing removes it.
-- A command that backgrounds its own child is not watched. The guard denies that shape anyway.
-- Allow rules still match a rewritten command. Measured: with only `Bash(echo:*)` allowed, the
-  rewritten echo ran. The hook does not widen or narrow what the allow list permits.
-- Under zsh, a trailing `\` continuation leaves one empty word. sh and bash drop it. The
-  exit code differs only when a lone `\` line follows a failing command: bare zsh gives 126,
-  and the rewrite keeps the failing code.
-- A command ending in an odd run of `\` behaves by shell: dash and bash 5 keep the last one as a
-  literal at end of input, bash 3.2 drops it. The hook probes `/bin/sh` and, when it keeps the
-  literal, doubles the last `\` so the rewrite matches bare. Measured on dash, not on Linux CI.
-  The probe reads `/bin/sh`, not the user's shell. Limit: a zsh user on a host whose `/bin/sh` is
-  dash gets an extra `\` on that last word.
-- The watcher checks the job with `ps` once each second.
+Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id
+exists for the job, so the age of its output file is the signal.
 
 Kind: process
 Home: hooks/stall_watch.py

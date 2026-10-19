@@ -1,7 +1,7 @@
 """The guard's shared-tree family: stash, reset, restore, checkout, clean and the subject read.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
@@ -66,7 +66,7 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-STASH_READ_ACTIONS = {"list", "show"}
+STASH_READ_ACTIONS = {"list", "show", "help"}
 # `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
 # tree, so the working tree is their subject. Every other action that is not a read TAKES an
 # entry off the stack, so the stack is theirs.
@@ -82,7 +82,7 @@ def stash_option_takes_next_word(arg: str) -> bool:
     """True when a `git stash push` option takes the NEXT word as its value.
 
     The options that take one are the two in git's synopsis: `-m`/`--message <msg>` and
-    `--pathspec-from-file <file>`. MEASURED 2026-10-13: git reads `-qm list`, `-um show`,
+    `--pathspec-from-file <file>`. Git reads `-qm list`, `-um show`,
     `--mess list` as a push with the message `list` or `show`. So a short cluster ending in `m`
     takes the next word, a long option takes it by any prefix git accepts, and a value glued on
     (`-mfoo`, `--message=x`) takes nothing more. `-U`/`--unified` and `--inter-hunk-context`
@@ -102,7 +102,8 @@ def stash_action(args) -> str:
     A bare `git stash`, `git stash -u`, `git stash -- <path>` and `git stash -m <msg>` all push,
     the same as `git stash push`. Options are skipped, and an option that takes a value skips its
     value too (stash_option_takes_next_word). The first word left is the action when git knows
-    it. After `--` the call is a push, because a pathspec follows.
+    it. After `--` the call is a push, because a pathspec follows. A sole `-h` or `--help` is
+    the action `help`, a read. Any other call with a help flag keeps its verdict.
 
     A plain word that is no known action is NOT a push in git: `git stash <path>` with no `--`
     is refused ("subcommand wasn't specified; 'push' can't be assumed", measured). The guard
@@ -113,6 +114,8 @@ def stash_action(args) -> str:
     import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
     args = list(args)
+    if args in (["-h"], ["--help"]):
+        return "help"  # Owner ruling 2026-10-17: a sole help flag prints usage and reads nothing.
     i = 0
     while i < len(args):
         arg = args[i]
@@ -150,13 +153,9 @@ def stash_discards(args) -> bool:
     `list` and `show` read the stash and change nothing, so they pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
-    OWNER'S RULING, 2026-09-19, which repeals the earlier exemption for `apply` and `pop`. The
-    old argument was MEASURED and correct on its own facts: git refuses to overwrite a modified
-    file rather than clobber it (2026-09-17, `git stash apply` aborted with "Please commit your
-    changes or stash them before you merge" and left the file untouched). It was wrong about the
-    SUBJECT. The thing at risk in an `apply` or a `pop` is not this tree. It is the shared stack.
-    The entry consumed may belong to another session, and a tree with nothing in it is exactly
-    when that theft leaves no trace.
+    `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
+    consumed may belong to another session, and a tree with nothing in it is exactly when that
+    theft leaves no trace.
     """
     return stash_action(args) not in STASH_READ_ACTIONS
 
@@ -289,7 +288,7 @@ def shared_tree_hit(segment: str) -> str:
 # The outcome this rule protects is the OTHER session's tree, so the reflog does not make the
 # named-commit form safe: it makes it whole for one tree only. `git reset --hard HEAD~1` therefore
 # keeps today's answer, deny in a shared checkout and ask in a worktree, whatever the tree holds.
-# (Owner's ruling, 2026-09-17. MEASURED on 1be660c in a pristine repository with an empty
+# (MEASURED on 1be660c in a pristine repository with an empty
 # porcelain: `git reset --hard HEAD` answered allow, and so did `git reset --hard HEAD~1`.)
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
 # `git reset` takes a value after this one. A pathspec form cannot carry `--hard` at all ("fatal:
@@ -301,7 +300,6 @@ RESET_HEAD_TARGETS = ("", "HEAD")
 # list, the read would narrow to it, and a delete of everything else would pass on an empty
 # answer. A wrong PASS is the one failure this layer must not have.
 CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}
-PATHSPEC_FROM_FILE = "--pathspec-from-file"
 
 
 def named_pathspecs(subcommand: str, args):

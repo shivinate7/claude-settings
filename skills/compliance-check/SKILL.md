@@ -22,8 +22,17 @@ parent. If the line or `<dir>/.git` is missing, stop and report the audit as unk
   headings of `CLAUDE.md`. The style file adds `style`.
 - Mechanism: `<parent>/lint/rule_mechanisms.json`, key `rules.<id>.mechanism.kind`.
 
-A `guard` or `gate` rule has a mechanism in the parent. Hooks and the report gate run in every
-session, so they already cover the child. Mark that rule `parent-covered` and do not probe it.
+A `guard` or `gate` rule has a mechanism in the parent. Mark that rule `parent-covered`, and
+do not probe it, only when both checks pass:
+
+- The live `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` has the same `hooks` block as
+  `<parent>/settings.json`.
+- `${CLAUDE_CONFIG_DIR:-~/.claude}/guard.log` has a verdict line from the last 7 days. Run
+  `lint/guard_log_report.py --days 7` from the parent to read it.
+
+If a check fails, the mechanism does not cover the child: report the rule as a gap in the
+parent's install. If a file is missing or unreadable, mark the rule `unknown`.
+
 Probe only what lives in the child's tree, from `probes.md` in this skill folder. A rule about
 session practice, with no trace in the tree, is `n/a (session)`.
 

@@ -218,7 +218,7 @@ def case_model_ok_is_silent():
     check("ok: exactly one claude call", len(run.calls) == 1, len(run.calls))
 
 
-# Owner ruling: run model haiku at effort xhigh. This case alone pins the model this hook passes
+# The hook runs model haiku at effort xhigh. This case alone pins the model this hook passes
 # (reply_judge.py, the invoke_model call). test_decision_watch case_invoke_model_argv pins the
 # argv builder; neither covers the other's call site.
 
@@ -235,7 +235,7 @@ def case_model_is_haiku_at_xhigh():
 # object, the Stop note that Claude Code delivers at the start of the next turn:
 #   {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}
 # NOTE names the rule id and the fix. The shape is the one Claude Code's async hook validator
-# accepts for a Stop hook (checked in the installed binary, 2026-10-13).
+# accepts for a Stop hook (checked in the installed binary).
 
 def parse_stdout(run):
     try:
@@ -320,7 +320,7 @@ def case_timeout_leaks_no_reply_text():
 
 # --------------------------------------------------------------------------- case 5
 # The prompt holds the reply text and the three rules, and says running background work never
-# makes a reply unfinished (the second false block, 2026-10-13).
+# makes a reply unfinished.
 
 def case_prompt_carries_reply_and_rules():
     run = run_hook(MARK, answer=json.dumps({"ok": True}))
@@ -391,13 +391,13 @@ def case_settings_reply_judge_is_async_and_report_gate_is_not():
 
 
 # --------------------------------------------------------------------------- cases 8-13
-# Sampling. Owner ruling, 2026-10-13 14:40 CDT: the reply judge runs on one Stop in five. Stop n
+# Sampling: the reply judge runs on one Stop in five. Stop n
 # of a session is judged when (n - 1) % 5 == 0: Stops 1, 6, 11, so a short session is judged
 # once. The count is a file in the state folder under CLAUDE_CONFIG_DIR, one per session, the
 # home decision_watch.py uses. Every Stop writes it back, skipped Stops included. A skipped Stop
 # returns at once: no model call, no output, exit 0.
 #
-# Guesses, pinned here and named in the report:
+# Assumptions pinned here:
 #   (a) the file holds the Stops so far; this Stop is n = stored + 1.
 #   (b) a missing, unreadable or corrupt file reads as no count. That Stop is Stop 1 and is
 #       judged, and its write repairs the file. One branch, not two: a fresh session and a
@@ -513,7 +513,7 @@ def case_counter_is_a_file_that_survives_between_processes():
 
 # --------------------------------------------------------------------------- case 12
 # A missing, corrupt or unreadable counter fails open: exit 0, no traceback, no block, and this
-# Stop is judged (guess (b)). For missing and corrupt, the write repairs the file, so Stop 3 is
+# Stop is judged (assumption (b)). For missing and corrupt, the write repairs the file, so Stop 3 is
 # skipped. For unreadable, the write fails too, so every Stop is judged; Stop 3 is not pinned.
 
 def case_damaged_counter_fails_open():
@@ -538,8 +538,7 @@ def case_damaged_counter_fails_open():
 # --------------------------------------------------------------------------- case 13
 # A counter write that fails never blocks or crashes the Stop. The state folder is made a plain
 # file, so every write under it fails and so does every read. The finding still comes out as a
-# note, and the Stop is judged once. Green on main by construction: main writes no counter, so
-# this case guards the write the builder adds.
+# note, and the Stop is judged once.
 
 def case_counter_write_failure_never_blocks():
     config = sample_config("write-fails")
@@ -556,8 +555,8 @@ def case_counter_write_failure_never_blocks():
 
 
 # --------------------------------------------------------------------------- cases 14-16
-# Hole 1 (review round 1): a failed counter write froze the stored count at k. Every later Stop
-# read k, returned n = k + 1 and was skipped forever. Pin: the Stop after a failed write is judged.
+# A failed counter write must not freeze the stored count at k: every later Stop would read k,
+# return n = k + 1 and be skipped forever. The Stop after a failed write is judged.
 # Stop 1 writes a good count. From Stop 2 on, the stub's os.replace refuses every write. Stop 2
 # reads 1, so n = 2 and is skipped, and its write fails. Stops 3 to 9 must each be judged, since
 # every one of them follows a failed write. No Stop is skipped forever.
@@ -578,9 +577,8 @@ def case_failed_write_does_not_freeze_the_count():
           all(called[n] == 1 for n in range(3, 10)), called)
 
 
-# Hole 2 (review round 1): a Stop with no reply text was counted before the empty-reply return,
-# so an empty Stop 1 used the session's first sample slot. Pin: an empty Stop writes no counter
-# change and counts for nothing. Stops 1, 6 and 11 are counted among Stops that carry a reply.
+# An empty Stop (no reply text) writes no counter change and counts for nothing, so it never
+# uses a sample slot. Stops 1, 6 and 11 are counted among Stops that carry a reply.
 
 def counter_snapshot(config):
     snap = {}
@@ -630,9 +628,9 @@ def case_empty_stops_between_replies_do_not_shift_samples():
 
 
 # --------------------------------------------------------------------------- cases 17-20
-# Freeze defect: after a good read, a failed write removes the counter file. If that remove also
-# fails (a read-only file on Windows), the old count stays on disk, so every later Stop reads it
-# and is skipped. Pin: when the write and the remove both fail, the Stop is judged, as a damaged
+# After a good read, a failed write removes the counter file. If that remove also fails (a
+# read-only file on Windows), the old count stays on disk and every later Stop would read it and
+# be skipped. When the write and the remove both fail, the Stop is judged, as a damaged
 # counter is (n = 1). Stops 1 to 3 with good writes leave the stored count at 3, so Stop 4 reads 3.
 
 FREEZE_SETUP_JUDGED = [1]  # Stop 1 is judged; Stops 2 and 3 are skipped by sampling

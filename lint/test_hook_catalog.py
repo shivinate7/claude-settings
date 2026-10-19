@@ -3,11 +3,11 @@
 
 Run: python3 lint/test_hook_catalog.py -v
 
-Owner ask (2026-10-13, 22:25 CDT): one readable page that says, for each hook, judge and mod,
-what it does and which model and effort it runs on. The page is generated, never kept by hand.
-Owner add (22:26 CDT): skills are in scope too. Their source is the frontmatter description.
+One readable page says, for each hook, judge and mod, what it does and which model and effort
+it runs on. The page is generated, never kept by hand. Skills are in scope too. Their source is
+the frontmatter description.
 
-Interface the generator must meet. The builder builds to this.
+Interface the generator must meet.
 - lint/hook_catalog.py, stdlib only, Python 3.11. Root: the repo root, or env HOOK_CATALOG_ROOT
   (same layout). Every fixture case sets HOOK_CATALOG_ROOT to a temp tree.
 - No argument: write docs/catalog.md. `--print`: write the render to stdout, exit 1 while a problem
@@ -15,6 +15,9 @@ Interface the generator must meet. The builder builds to this.
 - `--check`: exit 0 and print nothing when docs/catalog.md equals the render (CRLF normalized).
   Exit 1: one line per problem, naming the offender (stale page, empty source, missing row).
   Exit 2: the path of an input it cannot read (settings.json, the model table, a file it names).
+- A description cell (What it does) longer than CELL_CAP characters is cut to at most CELL_CAP
+  characters and ends in an ellipsis (U+2026). CELL_CAP is a named constant in lint/hook_catalog.py.
+  A cut never splits a backtick span, and every row keeps its cells.
 - Sources, read from the root:
   - settings.json `hooks`: one row per registration (event, matcher, `if`, command or prompt).
   - A command names its script as `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`. Source: a .py
@@ -23,7 +26,7 @@ Interface the generator must meet. The builder builds to this.
   - A command that names no script is inline. Its text is the one-line value in
     lint/hook_catalog_inline.json under its sidecar key: its label (the event, then ` matcher=<m>` and
     ` if=<c>` when present), then ` #` and the first 8 hex digits of the SHA-256 of the command text
-    (ruling: a changed command changes its key, so it fails --check until its summary is keyed).
+    (a changed command changes its key, so it fails --check until its summary is keyed).
     Its row key is `inline: <label>`. A key with no value, an empty or multi-line value, a key
     written twice, or a sidecar key that matches no inline command is a problem. A missing sidecar is a problem
     too: exit 1, never exit 2.
@@ -44,26 +47,23 @@ Interface the generator must meet. The builder builds to this.
   mods/<name> (mod), skills/<name> (skill). A pipe inside a cell is written \\|.
   Event, Matcher and If are "-" when absent. Mods and skills have no event, matcher or if.
 
-Red on main: the generator and the page do not exist. Real-repo cases R1-R9 read this repo.
+Real-repo cases R1-R9 read this repo.
 Fixture cases F1-F29 run the generator on temp trees, so a generator that is silent for every
-input fails them. F25-F29 are round 2: F25 and F28 pin the Modes and duplicate-key checks, F26 and F27 pin
-the hash-keyed sidecar ruling, and F29 pins the orphan check.
+input fails them. F25 and F28 pin the Modes and duplicate-key checks, F26 and F27 pin
+the hash-keyed sidecar, and F29 pins the orphan check.
 Unit cases U1-U4 pin the table and sentence helpers used here.
 
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
 are hand scanners; they get the comment-opener, lone-quote and multi-line-string cases (F2-F6,
 F11-F16). JavaScript is not scanned, so the multi-line template-literal case does not apply.
 
-Records page, lane records-index, round 1. Owner ruling 2026-10-14 10:59 CDT: "live updating index
-for this and all repos, and it needs to delete old/stale rulings and rewrite in place, never store
-a history that's overruled". Cases A, B, C, D and R10-R13 pin it; U5-U7 pin the readers they use.
-Interface the generator must meet. The builder builds to this. One home: the same generator, no
-second script.
+Records page: a live index for this and all repos. It deletes stale rulings and rewrites in place,
+and never stores an overruled history. Cases A, B, C, D and R10-R13 pin it; U5-U7 pin the readers
+they use. Interface the generator must meet. One home: the same generator, no second script.
 - No argument writes every page it owns: docs/catalog.md and docs/records.md. `--check` checks both:
   a missing or stale page, or a problem, is exit 1 and names the page or the offender. `--print`
-  stays the catalog page only (R7). F18, F19, F26 and F27 now publish with a no-argument run, so
-  they stay green on 1ac9851 and on the build.
-- Merge-time rebuild, owner ruling 2026-10-14 13:18 CDT. The shared merge tool (merge/merge.py,
+  stays the catalog page only (R7). F18, F19, F26 and F27 publish with a no-argument run.
+- Merge-time rebuild. The shared merge tool (merge/merge.py,
   cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
   head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
   page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
@@ -83,39 +83,38 @@ second script.
   docs/records.md and never reads settings.json or the model table. A root with a part and no
   settings.json is still exit 2 (F20).
 - Records, read from the root: the `<!-- rule:<id> -->` markers in CLAUDE.md, and the .md files in
-  decisions/, debts/, deferred/ and plans/. A README.md in a folder is no record. Other files and a
+  decisions/, debts/ and plans/. A README.md in a folder is no record. Other files and a
   missing folder are ignored. A file the generator cannot read is exit 2 naming it. An empty record,
   or a debt with no What, is a problem: exit 1 naming the file.
 - Page: one `## ` section per kind, in this order, only when it has a row: Mandates, Rulings, Build
-  designs, Unsorted decisions, Debts, Deferred, Plans. Each holds a table headed Slug | Gist | Link.
+  designs, Unsorted decisions, Debts, Plans. Each holds a table headed Slug | Gist | Link.
   Slug: the rule id, or the file name without .md. Link: `../CLAUDE.md` or `../<folder>/<slug>.md`.
   Rows: Mandates in CLAUDE.md order, every other kind sorted by slug. A pipe in a gist is written \\|.
 - Rulings: Kind: process. Build designs: Kind: build. Unsorted decisions: no Kind line, or a Kind
   the generator does not know (that may instead be a problem naming the file). A Kind line counts
-  outside fenced text only: decisions/rulings-declare-kind.md holds a fenced example of both.
+  outside fenced text only: a fenced example of both kinds counts for neither (the FENCED_KINDS fixture).
 - Gist, one sentence, text flattened first (lines wrap). A sentence ends at ". ", "? " or "! ", or at
   the end of its block. Mandate: the first sentence of the rule's text, which runs from the paragraph
   start (a bold lead label dropped) or the marker before it, to its marker. Decision: the first block
   under the first `## Ruling` or `## The ruling`, else under `## The question`, else the first
   paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
   text stays as written, so a decision whose paragraph opens with bold text (the real
-  one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
+  one-shared-record-stamp does) keeps it. Debt: the What. Plan: the first line, its
   leading # dropped.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
   or "Old ruling", in any case. The other five fail only where they open a block: the text of a
   heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
   marker itself. "was:" fails where it opens a block, or where the word "old" comes earlier in the
   same block ("the old wording was: ..."). A bare "no longer" is no marker. The failure is one line per
-  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
+  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/ and
   plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
   comments are not special: their lines are read as prose, so history hidden in a comment fails when
   it opens a block. A continuation line of a wrapped paragraph does not open a block.
-  What I chose, and why. Measured on 1ac9851 over those files: this rule fires on 0 lines, and "was:"
-  has 0 hits in all of them. The plain rule "the marker appears anywhere in the prose" fires on 30
-  lines in 21 files, almost all of them behaviour prose ("the guard no longer crashes"), CI runs
-  ("cancels superseded runs"), or a rule quoted by name. That would cry wolf on day one. The cost:
-  kept history that says "(superseded by the floor, kept as evidence)" mid-sentence is not caught. A
-  debt's What describing a gap may say "no longer", and it opens with its "**What.**" label.
+  Why the marker must open a block: the plain rule "the marker appears anywhere in the prose" would
+  fire on behaviour prose ("the guard no longer crashes"), CI runs ("cancels superseded runs"), and
+  a rule quoted by name. That would cry wolf. The cost: kept history that says "(superseded by
+  the floor, kept as evidence)" mid-sentence is not caught. A debt's What describing a gap may say
+  "no longer", and it opens with its "**What.**" label.
 - Scanner cases (rule building-scanner-respects-strings), the markdown form. A comment opener, a
   quote or a backtick inside code or a fence must not hide, or invent, a marker, a heading, a Kind
   line or a rule marker. A multi-line fenced block is the multi-line-template-literal case. A lone
@@ -173,8 +172,8 @@ def inline_label(event, matcher, cond):
 
 
 def sidecar_key(label, command):
-    """The sidecar key of an inline command, per the ruling: its label, " #", then the first 8 hex digits
-    of the SHA-256 of its command text. Written here from the ruling, not imported from the generator."""
+    """The sidecar key of an inline command: its label, " #", then the first 8 hex digits
+    of the SHA-256 of its command text. Written here from the spec, not imported from the generator."""
     return "%s #%s" % (label, hashlib.sha256(command.encode("utf-8")).hexdigest()[:8])
 
 
@@ -435,7 +434,7 @@ class RealRepo(unittest.TestCase):
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
     def test_r9_session_start_refresh_command_is_byte_identical_to_main(self):
-        # F1 ruling: the refresh stays inline. A move into a script gates recovery on an install.
+        # The refresh stays inline. A move into a script gates recovery on an install.
         # Equal as the JSON decodes, which is the exact text the harness runs.
         commands = [hook.get("command") for event, matcher, _cond, hook in registrations()
                     if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
@@ -510,7 +509,7 @@ def row_for(rows, key):
 # ---- the records page: readers and fixture texts ------------------------------------------------
 
 RECORDS_COLUMNS = ["Slug", "Gist", "Link"]
-SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans"]
+SECTIONS = ["Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans"]
 RECORDS_PAGE = os.path.join(ROOT, "docs", "records.md")
 LINK_TARGET = re.compile(r"\]\(([^)]*)\)")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
@@ -583,7 +582,6 @@ LOOSE = ("# Loose note\n\nThis note has no kind and no\nruling heading. It wraps
 TITLED = "# Just a title\n\n## Why\n\nBecause.\n"
 DEBT = ("# Gap one\n\n- **What.** The check misses one case. It also misses a second.\n"
         "- **Where.** `lint/x.py`.\n- **Decision.** none\n- **Retire.** Cover both.\n")
-WAITING = "# Waiting for a thing\n\n**What waits.** The thing.\n"
 PLAN = "# Plan: do a thing\n\nOne command does it.\n"
 RULES = ("# How I work\n\n**Building.** Never guess an answer the code should give you.<!-- rule:b-one --> "
          "Surface ambiguity instead\nof resolving it silently. Say why.<!-- rule:b-two -->\n\n"
@@ -595,7 +593,7 @@ def with_records(extra=None):
     spec = clean()
     spec.update({"CLAUDE.md": RULES, "decisions/ruled.md": RULED, "decisions/built.md": BUILT,
                  "decisions/loose.md": LOOSE, "decisions/titled.md": TITLED, "debts/gap-one.md": DEBT,
-                 "deferred/waiting.md": WAITING, "plans/plan-a.md": PLAN})
+                 "plans/plan-a.md": PLAN})
     for rel, text in (extra or {}).items():
         if text is None:
             spec.pop(rel, None)
@@ -795,8 +793,8 @@ class Fixtures(Tree):
         self.assertEqual(row["What it does"], "Says one plain thing.")
         self.assertEqual((row["Event"], row["Model"], row["Effort"]), ("Notification", "no model", "n/a"))
 
-    # Round 2 cases, F25-F29. The sidecar key is the label, " #", and 8 hex digits of the command's SHA-256.
-    # F25 and F28 pin the builder's Modes and duplicate-key checks. F29 pins the orphan check.
+    # Cases F25-F29. The sidecar key is the label, " #", and 8 hex digits of the command's SHA-256.
+    # F25 and F28 pin the Modes and duplicate-key checks. F29 pins the orphan check.
 
     def test_f25_one_script_under_two_flags_does_not_share_one_summary(self):
         # A script registered twice with different flags. Under exit 0 the two rows may not show the
@@ -815,7 +813,7 @@ class Fixtures(Tree):
                             "both registrations show one summary: " + rows[0]["What it does"])
 
     def test_f26_changed_inline_command_fails_check_until_its_summary_is_keyed(self):
-        # Ruling: a changed command changes its sidecar key. --check fails, and names the new key, until a
+        # A changed command changes its sidecar key. --check fails, and names the new key, until a
         # person reviews the summary and keys it to the new text. Then the page matches and the check passes.
         def settings(text):
             hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [{"type": "command", "command": text}]}])
@@ -898,7 +896,7 @@ GIST_CASES = [
      "**Changed in part on 2026-09-28** by `other-rule`, the rule stays."),
 ]
 
-# The real shape of decisions/rulings-declare-kind.md: a fenced example of both kinds, then one real line.
+# A record with a fenced example of both kinds, then one real line: only the unfenced Kind line counts.
 FENCED_KINDS = ("# T\n\n## The ruling\n\nIt is so.\n\n```\nKind: build\nPlan: <path>#<slug> (<platform>)\n\n"
                 "Kind: process\nHome: rule:<id>\n```\n\nKind: process\nHome: lint/x.py\n")
 
@@ -917,7 +915,6 @@ class RecordsPage(Tree):
             "Build designs": ["built"],
             "Unsorted decisions": ["loose", "subagent-model-cap", "titled"],
             "Debts": ["gap-one"],
-            "Deferred": ["waiting"],
             "Plans": ["plan-a"],
         })
 
@@ -928,7 +925,6 @@ class RecordsPage(Tree):
             ("Unsorted decisions", "loose"): "This note has no kind and no ruling heading.",
             ("Unsorted decisions", "titled"): "Just a title",
             ("Debts", "gap-one"): "The check misses one case.",
-            ("Deferred", "waiting"): "Waiting for a thing",
             ("Plans", "plan-a"): "Plan: do a thing",
             ("Mandates", "b-one"): "Never guess an answer the code should give you.",
             ("Mandates", "b-two"): "Surface ambiguity instead of resolving it silently.",
@@ -940,7 +936,7 @@ class RecordsPage(Tree):
 
     def test_a3_each_row_links_to_its_file(self):
         folder = {"Rulings": "decisions", "Build designs": "decisions", "Unsorted decisions": "decisions",
-                  "Debts": "debts", "Deferred": "deferred", "Plans": "plans"}
+                  "Debts": "debts", "Plans": "plans"}
         rows = self.rows()
         self.assertTrue(rows)
         for r in rows:
@@ -965,9 +961,9 @@ class RecordsPage(Tree):
         self.assertNotIn("README", got["Debts"])
 
     def test_a6_one_slug_in_two_kinds_gets_two_rows(self):
-        got = listed(self.rows({"decisions/shared.md": RULED, "deferred/shared.md": WAITING}))
+        got = listed(self.rows({"decisions/shared.md": RULED, "debts/shared.md": DEBT}))
         self.assertIn("shared", got["Rulings"])
-        self.assertIn("shared", got["Deferred"])
+        self.assertIn("shared", got["Debts"])
 
     def test_a7_a_decision_gist_comes_from_its_ruling_else_its_question(self):
         extra = {"decisions/g%d.md" % i: text for i, (_name, text, _gist) in enumerate(GIST_CASES)}
@@ -1030,7 +1026,7 @@ class RecordsPage(Tree):
         self.assertIn("decisions/bad.md", out + err)
 
     def test_a15_a_short_first_ruling_block_gives_the_question_sentence(self):
-        # Red on 6fb3ac0 for the three short-block rows. Kind: process throughout. A ruling's first block of under 4 words
+        # Kind: process throughout. A ruling's first block of under 4 words
         # ("Yes.", "Owner, 2026-10-11:") gives the first sentence of "## The question". A 4-word block stays (green pin).
         cases = [
             ("a bare yes", "Does the gate run first? It does.", "Yes.", "Does the gate run first?"),
@@ -1045,6 +1041,15 @@ class RecordsPage(Tree):
         for i, (name, _q, _r, gist) in enumerate(cases):
             with self.subTest(name):
                 self.assertEqual(got.get("r%d" % i), gist)
+
+    def test_a16_the_notes_file_in_debts_is_no_record(self):
+        # A finding too unlikely to hit is one line in the notes file, not a debt. The notes file has no
+        # **What.** line, and the page must not refuse it.
+        notes = "# Notes\n\n- A finding too unlikely to hit. Decision: none.\n"
+        root = self.tree(with_records({"debts/notes.md": notes}))
+        code, out, err = generator(root)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(listed(records_rows(self.records_text(root)))["Debts"], ["gap-one"])
 
 
 class RecordsStale(Tree):
@@ -1073,7 +1078,6 @@ class RecordsStale(Tree):
                 root, "debts/gap-one.md", DEBT.replace("The check misses one case.", "The check misses two cases.")),
             "a decision is added": lambda root: put(root, "decisions/new.md", LOOSE),
             "a decision gains a Kind line": lambda root: put(root, "decisions/loose.md", LOOSE + "\nKind: process\n"),
-            "a deferred file is added": lambda root: put(root, "deferred/new.md", WAITING),
             "a plan is added": lambda root: put(root, "plans/new.md", PLAN),
             "a rule marker is added": lambda root: put(root, "CLAUDE.md", RULES + "\nShip it.<!-- rule:b-four -->\n"),
             "a rule marker is deleted": lambda root: put(root, "CLAUDE.md", RULES.replace("<!-- rule:b-three -->", "")),
@@ -1111,7 +1115,7 @@ class RecordsStale(Tree):
         self.publish(root)
         self.assertEqual(self.records_text(root), before)
 
-    # Merge-time rebuild (owner ruling 2026-10-14 13:18 CDT): the merge rewrites the page, so a pull request
+    # Merge-time rebuild: the merge rewrites the page, so a pull request
     # run does not fail on a stale one. The stamp engine reads a pull request run from GITHUB_BASE_REF or a
     # GITHUB_REF under refs/pull/, and each alone counts.
     PULL_REQUEST_RUNS = ({"GITHUB_BASE_REF": "main"}, {"GITHUB_REF": "refs/pull/12/merge"},
@@ -1159,7 +1163,7 @@ class RecordsStale(Tree):
         self.assertIn("debts/empty.md", out + err)
 
     def test_b10_the_catalog_page_stays_strict_on_a_pull_request(self):
-        # Regression pin, green on 1ac9851: the ruling covers the records page only.
+        # The pull request waiver covers the records page only.
         root = self.published()
         put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
         code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
@@ -1219,7 +1223,6 @@ class RecordsHistory(Tree):
 
     def test_c2_every_record_folder_and_claude_md_is_read(self):
         cases = [
-            ("deferred/old.md", "# Old\n\nSuperseded: by the new plan.\n", "Superseded: by the new plan."),
             ("plans/old.md", "# Plan\n\n## Old ruling\n\nText.\n", "## Old ruling"),
             ("debts/old.md", DEBT + "\nPreviously: the check ran.\n", "Previously: the check ran."),
             ("CLAUDE.md", RULES + "\nOverruled: the old rule text.\n", "Overruled: the old rule text."),
@@ -1300,7 +1303,7 @@ class RecordsHistory(Tree):
         self.assertEqual(gists["roles-remove-override-file"], "Remove the file when the raise is no longer needed.")
 
     def test_c12_words_that_only_look_like_a_marker_do_not_fail(self):
-        # Red on 6fb3ac0 for each prose line below: none is overruled text. The control line must still fail the check,
+        # None of the prose lines below is overruled text. The control line must still fail the check,
         # so a detector gone silent cannot pass this case.
         for line in ["The flag was: on.", "No longer used: the old flag.", "Previously-run tests stay green."]:
             with self.subTest(line):
@@ -1311,8 +1314,8 @@ class RecordsHistory(Tree):
         self.assert_history(with_records({"decisions/old.md": old_decision("Old ruling: allow it.")}), "decisions/old.md:7")
 
     def test_c13_only_in_force_opens_a_no_longer_marker(self):
-        # Review round 2, records-index. "No longer" marks overruled text only as "No longer in force". The first three
-        # lines were markers until the orchestrator dropped them (red on d027e3d). The fourth is a bare "No longer".
+        # "No longer" marks overruled text only as "No longer in force". The first three lines are not
+        # markers. The fourth is a bare "No longer".
         for line in ["No longer holds: the rule.", "No longer applies: the flag.", "No longer valid: the flag.", "No longer checks the flag."]:
             with self.subTest(line):
                 root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
@@ -1388,8 +1391,8 @@ class OtherRepos(Tree):
 
 @unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
 class RealRecords(unittest.TestCase):
-    """The committed page against the real records. Red until the builder writes docs/records.md. Skipped on a pull
-    request run (owner ruling 2026-10-14 13:18 CDT: the merge rebuilds the page); run on a laptop and on a push to main."""
+    """The committed page against the real records. Skipped on a pull request run (the merge rebuilds the
+    page); run on a laptop and on a push to main."""
 
     def rows(self):
         if not os.path.exists(RECORDS_PAGE):
@@ -1399,10 +1402,13 @@ class RealRecords(unittest.TestCase):
     def test_r10_every_record_file_has_one_row_and_a_link_that_resolves(self):
         rows = self.rows()
         folders = (("decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("debts", ("Debts",)),
-                   ("deferred", ("Deferred",)), ("plans", ("Plans",)))
+                   ("plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder)) if f.endswith(".md") and f != "README.md")
+            # debts/notes.md is the notes tier, no record: a row for it is an extra.
+            # Compared by path: a decisions/notes.md is still a record and needs its row.
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
+                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
@@ -1431,7 +1437,7 @@ class RealRecords(unittest.TestCase):
         self.assertFalse(problems, "\n".join(problems))
 
     def test_r13_the_real_kind_lines_decide_the_group(self):
-        # decisions/rulings-declare-kind.md holds a fenced example of both kinds and one real process line.
+        # A record may fence an example of both kinds (the FENCED_KINDS fixture); only its unfenced Kind lines decide the group.
         got = {r["slug"]: r["section"] for r in self.rows() if r["section"] in ("Rulings", "Build designs", "Unsorted decisions")}
         problems = []
         for name in sorted(os.listdir(os.path.join(ROOT, "decisions"))):
@@ -1463,6 +1469,186 @@ class Helpers(unittest.TestCase):
 
     def test_u7_line_of_counts_from_one(self):
         self.assertEqual(line_of("a\n\nb\nb\n", "b"), 3)
+
+    def test_the_guards_records_header_opens_the_generated_intro(self):
+        """hooks/guard_merge.py copies the first line of RECORDS_INTRO as RECORDS_HEADER. If the intro title changes
+        and the copy does not, the guard stops matching the page and lets each lane commit of it pass."""
+        hooks = os.path.join(ROOT, "hooks")
+        sys.path.insert(0, hooks)
+        try:
+            from guard_merge import RECORDS_HEADER
+        finally:
+            sys.path.remove(hooks)
+        from hook_catalog import RECORDS_INTRO
+        self.assertTrue(RECORDS_HEADER.strip(), "RECORDS_HEADER is empty")
+        self.assertTrue(RECORDS_INTRO.startswith(RECORDS_HEADER), (RECORDS_HEADER, RECORDS_INTRO[:40]))
+
+
+# ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
+# Decision catalog-cells-never-cut: the cap sits above the longest current cell, so no cell loses text.
+# A cap stays only as a ceiling for growth. Sources (SKILL.md, plugin.json, the judge prompts in settings.json)
+# are never edited. The cap is one named constant in lint/hook_catalog.py, CELL_CAP. The cases import it,
+# so a new value moves every case with it. No case copies the number.
+
+ELLIPSIS = "…"
+PROSE = "alpha beta gamma delta "
+JUDGE_KEY = "Judge this AskUserQuestion call: $ARGUMENTS"
+
+
+def cell_cap():
+    """CELL_CAP from the generator. A missing name fails the case by its name."""
+    try:
+        from hook_catalog import CELL_CAP
+    except ImportError as err:
+        raise AssertionError("lint/hook_catalog.py has no CELL_CAP, the one named cap on a description cell: %s" % err)
+    return CELL_CAP
+
+
+def prose(n):
+    """Plain prose of exactly n characters that ends in a letter, so flattening it keeps its length."""
+    text = (PROSE * (n // len(PROSE) + 2))[:n]
+    return text[:-1] + "e" if text.endswith(" ") else text
+
+
+def filler(n):
+    """A judge body of at least n characters."""
+    sentence = "Check each question and option against the brief it cites. "
+    return sentence * (n // len(sentence) + 1)
+
+
+def what_of(out, key):
+    """The What it does cell of the row keyed key in a rendered page, pipes unescaped."""
+    return row_for(page_rows(out), key)["What it does"]
+
+
+class CellCap(Tree):
+    """A description cell longer than CELL_CAP is cut to at most CELL_CAP characters and ends in an ellipsis.
+    The cut keeps the start of the source, never splits a backtick span, and leaves every row its cells."""
+
+    def render(self, tree_files):
+        code, out, err = generator(self.tree(tree_files), "--print")
+        self.assertEqual(code, 0, out + err)
+        return out
+
+    def render_skill(self, text):
+        return self.render(files(extra={"skills/alpha/SKILL.md": skill_md("description: " + text)}))
+
+    def assert_cut(self, cell, source, floor=True):
+        """The cell ends in the ellipsis, keeps the start of the source, and fits the cap. floor=False when the
+        cut must fall before a span longer than the cap, so the cell may be short."""
+        self.assertTrue(cell.endswith(ELLIPSIS), "not cut: %d chars, and no ellipsis at the end" % len(cell))
+        self.assertTrue(" ".join(source.split()).startswith(cell[:-1]), "the cut rewords the source: %r" % cell)
+        cap = cell_cap()
+        self.assertLessEqual(len(cell), cap, "%d chars, over the cap of %d" % (len(cell), cap))
+        if floor:
+            self.assertGreater(len(cell), cap // 2, "the cut keeps too little: %d chars at a cap of %d" % (len(cell), cap))
+
+    def assert_span_cut(self, out, key, source, floor=True):
+        """A cut that would split a backtick span falls before the span: the cell has no backtick, and the row keeps its cells."""
+        cell = what_of(out, key)
+        self.assert_cut(cell, source, floor)
+        self.assertNotIn("`", cell, "the cut keeps or opens a backtick span: %r" % cell[-30:])
+        rows = [line for line in out.split("\n") if line.startswith("| `%s`" % key)]
+        self.assertEqual(len(rows), 1, out)
+        self.assertEqual(len(split_cells(rows[0])), len(COLUMNS), "the cut leaves an unbalanced pipe: " + rows[0])
+
+    def test_e1_the_cap_is_one_named_positive_integer_in_the_generator(self):
+        cap = cell_cap()
+        self.assertIsInstance(cap, int)
+        self.assertGreater(cap, 0)
+
+    def test_e2_a_skill_description_over_the_cap_is_cut_and_ends_in_an_ellipsis(self):
+        text = prose(2 * cell_cap())
+        self.assert_cut(what_of(self.render_skill(text), "skills/alpha"), text)
+
+    def test_e3_a_mod_description_over_the_cap_is_cut(self):
+        text = prose(2 * cell_cap())
+        out = self.render(files(plugins={"tw@claude-settings": True}, extra={
+            "mods/tw/.claude-plugin/plugin.json": json.dumps({"description": text}),
+            "mods/tw/SOURCE.md": "repo and commit go here\n",
+        }))
+        self.assert_cut(what_of(out, "mods/tw"), text)
+
+    def test_e4_a_judge_prompt_over_the_cap_is_cut(self):
+        body = filler(2 * cell_cap())
+        prompt = JUDGE_KEY + "\n" + body + "Block only on a clear breach of the brief."
+        out = self.render(files(hooks={"PreToolUse": [{"matcher": "AskUserQuestion", "hooks": [judge(prompt=prompt)]}]}))
+        self.assert_cut(what_of(out, JUDGE_KEY), body)
+
+    def test_e5_a_short_description_renders_unchanged(self):
+        # Pins that a cell under the cap is never touched.
+        self.assertEqual(what_of(self.render(files()), "skills/alpha"), "Use when testing alpha.")
+
+    def test_e6_a_description_of_exactly_the_cap_is_unchanged_and_one_more_character_is_cut(self):
+        cap = cell_cap()
+        self.assertEqual(what_of(self.render_skill(prose(cap)), "skills/alpha"), prose(cap))
+        cell = what_of(self.render_skill(prose(cap + 1)), "skills/alpha")
+        self.assertTrue(cell.endswith(ELLIPSIS), "%d chars at the cap plus one: no ellipsis" % len(cell))
+        self.assertLessEqual(len(cell), cap)
+
+    def test_e7_a_span_longer_than_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = "ab `x " + "c" * cap + " | " + "d" * 60 + "` " + PROSE * 20  # the span runs past the cap, with a space inside before it
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text, floor=False)
+
+    def test_e12_a_short_span_that_straddles_the_cap_is_cut_before_it(self):
+        cap = cell_cap()
+        text = prose(cap - 40) + " `" + "c" * 10 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after, with spaces inside before it
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
+
+    def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):
+        # Scanner rule (building-scanner-respects-strings): #, // and /* inside a code span are text.
+        cap = cell_cap()
+        text = prose(cap - 25) + " `" + "x" * 10 + " // # /* opener " + "y" * 60 + "` " + PROSE * 20  # openers at the cap
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md('description: "%s"' % text)}))
+        self.assert_span_cut(out, "skills/alpha", text)
+
+    def test_e10_a_lone_backtick_in_plain_text_does_not_stop_the_cut(self):
+        cap = cell_cap()
+        text = "Use when a lone ` sits early in plain text, then " + prose(cap * 3)
+        cell = what_of(self.render_skill(text), "skills/alpha")
+        self.assert_cut(cell, text)
+        self.assertIn("a lone ` sits early", cell)
+
+    def test_e11_a_code_span_that_a_folded_line_break_splits_is_one_span(self):
+        # Scanner rule, the multi-line case: a folded frontmatter joins its two lines, so the span is one span.
+        cap = cell_cap()
+        lead = prose(cap - 100)
+        folded = "description: >\n  " + lead + " `" + "c" * 60 + "\n  " + "d" * 60 + "` " + PROSE * 20
+        source = lead + " `" + "c" * 60 + " " + "d" * 60 + "` " + PROSE * 20
+        out = self.render(files(extra={"skills/alpha/SKILL.md": skill_md(folded)}))
+        self.assert_span_cut(out, "skills/alpha", source)
+
+
+class RealCellCap(unittest.TestCase):
+    def test_e8_every_description_cell_of_the_committed_page_is_at_or_under_the_cap(self):
+        if not os.path.exists(PAGE):
+            self.fail("docs/catalog.md does not exist yet: the generator writes it")
+        rows = page_rows(read(PAGE))
+        self.assertTrue(rows, "no catalog rows, so the scan proves nothing")
+        cap = cell_cap()
+        over = ["%s %d chars" % (r["Key"], len(r["What it does"])) for r in rows if len(r["What it does"]) > cap]
+        self.assertFalse(over, "over the cap of %d: %s" % (cap, "; ".join(over)))
+
+    def test_e13_no_real_description_cell_is_cut(self):
+        # Decision catalog-cells-never-cut: no cell loses text. Render the real repo at the cap and with
+        # no cap; a row that differs was cut. The lists are zipped, never keyed: two judge rows share a key.
+        import hook_catalog as gen
+        saved = gen.CELL_CAP, gen.ROOT
+        try:
+            gen.ROOT = ROOT
+            capped, problems = gen.render()
+            gen.CELL_CAP = sys.maxsize
+            full, more = gen.render()
+        finally:
+            gen.CELL_CAP, gen.ROOT = saved
+        self.assertEqual(problems + more, [], "the real repo does not render")
+        capped, full = page_rows(capped), page_rows(full)
+        self.assertEqual(len(capped), len(full))
+        self.assertTrue(full, "no catalog rows, so the scan proves nothing")
+        cut = [(len(u["What it does"]), u["Key"]) for c, u in zip(capped, full) if c["What it does"] != u["What it does"]]
+        self.assertFalse(cut, "%d cells cut at the cap of %d; the longest cell is %d chars, so the cap must be at least that: %s" % (
+            len(cut), saved[0], max(len(u["What it does"]) for u in full), "; ".join("%s %d chars" % (k, n) for n, k in sorted(cut, reverse=True))))
 
 
 if __name__ == "__main__":

@@ -7,10 +7,8 @@ GUARD_UNDER_TEST=<copy> and CLAUDE_CONFIG_DIR=<temp dir>. The suite must go red
 (a nonzero exit backed by at least one FAIL line). A mutation the suite does not
 catch is "survived", and any survivor fails this run.
 
-A RED SUITE IS NOT ENOUGH. A nonzero exit plus any red line used to count as "killed", even
-when every red line belonged to some OTHER case than the one the mutation's label names. A
-mutant that breaks the waiter rule could die on an unrelated shared-tree case and still count
-as caught, which proves nothing about the rule its label names. Every mutation below therefore
+A RED SUITE IS NOT ENOUGH. A mutant could die on a case unrelated to the rule its label
+names, which proves nothing about that rule. Every mutation below therefore
 carries a fifth field: the case name (or a distinctive fragment of it) that MUST appear among
 the suite's own FAIL lines. A mutant whose red lines miss that name is "WRONG CAUSE", kept
 distinct from "survived", and fails this run exactly as a survivor does. The field is mandatory:
@@ -24,17 +22,10 @@ mutation either way.
 The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
 (MUTATE_JOBS overrides). Each mutant gets its own guard copy and its own config directory, so
 the runs share nothing but the read-only fixture tree the suite builds under its own temp
-root. MEASURED 2026-09-19 on a 4-core machine: 38 mutants serial, 14 min 8 s (22 s each);
-47 mutants parallel, 4 min 29 s. The suite itself spawns guard.py once per case, which is
-where the time goes.
+root. The suite itself spawns guard.py once per case, which is where the time goes.
 
 Run:
     python hooks/mutate_guard.py
-
-Ported from a prior run at
-.../scratchpad/mutate3.py (fourteen mutations), plus five added for rules
-guard.py grew since that run: the live-stream rule, the waiter rule (Rule 9),
-the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 """
 
 import os
@@ -155,10 +146,8 @@ MUTATIONS = [
      '        if False:\n            return False\n    return True', "guard",
      'branch: a commit found nowhere else is the only copy, and the rule denies'),
     ("branch-delete: the base never falls back past origin/HEAD",
-     '    for name in ("main", "master"):\n        answer = _git(where, "rev-parse", "--verify", '
-     '"-q", "refs/heads/" + name)',
-     '    for name in ():\n        answer = _git(where, "rev-parse", "--verify", "-q", '
-     '"refs/heads/" + name)', "guard",
+     '    candidates = [remote + "/main", remote + "/master", "main", "master"]',
+     '    candidates = []', "guard",
      'branch: local main\'s fallback still denies an only-copy branch'),
 
     ("worktree-remove: --force is read as the path, missing the real target",
@@ -272,11 +261,11 @@ MUTATIONS = [
      '    if repo is None or repo.returncode != 0:\n        return None',
      '    if False:\n        return None', "guard", 'push: forced with a plus where git cannot be read asks'),
     ("force-push: origin/HEAD is ignored for the fallback names",
-     '        return (head.stdout.strip()[len(prefix):],)',
+     '        return named',
      '        return DEFAULT_BRANCH_FALLBACK', "guard", 'named by origin/HEAD, not by name'),
     ("force-push: the fallback forgets master",
-     '    return DEFAULT_BRANCH_FALLBACK\n\n\n# A quoted',
-     '    return ("main",)\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
+     '    return DEFAULT_BRANCH_FALLBACK + named\n\n\n# A quoted',
+     '    return ("main",) + named\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
     ("force-push: HEAD as a destination is not resolved",
      '        elif target in ("HEAD", "@"):',
      '        elif target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
@@ -339,7 +328,7 @@ MUTATIONS = [
      'trim: env: grep with a dot-star pattern'),
     ("machine-wide-kill: pkill and killall no longer deny in command position",
      '    if tool in KILL_COMMAND_WORDS:\n        return word',
-     '    if False:\n        return word', "guard", 'kill: pkill by pattern'),
+     '    if False:\n        return word', "guard", 'kill: pkill by pattern denies'),
     ("machine-wide-kill: taskkill's image flag no longer denies",
      '    if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):\n'
      '        return word',
@@ -570,7 +559,8 @@ MUTATIONS = [
      'waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed'),
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
-     "    for pattern in ():\n        found = pattern.search(cmd)", "guard", 'delete: the root'),
+     "    for pattern in ():\n        found = pattern.search(cmd)", "guard",
+     'delete: Remove-Item at a drive root'),
     # Added 2026-09-24 with the cmd.exe verbs (`rd`/`rmdir`/`del`/`erase` and their `/s` flag),
     # the Windows twin of the mutant just above. Drops the new forms back to the gap they fixed:
     # `rd /s /q C:\` denied nothing before this rule existed.
@@ -578,6 +568,13 @@ MUTATIONS = [
      'CMD_EXE_DELETE_WORDS = {"rd", "rmdir", "del", "erase"}',
      "CMD_EXE_DELETE_WORDS = set()", "guard",
      'delete: rd /s /q at a drive root, Bash'),
+    # Added 2026-10-17 (guard-audit-fixes-234), the token reader of POSIX `rm -rf`. The patterns
+    # above never match a `-rf` cluster, so `rm_delete_hit` is the only reader of `rm -rf ~/`.
+    # Dropping it leaves the cmd.exe reader alone and every POSIX wide delete allowed.
+    ("destructive-delete: drop the token reader of rm -rf, the POSIX form",
+     "        matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)",
+     "        matched = cmd_exe_delete_hit(segment)", "guard",
+     'delete: the home directory with a trailing slash'),
     ("git-call parsing: drop the redirect strip before tokenizing",
      '    text = REDIRECTION.sub(" ", segment)',
      '    text = segment', "guard", 'checkout: a start point survives a merged-output redirect'),
@@ -757,6 +754,10 @@ MUTATIONS = [
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
+    ("cap: a Write of a settings file never asks, so an opus lift lands unasked",
+     '        if is_settings_file(target, cwd):\n            change = cap_change_parts(write_content_parts(tool_input))',
+     '        if False:\n            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
      '    return "haiku" in str(model).lower()',
      '    return "haiku" in str(model)', "guard", 'floor: Agent with a mixed-case haiku spelling is denied'),
@@ -769,6 +770,10 @@ MUTATIONS = [
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
      'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)'),
+    ("step-up: a builder try 3 on a non-opus model is no longer refused",
+     'if role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
+     'if False and role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
+     "guard", 'floor step-up: builder Try 3 of 3 on sonnet is denied'),
     ("frozen-path: the config-watch baseline store is not frozen",
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),
@@ -784,7 +789,7 @@ MUTATIONS = [
     #   "silent-write: the quiet-flag arm no longer fires for any subcommand"
     #     -> "silent-write: push's own quiet flag needs no redirect at all"
     #   "silent-write: a discarding redirect no longer silences anything"
-    #     -> "silent-write: a discarded proof of landing, stdout alone"
+    #     -> "silent-write: discarding a write command output denies, stdout alone"
     #   "silent-write: the merge --abort carve-out is gone"
     #     -> "silent-write: an abort lands nothing, so it is carved out"
     #   "silent-write: fetch joins the denied subcommands"
@@ -803,7 +808,7 @@ MUTATIONS = [
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
      '            refuse(tool, "deny", "silent-write",', "guard",
-     "silent-write: a discarded proof of landing, stdout alone"),
+     "silent-write: discarding a write command output denies, stdout alone"),
     ("silent-write: the quiet-flag arm no longer fires for any subcommand",
      '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
      '        if False and quiet_write(args):', "guard",
@@ -811,7 +816,7 @@ MUTATIONS = [
     ("silent-write: a discarding redirect no longer silences anything",
      '        if silenced:\n            return matched, "redirect"',
      '        if False:\n            return matched, "redirect"', "guard",
-     'silent-write: a discarded proof of landing, stdout alone'),
+     'silent-write: discarding a write command output denies, stdout alone'),
     ("silent-write: the merge --abort carve-out is gone",
      '        if subcommand == "merge" and "--abort" in args:\n            continue',
      '        if False:\n            continue', "guard",
@@ -1089,43 +1094,45 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
      "guard", "worktree-home:"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
-     '            if path_is_inside(home_cwd, home) is False:',
-     '            if path_is_inside(home_cwd, home) is None:',
+     '        if (path_is_inside(home_cwd, home) is False\n',
+     '        if (path_is_inside(home_cwd, home) is None\n',
      "guard", "worktree-home:"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is None):',
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is None):',
      "guard", "worktree-home:"),
+    # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
+    # refuse; a mutant that returns a detail for a status that allows is a deny.
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
-     '    if home_status == "home":',
+     '    if home_status != "home":',
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "unknown":\n'
-     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "unreadable state")\n'
-     '    if home_status == "home":',
+     '        return "unreadable state"\n'
+     '    if home_status != "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
-     '    if home_status == "home":',
+     '    if home_status != "home":',
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "no-record":\n'
-     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "no record")\n'
-     '    if home_status == "home":',
+     '        return "no record"\n'
+     '    if home_status != "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
-     '                try:\n                    resolved_target = _resolved(write_target, home_cwd)\n'
-     '                except Exception:\n                    resolved_target = write_target\n'
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
-     '                resolved_target = write_target\n'
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
+     '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
+     '            except Exception:\n                resolved_target = write_target\n'
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
+     '            resolved_target = write_target\n'
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
      "guard", "worktree-home:"),
     ("worktree-home: the write-target loop judges only the first path field",
-     '            for write_target in (write_targets(tool_input) if home_primary else ()):',
-     '            for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
+     '        for write_target in (write_targets(tool_input) if home_primary else ()):',
+     '        for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
      "guard", "worktree-home: a later path field outside"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
@@ -1200,7 +1207,10 @@ MUTATIONS = [
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
      '            module.SH_TIMEOUT = None', "guard",
      'merge-checks: a gh slower than the gate waits is unknown'),
-    ("cite-by-id: the deferred folder is no record folder",
+    ("bare-merge: a stamp with a merge block reads as not using the merge tool",
+     '"merge" in config', 'False', "guard",
+     'bare-merge: gh pr merge in a repo with a merge block asks'),
+    ("cite-by-id: the debts folder is no record folder",
      '"|".join(map(re.escape, names))', 're.escape(names[0])', "guard",
      'cite-by-id: a -am cluster denies'),
     ("cite-by-id: the record folders are read from nowhere",
@@ -1535,7 +1545,7 @@ def run_mutant(sources, work: str, entry):
     if target in ("ruling", "decision"):
         # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
-        # (mutant-cause-of-death, a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)

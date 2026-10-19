@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code hook: reply judge (Stop). Judges the final reply against three style rules.
+"""At Stop, a model (Haiku) judges the final reply against three style rules. It runs on every fifth Stop and never blocks. A finding comes back as a note on the next turn.
 
-It replaces the `type: prompt` Stop judge, pulled 2026-10-12 because it ignored its own line
-"if stop_hook_active is true, answer ok" and blocked done replies in a loop. A prompt hook
-cannot exit on a field in code. This command hook does: `stop_hook_active` true means this Stop
-is already a rewrite, so it exits 0 at once and never calls the model.
+It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
+in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
+exits 0 at once and never calls the model.
 
 The model call is `decision_watch.invoke_model`, the one home for it: Haiku at effort xhigh,
 `--safe-mode`, no tools, and an empty config dir and scratch cwd, so the child cannot fire this
@@ -28,8 +27,8 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 OK_SHAPE = {"ok": (True, False)}
-MODEL_TIMEOUT = 20  # measured 6.6, 7.0, 8.0 s per run on this machine; the Stop entry allows 25
-SAMPLE_EVERY = 5  # owner ruling 2026-10-13: the judge runs on Stops 1, 6, 11 of a session
+MODEL_TIMEOUT = 20  # the Stop entry allows 25
+SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 

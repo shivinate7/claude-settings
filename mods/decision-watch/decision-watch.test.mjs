@@ -12,8 +12,8 @@
 // the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder;
 // a config notice is its own toast and contains the word "notice" (any case), and the verdict toast holds the
 // verdict text exactly; a judge slot held by a python call that never returns frees within 60 s.
-// Amended in review round 2 (were pins of e40df46): the two-phase model-call fields (timeoutMs is pinned
-// on its own) and the stop_hook_active case (a STOP seen write is allowed).
+// The two-phase model-call fields (timeoutMs is pinned on its own) and the stop_hook_active case
+// (a STOP seen write is allowed).
 // Guessed contract point, HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
 // passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
 import assert from 'node:assert/strict'
@@ -96,6 +96,13 @@ await test('source: the host reads $.model.complete( and the event names as lite
   assert.ok(text.includes('$.model.complete('), 'missing the $.model.complete( literal')
   assert.ok(text.includes('"classic.Stop"'), 'missing the "classic.Stop" literal')
   assert.ok(text.includes('"command.run"'), 'missing the "command.run" literal')
+})
+
+// A raw U+FFFF (a noncharacter) in the file can be dropped or mangled by an editor
+// or a transfer, and then the asciiJson range end changes with no sign. The escape \uFFFF is plain ASCII.
+// This is a character-presence check, not a scan of strings and comments, so it needs no opener cases.
+await test('source: hooks/register.mjs holds no raw U+FFFF character, the asciiJson range end is an escape', () => {
+  assert.ok(!readFileSync(REGISTER, 'utf8').includes('\uFFFF'), 'a raw U+FFFF character is in hooks/register.mjs')
 })
 
 // Item 1. The validator rejects a $ noun read as a value. $.fs.write makes folders, so there is no mkdir.
@@ -301,7 +308,7 @@ await test('stop: never throws when every host call throws, and still returns ne
   await settle()
 })
 
-// Amended (review round 2): a STOP seen line is allowed; no judge may start.
+// A STOP seen line is allowed; no judge may start.
 await test('stop: stop_hook_active skips the judge: no process call, no model call, no START or END line', async () => {
   const h = await load(host())
   const NEXT = { decision: 'pass' }
@@ -326,7 +333,7 @@ await test('stop: a STOP seen line is written before Stop returns next(e)', asyn
   }
 })
 
-// Item 7 guard: a write that never returns cannot hold Stop. Green on e40df46, which writes nothing before Stop returns.
+// A write that never returns cannot hold Stop.
 await test('stop: a STOP seen write that never returns cannot hold Stop past 1.5 s', async () => {
   const h = await load(host())
   h.$.fs.write = () => new Promise(() => {})
@@ -346,7 +353,7 @@ await test('two-phase: phase 1 emits the prompt; the model call takes it with ma
   same(py[1].argv.slice(0, 3), [PY, '-I', SCRIPT], 'phase 2 argv head')
   same(py[1].argv[3], '--model-text', 'phase 2 flag')
   same(py[1].argv[4], ALLOW_REPLY, 'phase 2 reply')
-  // Amended: timeoutMs is pinned on its own, in the case below.
+  // timeoutMs is pinned on its own, in the case below.
   same(h.modelReqs.map(({ timeoutMs, ...rest }) => rest), [{ model: 'haiku', prompt: PROMPT, maxTokens: 512 }], 'model call fields')
   same(JSON.parse(py[0].opts.stdin).session_id, SID, 'phase 1 stdin is the Stop JSON')
   same(JSON.parse(py[1].opts.stdin).transcript_path, TRANSCRIPT, 'phase 2 stdin is the same Stop JSON')
@@ -372,9 +379,23 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
 })
 
+// An aborted call returns no text and a reason. The reply still goes to python
+// as --model-error (a reason is not a verdict reply), and the error and the log name the reason.
+await test('model error: an aborted reply with a reason and no text goes as --model-error, and the log names the reason', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: false, reason: 'aborted by user', usage: {} }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  const argv = pyCalls(h)[1].argv
+  assert.ok(argv.includes('--model-error'), 'phase 2 has --model-error')
+  assert.ok(!argv.includes('--model-text'), 'phase 2 has no --model-text: the reason is not a reply')
+  assert.ok(String(argv[argv.indexOf('--model-error') + 1]).includes('aborted by user'), 'the error names the reason')
+  assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
+  assert.match(endData, /aborted by user/, 'log does not name the reason')
+})
+
 // ---- HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
 
-// Red on main: main passes no key, so the moved evidence is judged afresh and reads a silent ALLOW.
+// With no phase-1 key, the moved evidence is judged afresh and reads a silent ALLOW.
 await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
   let h
   h = await load(host({
@@ -450,8 +471,8 @@ await test('shown: an ALLOW shows nothing', async () => {
 
 // ---- the config notice. decision_watch.py joins config_report() text onto its message, after the verdict, with
 // " ".join at main, so a notice rides on every verdict, ALLOW included, and on a cheap-path message too.
-// Arbiter ruling, 2026-10-14 00:09 CDT: each config notice is its own toast line, apart from the verdict, and is
-// marked as a notice. An ALLOW verdict itself stays silent. The notice's marker is the word "notice" (any case).
+// Each config notice is its own toast line, apart from the verdict, and is marked as a notice. An ALLOW
+// verdict itself stays silent. The notice's marker is the word "notice" (any case).
 const CONFIG_LINE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json')
 const CONFIG_NOTICE = CONFIG_LINE + pyConst('TAIL')
 // What decision_watch.py prints under a split flag (the mod's own call): systemMessage is the joined text,
@@ -497,7 +518,7 @@ await test('config notice: a FLAG with a config notice shows two toasts, the FLA
   noticeToast(h.toasts.find(t => t !== FLAG))
 })
 
-// Same ruling for an UNKNOWN verdict: the UNKNOWN text exactly, and the notice as its own toast.
+// The same holds for an UNKNOWN verdict: the UNKNOWN text exactly, and the notice as its own toast.
 await test('config notice: an UNKNOWN with a config notice shows two toasts, the UNKNOWN and the notice', async () => {
   const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
   const h = await load(host({ py2: splitOut(TEXT, [CONFIG_NOTICE]) }))
@@ -604,7 +625,7 @@ await test('/dw after a shadow FLAG on the same turn still shows the FLAG, not n
   assert.doesNotMatch(text, /nothing to say/, 'the shadow verdict muted /dw')
 })
 
-// Green guard on e40df46: the cache stays. A second Stop on an unchanged turn makes no second model call.
+// The cache stays. A second Stop on an unchanged turn makes no second model call.
 await test('cache kept: a second shadow Stop on an unchanged turn makes no second model call', async () => {
   const h = await load(host())
   await fire(h, 'classic.Stop', stopEvent(), {})
@@ -617,7 +638,7 @@ await test('cache kept: a second shadow Stop on an unchanged turn makes no secon
 
 // ---- item 3: a lost verdict is never a pass. The python marker is the one signal.
 
-// Green pass-through on e40df46: the mod shows the python marker. The red for this is in the python file.
+// The mod shows the python marker. The python file pins the marker itself.
 await test('lost verdict: a model FLAG whose phase 2 finds the verdict already recorded shows verdict lost, never ALLOW', async () => {
   let h
   h = await load(host({
@@ -648,7 +669,8 @@ await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, 
 
 await test('stdin: the JSON sent to python is ASCII-only, and a non-ASCII path round-trips', async () => {
   const cwd = '/work/café/repo'
-  const transcript = REAL_CFG + '/projects/café/' + SID + '.jsonl'
+  // U+FFFF is the top of the escaped range: it must escape, and round-trip.
+  const transcript = REAL_CFG + '/projects/café\uFFFF/' + SID + '.jsonl'
   const h = await load(host())
   await fire(h, 'classic.Stop', stopEvent({ cwd, transcript_path: transcript }), {})
   await judged(h)
@@ -985,7 +1007,7 @@ await test('HOLE 13: the END log keeps every notice when the line runs 3000 char
   }
 })
 
-// ---- dw-unread-dir, review round 1 (lane dw-unread-dir). Guessed contract points, as the HOLE cases above: a config
+// ---- dw-unread-dir. Guessed contract points, as the HOLE cases above: a config
 // notice is written as its own NOTICE line, `<stamp> NOTICE <sid> | NOTICE: <text>`; the mod does not cap a notice, so
 // a long one reaches the log whole; a newline in a notice must not start a log record.
 
@@ -1037,7 +1059,7 @@ await test('dw-unread-dir (b): a notice with a newline and "STOP seen" does not 
   same(text.split('\n').pop(), 'Stops seen: 1', '/dw last line')
 })
 
-// ---- dw-unread-dir, review round 2. A long notice is split into pieces (register.mjs, the split loop in shadow()).
+// ---- dw-unread-dir. A long notice is split into pieces (register.mjs, the split loop in shadow()).
 // The pieces, read back in order from the final log, must join to the notice exactly.
 
 // The payloads of the NOTICE lines in the final log, in order. A split round-trips only if these join to the notice.

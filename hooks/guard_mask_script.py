@@ -1,7 +1,7 @@
 """The guard's mask-script family: the Workflow script lexer that masks strings and comments.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import re
 

@@ -55,18 +55,23 @@ GOOD_MAP = {
 }
 
 
+def kind_count(rule_map, kind):
+    rules = rule_map.get("rules", {})
+    return sum(1 for r in rules.values()
+               if isinstance(r, dict) and (r.get("mechanism") or {}).get("kind") == kind)
+
+
 def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
-        rule_floor=1, unmechanized_expected=None):
+        rule_floor=1, unmechanized_expected=None, judgment_expected=None):
     """Call check() with small pins sized to the fixture, not this repo's real numbers."""
     if rule_map is None:
         rule_map = GOOD_MAP
     if unmechanized_expected is None:
-        rules = rule_map.get("rules", {})
-        unmechanized_expected = sum(
-            1 for r in rules.values()
-            if isinstance(r, dict) and (r.get("mechanism") or {}).get("kind") == "unmechanized"
-        )
-    return rule_audit.check(md, rule_map, guard, workflow, rule_floor, unmechanized_expected)
+        unmechanized_expected = kind_count(rule_map, "unmechanized")
+    if judgment_expected is None:
+        judgment_expected = kind_count(rule_map, "judgment")
+    return rule_audit.check(md, rule_map, guard, workflow, rule_floor, unmechanized_expected,
+                            judgment_expected=judgment_expected)
 
 
 def gate_map(mechanism):
@@ -265,11 +270,110 @@ class RuleAuditTests(unittest.TestCase):
         self.assertTrue(any("duplicate" in p and "shared-trees-no-destructive-git" in p
                             for p in problems), problems)
 
+JUDGMENT_REASON = "No check can judge whether this sentence was followed, so a person must."
+TWO_RULE_MD = GOOD_MD + "**Second.** Judge it.<!-- rule:second-judged-rule -->\n"
+
+
+def one_row_map(kind, reason=None):
+    mechanism = {"kind": kind}
+    if reason is not None:
+        mechanism["reason"] = reason
+    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+
+
+class JudgmentKindTests(unittest.TestCase):
+    """`judgment`: an unmechanized rule whose reason says no check can judge it. Same reason
+    floor as `unmechanized`, its own pin JUDGMENT_EXPECTED, passed as `judgment_expected`.
+    `unmechanized` never reads `ref`, so no ref case is pinned."""
+
+    def reason_problems(self, problems):
+        # Only a reason check says these words. "unknown mechanism kind 'judgment'" does not.
+        return [p for p in problems
+                if "judgment" in p and ("words of reason" in p or "rubber stamp" in p)]
+
+    def test_judgment_is_a_kind_with_its_own_integer_pin(self):
+        self.assertIn("judgment", rule_audit.KINDS)
+        self.assertIsInstance(rule_audit.JUDGMENT_EXPECTED, int)
+
+    def test_judgment_row_with_a_full_reason_is_clean(self):
+        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON), judgment_expected=1)
+        self.assertEqual(problems, [])
+
+    def test_judgment_reason_of_exactly_the_minimum_words_is_clean(self):
+        reason = " ".join(["word"] * rule_audit.REASON_MIN_WORDS)
+        problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
+        self.assertEqual(problems, [])
+
+    def test_judgment_reason_one_word_short_fails_as_a_reason_problem(self):
+        reason = " ".join(["word"] * (rule_audit.REASON_MIN_WORDS - 1))
+        problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
+        self.assertTrue(self.reason_problems(problems), problems)
+
+    def test_judgment_with_a_thin_empty_blank_or_missing_reason_fails(self):
+        for reason in ("no reason", "", "   ", None):
+            with self.subTest(reason=reason):
+                problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
+                self.assertTrue(self.reason_problems(problems), problems)
+
+    def test_judgment_count_above_the_pin_fails_as_more(self):
+        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON), judgment_expected=0)
+        self.assertTrue(any("judgment" in p and "more than the pinned 0" in p for p in problems),
+                        problems)
+
+    def test_judgment_count_below_the_pin_fails_as_fewer(self):
+        # A `>` in place of `!=` passes the case above and misses this one. GOOD_MAP has no judgment row.
+        problems = run(judgment_expected=1)
+        self.assertTrue(any("judgment" in p and "fewer than the pinned 1" in p for p in problems),
+                        problems)
+
+    def test_judgment_row_is_not_counted_as_unmechanized(self):
+        # One judgment row, unmechanized pin 0: clean only if that pin counts `unmechanized` alone.
+        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON),
+                       unmechanized_expected=0, judgment_expected=1)
+        self.assertEqual(problems, [])
+
+    def test_unmechanized_pin_ignores_judgment_rows_beside_unmechanized_ones(self):
+        rule_map = {"rules": {
+            "shared-trees-no-destructive-git": {"mechanism": {
+                "kind": "unmechanized", "reason": JUDGMENT_REASON}},
+            "second-judged-rule": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}}}}
+        problems = run(md=TWO_RULE_MD, rule_map=rule_map, unmechanized_expected=1,
+                       judgment_expected=1)
+        self.assertEqual(problems, [])
+
+    def test_relabeling_unmechanized_as_judgment_cannot_dodge_the_pins(self):
+        # The row was `unmechanized` (pin 1). Relabeled `judgment`, with neither pin moved.
+        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON),
+                       unmechanized_expected=1, judgment_expected=0)
+        self.assertTrue(any("unmechanized" in p and "fewer than the pinned 1" in p
+                            for p in problems), problems)
+        self.assertTrue(any("judgment" in p and "more than the pinned 0" in p
+                            for p in problems), problems)
+
+
 SIBLING_MAP = {
     "rules": {
         "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
     }
 }
+
+
+class KindDocTests(unittest.TestCase):
+    """The module docstring keeps the two kinds apart: only `judgment` says no check can judge the rule.
+    A reader of `unmechanized` must not read it as the same case (claude-md-shrink)."""
+
+    def bullet(self, kind):
+        doc = rule_audit.__doc__
+        start = doc.index("  - `%s`:" % kind)
+        end = doc.find("\n  - `", start + 1)
+        return doc[start:end if end != -1 else len(doc)]
+
+    def test_unmechanized_bullet_does_not_say_cannot_be_checked(self):
+        self.assertNotIn("cannot be checked", self.bullet("unmechanized"))
+
+    def test_the_bullet_slice_reads_the_whole_unmechanized_bullet(self):
+        # Control: a slice that came back short would pass the case above for the wrong reason.
+        self.assertIn("reason", self.bullet("unmechanized"))
 
 
 class GuardTextTests(unittest.TestCase):
@@ -297,7 +401,7 @@ class GuardTextTests(unittest.TestCase):
     def test_rule_refused_only_in_a_sibling_module_resolves(self):
         root = self.tree(self.files())
         guard_text = rule_audit.guard_text(root)
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0)
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
         self.assertEqual(problems, [])
 
     def test_guard_py_alone_leaves_that_sibling_rule_stale(self):
@@ -305,7 +409,7 @@ class GuardTextTests(unittest.TestCase):
         case above proves the reader, not the fixture."""
         root = self.tree(self.files())
         guard_text = rule_audit.read(os.path.join(root, "hooks", "guard.py"))
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0)
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
         self.assertTrue(any("sibling-rule" in p and "Stale row" in p for p in problems), problems)
 
     def test_guard_text_joins_guard_modules_and_no_test_file(self):

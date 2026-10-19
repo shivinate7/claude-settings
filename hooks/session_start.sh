@@ -43,8 +43,8 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 
-# core.worktree in the SHARED config re-points every checkout of the clone at one tree. Incident
-# (q_max, 2026-10-14): a test's child `git init` inherited GIT_DIR and GIT_WORK_TREE and wrote it.
+# core.worktree in the SHARED config re-points every checkout of the clone at one tree. A child
+# `git init` that inherits GIT_DIR and GIT_WORK_TREE writes it.
 # Warns only, never fixes: the value may be someone's live work. Both git calls are bounded, so a
 # slow git never stalls session start. `git config` exits 0 when the key is set, 1 when it is
 # absent, and above 1 when the read failed or was killed, which is reported as unknown, never as
@@ -174,7 +174,7 @@ if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
 fi
 
 # More than AGENT_WORKTREE_LIMIT `.claude/worktrees/agent-*` worktrees: one notice with the count
-# (owner ruling 2026-10-15). Agent end and the janitor remove finished ones; this says when they
+# Agent end and the janitor remove finished ones; this says when they
 # pile up anyway. One bounded worktree listing, counted with grep. A failed read is reported as
 # unknown, never as a count of zero.
 AGENT_WORKTREE_LIMIT=50

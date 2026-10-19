@@ -5,7 +5,7 @@
 #   map skill tests, steps of the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA. decisions/docs-only-prs-skip-code-suites.md.
+# BASE_SHA.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
 ALL="$JOBS code mods guard sweep"
@@ -49,6 +49,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.
       lint/test_scanner_traps.mjs) on="$on mods code " ;;
+      # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
+      bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.

@@ -1,7 +1,7 @@
 """The guard's env family: any read or write of an environment file.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import fnmatch
 import re
@@ -18,8 +18,8 @@ from guard_core import (
 # Handing the file to a runner that loads it into its own environment prints nothing and puts
 # nothing in the transcript, so this layer allows it by name.
 #
-# The check is a PATH TOKEN test and never a substring test. MEASURED in q_max on 2026-09-08: a
-# substring test over the backslash-normalized command refused both of these:
+# The check is a PATH TOKEN test and never a substring test. A substring test over the
+# backslash-normalized command refuses both of these:
 #
 #   grep -n "dotenv|VERIFY_DATABASE_URL|process\.env" harness/browser/verify.mjs
 #   ls -la .env
@@ -43,9 +43,8 @@ ENV_BASENAME = re.compile(r"^\.env(\.[A-Za-z0-9_.\-]+)?$")
 # regex escape. `.\.env` and `C:\Users\me\.env` are paths. The `process\.env` in a grep pattern is
 # not. A separator is followed by a path segment, while `\.` and `\\` are regex escapes.
 #
-# MEASURED in q_max on 2026-09-09: reading ANY backslash as a separator refused
-# `grep "import\.meta\.env"`, because the head `import\.meta` holds a backslash. One identifier
-# deeper than the first case, and the same defect.
+# Reading ANY backslash as a separator refuses `grep "import\.meta\.env"`, because the head
+# `import\.meta` holds a backslash. One identifier deeper than the first case, and the same defect.
 #
 # The residue, stated rather than hidden: a RELATIVE Windows path whose every segment after the
 # first begins with a dot, such as `foo\.config\.env`, is no longer read as a path. Text alone
@@ -94,9 +93,6 @@ ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+commit|gh\s+pr\s+create)\b")
 ENV_MESSAGE_ARG = re.compile(
     r"""(?P<flag>(?:-m|--message|--title|--body)(?:=|\s+))"""
     r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')""")
-# The text ahead of a substitution that sits inside a message argument, so a substitution that
-# only prints text there is text.
-ENV_IN_MESSAGE = re.compile(r"(?:-m|--message|--title|--body)(?:=|\s+)\"(?:[^\"\\]|\\.)*$")
 
 
 def _blank_messages(segment: str) -> str:

@@ -449,6 +449,30 @@ class RulingKindTests(unittest.TestCase):
         self.assert_passes(REC)
         self.assert_passes(REC, "--dir", "decisions")
 
+    # --dir=VALUE is read as --dir VALUE. A leftover option fails closed, never reads as a file name.
+
+    def test_dir_equals_form_checks_the_named_folder(self):
+        self.css_plan()
+        self.put(NESTED, record("Owner ruling. Ship it."))  # no Kind line
+        rc, out = self.lint("--dir=" + DOCS, NESTED)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_ruling_kind: FAIL:", out)
+        self.put(NESTED, record(BUILD_OK))
+        self.assert_passes(NESTED, "--dir=" + DOCS)
+
+    def test_dir_equals_form_that_names_no_folder_fails(self):
+        rc, out = self.lint("--dir=nope")
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_unknown_option_fails_never_reads_as_a_file(self):
+        self.put(REC, record(BUILD_OK))
+        for opt in ("--bogus", "-x", "--dirs=decisions"):
+            with self.subTest(opt=opt):
+                rc, out = self.lint(opt, REC)
+                self.assertNotEqual(rc, 0, out)
+                self.assertNotIn("Traceback", out)
+
 
 if __name__ == "__main__":
     unittest.main()

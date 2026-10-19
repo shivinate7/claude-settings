@@ -1,8 +1,8 @@
 """The guard's shared code: stream encoding, shell segments, heredoc bodies, git call parsing,
 command roots, tree and worktree reads, session liveness, the config folder, and the log.
 
-guard.py is the only entry point. It loads this module from its own folder (decision
-guard-split-by-family). Other files reach these names through `guard`. A test or the janitor
+guard.py is the only entry point. It loads this module from its own folder.
+Other files reach these names through `guard`. A test or the janitor
 that patches one of them patches it here, on the one object that every caller reads.
 """
 import errno
@@ -327,11 +327,10 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
 # environment layer below, so the two never drift into judging an assignment two different ways.
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-# PowerShell's own assignment, `$name = value`, two tokens under shlex rather than one: `$sg`
-# then `=`. MEASURED against a real launch, `$sg = Start-Process npx ... -PassThru`, the exact
-# shape PowerShell's own remedy for rule 2b recommends. Before this, `resolve_command` read
-# `$sg` itself as the command word on that line, which matches no rule's tool name, so every
-# command-word rule silently missed the real command sitting right after it.
+# PowerShell's own assignment, `$name = value`, is two tokens under shlex: `$sg` then `=`. MEASURED
+# against a real launch, `$sg = Start-Process npx ... -PassThru`, the shape PowerShell's remedy for
+# rule 2b recommends. `resolve_command` skips it: `$sg` as the command word matches no rule's tool
+# name, so every command-word rule would miss the real command after it.
 POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 
 # A wrapper that runs another program in its place, so the CALLED program is a segment's real
@@ -353,6 +352,14 @@ WRAPPER_VALUE_FLAGS = {
              "--close-from", "-D", "--chdir", "-R", "--chroot", "-T", "--command-timeout",
              "-r", "--role", "-t", "--type", "-U", "--other-user"},
 }
+# Runners that start another command but are no `COMMAND_WRAPPERS` entry: `wrapped_commands` reads
+# them. Their value flags sit here so `_wrapper_flags` skips the same way.
+WRAPPER_VALUE_FLAGS.update({
+    "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
+    "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+})
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
@@ -588,9 +595,7 @@ def _walk_wrappers(tokens):
 # ------------------------------------------------------------------ heredoc bodies
 #
 # A heredoc body is DATA being written, not a command being run. A commit message that DISCUSSES a
-# refused command must not trip the guard. MEASURED in job-cost-reporting on 2026-08-20: a commit
-# message naming the protected folder was refused, and that was one of three false positives in the
-# guard's first week.
+# refused command must not trip the guard.
 #
 # The HEADER LINE is kept, so a redirect in the header still counts as a write:
 # `cat <<'EOF' > .claude/settings.json` writes the settings file.
@@ -794,16 +799,15 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     return _drop_heredoc_bodies(cmd)
 
 
-# BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). Before heredoc-one-step the
-# header pattern was this one. It finds no header at a word such as `'EOF-1'` or `\EOF`. At `EOF-1` or `"E"OF`
-# it reads a shorter word, which closes the body early at a line `EOF` or `E`. Either way main kept body lines
-# in view, so a run path that no rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line,
-# `| python3 -`) still denied. heredoc_delimiter reads those words right. So _drop_heredoc_bodies walks the
-# command twice, as the lane reads it and as main read it, and keeps a line when either walk keeps it: every
-# drop, the unconditional one too, sees what main saw. That holds for two heredocs in one command, where main's
-# early close at a line of the second body leaves its payload outside every body.
+# BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
+# pattern. At a word such as `'EOF-1'` or `\EOF` it finds no header; at `EOF-1` or `"E"OF` it reads a shorter
+# word and closes the body early at a line `EOF` or `E`. Main so kept body lines in view, and a run path no
+# rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line, `| python3 -`) still denied.
+# heredoc_delimiter reads those words right, so _drop_heredoc_bodies walks the command as the lane reads it and
+# as main read it, and keeps a line when either walk keeps it: every drop, the unconditional one too, sees what main saw,
+# also for two heredocs where main's early close at a line of the second body leaves its payload outside every body.
 # The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
-# Retire it when each run path reads its body (debt heredoc-run-other-path).
+# Retire it when each run path reads its body.
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
@@ -908,8 +912,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # the owner's editor and every other session, so a discard there earns a "deny".
 #
 # The directory is the last `cd <path>` in the command, or a `git -C <path>`, or the shell's own cwd.
-# MEASURED in job-cost-reporting on 2026-09-10: a gate that read the main checkout for every command
-# judged a worktree command against another branch.
+# Reading the main checkout for every command would judge a worktree command against another branch.
 #
 # READ OFF PARSED TOKENS, NOT THE RAW STRING. A regex over the raw text cannot tell a real `cd`
 # from one sitting inside a quoted argument or a `#` comment. MEASURED against this file before
@@ -917,9 +920,7 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # /elsewhere\n<destructive>` both resolved to `/elsewhere`, because the old `CD_RE` only asked
 # whether `cd` was preceded by `^`, `;`, `&`, or `|` in the raw text — true for both, despite the
 # `cd` in each case never running. `split_segments` (quote- and comment-aware) plus
-# `segment_tokens` (shlex) are the readers already used elsewhere in this file for the same
-# reason. Lifted from `~/Developer/banchi/scripts/shell_parse.py`, which paid this debt first
-# by reading `cd` and `git -C` off tokens instead of a raw-text regex.
+# `segment_tokens` (shlex) are the readers already used elsewhere in this file.
 # `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
 # applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
 # `git --work-tree=B status --porcelain` reported B's modified file and B's untracked file. The
@@ -1280,8 +1281,8 @@ def stash_stack(where: str):
 # working-tree read at all: the subject is the WORK the branch names, and the question is whether
 # that work exists anywhere else.
 #
-# Resolve the base in this order: `origin/HEAD`, then local `main`, then local `master` (owner's
-# ruling, this plan). None answering is UNREADABLE, never a silent pass and never a silent deny:
+# Resolve the base in this order: `origin/HEAD` when it resolves, then `origin/main`, `origin/master`,
+# local `main`, local `master`. None answering is UNREADABLE, never a silent pass and never a silent deny:
 # a repository with no default branch this rule can find is one this rule cannot judge.
 #
 # THREE TESTS, ANY ONE PASSING PROVES THE WORK SURVIVES the branch:
@@ -1294,25 +1295,42 @@ def stash_stack(where: str):
 #                  clone elsewhere holds the same commit.
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
-def resolve_default_base(where: str):
-    """Return the ref name of the repository's default branch, or None when none answers.
+def read_default_base(where: str, remote: str = "origin"):
+    """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
 
-    `origin/HEAD` first, then local `main`, then local `master` (owner's ruling). A branch is
-    read against whichever one resolves; the others are never tried once one does.
+    Owner's ruling 2026-10-16: `<remote>/HEAD` when it resolves, then `<remote>/main`, then
+    `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
+    rest are never tried. A dangling `<remote>/HEAD` falls through. The second value is the name
+    the symbolic ref holds, even when that branch does not verify or a later read failed; it is ""
+    when the ref is unset. A name is None when git could not run: unreadable, never "does not
+    exist". The push guard reads the PUSHED remote here; the branch-delete rule and the sweep
+    read `origin`.
     """
-    origin_head = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
-    if origin_head is not None and origin_head.returncode == 0 and origin_head.stdout.strip():
-        ref = origin_head.stdout.strip()
-        live = _git(where, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    candidates = [remote + "/main", remote + "/master", "main", "master"]
+    # No --short: a local branch or tag named `<remote>/<default>` makes git print the ambiguous
+    # `remotes/<remote>/<default>`. The full ref strips to the name with no such ambiguity.
+    named = _git(where, "symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD")
+    if named is None:  # git could not run: unreadable
+        return None, None
+    full_head = named.stdout.strip() if named.returncode == 0 else ""
+    head = full_head.removeprefix("refs/remotes/")
+    if head == full_head or not head.startswith(remote + "/"):
+        head = ""
+    if head:
+        candidates.insert(0, head)
+    for name in candidates:
+        full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
+        live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None
-        if live.returncode == 0:  # a dangling origin/HEAD (git answered no) falls through
-            return ref
-    for name in ("main", "master"):
-        answer = _git(where, "rev-parse", "--verify", "-q", "refs/heads/" + name)
-        if answer is not None and answer.returncode == 0:
-            return name
-    return None
+            return None, head
+        if live.returncode == 0:
+            return name, head
+    return None, head
+
+
+def resolve_default_base(where: str, remote: str = "origin"):
+    """The short ref name of the default branch, or None when none answers (`read_default_base`)."""
+    return read_default_base(where, remote)[0]
 
 
 def branch_is_ancestor(where: str, base: str, branch: str):
@@ -1427,8 +1445,7 @@ SESSION_LIVE_TOLERANCE_MS = 60000
 
 # `_process_start_ms` returns this sentinel, never `None`, when the read itself could not tell
 # whether the process is alive or dead. `None` stays reserved for a CONFIRMED dead pid, so a
-# caller can never coerce "I could not tell" into "it is dead." See
-# `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+# caller can never coerce "I could not tell" into "it is dead."
 PROCESS_START_UNREADABLE = object()
 
 
@@ -1503,8 +1520,7 @@ def _process_start_ms(pid: int):
     """Return a live process's start time in epoch milliseconds. Return `None` when the pid is
     CONFIRMED not running (dead). Return `PROCESS_START_UNREADABLE` when the read could not
     tell either way. A caller must never fold the third state into the second: an unreadable
-    read is not proof of death. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+    read is not proof of death.
 
     POSIX: `ps -o lstart=` prints the start time in THIS machine's own local clock, with no
     timezone marker at all. Read it with `time.mktime`. That call turns a naive `struct_time`
@@ -1631,8 +1647,7 @@ def worktree_live_session(target: str):
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
     confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
-    this read exists to avoid. See
-    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`."""
+    this read exists to avoid."""
     records = session_records()
     if records is None:
         return None
@@ -1945,7 +1960,46 @@ def _log_unlock(handle) -> None:
         pass
 
 
+_pass_who = ("", None)  # (session id, agent id) of the call this process judges
+
+
+def set_pass_context(session_id, agent_id) -> None:
+    """Name the session and subagent whose call this process judges, for the owner override pass."""
+    global _pass_who
+    _pass_who = (session_id, agent_id or None)
+
+
+def set_pass_veto(veto) -> None:
+    """Register the test judge() builds for this call: veto() is true when the call holds an act no
+    override pass lifts. Until it is set, no refusal is passable."""
+    global _pass_veto
+    _pass_veto = veto
+
+
+_pass_veto = lambda: True  # noqa: E731 - fail closed until judge() registers its own
+
+
+def _vetoed() -> bool:
+    try:
+        return bool(_pass_veto())
+    except Exception:
+        return True  # a veto that cannot be read is a veto: the refusal stands
+
+
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> None:
+    """Print a deny or an ask and exit, unless an owner override pass lifts it (decision
+    owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. The
+    veto runs before the pass is taken, so a call that also holds a never-passed act spends no pass."""
+    if not _vetoed():
+        try:  # an import or read failure is no pass: the refusal stands
+            import override_pass
+            lifted = override_pass.take(_pass_who[0], _pass_who[1], override_pass.now())
+        except Exception:
+            lifted = None
+        if lifted:
+            record(tool, lifted, rule, matched)
+            if lifted == override_pass.PASSED:
+                sys.exit(0)
     record(tool, decision, rule, matched)
     print(json.dumps({
         "hookSpecificOutput": {
@@ -1959,14 +2013,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 
 # ------------------------------------------------------------------ builders do not edit tests
 #
-# EVIDENCE: ImpossibleBench (arXiv 2510.20270): read-only tests block a worker's direct edits of
-# the tests that grade it, with little loss of real performance. A builder that cannot pass a test
-# may otherwise delete it, skip it, or rewrite it to pass.
+# A builder that cannot pass a test may otherwise delete it, skip it, or rewrite it to pass.
 #
-# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). A first
-# version read shell commands (`rm`, `mv`, `sed -i`, a redirect). A review found a bypass for
-# each: `bash -c`, `find -delete`, `xargs rm`, `dd`, `rsync`, `patch`, a variable, a symlink. The
-# commands are not the act. The act is a test path in the diff. So the diff is judged, at three
+# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). The act is a
+# test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
 # `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
 # the agent's branch was created from, plus untracked files, with every path normalised for
@@ -1976,7 +2026,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
 # `agent_id`; unmeasured, so it stays allowed) pass untouched. `test-author` is the inverse: it may
 # change ONLY test paths and test config, never product code (agents/test-author.md).
-# `record-writer` (owner ruling 2026-10-10) may change ONLY `*.md` files (case-insensitive
+# `record-writer` may change ONLY `*.md` files (case-insensitive
 # extension; agents/*.md and CLAUDE.md included), never anything else (agents/record-writer.md).
 #
 # A TEST PATH is read from the path's own parts, never from a substring: a basename shape
@@ -1987,7 +2037,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 # that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
 # dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
 # `contest.py` and `latest_results.md` match no shape.
-# Xcode/SPM (incident 2026-10-11, Degen): a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
+# Xcode/SPM: a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
@@ -2073,8 +2123,7 @@ def is_move_into(tool: str, command: str, cwd: str, home: str) -> bool:
 
 
 # A shell that runs its `-c` argument as a script. The script is judged by this same rule.
-# MEASURED 2026-09-26 on Windows (PR #144): `sh -c 'cmd &'` was allowed, and the server outlived
-# its call. The `&` sat inside one quoted token, where no per-segment read above can see it.
+# The `&` in `sh -c 'cmd &'` sits inside one quoted token, where no per-segment read above can see it.
 INLINE_SCRIPT_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "sh.exe", "bash.exe"}
 _C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 
@@ -2101,7 +2150,7 @@ REDIRECT = re.compile(r"(\d?>>?)")
 
 
 # A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
-# environment file. MEASURED in guard.log 2026-09-16 to 10-02: 65 false `env-file` denies.
+# environment file.
 ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
 
 
@@ -2150,6 +2199,99 @@ def nested_script(tokens) -> str:
     if word == "eval":
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
+
+
+# The ssh options that take a value: `-p 22`, `-i key`, `-o X=y`. The value is never the host.
+SSH_VALUE_LETTERS = "BbcDEeFIiJLlmOopQRSWw"
+
+
+def ssh_remote_script(tokens) -> str:
+    """The command `ssh [options] host COMMAND...` runs on the far side, else ''. Not part of
+    `nested_script`: that one also feeds the step count of an ask, which this must not move."""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ssh":
+        return ""
+    index = at + 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        flag, index = tokens[index], index + 1
+        for pos, letter in enumerate(flag[1:], 1):
+            if letter in SSH_VALUE_LETTERS:
+                index += pos == len(flag) - 1   # the value is the next word, else glued on
+                break
+    return " ".join(tokens[index + 1:])   # tokens[index] is the host
+
+
+def wrapped_commands(tokens, at: int):
+    """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "kubectl" and "exec" in rest and "--" in rest:
+        return [shlex.join(rest[rest.index("--") + 1:])]
+    if word == "find":
+        found = []
+        for i, token in enumerate(rest):
+            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+                end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
+                found.append(shlex.join(rest[i + 1:end]))
+        return found
+    if word == "su":
+        return [rest[i + 1] for i, t in enumerate(rest[:-1]) if t in ("-c", "--command")][:1]
+    skip = 0
+    if word in ("docker", "podman"):
+        if rest[:1] in (["container"], ["compose"]):
+            rest = rest[1:]
+        if rest[:1] != ["exec"]:
+            return []
+        rest, skip = rest[1:], 1   # the container
+    elif word == "flock":
+        skip = 1   # the lock file
+    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+        return []
+    index, _ = _wrapper_flags(word, rest, 0)
+    inner = rest[index + skip:]
+    return [shlex.join(inner)] if inner else []
+
+
+def bare_words(segment: str):
+    """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
+    no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
+    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
+    words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
+    has no bare word."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is not None and basename(tokens[at]) in ENV_PATTERN_COMMANDS:
+        return [], set()
+    spans, start, bare = [], None, True
+    for index, char, quote in walk_quotes(segment):
+        if not quote and char in " \t\r\n":
+            if start is not None:
+                spans.append((segment[start:index], bare))
+            start, bare = None, True
+            continue
+        start = index if start is None else start
+        bare = bare and not quote and char not in "'\"\\"
+    if start is not None:
+        spans.append((segment[start:], bare))
+    words = []
+    for text, _ in spans:
+        try:
+            words.append("".join(shlex.split(text)))
+        except ValueError:
+            words.append(text)
+    return words, {i for i, (_, b) in enumerate(spans) if b}
+
+
+def inner_commands(tokens):
+    """Every command text one segment hands on, for a rule that judges the command word: what a
+    shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
+    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
+    found = [nested_script(tokens), ssh_remote_script(tokens)]
+    for at in command_indexes(tokens):
+        found.extend(wrapped_commands(tokens, at))
+    return [text for text in found if text]
 
 
 def _command_starts(tokens):

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes docs/catalog.md and docs/records.md. The catalog says what each hook, judge, mod and skill does.
-The records page lists the records of a repo: its rules, decisions, debts, deferred items and plans.
+The records page lists the records of a repo: its rules, decisions, debts and plans.
 
-The owner asked for this page on 2026-10-13: plain words, one row each, and the model and
+Plain words, one row each, and the model and
 effort beside it, like the model table in decisions/subagent-model-cap.md. The page is
 generated and never edited by hand. Each description comes from the source it describes, so
 the page cannot drift from it.
@@ -17,7 +17,7 @@ this script is in. It is never the working folder.
 
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
 for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
-files in decisions/, debts/, deferred/ and plans/. A root with no record gets no records page. A record
+files in decisions/, debts/ and plans/. A root with no record gets no records page. A record
 that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
@@ -44,7 +44,7 @@ Sources, all read from the root:
   enabled repo mods       `enabledPlugins` keys `<name>@claude-settings` set true. The text is
                           the intro under the first heading of mods/<name>/README.md. A mod with no
                           README takes the `description` in its .claude-plugin/plugin.json,
-                          then the text of its SOURCE.md (repo, commit, licence).
+                          and must hold a SOURCE.md (repo, commit, licence), which the page omits.
   skills                  the `description` in the frontmatter of skills/<name>/SKILL.md.
   model and effort        the row of the model table whose first cell names the script.
 
@@ -69,6 +69,7 @@ PAGE = "docs/catalog.md"
 TABLE = "decisions/subagent-model-cap.md"
 INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
+CELL_CAP = 1000  # ceiling on a description cell, in characters, the ellipsis included. It sits above the longest cell, so none is cut (decision catalog-cells-never-cut).
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
 CMD_FLAG = re.compile(r'"\$g"[ \t]+(--[\w-]+)')
@@ -99,10 +100,17 @@ def flat(text):
     return " ".join(text.split())
 
 
-def cell(text):
-    """One table cell: one line, a pipe written \\|, and <tag> text in a code span so a viewer shows it."""
+def cell(text, cap=None):
+    """One table cell: one line, a pipe written \\|, and <tag> text in a code span so a viewer shows it.
+    With cap, a cell over cap characters is cut at a word and ends in an ellipsis, never inside a code span."""
     parts = re.split(r"(`[^`]*`)", flat(text))
     text = "".join(p if p.startswith("`") else re.sub(r"<[^<>\s][^<>]*>", r"`\g<0>`", p) for p in parts)
+    if cap and len(text) > cap:
+        end = max(text.rfind(" ", 0, cap), 0) or cap - 1
+        for span in re.finditer(r"`[^`]*`", text):
+            if span.start() < end < span.end():
+                end = span.start()
+        text = text[:end].rstrip() + "\u2026"
     return text.replace("|", "\\|")
 
 
@@ -324,7 +332,7 @@ Where each text comes from:
 
 - A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script that runs under more than one flag or event needs a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
-- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
+- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, and must hold a `SOURCE.md`, which says where it came from. The page omits that file's text.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
 Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
@@ -421,14 +429,14 @@ def render():
                     problems.append("%s: inline command has no summary in %s under the key %r. Review the "
                                     "summary against the command, then key it so" % (label, INLINE, key))
                 else:
-                    hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text)])
+                    hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text, CELL_CAP)])
                 used.add(key)
                 continue
             path = found.group(1)
             what = script_row(path, label, event, hook.get("command", ""))
             if what:
                 model, effort = models.get(path, NO_MODEL)
-                hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what)])
+                hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what, CELL_CAP)])
         elif kind in ("prompt", "agent"):
             prompt = hook.get("prompt", "")
             key = first_sentence(prompt)
@@ -436,7 +444,7 @@ def render():
                 problems.append("%s: prompt has no first sentence" % label)
                 continue
             hook_rows.append([key_cell(key), "judge", event, cell(matcher), cell(cond), hook.get("model") or "unset", "n/a",
-                              cell(judge_text(prompt, key))])
+                              cell(judge_text(prompt, key), CELL_CAP)])
         else:
             problems.append("%s: hook type %r has no catalog reader" % (label, kind))
 
@@ -455,12 +463,10 @@ def render():
             text = under_first_heading(read(base + "/README.md"))
         else:
             text = mod_manifest_description(base) if has_file(base + "/SOURCE.md") else ""
-            if text:
-                text += " Source: " + under_first_heading(read(base + "/SOURCE.md"))
         if not text:
             problems.append("%s: no text under the first heading of README.md, and no plugin.json description with a SOURCE.md" % base)
             continue
-        mod_rows.append([key_cell("mods/" + name), "mod", "-", "-", "-", "not listed", "not listed", cell(text)])
+        mod_rows.append([key_cell("mods/" + name), "mod", "-", "-", "-", "not listed", "not listed", cell(text, CELL_CAP)])
 
     skill_rows = []
     for name in skill_names(os.path.join(ROOT, "skills")):
@@ -468,7 +474,7 @@ def render():
         if not text:
             problems.append("skills/%s: SKILL.md has no description in its frontmatter" % name)
             continue
-        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "none", cell(text)])
+        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "none", cell(text, CELL_CAP)])
 
     page = INTRO % {"regen": REGEN}
     page += table("Hooks and judges", hook_rows) + table("Mods", mod_rows) + table("Skills", skill_rows)
@@ -481,8 +487,9 @@ def render():
 # ---- the records page --------------------------------------------------------------------------
 
 RECORDS_PAGE = "docs/records.md"
-RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")
-SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans")
+RECORD_FOLDERS = ("decisions", "debts", "plans")
+NOTES_FILE = "debts/notes.md"  # the notes tier: one line per unlikely finding, not a record
+SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
@@ -497,7 +504,7 @@ OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/`, `deferred/` and `plans/`. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/` and `plans/`. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
@@ -691,6 +698,8 @@ def collect_records():
                 continue
             text = read(rel)
             problems += history_problems(rel, text)
+            if rel == NOTES_FILE:
+                continue
             if folder == "decisions":
                 section, gist = decision_section(text), decision_gist(text)
             elif folder == "debts":
