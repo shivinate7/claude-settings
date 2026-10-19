@@ -55,7 +55,7 @@ MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch
 PY = sys.executable
 SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-")
 PIDS = set()
-MARKS = []  # tokens in job commands that no other process carries, so reap() finds a stray job
+MARKS = []  # tokens in job shells' argv that no other process carries, so reap() finds a stray job
 CASES = []
 
 PID_RE = re.compile(r"\bpid\b\W{0,3}(\d+)")
@@ -220,14 +220,17 @@ def rewrite(command):
     return ui["command"], hso
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40):
-    """Run the rewritten command in the given shell. Return (rc or None, text, seconds, cmd)."""
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None):
+    """Run the rewritten command in the given shell. Return (rc or None, text, seconds, cmd).
+    The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
+    names. Text added to the command would change it, for one ending in a backslash."""
     cmd, _hso = rewrite(command)
+    mark = mark or new_mark()
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
     start = time.monotonic()
     with open(out_path, "wb") as out:
-        proc = subprocess.Popen([shell, "-c", cmd], cwd=d, stdin=subprocess.DEVNULL,
+        proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT)
         try:
             rc = proc.wait(timeout=timeout)
@@ -579,8 +582,8 @@ def job_problems(shell, template, pidfiles=()):
     Return a list of problems."""
     mark = new_mark()
     never = os.path.join(new_dir(), mark + ".b")
-    orig = template.replace("@MARK@", mark).replace("@NEVER@", never) + " # " + mark
-    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10)
+    orig = template.replace("@MARK@", mark).replace("@NEVER@", never)
+    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10, mark=mark)
     problems = stall_problems(rc, text, secs)
     problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
     listed = stall_pids(text)
@@ -746,6 +749,27 @@ def command_after_a_loop_ends_with_the_stop():
         ("loop, then sleep", "for i in 1; do :; done; sleep 30.@MARK@"),
         ("loop, then b", "for i in 1 2; do sleep 30.@MARK@; done; touch @NEVER@"),
     ])
+
+
+@posix_case
+def reap_ends_a_job_that_no_report_names():
+    """22. reap() ends an endless loop that no report names: it finds the job by its mark"""
+    rc, text, _secs, _cmd = run_rewritten("while true; do sleep 1; done")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    m = PID_RE.search(text)
+    job = [pid for pid, _args in tree(int(m.group(1)))] if m else []
+    try:
+        problems += expect(m is not None, "report names no pid=")
+        PIDS.clear()  # as when a report names the wrong pid: only the mark is left to find the job
+        reap()
+        deadline = time.monotonic() + 2.5
+        while alive(job) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        problems += expect(not alive(job), f"reap() left the job running: pids {alive(job)}")
+    finally:
+        kill_all(alive(job))  # the job must not outlive a failing case
+        reap()
+    return problems
 
 
 @posix_case
