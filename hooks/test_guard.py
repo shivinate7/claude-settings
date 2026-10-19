@@ -13495,8 +13495,9 @@ def ov_act_call(act, config, session, seconds):
 
 
 def ov_drift_acts(config, session):
-    """A subagent that left its own worktree: worktree-home, rule 0, refuses every call it makes. A
-    pass that lifted rule 0 and then exited would never judge the refusals behind it."""
+    """A subagent that left its own worktree: worktree-home, rule 0, refuses every call it makes, and
+    no pass lifts it (owner, 18:37 CDT). Each act is refused as worktree-home under a timed pass, with
+    or without another refusal in the same command. A pass that lifted rule 0 would free the subagent."""
     primary = os.path.join(ROOT, "ovdrift_primary")
     worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + OV_AGENT)
     if not os.path.isdir(worktree):
@@ -13504,12 +13505,34 @@ def ov_drift_acts(config, session):
         run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + OV_AGENT)
     ov_call("Bash", {"command": "echo hi"}, worktree, config, session, 0, OV_AGENT)  # records the home
     hook = slash(os.path.join(config, "hooks", "guard.py"))
-    return tuple(OvAct(label, "Bash", {"command": command}, ("worktree-home", rule),
-                       first="worktree-home", cwd=primary, agent_id=OV_AGENT)
-                 for label, command, rule in (
-        ("a drifted subagent's write onto a config hook", "echo x > " + hook, "frozen-path"),
-        ("a drifted subagent's kill of pid 0", "kill 0", "machine-wide-kill"),
-        ("a drifted subagent's command that sets GIT_DIR", "GIT_DIR=/x git status", "git-env-set"),
+    shell = tuple(OvAct(label, "Bash", {"command": command}, "worktree-home", cwd=primary,
+                        agent_id=OV_AGENT)
+                  for label, command in (
+        ("a drifted subagent's write onto a config hook", "echo x > " + hook),
+        ("a drifted subagent's kill of pid 0", "kill 0"),
+        ("a drifted subagent's command that sets GIT_DIR", "GIT_DIR=/x git status"),
+        ("a drifted subagent's echo", "echo hi"),
+        ("a drifted subagent's kill of a pgrep list", "kill $(pgrep x)"),
+    ))
+    # The cwd is the home; the target is the primary checkout, outside it.
+    write_out = OvAct("a subagent's Write into the primary checkout from inside its worktree", "Write",
+                      {"file_path": os.path.join(primary, "src", "app.py"), "content": "x"},
+                      "worktree-home", cwd=worktree, agent_id=OV_AGENT)
+    return shell + (write_out,)
+
+
+def ov_cap_shell_acts(config, session):
+    """The shell form of subagent-model-cap: a write of the cap variable into the project settings
+    file by echo, printf or a heredoc. It asks with no pass, and no pass lifts it, as for a Write."""
+    line = CAP_KEY + "=opus"
+    return tuple(OvAct(label, "Bash", {"command": command}, "subagent-model-cap", "ask")
+                 for label, command in (
+        ("an echo of the cap variable into the project settings file",
+         "echo " + line + " > " + PROJ_SETTINGS),
+        ("a printf of the cap variable into the project settings file",
+         "printf '%s\\n' " + line + " > " + PROJ_SETTINGS),
+        ("a heredoc of the cap variable into the project settings file",
+         "cat <<'EOF' > " + PROJ_SETTINGS + "\n" + line + "\nEOF"),
     ))
 
 
@@ -13664,7 +13687,7 @@ for _label, _check in (
      ov_exclusion_check(True, ov_kill_all_acts, "killall")),
     # A one-act pass never reaches a subagent (ov_agent_once_check), so the drifted subagent has
     # a timed story only.
-    ("override: a drifted subagent's frozen-path, pid 0 and GIT_DIR refusals stay under a timed pass",
+    ("override: a drifted subagent stays refused as worktree-home under a timed pass",
      ov_exclusion_check(True, ov_drift_acts, "drift")),
     ("override: a refusal no pass lifts stays when chained with one a pass lifts, one-act pass",
      ov_exclusion_check(False, ov_chain_acts, "chain")),
@@ -13674,6 +13697,10 @@ for _label, _check in (
      ov_exclusion_check(False, ov_role_acts, "role")),
     ("override: the model and role guards stay refused under a timed pass",
      ov_exclusion_check(True, ov_role_acts, "role")),
+    ("override: a shell write of the subagent model cap stays asked under a one-act pass",
+     ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
+    ("override: a shell write of the subagent model cap stays asked under a timed pass",
+     ov_exclusion_check(True, ov_cap_shell_acts, "capshell")),
     ("override: `override off` ends a pass at once", ov_off_check),
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
     ("override: a guard copy that cannot import override_pass never allows on a pass",
