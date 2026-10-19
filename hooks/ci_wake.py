@@ -23,7 +23,6 @@ import os
 import re
 import shutil
 import subprocess
-import _nowindow
 import sys
 import tempfile
 import threading
@@ -33,8 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-# The sibling modules (guard_core, guard_env, guard_merge) load inside main(), so a failed import
-# ends in an unknown line, never a traceback and exit 1.
+# The sibling modules (guard_core, guard_env, guard_merge, _nowindow) load inside main() and gh(), so a
+# failed import ends in an unknown line, never a traceback and exit 1.
 
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
 STATUS_PAUSE = 30         # seconds between two status reads of one run
@@ -70,6 +69,7 @@ def emit(lines):
 def gh(args, cwd, timeout=READ_TIMEOUT):
     """-> (rc, stdout, stderr). gh is found with shutil.which: a list-form call of a bare "gh"
     misses a .cmd launcher on Windows. A timeout kills gh and never waits on its pipes."""
+    import _nowindow  # the one home of a no-window child start
     exe = shutil.which("gh")
     if exe is None:
         raise Unknown("gh is not on PATH")

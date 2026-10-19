@@ -180,11 +180,13 @@ def last_human_epoch(path):
 
 
 def _git(cwd, *args):
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-    import _nowindow  # lazy, same reason
     try:
+        hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+        if hooks not in sys.path:
+            sys.path.insert(0, hooks)
+        import _nowindow  # lazy, same reason
         run = _nowindow.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
-                             timeout=10)
+                            timeout=10)
     except Exception:
         return None
     return run.stdout if run.returncode == 0 else None

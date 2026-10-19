@@ -38,13 +38,13 @@ import json
 import os
 import re
 import subprocess
-import _nowindow
 import sys
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture

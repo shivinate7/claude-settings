@@ -20,10 +20,11 @@ import os
 import re
 import shutil
 import subprocess
-import _nowindow
 import sys
 import tempfile
 import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 # A Bash call that cannot touch a simulator skips the ~0.3 s `simctl list`. ponytail: a boot hidden
 # behind a script that never names these words goes unrecorded, and an unrecorded device is kept.

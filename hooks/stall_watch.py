@@ -47,13 +47,16 @@ import re
 import shlex
 import shutil
 import subprocess
-import _nowindow
 import sys
 import tempfile
 import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _nowindow  # the one home of a no-window child start
+except ImportError:  # the Stop check is a recovery control: each tool read then reports no answer, and it never dies
+    _nowindow = None
 try:
     from guard_stream import until_note  # the one parser of the `until:` note
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies

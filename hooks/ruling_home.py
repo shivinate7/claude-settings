@@ -71,8 +71,9 @@ import json
 import os
 import re
 import subprocess
-import _nowindow
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 MEMORY_DIRNAME = "memory"
 INDEX_FILE = "MEMORY.md"

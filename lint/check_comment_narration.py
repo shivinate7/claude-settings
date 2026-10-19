@@ -14,6 +14,7 @@ Exit 2 when the base or a file cannot be read: an unread diff is never a clean o
 import argparse
 import ast
 import io
+import os
 import re
 import subprocess
 import sys

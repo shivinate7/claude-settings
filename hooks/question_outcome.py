@@ -10,13 +10,13 @@ import json
 import os
 import re
 import subprocess
-import _nowindow
 import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 
 from decision_watch import invoke_model  # noqa: E402  looked up at call time, in main()

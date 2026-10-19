@@ -31,11 +31,12 @@ Run:
 import os
 import shutil
 import subprocess
-import _nowindow
 import sys
 import tempfile
 
 import mutate_shared
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")

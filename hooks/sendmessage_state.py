@@ -21,13 +21,13 @@ import os
 import shutil
 import signal
 import subprocess
-import _nowindow
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}

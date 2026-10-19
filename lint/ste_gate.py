@@ -40,7 +40,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import paragraph_blocks, format_finding, advisory_lines  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # gate-hooks-fail-closed: a gate never dies for a missing helper; it spawns as before
+    _nowindow = subprocess
 try:
     from _transcript import guard_logger  # noqa: E402
 except Exception:  # an older _transcript.py beside this script: the gate runs, with no log line
