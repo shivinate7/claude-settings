@@ -443,9 +443,10 @@ def _common_dir_key(path: str):
 
 
 def _live_remote_heads(path: str):
-    """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`,
-    read-only: never a fetch, never a prune), or None when any read failed. Local
-    refs/remotes/* are not used: a branch deleted on the remote leaves its tracking ref behind."""
+    """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`, which
+    moves no ref; the run's own `fetch --prune` is `_fetch_prune`), or None when any read failed.
+    A head whose commit this clone lacks is dropped: it cannot hold a commit the clone has, and
+    `rev-list` fails on an unknown SHA. Local refs/remotes/* are not used: they lag the remote."""
     key = _common_dir_key(path)
     if key is None:
         return None
@@ -468,6 +469,18 @@ def _live_remote_heads(path: str):
                 shas = None
                 break
             shas.update(line.split("\t", 1)[0] for line in listed.stdout.splitlines() if "\t" in line)
+    if shas:
+        try:
+            held = subprocess.run(
+                ["git", "-C", path, "cat-file", "--batch-check"],
+                input="".join(sha + "\n" for sha in sorted(shas)),
+                capture_output=True, text=True, timeout=10)
+        except Exception:
+            held = None
+        if held is None or held.returncode != 0:
+            shas = None
+        else:
+            shas -= {line.split()[0] for line in held.stdout.splitlines() if line.endswith(" missing")}
     if _LIVE_HEADS is not None:
         _LIVE_HEADS[key] = shas
     return shas
@@ -2642,6 +2655,18 @@ def _oldest_idle_first(entries):
     return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
+def _fetch_prune(root: str):
+    """`git fetch --prune` in ROOT, so the pushed and merged reads see the remote as it is now:
+    its current default branch, and no tracking ref for a head deleted there. It moves only
+    remote-tracking refs, so a preview runs it too. A failed fetch is ignored: the reads that
+    follow keep each tree they cannot settle."""
+    try:  # prompts off: an unattended run never waits on a login window
+        subprocess.run(["git", "-C", root, "fetch", "--prune"], capture_output=True, timeout=10,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+    except Exception:
+        pass
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
@@ -2662,6 +2687,8 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         result["refused"] = "opted-out"
         return result
 
+    if mode != "tier1" and not _past_deadline():
+        _fetch_prune(root)
     base = guard.resolve_default_base(root)
     if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
