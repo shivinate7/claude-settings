@@ -1,13 +1,12 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
 `hooks/decision_watch.py`'s config report section already imports `lint/report_gate.py`, which
-already imports `lint/ste_gate.py`. The "no import between two
-hooks fired by the same Stop event" rule that once justified copying these readers into each
-hook is retired, so this module holds the one copy and the four hooks import it.
+already imports `lint/ste_gate.py`. This module holds the one
+copy of these readers, and the four hooks import it.
 
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
 and its `content` blocks. paragraph_blocks / format_finding are the STE-lint-result helpers
-`lint/ste_gate.py` and `lint/md_sweep.py` both used to carry.
+`lint/ste_gate.py` and `lint/md_sweep.py` both use.
 
 format_finding is also the one place both of those hooks turn a finding's `message` into text
 for a reason a person or the model reads: ste_gate.py's permissionDecisionReason, live on every
@@ -282,6 +281,20 @@ def paragraph_blocks(text):
 
 def format_finding(f):
     return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
+
+
+def advisory_lines(findings):
+    """One line per advisory code: its first finding, then how many more of that code follow.
+    At most six lines, one per advisory rule, so no code hides behind a flood of another."""
+    first, extra = {}, {}
+    for f in findings:
+        code = f.get("code")
+        if code in first:
+            extra[code] = extra.get(code, 0) + 1
+        else:
+            first[code] = f
+    return [format_finding(f) + (" (%d more %s)" % (extra[c], c) if c in extra else "")
+            for c, f in first.items()]
 
 
 # ---------------------------------------------------------------- guard.log lines from the gates

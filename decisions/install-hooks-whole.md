@@ -1,62 +1,19 @@
 # An install never shows a session a half-copied hook
 
-## The question
-
-How does an install refresh `~/.claude/hooks` so that no running session judges a call with a
-missing, short or mixed set of hook files?
-
 ## The ruling
 
-- The installer writes each non-guard file to a temp name in the same folder, then renames it
-  over the target. A rename held up by an open reader is retried briefly.
-- Guard files no longer follow a per-file rule. The guard set switches as one stamped folder,
-  `hooks/guard.d/<id>/`, and one rename of `guard.py`. In link mode it is one rename of the
-  `<clone>-live` link. See merge-reinstalls-from-main (owner, 2026-10-15 17:40 CDT).
-- The guard checks the `INSTALL_ID` of the modules it loaded. On an import failure, a load failure
-  or a stamp mismatch, it waits in short steps for about 5 s and loads again. After the wait it
-  fails closed with guard-crash, never open. This wait stays in the guard.
-- No moment may leave a hook file, `CLAUDE.md`, `settings.json`, `agents`, `lint` or `skills`
-  missing. A folder swap of `hooks` is out, because it leaves `hooks` absent for an instant.
-  Adding the subfolder `hooks/guard.d/<id>/` is not a swap of `hooks`. Named exception: in link
-  mode, the first move from a plain `<clone>-live` directory leaves that path absent for a
-  moment (named in merge-reinstalls-from-main).
+No running session judges a call with a missing, short or mixed set of hook files.
 
-Incident: 2026-10-14, about 03:25 CDT. After PR 420 merged, the post-merge hook copied the hooks
-in place. For a few seconds every session's Bash call got guard-crash, and the arbiter's merges
-stopped. Arbiter rulings 03:41 and 03:50 CDT.
+- The installer writes each non-guard file to a temp name in the same folder, then renames it over the target. A rename held up by an open reader is retried briefly.
+- An install or update never locks a session out. It switches all guard files at once: it writes a new stamped folder `hooks/guard.d/<id>/`, then makes one rename of `guard.py`. In link mode it makes one rename of the `<clone>-live` link instead (`merge-reinstalls-from-main`). A guard run sees the old set or the new set, never a mix (owner ruling 2026-10-15). The guard set follows no per-file rule.
+- The guard checks the `INSTALL_ID` of the modules it loaded. On an import failure, a load failure or a stamp mismatch, it waits in short steps for about 5 s and loads again. After the wait it fails closed with guard-crash, never open. This wait stays in the guard.
+- No moment may leave a hook file, `CLAUDE.md`, `settings.json`, `agents`, `lint` or `skills` missing. A folder swap of `hooks` is out, because it leaves `hooks` absent for an instant. Adding the subfolder `hooks/guard.d/<id>/` is not a swap of `hooks`. Named exception: in link mode, the first move from a plain `<clone>-live` directory leaves that path absent for a moment.
+- One install runs at a time (owner ruling 2026-10-15). One lock file serves every installer path: `install.sh`, `install.ps1` and the post-merge hook that `install.ps1` writes.
+- Each installer path logs a start line and an end line. Each line carries a unique install id and the pid.
 
-## What protects it
+Why: a post-merge hook that copied in place gave every session's Bash call guard-crash for a few seconds (arbiter rulings 2026-10-14 03:41 and 03:50 CDT).
 
-- `install-no-gap.test.ps1`: a reader loop over 20 install runs fails on a missing path or a
-  short read. It also fails when a mixed `INSTALL_ID` outlasts the guard's wait. On main's
-  in-place copy it went red in every test run.
-- `hooks/test_guard.py`, family `reload-stamp`: a truncated module, a missing module and a
-  mismatched stamp, each fixed during the wait (allow) and never fixed (deny).
-
-## Holes, named
-
-Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-stamp-line-unpinned` (no test pins the stampers' placeholder text), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand).
-
-Guard-set and pin-move holes are named in merge-reinstalls-from-main.
-
-## Named limits
-
-- A file that the installer cannot replace keeps its old stamp. The guard then denies every call until an install succeeds. The installer prints each such file and exits non-zero. The remedy is to run the installer from a terminal, which the guard does not gate.
-
-## Build plan
-
-Code in `install.ps1`, `install.sh` and `hooks/guard.py`.
-
-### windows
-
-`install.ps1` and the post-merge hook it writes. CI runs `install-no-gap.test.ps1` on
-windows-latest.
-
-### macos
-
-`install.sh` links the hooks in local mode, so no copy runs. Its cloud mode copies; the same
-temp-then-rename applies. Proof on the Mac is not measured.
-
-Kind: build
-Plan: decisions/install-hooks-whole.md#windows (windows)
-Plan: decisions/install-hooks-whole.md#macos (macos)
+Kind: process
+Home: install.sh
+Home: install.ps1
+Home: hooks/guard.py

@@ -5,8 +5,8 @@ Run it from the repository root:
 
     python3 hooks/test_rm_prompt_answer.py
 
-Contract, from deferred item rm-prompt-answer-hook and decision rm-on-a-variable-needs-a-guard
-(owner rulings, 2026-10-11). The hook answers allow ONLY when all of these hold:
+Contract, from decision rm-on-a-variable-needs-a-guard (rm on a variable path needs a `:?` guard).
+The hook answers allow ONLY when all of these hold:
 - the hook input has `permission_mode` == "bypassPermissions";
 - each `rm` target is a `${NAME:?}` expansion followed only by plain folder names (`/a/b`): no
   `..`, no glob, no braces, no `~`, no `$HOME`, no `$PWD`, no command substitution, no second
@@ -16,7 +16,7 @@ Contract, from deferred item rm-prompt-answer-hook and decision rm-on-a-variable
   `_rm_target_bad` in hooks/guard.py). The value is judged, not the joined path.
 Every other request gets no output and exit 0, so the owner is still asked.
 
-Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks, read 2026-10-11):
+Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks):
 - Input: one JSON object on stdin. Common fields include `session_id`, `transcript_path`, `cwd`,
   `permission_mode` ("default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions"),
   `hook_event_name` "PermissionRequest", `tool_name`, and `tool_input` (`tool_input.command` for
@@ -27,7 +27,7 @@ Interface (Claude Code hooks reference, https://code.claude.com/docs/en/hooks, r
 - No decision: the docs show no example. This file pins stdout empty and exit 0.
 - Bad JSON on stdin: no output, exit 0.
 
-Whole-command rule (kept from the first test file; a stated reading, not in the ruling): the hook
+Whole-command rule (a stated reading, not in the decision): the hook
 answers allow only when every simple command in the input is an `rm` command or a simple
 assignment. Anything else, such as `curl`, `echo`, a pipe, or a `for` loop, gets no output.
 An `rm` target variable with no assignment in the command is unverifiable and gets no output.
@@ -158,7 +158,7 @@ silent("rm-prompt: bypass, S reassigned to / later is not allowed",
 silent("rm-prompt: bypass, an unbound guarded variable is not allowed", 'rm -rf "${S:?}"/build')
 silent("rm-prompt: bypass, a variable bound to the wrong name is not allowed",
        'T=/tmp/x; rm -rf "${S:?}"/build')
-# Round 2: an assignment to a name that no rm target uses changes how the shell runs the rm
+# An assignment to a name that no rm target uses changes how the shell runs the rm
 # (IFS splits an unquoted expansion, PATH picks another rm, CDPATH, any stray binding), so it
 # stops the allow. The allow cases are the controls: every binding is used by a target.
 silent("rm-prompt: bypass, IFS=: splits S into two targets, one the home folder",
@@ -183,7 +183,7 @@ silent("rm-prompt: bypass, a stray plain-folder binding no target uses is not al
        'T=/tmp/y; S=/tmp/x; rm -rf "${S:?}"/a')
 silent("rm-prompt: bypass, a stray binding set after the rm is not allowed",
        'S=/tmp/x; rm -rf "${S:?}"/a; T=/tmp/y')
-# Round 3: IFS and PATH are refused by name, even when a target expands the name that was bound.
+# IFS and PATH are refused by name, even when a target expands the name that was bound.
 silent("rm-prompt: bypass, IFS bound and expanded unquoted is not allowed",
        'IFS=t; rm -rf ${IFS:?}/home')
 silent("rm-prompt: bypass, IFS bound and expanded quoted is not allowed",

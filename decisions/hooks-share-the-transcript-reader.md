@@ -1,104 +1,21 @@
 # Hooks share the transcript reader
 
-Four hooks each carried their own copy of the same transcript readers. The copies are
-now one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`,
-`tool_uses`, `records_after_last_human`, `paragraph_blocks` and `format_finding`.
-`lint/md_sweep.py`, `lint/ste_gate.py` and `lint/report_gate.py` import it. The config
-report section of `hooks/decision_watch.py` reads through it too (the old
-`hooks/config_report.py`, folded in on 2026-10-02).
+## The ruling
 
-It also holds the cheap Stop reads. `last_human_epoch` and `read_turn` read only the
-tail of the transcript since the last human message. `landed_work` is the one early
-exit "nothing dirty, committed, or in the extra paths since that message".
-`lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py`, `hooks/config_report.py`
-and `hooks/ruling_home.py` call the tail readers. `hooks/config_watch.py` calls neither:
-its expiry rule fires with no file change, so no such exit is safe there.
+The Stop hooks read the transcript through one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`, `tool_uses`, `records_after_last_human`, `paragraph_blocks` and `format_finding`. `lint/md_sweep.py`, `lint/ste_gate.py` and `lint/report_gate.py` import it. So does the config report section of `hooks/decision_watch.py`.
 
-## The sentence this retires
+- The cheap Stop reads live there too. `last_human_epoch` and `read_turn` read only the tail of the transcript since the last human message. `landed_work` is the one early exit "nothing dirty, committed, or in the extra paths since that message". `lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py` (with its config report section) and `hooks/ruling_home.py` call the tail readers.
+- `hooks/config_watch.py` calls neither, because its expiry rule fires with no file change, so no such exit is safe there.
+- `building-allow-list-is-the-constant` does not govern it: a transcript helper is not a permit list.
 
-The governing entry is `a-gates-allow-list-is-the-constant`, the scope section that
-names three copied helpers. Its sentence, verbatim:
+Why: four hooks carried copies of the same readers, and the claim that each Stop hook stays in one file with no import between hooks was already false.
 
-> It is copied so each Stop hook stays in one file, with no import between two hooks
-> fired by the same event.
+Protection of the old outcome (one bad edit must mute one reporter, never all four):
 
-`lint/ste_gate.py:64` carried the same claim in its own words. So did
-`lint/md_sweep.py:116`. This change rewrites those two code comments.
+- `lint/test_gates.py` runs each gate as a subprocess, so an import error in `lint/_transcript.py` fails the gate suite in CI.
+- A break in the shared module is loud. The import sits at the top of each hook file, above `main`, so the fail-open `try` and `except` in `main` never sees it. The hook exits 1 and prints a traceback.
+- The fail-open path still catches a bad transcript, a missing file or a parse error inside a running hook. Such a hook exits 0 and prints nothing.
 
-This branch first withdrew the repeal and left it to the owner, because
-CLAUDE.md says: "Never repeal an argument on your own." The owner approved it
-on 2026-09-22.
-
-THE REPEAL, as approved. The three sentences naming the copied helpers are
-gone from `a-gates-allow-list-is-the-constant`. The scope rule itself is
-unchanged. A transcript helper is still not a permit list. Only the example
-was wrong. Both anchors it cited are retired by this branch, and the reason it
-gave was already false. The next section is the measurement that showed it.
-
-## What this change measured
-
-The sentence was already false when this change started. The reads below show that. `hooks/config_report.py`
-(folded into `hooks/decision_watch.py` since) imported `lint/report_gate.py`. Its own docstring says so, at lines 32 to 44 of
-the file before this change. Line 35 names `report_gate.block_text` as the reader it
-reuses. Lines 42 to 44 record that the import of `report_gate` pulls in that module's
-own import of `hooks/guard.py`. `lint/report_gate.py` in turn imports `lint/ste_gate.py`
-for `last_reply`. Three of the four hooks were therefore already linked by import
-before this change. Only the fourth, `lint/md_sweep.py`, stood alone.
-
-The docstring lines 42 to 44 also claimed that `hooks/config_report.py` avoids
-`lint/ste_gate.py`. That claim was already wrong for the same reason, through
-`report_gate`. This change does not repair that sentence. It is named here as a known
-error in the docstring.
-
-The cut is 167 duplicate lines removed against 115 added. 93 of the added lines are the
-new shared module.
-
-## The outcome the old sentence protected
-
-The old sentence protected one outcome. One bad edit must mute one reporter, never all
-four. A Stop event fires several hooks. A shared file carries a risk. A syntax error or a bad
-import in that file can silence every one of them at once. The owner then gets no
-report at all, and does not learn that a report is absent.
-
-## What protects that outcome now
-
-Two mechanisms, not a comment. Neither one is the fail-open path, and the first
-draft of this entry claimed wrongly that it was. The correction is recorded below.
-
-`lint/test_gates.py` runs each gate as a subprocess, at line 58. An import error in
-`lint/_transcript.py` therefore shows as a failure in the gate suite, and the gate
-suite runs in CI. The suite reads 97 tests green after this change, and it covers all
-four hooks. A reviewer broke the import for real, in a scratch copy of the tree, and
-measured the suite at 76 failures and 18 errors. The guard goes red on the defect it
-guards.
-
-A break in the shared module is also LOUD, not quiet. The same reviewer ran
-the config report hook directly against the broken module. It exited 1 and printed a
-Python traceback. The shared import sits at the top of each hook file, above `main`.
-The fail-open `try` and `except` inside `main` never sees an import-time error. The
-owner therefore gets a visible failure, not silence.
-
-## The correction
-
-The first draft of this entry made a false claim. It said that each hook's fail-open
-`try` and `except` catches an import error, and that the hook then exits 0 and prints
-nothing. The measurement above is what shows the claim false. The `try` and `except` in `main` guards
-the code that `main` calls. It cannot guard an import that already ran.
-
-The fail-open path still does its own job. It catches a bad transcript, a missing file
-or a parse error inside a running hook. The hook then exits 0 and prints nothing. That
-is the case it was written for. This change does not touch it.
-
-## The accepted risk
-
-One bad edit to `lint/_transcript.py` that still passes CI can break all four reporters at
-the same time. Before this change it could break only one.
-
-The risk is smaller than a silent mute, because the break is loud. Each hook is its own
-process. A broken import takes that process down, and prints a traceback the owner reads.
-The reader can tell a crash from a clean turn. The reader cannot tell a fail-open exit
-from a clean turn, and that case is unchanged by this entry.
-
-The owner accepts this risk. This change does not close it. The trade is 167 lines of copy
-against one shared file with a CI gate on it. No measurement here shows how often a bad
-edit passes CI. This entry reports that number as unmeasured.
+Accepted risk (owner): one bad edit to `lint/_transcript.py` that passes CI can break all four reporters at once. How often a bad edit passes CI is unmeasured.
+Kind: process
+Home: lint/_transcript.py

@@ -1,7 +1,7 @@
 """The guard's kill family: a machine-wide kill, a detached launch and the Playwright browser cache.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import itertools
 import os
@@ -21,9 +21,9 @@ from guard_env import _substitutions
 
 # ------------------------------------------------------------------ a machine-wide kill
 #
-# CLAUDE.md: "Never kill a process you did not start. Treat `pkill -f` and `lsof -t` as
-# machine-wide." A kill BY NAME or BY PATTERN reaches every matching process on the machine,
-# including another agent's dev server, another person's worker, and the editor itself.
+# Rule `shared-trees-no-machine-wide-kill`: never kill a process you did not start. A kill BY NAME
+# or BY PATTERN reaches every matching process on the machine, including another agent's dev
+# server, another person's worker, and the editor itself.
 #
 # A KILL BY PID NAMES ONE PROCESS, so the name rules below pass it. It is judged by OWNERSHIP
 # instead: see `foreign_pid_kill`. `taskkill /PID` and `Stop-Process -Id` are the same act under
@@ -68,13 +68,26 @@ def kill_hit(tokens) -> str:
         for arg in rest:
             if arg.startswith("-") and not arg.startswith("--") and "t" in arg:
                 return word + " " + arg
+    # By port, the same act as `lsof -t | xargs kill`: `fuser -k` (alone or in a cluster, `-kn`) and
+    # `kill-port`, run directly or through a package runner.
+    if tool == "fuser" and any(
+            arg == "--kill" or (arg.startswith("-") and not arg.startswith("--") and "k" in arg)
+            for arg in rest):
+        return word
+    if tool == "kill-port" or (
+            (tool in ("npx", "pnpx", "bunx") or (tool in ("npm", "pnpm", "yarn")
+                                                 and ("exec" in rest or "dlx" in rest)))
+            and any(arg.split("@")[0] == "kill-port" for arg in rest)):
+        return word + " kill-port"
     return ""
 
 
 KILL_PID_RE = re.compile(r"^-?[0-9]+$")
 ROOT_PID_RE = re.compile(r"[0-9]+")
 PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
-PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
+# `lsof` counts only with a `-t` flag, which makes it a pid list; `lsof -i :3000` lists and no more.
+PID_SUBSTITUTION_RE = re.compile(
+    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof|lsof(?=[^)`]*\s-[A-Za-z]*t))\b")
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
@@ -168,6 +181,36 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
 
 
+def _kill_pids(tokens):
+    """The numeric pid arguments of a `kill` segment, as text, in order. Nothing for any other
+    command, or for `kill -l`. Signal flags and their values are skipped."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill":
+        return
+    rest = tokens[index + 1:]
+    if any(arg == "-l" or arg == "-L" for arg in rest):
+        return
+    skip = after_dashes = signal_given = False
+    for arg in rest:
+        if skip:
+            skip = False
+            continue
+        # A flag after the signal that reads `-1` is pid -1 (every process): `kill -9 -1`.
+        if not after_dashes and arg.startswith("-") and arg != "-" and not (
+                signal_given and arg == "-1"):
+            after_dashes = arg == "--"
+            skip = arg in KILL_SIGNAL_ARG_FLAGS
+            signal_given = signal_given or not after_dashes
+            continue
+        if KILL_PID_RE.match(arg):
+            yield arg
+
+
+def kills_group_pid(tokens) -> bool:
+    """True when a `kill` segment names pid 0, 1 or -1. No override pass lifts it."""
+    return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
+
+
 def foreign_pid_kill(tokens, transcript: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
@@ -176,24 +219,8 @@ def foreign_pid_kill(tokens, transcript: str = "") -> str:
     answer is "" (unknown, so allowed), never a guess. ponytail: a pid reused since launch, or
     a child that reparented to init, reads as foreign; stop it through the harness.
     """
-    index = resolve_command(tokens)
-    if index is None or basename(tokens[index]) != "kill":
-        return ""
-    rest = tokens[index + 1:]
-    if any(arg == "-l" or arg == "-L" for arg in rest):
-        return ""
     root = None
-    skip = after_dashes = False
-    for arg in rest:
-        if skip:
-            skip = False
-            continue
-        if not after_dashes and arg.startswith("-") and arg != "-":
-            after_dashes = arg == "--"
-            skip = arg in KILL_SIGNAL_ARG_FLAGS
-            continue
-        if not KILL_PID_RE.match(arg):
-            continue
+    for arg in _kill_pids(tokens):
         number = int(arg)
         if number in (0, 1, -1):   # a whole group, init, or every process: judged with no root
             return arg
@@ -254,13 +281,11 @@ KILL_REASON = (
 
 # ------------------------------------------------------------------ a detached launch
 #
-# MEASURED 2026-09-23 on macOS: a subagent ran a background job inside a subshell,
-# `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at
-# once, pid 1 adopted the server, the harness never tracked it, and no pid was kept. Rule 2
-# above then correctly refused `pkill -f` and `lsof -t`, but its own remedy asks for "one
-# process id that this session started" and gives no way to get one, so the agent left the
-# server running. This rule closes that gap: it denies the LAUNCH, before a session can ever
-# reach a machine-wide kill trying to clean one up.
+# MEASURED on macOS: a background job in a subshell,
+# `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`, exits the subshell at
+# once. Pid 1 adopts the server, the harness never tracks it, and no pid is kept. Rule 2 above
+# refuses `pkill -f` and `lsof -t`, and its remedy needs a pid this session started, so the
+# server stays up. This rule denies the LAUNCH, before a session reaches a machine-wide kill.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
 # every check below reads a segment's OWN tokens, from `segment_tokens`, quote-aware and
@@ -370,18 +395,8 @@ def bare_background_hit(cmd: str) -> str:
     """Return the matched text when ANY segment holds a bare background job (`&` as its own
     token, after the command word) with no pid captured anywhere in the command, else ''.
 
-    MEASURED 2026-09-24 against this machine's own local transcripts (`~/.claude/projects/*/
-    *.jsonl`, read-only): 16571 Bash commands across 116 sessions, 0 ended in a bare trailing
-    `&`. This shape refuses no harmless command this session has actually seen run.
-
-    MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): an earlier version read
-    the LAST segment only, so `cmd &` followed by another line was allowed, and that server
-    outlived the agent. The `&` must come AFTER the command word: a leading `&` is
-    PowerShell's call operator, never a background job.
-
-    MEASURED 2026-09-26 against 13312 distinct local Bash commands in 118 sessions: the
-    any-segment read refused 6 that the old rule allowed. All 6 were an `&` inside a python
-    heredoc body, Python code, not a shell job. So this read drops every heredoc body first.
+    The `&` must come AFTER the command word: a leading `&` is PowerShell's call operator,
+    never a background job. Every heredoc body is dropped first: an `&` there is not a job.
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     if "$!" in cmd:
@@ -434,11 +449,9 @@ DETACHED_LAUNCH_REASON = (
 )
 
 
-# THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
-# PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
-# The real causes were a stale `__dirlock` left at 16:11 by an install stopped halfway, and an
-# install that hangs while it unpacks under Node 26.11 with Playwright 1.58. The install sat 73
-# minutes, and the workaround hid both causes. See the record playwright-browsers-path.
+# THE PLAYWRIGHT BROWSER CACHE. A scratch PLAYWRIGHT_BROWSERS_PATH hides the real causes of a
+# missing chromium_headless_shell: a stale `__dirlock` from a half-stopped install, and an install
+# that hangs while it unpacks under Node 26.11 with Playwright 1.58. See the record playwright-browsers-path.
 # A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, `cmd /c set VAR=v`, any of these inside
 # `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
@@ -729,10 +742,9 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
     return ""
 
 
-# GIT LOCATION VARIABLES. Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set GIT_DIR and
-# GIT_WORK_TREE in PowerShell, then a test's child `git init` inherited them and wrote
-# core.worktree into the shared .git/config. Every checkout then read the wrong tree. One walk
-# with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
+# GIT LOCATION VARIABLES. A GIT_DIR or GIT_WORK_TREE set in PowerShell reaches a child `git init`,
+# which writes core.worktree into the shared .git/config, so every checkout reads the wrong tree.
+# One walk with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
 # with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.

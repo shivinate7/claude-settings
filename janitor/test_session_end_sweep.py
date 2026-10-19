@@ -261,9 +261,7 @@ class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
 class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
     """The hook's own worst-case run time (`session_end_sweep.HOOK_WORST_CASE_SECONDS`) must be
     STRICTLY SMALLER than the timeout settings.json actually gives this hook -- proven against
-    the real settings.json in this checkout, not a copy of the number typed into this file.
-    A reviewer measured the earlier arithmetic wrong: two 10s guard._git calls plus a 25s sweep
-    is 45s, against a 30s settings.json ceiling that used to sit there unchecked."""
+    the real settings.json in this checkout, not a copy of the number typed into this file."""
 
     SETTINGS_PATH = os.path.join(REPO_ROOT, "settings.json")
 
@@ -304,15 +302,11 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
             self.settings = json.load(handle)
 
     def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
-        """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is now a plain, hand-typed constant
-        (the owner asked for it, and for `inspect` to leave session_end_sweep.py). A plain
-        constant carries no guard of its own against `guard._git`'s real subprocess timeout
-        drifting away from it -- so THIS TEST reads the real number back out of `guard._git`'s
-        own source, the same way the deleted `_guard_git_call_timeout_seconds()` did, and pins
-        it against the module's constant. MEASURED: bumping `guard._git`'s `timeout=` from 10 to
-        15 turns this arm red while the three arithmetic/settings.json arms above and below stay
-        green, because none of them re-reads guard.py at all (CLAUDE.md, "trust a guard only
-        once it goes red on the defect it guards")."""
+        """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is a plain, hand-typed constant, so
+        nothing else stops `guard._git`'s real subprocess timeout drifting away from it. THIS
+        TEST reads the real number back out of `guard._git`'s own source and pins it against the
+        module's constant. The three arithmetic/settings.json arms around it never re-read
+        guard.py, so a bump of `guard._git`'s `timeout=` turns only this arm red."""
         import inspect
         import re
         source = inspect.getsource(guard._git)
@@ -410,15 +404,15 @@ class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
 
 class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
     """Arm: HookSkipsTheSweepWhenBudgetIsSpent. In-process: `elapsed_seconds` reaches `handle`
-    only as an explicit argument now (PR #84 review dropped the environment seam), so this arm
+    only as an explicit argument, so this arm
     calls `handle` directly, the way a caller who genuinely has an elapsed reading would, with a
     real repository and a real reapable branch.
 
     `subprocess.run` is monkeypatched to RECORD each call, never to raise inside the callback:
     `handle` wraps that call in `except Exception`, on purpose, because the hook must fail open,
     so a raise inside the patched function is swallowed before it ever reaches this test runner
-    (second PR #84 review: a test that signals failure through the code under test is at the
-    mercy of that code). The recorded list is asserted on AFTER `handle` returns, the one point
+    (a test that signals failure through the code under test is at the mercy of that code).
+    The recorded list is asserted on AFTER `handle` returns, the one point
     where no exception handler of `handle`'s own stands between the fact and the check."""
 
     def setUp(self):
@@ -496,10 +490,10 @@ def deadline_value(argv):
 
 
 class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
-    """Arm: HookPassesItsTimeLeft. The SessionEnd run is the only run with a deadline (owner ruling
-    2026-10-15 15:08 CDT), so `handle` must hand the sweep its time left as an explicit
-    `--deadline-seconds N`. N is `remaining_sweep_timeout_seconds(elapsed)`, the same number the
-    hook uses as its own subprocess timeout. Recorded as in the arm above, never a real sweep."""
+    """Arm: HookPassesItsTimeLeft. The SessionEnd run is the only run with a deadline, so
+    `handle` must hand the sweep its time left as an explicit `--deadline-seconds N`. N is
+    `remaining_sweep_timeout_seconds(elapsed)`, the same number the hook uses as its own
+    subprocess timeout. Recorded as in the arm above, never a real sweep."""
 
     def setUp(self):
         import session_end_sweep

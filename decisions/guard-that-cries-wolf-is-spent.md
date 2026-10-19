@@ -1,79 +1,14 @@
 # A guard that cries wolf is spent
 
-CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards."
-This entry records the missing half, and the two false alarms that made the
-half worth writing down. A guard that goes red when nothing is wrong is
-spent. The reader learns to scroll past it.
+## The ruling
 
-## The shared shape
+CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it.
 
-Both false alarms below matched text instead of resolving the act. Neither
-looked at what a command would actually run. Each treated a substring's
-presence as proof of an act. That argument, and why it fails, is recorded
-already. See decisions/predicate-is-the-act.md. This entry does not restate
-it. It adds two more measurements of the same shape, from a different file.
+- A predicate that matches text is not a predicate on the act (`predicate-is-the-act`). Resolve the act instead. `hooks/guard.py` already does this with `split_segments`, `strip_heredoc_bodies` and `git_calls`. Import the resolver, do not re-derive a part of it.
+- Or gate on identity before content. `hooks/session_start.sh` compares `git remote get-url origin` in both trees before it reads either `CLAUDE.md`, so it warns only in a clone of the repository the pointer names.
+- `lint/report_gate.py` imports the guard's tokenizer and `git_calls`, which walks past `sudo` and every value-taking option, `-C` included, to the real subcommand. So `git -C /path commit` counts as a landing, and a quoted `git commit` in a probe list or heredoc body does not. `lint/test_gates.py` pins both: `test_58_quoted_git_commit_in_probe_list_passes` and `test_59_heredoc_body_naming_git_merge_passes`.
 
-## False alarm 1: session_start.sh warns in every repo that is not the pointer clone
+The guard's worktree-remove rulings are in `agent-worktree-discard-is-noted` (a discard or remove in a worktree).
 
-`hooks/session_start.sh` compared the pointer target `CLAUDE.md` against the
-current checkout's `CLAUDE.md` whenever both files existed. It never checked
-whether the current checkout was a clone of the same repository the pointer
-names. In any other repo, the two files differ by design. The line printed
-every session, everywhere.
-
-Reproduction, before the fix:
-
-```
-printf '{"cwd":"/Users/shivinate/Developer/pkmnscan"}' | sh hooks/session_start.sh
-```
-
-This printed a divergence line for `banchi`, a repository with its own
-`CLAUDE.md` and no relation to claude-settings. The check read the file
-content. It never read the identity of the tree that held it.
-
-## False alarm 2: report_gate.py accused a turn that landed nothing
-
-`lint/report_gate.py` ran a regex over the raw text of every Bash command in a
-turn. It searched for `git commit`, `git push`, or `git merge`. It never
-parsed the command. A read-only Bash call in this session held the quoted
-probe list `'git commit -q -m x' 'git push --quiet'`, written to test a
-fixture. The words sat inside single quotes. They never ran. The gate still
-demanded the closing report, for a turn that landed nothing.
-
-Fixture pinning this, in `lint/test_gates.py`:
-
-- `test_58_quoted_git_commit_in_probe_list_passes`
-- `test_59_heredoc_body_naming_git_merge_passes`
-
-Both fail against the pre-fix `report_gate.py`. Both pass against the fix,
-which imports `guard.py`'s tokenizer instead of reading raw text.
-
-## What this changes
-
-Extend the CLAUDE.md sentence. Trust a guard only once it goes red on its own
-defect. A guard that goes red on nothing is spent, because the reader stops
-reading it.
-
-A predicate that matches text is not a predicate on the act. Resolve the act
-instead. `hooks/guard.py` already does this, with `split_segments`,
-`strip_heredoc_bodies`, and `git_calls`, which walks past `sudo` and past
-options like `-C <dir>` to the subcommand a call actually runs. The first
-report-gate fix hand-rolled its own, narrower skip, past only `git`'s own
-next token. That missed `git -C /path commit`, a real landing, unreported.
-The lesson holds twice over: import the resolver, do not re-derive a part of
-it. Or gate on identity before content, the way the fixed `session_start.sh`
-now compares `git remote get-url origin` in both trees, before it reads
-either file.
-
-## Ruling: an unforced worktree remove is not noted as unread
-
-The owner ruled that the `subject-unread` note must not fire for an unforced worktree remove. The VCS itself refuses a dirty or locked tree without `--force` or `-f`, so the note protects nothing. The note stays for a forced remove and for every other shared-tree command.
-
-## Ruling: an untracked link is not work in a worktree remove
-
-Owner, 2026-10-11: when the guard judges a worktree remove, an untracked entry that is a
-symlink does not count as work. Removing a link deletes only the link. Measured: after
-`git worktree remove --force`, the folder a `node_modules` link pointed to kept its file.
-Incident: feed-build, a worker linked `app/node_modules` to another worktree's packages, and
-the guard refused to remove the scratch tree. Limit: a link whose name git quotes, such as
-one with a space or an accent, still counts as work.
+Kind: process
+Home: rule:verification-cry-wolf-guard-is-spent

@@ -1449,8 +1449,8 @@ test("the CLI runs, and never exits 0 silent, when reached through a symlinked d
     assert.match(r.stdout, /every pending record is in order/);
   }));
 
-// ---------------------------------------------------------------- kinds: [] (plan "How a repo opts in":
-// "A repo with no records writes `[]`, and the claim step does nothing.")
+// ---------------------------------------------------------------- kinds: []: a repo with no records
+// writes `[]`, and the claim step does nothing.
 function emptyKindsRepo(root, kinds) {
   mkdirSync(root, { recursive: true });
   initRepo(root);

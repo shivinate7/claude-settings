@@ -5,13 +5,9 @@ Run it from the repository root:
 
     python hooks/test_precompact_handoff.py
 
-Spec: decisions/precompact-handoff.md, rewritten 2026-10-03: no `claude -p` child, no
-second login. PreCompact writes a digest file and a state file. Reorient prints a message
-naming the prompt file and the digest, and never spawns anything.
-
-RED BEFORE GREEN. As of this file's own red run, `hooks/precompact_handoff.py` still runs
-a `claude -p` child (the OLD design) -- so the "never calls claude" case must fail red, for
-that exact reason, not a crash.
+Spec: decisions/precompact-handoff.md: no `claude -p` child, no second login. PreCompact
+writes a digest file and a state file. Reorient prints a message naming the prompt file and the
+digest, and never spawns anything.
 
 Each case gets its own temp root: a real git repo (the hook's `cwd`, and its own top
 level), a `CLAUDE_CONFIG_DIR`, and a `bin` dir on PATH holding a fake `claude` (the same
@@ -361,8 +357,8 @@ def case_settings_json():
         return out
 
     precompact = entries("PreCompact")
-    # Not pinning a timeout value here: the owner's rewritten design does its work inline,
-    # with no model call to budget for, so a timeout number is the builder's call to make.
+    # Not pinning a timeout value here: the design does its work inline, with no model call to
+    # budget for, so any timeout number is fine.
     found = [h for (_, h) in precompact if "precompact_handoff.py" in h.get("command", "")]
     check("settings: a PreCompact hook runs precompact_handoff.py",
           bool(found), "PreCompact hooks: %r" % precompact)
@@ -376,7 +372,7 @@ def case_settings_json():
 
 
 # --------------------------------------------------------------------------- Stop --nudge
-# Owner ruling 2026-10-07: on Stop, `--nudge` blocks once per 150k bucket from 200k up.
+# On Stop, `--nudge` blocks once per 150k bucket from 200k up.
 
 
 def usage_line(inp, cc=0, cr=0):

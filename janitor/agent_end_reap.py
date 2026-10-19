@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Claude Code hook: at agent end, stop orphans in the agent's worktree and remove other idle agent trees.
+"""At SubagentStop, stops processes the finished agent left running in its worktree, and removes other idle agent worktrees. When a check cannot tell, it keeps.
 
 Design: decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
 
-MEASURED 2026-09-26 on Windows (decisions/which-start-shapes-outlive-the-agent-on-windows.md,
-PR #144): `cmd &` then another line, in one foreground Bash call, outlives the agent. Its
-parent is a live MSYS bash stub, and the tool shell above the stub is dead. `sweep.is_orphan`
-reads the live stub and keeps the server forever.
-
 Reads one hook payload on stdin. SubagentStop names the agent by `agent_id`. The harness names
 that agent's worktree `.claude/worktrees/agent-<agent_id>` under the primary checkout.
-Only SubagentStop names a target (owner ruling 1, 2026-09-27: WorktreeRemove stays
+Only SubagentStop names a target (WorktreeRemove stays
 unwired). The target must have the `.claude/worktrees/<name>` shape and must not be a primary checkout.
 
 A process is stopped only when all of these answer a confirmed yes:
@@ -29,9 +24,9 @@ a sibling trash name, then starts a detached child that deletes the trash. The h
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
-Worktrees (owner rulings 2026-10-15, 23:01 CDT): when the gates above hold for the whole worktree,
-the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a delayed
-remover (lane wt-reap-delay) removes it later. It removes every other `.claude/worktrees/agent-*`
+Worktrees (decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
+the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
+removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
 prove keeps. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
@@ -90,11 +85,10 @@ def _log_lock(path: str):
 
 def log(record: dict, replace_run=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
-    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
-    it grew to thousands of raw payloads nobody reads. Parallel runs take turns on a lock file,
-    because MEASURED on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a
-    shared temp name and no lock. The temp name carries the pid. On Windows the replace can
-    raise PermissionError while the destination is held for a moment, so it retries a few times.
+    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
+    Parallel runs take turns on a lock file, because writers lost rows without it. The temp name
+    carries the pid. On Windows the replace can raise PermissionError while the destination is
+    held for a moment, so it retries a few times.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
     A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
@@ -117,7 +111,7 @@ def log(record: dict, replace_run=None):
                 try:
                     os.replace(temp, path)  # a reader never sees an empty or half-written file
                     break
-                except PermissionError:  # MEASURED 2026-10-08 on Windows: the destination is held a moment
+                except PermissionError:  # Windows: the destination is held a moment
                     if attempt == REPLACE_TRIES - 1:
                         raise
                     time.sleep(0.05)
@@ -295,11 +289,11 @@ WORKTREE_SECONDS = 15  # budget for the worktree stage; a tree not reached waits
 HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook started; the hook's own limit is 60
 
 
-OWN_TREE_REASON = "own tree: left for the delayed remover"  # owner ruling 2026-10-15 23:01 CDT
+OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision when-a-worktree-may-be-removed (own tree waits 30 idle min); a later agent end removes it
 
 
 def reap_worktrees(target: str, deadline: float):
-    """Keep TARGET (the ending agent's own worktree; lane wt-reap-delay removes it later) and remove
+    """Keep TARGET (the ending agent's own worktree; a later agent end removes it once idle) and remove
     every other finished `.claude/worktrees/agent-*` worktree of its repository, idle 30 minutes or
     more, that `sweep.decide_agent_end_worktree` clears. Returns one row for TARGET, one per other
     tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""

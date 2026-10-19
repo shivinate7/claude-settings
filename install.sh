@@ -176,7 +176,7 @@ pin_off_main() {
     || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
 }
 
-# Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
+# An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
 # worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
@@ -204,13 +204,22 @@ INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
 STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
 STAMP_CR="$(printf '\r')"
 INSTALL_FAILED=0
+# mv_retry SRC DEST: mv -f, retried 25 times at 0.1 s (the budget of Move-OverFile in install.ps1), because
+# Windows refuses a rename over a file a running reader holds open. The last try's stderr is printed.
+mv_retry() {
+  n=1
+  until mv_err=$(mv -f "$1" "$2" 2>&1); do
+    if [ "$n" -ge 25 ]; then printf '%s\n' "$mv_err" >&2; return 1; fi
+    n=$((n + 1)); sleep 0.1
+  done
+}
 put_file() {
   t="$2.cs-new"
   case "$1" in
     */guard.py|*/guard_*.py)
       sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
     *) cp "$1" "$t" ;;
-  esac && mv -f "$t" "$2" && return 0
+  esac && mv_retry "$t" "$2" && return 0
   rm -f "$t"
   log "could not replace $2; left as it was"
   INSTALL_FAILED=1
@@ -218,7 +227,7 @@ put_file() {
 }
 
 # ---- one install at a time, one start line and one end line in the install log --------------------
-# Owner ruling 2026-10-15 (install-set). The lock is a file made with noclobber, so only one run makes
+# Decision install-hooks-whole. The lock is a file made with noclobber, so only one run makes
 # it. install.ps1 and its post-merge hook take the same file, so the three paths wait on each other.
 # A run waits CLAUDE_SETTINGS_LOCK_WAIT seconds (default 60), then prints one line and exits 1 with
 # nothing written. A lock file older than 10 minutes is a dead run's: it is removed.
@@ -338,8 +347,8 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files. Owner ruling 2026-10-15 (install-set):
-# a guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
+# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
+# A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
 # with this run's id, into DEST_HOOKS/guard.d/<id>/, where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
 # id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept

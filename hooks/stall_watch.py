@@ -12,16 +12,19 @@ Hook: stall_watch.py --hook
   (no permissionDecision), with this command, run by the harness shell:
 
     { <original>
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N; rc=$?;
-    [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG; exit $rc
+    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N;
+    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG; exit $rc
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
 
 Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
   Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. After SECS (default
-  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. When
-  the job ends first, it exits 0.
+  300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. The
+  STALL line lists the job's shell and every process under it, parent first. Stopping them in that
+  order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
+  not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
+  ends first, it exits 0.
 
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
@@ -81,31 +84,32 @@ def ended_state(state):
 
 
 def job_tree(pid):
-    """Return [pid, state, elapsed, command] for the job and its descendants."""
-    rows = {}
+    """Return rows [pid, state, elapsed, command] for the job's shell and every process under it,
+    parent first. The job's pid is the one `&` gave the shell. Stopping the rows in order ends the
+    job: a parent dies before it can start another child."""
+    rows, kids = {}, {}
     for line in _run(["ps", "-axo", "pid=,ppid=,stat=,etime=,command="]).splitlines():
         p = line.split(None, 4)
         if len(p) >= 4:
             rows[p[0]] = p
-    kids = {}
-    for p in rows.values():
-        kids.setdefault(p[1], []).append(p[0])
+            kids.setdefault(p[1], []).append(p[0])
     found, stack = [], [str(pid)]
     while stack:
         cur = stack.pop()
         if cur in rows:
             p = rows[cur]
             found.append([p[0], p[2], p[3], p[4] if len(p) > 4 else ""])
-        stack.extend(kids.get(cur, []))
+            stack.extend(kids.get(cur, [])[::-1])
     return found
 
 
 def report(pid, quiet, log):
     rows = job_tree(pid)
     pids = ",".join(r[0] for r in rows) or str(pid)
-    lines = ["STALL: no output for %ss; pid=%d is still running" % (quiet, pid),
+    lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pids),
              "The job was not stopped, and the session cannot stop it: the job is not its child.",
-             "Diagnose it from this report. To stop pid=%d, ask the owner to stop it." % pid,
+             "Diagnose it from this report. To stop the job, ask the owner to stop pid=%s, in order."
+             % pids,
              "Processes (pid state elapsed command):"]
     lines += ["  " + " ".join(r) for r in rows] or ["  (none found)"]
     if shutil.which("lsof"):
@@ -188,7 +192,8 @@ def hook():
     wrapped = (
         "{ " + original + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
-        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + "; rc=$?; "
+        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet)
+        + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + "; exit $rc"
     )
     print(json.dumps({"hookSpecificOutput": {
@@ -264,7 +269,7 @@ def closed_by_notice(text):
     ids = []
     for note in text.split("<task-notification>")[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip() in TERMINAL:
+        if tid and st and st.group(1).strip().lower() in TERMINAL:
             ids.append(tid.group(1).strip())
     return ids
 
@@ -298,7 +303,7 @@ def stop():
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
             try:
                 idle = now - os.stat(real).st_mtime
-            except (OSError, TypeError):  # TypeError: no path recorded
+            except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
                 rows.append("%s: unknown, output file not found: %s%s" % (job, path or "(path not recorded)", until))
                 continue
             if idle >= quiet:

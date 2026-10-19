@@ -1,24 +1,26 @@
 """The guard's stream family: a stream that never ends, a waiter loop, a background server with no end
 note, a waiter loop over a pattern and two ported shell traps.
 
-guard.py is the only entry point, and it runs these checks in its fixed order (decision
-guard-split-by-family). Other files reach these names through `guard`.
+guard.py is the only entry point, and it runs these checks in its fixed order.
+Other files reach these names through `guard`.
 """
 import os
 import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    inline_script, resolve_command, segment_tokens, split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
+    split_segments,
 )
 
 
 # ------------------------------------------------------------------ a stream that never ends
 #
-# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag turns `tail` or
-# `Get-Content` into a command that never exits on its own, so it outlives the turn and the
-# agent that started it. The COMMAND WORD is checked first, so an unrelated `-f` on another
-# program never matches.
+# Guard rule live-stream. A follow flag turns `tail` or `Get-Content` into a command that never
+# exits on its own, so it outlives the turn and the agent that started it. A `tail` at any bare
+# (unquoted) word counts, so a runner no reader names still shows it (bare_words). Quoted text, a
+# commit message or a search command's pattern never matches. A script inside one quoted word
+# (`sh -c`, `ssh`, `docker exec` and the like) is read as a nested command (inner_commands).
 #
 # The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
 # `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
@@ -27,23 +29,39 @@ LIVE_STREAM_TAIL_TOOL = "tail"
 LIVE_STREAM_GETCONTENT_TOOLS = ("get-content", "gc")
 
 
-def live_stream_hit(segment: str) -> str:
-    """Return the matched text when one segment follows a stream and never ends, else ''."""
-    tokens = segment.split()
-    for index, token in enumerate(tokens):
-        tool = basename(token)
+def _follow_hit(token: str, args) -> str:
+    """The matched text when the command `token` with arguments `args` follows a stream, else ''."""
+    tool = basename(token)
+    for arg in args:
         if tool == LIVE_STREAM_TAIL_TOOL:
-            for arg in tokens[index + 1:]:
-                if arg == "--follow" or arg.startswith("--follow="):
-                    return token + " " + arg
-                if arg.startswith("-") and not arg.startswith("--") and (
-                        "f" in arg or "F" in arg):
-                    return token + " " + arg
-        elif tool in LIVE_STREAM_GETCONTENT_TOOLS:
-            for arg in tokens[index + 1:]:
-                if arg.lower() == "-wait":
-                    return token + " " + arg
+            if arg == "--follow" or arg.startswith("--follow="):
+                return token + " " + arg
+            if arg.startswith("-") and not arg.startswith("--") and ("f" in arg or "F" in arg):
+                return token + " " + arg
+        elif tool in LIVE_STREAM_GETCONTENT_TOOLS and arg.lower() == "-wait":
+            return token + " " + arg
     return ""
+
+
+def live_stream_hit(segment: str) -> str:
+    """Return the matched text when one segment follows a stream and never ends, else ''.
+
+    A segment shlex cannot parse is read word by word, every word as a command word, so an
+    unmatched quote elsewhere in the line does not hide a follow."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        words = segment.split()
+        return next((h for i, w in enumerate(words) if (h := _follow_hit(w, words[i + 1:]))), "")
+    for start in command_indexes(tokens):
+        hit = _follow_hit(tokens[start], tokens[start + 1:])
+        if hit:
+            return hit
+    words, bare = bare_words(segment)
+    hit = next((h for i in sorted(bare) if (h := _follow_hit(words[i], words[i + 1:]))), "")
+    if hit:
+        return hit
+    return next((h for text in inner_commands(tokens) for part in split_segments(text)
+                 if (h := live_stream_hit(part))), "")
 
 
 LIVE_STREAM_REASON = (
@@ -54,8 +72,7 @@ LIVE_STREAM_REASON = (
 )
 
 
-# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from banchi's
-# `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. The merge tool waits minutes for
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
 # incident, because "does this command narrate for minutes" cannot be resolved from the system, and
@@ -127,7 +144,7 @@ NARRATED_TAIL_REASON = (
 WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
-SLEEP_LIMIT = 25   # owner ruling 2026-10-12: one sleep under 25 s is allowed
+SLEEP_LIMIT = 25   # one sleep under 25 s is allowed
 LOOP_WORDS = {"while", "until", "for", "foreach", "do", "%", "foreach-object"}
 
 
@@ -240,9 +257,8 @@ WAITER_REASON = (
 
 # ------------------------------------------------------------------ a background end condition
 #
-# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A server or watcher that runs in the
-# background has no end of its own (incident: a file server on port 3202 ran 27 h unnoticed). The
-# call must say when it ends: an `until: <condition>` note in the tool's `description`. The note
+# A server or watcher that runs in the background has no end of its own. The call must say when it
+# ends: an `until: <condition>` note in the tool's `description`. The note
 # belongs to the call, not the command text. stall_watch.py --stop shows the note per quiet job, and
 # reads it through `until_note` below, the one parser.
 #
@@ -265,8 +281,7 @@ SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab",
                 "streamlit": ("run",)}
 SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
 # Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
-# is checked for presence only, and some wrappers and forms are not read (debt
-# server-wrappers-unread).
+# is checked for presence only, and some wrappers and forms are not read (debt notes).
 
 
 def until_note(description) -> str:
@@ -377,13 +392,6 @@ BACKGROUND_END_REASON = (
 
 # ------------------------------------------------------------------ a waiter loop over a pattern
 #
-# Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
-# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
-# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
-# the condition never went false, because `pgrep -f` matches every process whose command line
-# names the pattern, including that very invocation of itself. A second copy of the driver then
-# raced the live one.
-#
 # THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
 # a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
 # token of its segment rather than only the first.
@@ -410,13 +418,10 @@ PATTERN_POLLER_REASON = (
 )
 
 
-# ------------------------------------------------------------------ two ported shell traps
-#
-# Ported from banchi's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
-# self-contained so it merges cleanly beside other edits to this file.
+# ------------------------------------------------------------------ two shell traps
 
 # `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
-# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# so a call meant as a GET silently becomes a write.
 # A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
 # is a POST by design and takes no method.
 GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
@@ -472,8 +477,8 @@ GH_API_METHOD_REASON = (
 
 
 # `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
-# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
-# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0.
+# A real directory always
 # descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
 # the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
 # fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing

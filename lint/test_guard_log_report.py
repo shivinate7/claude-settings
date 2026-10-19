@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for guard_log_report.py (reader for ~/.claude/guard.log).
 
-Pinned contract (the spec lives here until the builder lands the module):
+Pinned contract:
 - Window: the `days` calendar dates ending on now's date, inclusive. With now=2026-10-11 and
   days=7 the window is 2026-10-05 .. 2026-10-11. A line is in the window by its own date.
 - by_rule counts deny/ask/noted only. A rule seen only in other decisions has no by_rule row.
@@ -9,7 +9,7 @@ Pinned contract (the spec lives here until the builder lands the module):
 - unreadable counts lines with fewer than 4 tab fields or a bad timestamp, window-independent.
   Field 5 is everything after the 4th tab, so extra tabs stay in the matched text.
 - main() returns 0 and prints render(...). A missing log prints "unreadable: log not found".
-- Session column (owner ruling: guard.log gets a session_id column): a line with six tab fields
+- Session column: a line with six tab fields
   carries the hook's session_id as field 6, last. A line with five fields, or a "-" in field 6,
   reads as "unknown session". --session <id> keeps the lines of one session, exact match.
   --by-session prints counts per session, by rule and decision. The session value is a label
@@ -161,7 +161,7 @@ class MainTests(unittest.TestCase):
         self.assertIn("| config-dir-rule | 1 | 0 | 0 |", out)
 
 
-# ----------------------------------------------------------- the session column (red until built)
+# ----------------------------------------------------------- the session column
 #
 # Six fields: time, tool, decision, rule, matched, session. Session is LAST, so every old reader
 # keeps its index 0..4. The writer folds whitespace in matched, so matched never holds a tab.
@@ -555,7 +555,7 @@ class OneReaderTests(unittest.TestCase):
                              "a second %s split was not unlisted" % shape)
 
 
-# ------------------------------------------- review round 1 (PR 383): reader nits, red until fixed
+# ------------------------------------------- reader edge cases
 #
 # Decisions pinned here:
 # - "-" is reserved for the placeholder. A hook id of "-" is written as "-", so it reads as
@@ -632,7 +632,7 @@ class PlaceholderHomeTests(unittest.TestCase):
         self.assertIn("SESSION_LOG_PLACEHOLDER", named)
 
 
-# ------------------------------------ review round 2 hole 1: unread notes survive an unimportable reader
+# ------------------------------------ unread notes survive an unimportable reader
 #
 # collect_unread names the unread subjects of a turn from guard.log. When the reader cannot be
 # imported, those notes must still come back. collect_unread falls back to a local split of the
@@ -799,6 +799,30 @@ class FixedDecisionTests(unittest.TestCase):
         self.assertIn("| shared-tree | 1 | 0 | 0 |", out)
         self.assertIn("| STE008 | 2 | 0 | 0 |", out)
         self.assertIn("| STE001,STE008 | 1 | 0 | 0 |", out)
+
+
+class OverrideDecisionTests(unittest.TestCase):
+    """A lifted act writes a line whose decision is `override` and whose rule is the one it lifted
+    (the owner override pass). The report counts those lines per rule and per session, so the owner
+    can see which refusals a pass lifted. Without it they would print under the verbatim lines."""
+
+    LINES = [
+        "2026-10-11T09:00:00\tBash\toverride\tmachine-wide-kill\tkill $(pgrep x)\tsess-a",
+        "2026-10-11T09:05:00\tBash\toverride\tmachine-wide-kill\tkill 4242\tsess-a",
+        "2026-10-11T09:10:00\tBash\toverride\tshared-tree\tgit stash --help -h\tsess-b",
+        "2026-10-11T09:15:00\tBash\tdeny\tmachine-wide-kill\tkill 1\tsess-a",
+        "2026-10-04T09:00:00\tBash\toverride\tmachine-wide-kill\toutside the window\tsess-a",
+    ]
+
+    def test_override_lines_are_counted_by_rule_and_session_not_left_verbatim(self):
+        s = glr.summarize(self.LINES, 7, NOW)
+        kill = s["by_rule"]["machine-wide-kill"]
+        self.assertEqual((kill.get("override"), kill["deny"]), (2, 1))
+        self.assertEqual(s["by_rule"]["shared-tree"].get("override"), 1)
+        self.assertEqual(s["other"], [])
+        self.assertEqual(s["per_day"]["2026-10-11"], 1)  # the per-day row counts denies only
+        self.assertEqual(s["by_session"]["sess-a"]["machine-wide-kill"].get("override"), 2)
+        self.assertEqual(s["by_session"]["sess-b"]["shared-tree"].get("override"), 1)
 
 
 if __name__ == "__main__":

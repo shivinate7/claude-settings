@@ -20,20 +20,12 @@ reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
-agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table. An
-unlisted agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Haiku runs only in the roles that table names. Sonnet is the floor for every other agent.<!-- rule:roles-sonnet-is-the-floor --> Sonnet is
+agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
 the ceiling, except Plan, the advisor, and a builder's third try
 (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
-wait for my word.<!-- rule:roles-opus-shaped-say-so --> Only on my word, write the repo's
-`.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to
-`opus`. The raise moves the default. It does not pin every spawn to it. The guard asks before
-that write lands.<!-- rule:roles-opus-override-guarded -->
-The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
-watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
-Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, governing rulings, failure classes from
+wait for my word.<!-- rule:roles-opus-shaped-say-so --> Owner raises Opus. The guard asks before an env write raises the subagent model.<!-- rule:roles-opus-override-guarded --> A brief carries the task, the files, governing rulings, failure classes from
 `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
 specifies a report cap in lines sized to the decision it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
@@ -41,7 +33,7 @@ test-author writes the new cases first and shows them red on the old code. The b
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
 reviewer hunts bypasses and false alarms and never replays a passing run. The test-author's
 recorded red run is the red proof. A reviewer re-runs it only when that record is missing or
-in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> A change gets at most three review rounds. Rounds 1 and 2 still fix the defect (`outcomes-tests-are-claims`). After round 3, a change that changes a guard, gate or check (`hold-unsafe-after-round-3`, net-value hold after round 3) gets the net-value test. The round-3 reviewer judges its net safety value against main: holes closed against holes opened, weighted by expected harm. A change that changes no guard, gate or check skips the test and merges on green. A safety hole is a guard, gate or check that lets through an act that main refuses or asks about. Turning a main refusal into an ask is also a safety hole. For a guard hook (`hooks/guard*.py`), an act counts only if Claude could write it by mistake or from a misread task. A form only an attacker would write does not count (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). Positive net value merges on green. For every change, each open finding becomes a limit named under "Holes, named" in the change's decision record, and a debt (`roles-holes-are-debts`). A change with zero or negative net value is held: remove it from the batch, so the rest merges green. A held change is parked. It gets no fix lane and no more work until the owner decides. After round 3, red CI is not a named hole: split it, ship the passing part, and open the red part as a new lane. That lane starts at round 1, try 1. Its brief records what failed; if no split works or the test looks stale, ask the owner (`outcomes-stale-decision-protocol`); never weaken a test to reach green. A red batch still drops the lane first (`git-integration-branch-merge`); the split happens in that lane's own fix. A held change that is also red gets no red-CI split.<!-- rule:roles-review-cap-three --> Each known gap is a debt in the repo's debt store. Write one entry per debt, and point it to its decision where one exists.<!-- rule:roles-holes-are-debts --> Builders get two Sonnet tries; if review round 2 fails, the third (`Try 3 of 3`) runs on Opus by the owner's standing word. From round 2 on, a reviewer runs on Sonnet, its ceiling; a reviewer already on Sonnet stays there. Round 3 may run Opus on my word for that spawn.<!-- rule:roles-third-try-steps-up --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
+in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> A change gets at most three review rounds. A change that only deletes and adds nothing gets one round. It skips rounds 2 and 3 and the net-value test, unless round 1 finds a hole Claude could hit in normal work (`hold-unsafe-after-round-3`, net-value hold after round 3). Rounds 1 and 2 still fix the defect (`outcomes-tests-are-claims`). After round 3, a change that changes a guard, gate or check (`hold-unsafe-after-round-3`, net-value hold after round 3) gets the net-value test. The round-3 reviewer judges its net safety value against main: holes closed against holes opened, weighted by expected harm. A change that changes no guard, gate or check skips the test and merges on green. A safety hole is a guard, gate or check that lets through an act that main refuses or asks about. Turning a main refusal into an ask is also a safety hole. For any guard, gate or check, an act counts only if Claude could write it by mistake or from a misread task. A form only an attacker would write does not count (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). An act that my typed override pass lets through is not a safety hole (`owner-override-pass`, my typed pass). Positive net value merges on green. A change whose only lifts need a pass the owner typed scores zero and merges on green. For every change, each open finding becomes a debt or a note, pointing to its decision (`roles-holes-are-debts`). Any other change with zero or negative net value is held: remove it from the batch, so the rest merges green. A held change is parked. It gets no fix lane and no more work until the owner decides. After round 3, red CI is not a named hole: split it, ship the passing part, and open the red part as a new lane. That lane starts at round 1, try 1. Its brief records what failed; if no split works or the test looks stale, ask the owner (`outcomes-stale-decision-protocol`); never weaken a test to reach green. A red batch still drops the lane first (`git-integration-branch-merge`); the split happens in that lane's own fix. A held change that is also red gets no red-CI split.<!-- rule:roles-review-cap-three --> A known gap is a debt only if Claude is likely to hit it in normal work. Write one entry per debt in the repo's debt store, and point it to its decision where one exists. Any other finding is one line in the store's notes file. A note becomes a debt after a real incident.<!-- rule:roles-holes-are-debts --> Third try: Opus. Builder's third try runs after review round 2 fails; its brief carries `Try 3 of 3`. Reviewers run Sonnet from round 2 on; round 1 uses the role's model.<!-- rule:roles-third-try-steps-up --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
@@ -50,23 +42,18 @@ Give an isolated workstream its own lane and orchestrator, briefed once.<!-- rul
 talk mid-task. Message a peer only when a branch must hear something that changes its
 work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism -->
 
-**Shared trees.** Never run `git stash`, `git reset`, `git checkout <path>`, or `git
-restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Set work
-aside with a commit on your own branch, never a stash.<!-- rule:shared-trees-no-destructive-git --> A stash entry belongs to
-no branch. It outlives no session that holds its tag. Never kill a
-process you did not start. Never restart another person's server. Treat `pkill -f` and
-`lsof -t` as machine-wide.<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
+**Shared trees.** No destructive git. Destructive git loses another agent's work in a shared tree.<!-- rule:shared-trees-no-destructive-git --> Kill only yours. Others' servers and processes are not yours to stop, unless my override pass covers the stop (`owner-override-pass`, my typed pass).<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout
 and branch you stand in before any git write or merge.<!-- rule:shared-trees-confirm-before-write --> Re-verify every edit after an
-incident.<!-- rule:shared-trees-reverify-after-incident --> On first use, install a hook that refuses these commands.<!-- rule:shared-trees-install-refusal-hook -->
+incident.<!-- rule:shared-trees-reverify-after-incident -->
 
 **Git, if this repo uses pull requests.** Move main only by pull request, merged only
-when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wait for required checks after every push.<!-- rule:git-wait-for-required-checks -->
-Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a command's output.<!-- rule:git-never-discard-output --> A refusal's printed remedy
+when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr -->
+Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Keep command output. Discarded output hides failures from the reader.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
-Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
+Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Ids, not paths. A path breaks when its file moves.<!-- rule:git-cite-by-id --> Give each record its
 own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One entry per question. When its ruling changes, rewrite the entry in place. Open an entry only for a new question.<!-- rule:git-one-entry-per-question --> Batch lane PRs that pass their local checks into one integration branch. Keep
-each lane's own commit. A lane joins the batch after the review the roles rules require. Only the integration PR goes ready, and its run is the only CI run for the batch. Each lane PR stays a draft until the integration PR merges. Then each lane PR closes as replaced. A lone lane is its own integration PR. A red integration run: read the failing job. Find the lane whose files it touches. Drop that lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane (`roles-review-cap-three`) is the exception: it is dropped and parked, and gets no fix lane until the owner decides. Never fix inside the integration branch. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's word.<!-- rule:git-integration-branch-merge --> Open every PR as a draft. A draft runs no CI. Every job, including the required check, skips while the PR is a draft. Mark only the integration PR ready, and only after review.<!-- rule:git-draft-until-reviewed -->
+each lane's own commit. A lane joins the batch after the review the roles rules require. Only the integration PR goes ready, and its run is the only CI run for the batch. Never push to a ready PR while its CI runs; a late lane joins the next batch. Each lane PR stays a draft until the integration PR merges. Then each lane PR closes as replaced. A lone lane is its own integration PR. A red integration run: read the failing job. Find the lane whose files it touches. Drop that lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane (`roles-review-cap-three`) is the exception: it is dropped and parked, and gets no fix lane until the owner decides. Never fix inside the integration branch. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's word.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->
@@ -75,8 +62,7 @@ a window or a screen capture lands on my screen, say so in one line.<!-- rule:ve
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
-on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
-a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
+on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
 published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
 rely on it, a document's own claims too. Report a read that could not run as unknown,
@@ -94,21 +80,19 @@ of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an 
 each capability one home, and call it from everywhere. Extend that home before you
 build a second. A duplicate needs a stated reason.<!-- rule:building-one-home-per-capability --> A gate's allow list must point at the constant
 the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Build a new guard or gate rule
-only against a named incident or a measured risk. Cite it in the rule's record. A check that
-enforces a rule in this file needs no other incident.<!-- rule:building-guard-needs-incident --> Fix the cause, not the symptom. Name a
+only against a named incident or a measured risk. Cite it in the rule's record.<!-- rule:building-guard-needs-incident --> Fix the cause, not the symptom. Name a
 bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.<!-- rule:building-scanner-respects-strings --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
-the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
-file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term -->
+the design abandoned.<!-- rule:building-land-design-or-abandon --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
+file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term --> Comment only what complex code does and why. Never narrate history or review rounds.<!-- rule:building-comments-say-why -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
 the history.<!-- rule:speak-rewrite-superseded-in-place -->
 
-**Output.** Write in Simplified Technical English by default, to me and between agents,
-unless told otherwise.<!-- rule:output-write-in-ste --> Rules for replies to me, and not to
-agents, live in the `shiv-stylisms` output style.
+**Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-write-in-ste -->
+Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style.
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 

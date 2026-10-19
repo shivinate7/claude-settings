@@ -18,23 +18,27 @@ Contract, from decision gate-hooks-fail-closed:
 - Advisory entries (SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, SubagentStop) exit 0
   when their script is missing, and carry no `onFailure`.
 - CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL in `env`.
+- From decision subagent-model-cap, `env` holds CLAUDE_CODE_SUBAGENT_MODEL = "sonnet" and
+  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1", both as strings.
 - Python launcher: every command hook that runs a script through a `g="..."` assignment never
   execs a python candidate whose `command -v` path contains `/WindowsApps/`. The Microsoft Store
-  alias there hung the guard for 30 s (2026-10-12). A stub alias ahead of a real python must be
+  alias there hangs the guard for 30 s. A stub alias ahead of a real python must be
   skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
   the no-python remedy and an advisory hook exits 0.
-- The guard split (decision guard-split-by-family): a copied guard.py takes split_segments from its
+- The guard split: a copied guard.py takes split_segments from its
   own guard_core.py sibling, never the real one. With the sibling missing, a Bash call is refused with
-  the reinstall step named (audit-high, decision gate-hooks-fail-closed), and one fallback line naming
+  the reinstall step named (decision gate-hooks-fail-closed), and one fallback line naming
   guard_core goes to guard.log. Every name other
   files reach through `guard` still resolves.
+- The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
+  line equal to the placeholder that install.sh and install.ps1 stamp. A line that drifted would install
+  unstamped, and the guard would then deny every call.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
 The shell is started by absolute path, so it still runs.
 
-Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST (used for the red run on
-main: `git show origin/main:settings.json > <scratch>/settings.json`).
+Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST.
 """
 import json
 import os
@@ -206,6 +210,14 @@ def check_env_subagent_model():
     return w is not None and w == s, "workflow=%r subagent=%r" % (w, s)
 
 
+def check_env_equals(key, want):
+    """`env[key]` is the string `want`: env values are strings, so a bare number or a missing key fails."""
+    def check():
+        got = load().get("env", {}).get(key)
+        return got == want, "%s=%r, want %r" % (key, got, want)
+    return check
+
+
 # a wrapper's script: the `g="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<script>"` assignment
 LAUNCH_RE = re.compile(r'g="\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([^"]+)"')
 
@@ -290,8 +302,8 @@ def check_alias_only_advisory():
     return (not bad and len(adv) > 0), "advisory checked %d; wrong: %s" % (len(adv), bad)
 
 
-# Guard split (decision guard-split-by-family). guard.py stays the entry point; shared code moves to
-# guard_core.py beside it. The pins below are red on a guard.py that has no sibling yet.
+# Guard split. guard.py stays the entry point; shared code lives in
+# guard_core.py beside it. The pins below fail on a guard.py that has no sibling.
 GUARD_PY = os.path.join(HERE, "guard.py")
 SPLIT_LABEL = "split_segments: a comment starting a word"  # a test_guard.py log check
 # Built from parts, so this file cannot trip the guard it tests (as test_guard.py does).
@@ -389,7 +401,7 @@ def split_control_case():
 
 
 def missing_sibling_case():
-    """audit-high (owner ruling 2026-10-13, decision gate-hooks-fail-closed): a copied guard.py with
+    """Decision gate-hooks-fail-closed: a copied guard.py with
     no guard_core.py beside it refuses the call. Stdout carries a deny whose reason names the
     reinstall step and no file, the exit is 0 as for any other deny, and one fallback line naming
     guard_core goes to guard.log. The payload is a command the guard refuses when it can judge."""
@@ -473,6 +485,36 @@ def guard_sentinel_case():
     return True, "the sentinel name raises AttributeError"
 
 
+def stamp_lines_case():
+    """The stampers (install.sh, install.ps1) swap one whole placeholder line in guard.py and each guard_*.py for the
+    install id. A file whose line drifts installs unstamped: the installer exits 0 and the guard then denies every call.
+    The placeholder is read from install.sh and install.ps1, never copied here. Each hooks/guard*.py holds exactly one."""
+    root = os.path.dirname(HERE)
+    found = {}
+    for name, pattern in (("install.sh", r"^STAMP_PLACEHOLDER='([^'\n]*)'\r?$"),
+                          ("install.ps1", r"^\$StampPlaceholder = '([^'\n]*)'\r?$")):
+        with open(os.path.join(root, name), encoding="utf-8") as f:
+            m = re.search(pattern, f.read(), re.M)
+        if not m or not m.group(1):
+            return False, "%s names no placeholder text" % name
+        found[name] = m.group(1)
+    if len(set(found.values())) != 1:
+        return False, "the stampers disagree: %r" % found
+    want = found["install.sh"]
+    files = sorted(n for n in os.listdir(HERE) if re.fullmatch(r"guard(_\w+)?\.py", n))
+    if "guard.py" not in files or "guard_core.py" not in files:
+        return False, "the guard files were not found in %s" % HERE
+    bad = []
+    for name in files:
+        with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
+            hits = sum(1 for line in f.read().split("\n") if line.rstrip("\r") == want)
+        if hits != 1:
+            bad.append("%s has %d placeholder lines" % (name, hits))
+    if bad:
+        return False, "%s; want exactly one line equal to %r" % ("; ".join(bad), want)
+    return True, "%d guard files each hold one placeholder line" % len(files)
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -503,6 +545,10 @@ def build_cases():
     cases.append(("no advisory entry carries onFailure", check_advisory_no_onfailure))
     cases.append(("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL",
                   check_env_subagent_model))
+    cases.append(("CLAUDE_CODE_SUBAGENT_MODEL is \"sonnet\"",
+                  check_env_equals("CLAUDE_CODE_SUBAGENT_MODEL", "sonnet")))
+    cases.append(("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is \"1\"",
+                  check_env_equals("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "1")))
     cases.append(("guard split: a copied guard loads split_segments from its sibling, not the real one",
                   split_mutant_case))
     cases.append(("guard split control: the same copy with its sibling unmutated passes the check",
@@ -513,6 +559,8 @@ def build_cases():
                   guard_names_case))
     cases.append(("guard split: a name no guard module defines raises AttributeError through guard",
                   guard_sentinel_case))
+    cases.append(("install stamp: each hooks/guard*.py holds exactly one placeholder line, as the stampers write it",
+                  stamp_lines_case))
     return cases
 
 

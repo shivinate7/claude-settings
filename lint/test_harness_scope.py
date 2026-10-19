@@ -8,7 +8,7 @@ HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
              gates_windows_rest, gates_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep (the suite flags the steps inside a job read)
+  STEP_FLAGS code, guard, sweep, mods (the suite flags the steps inside a job read)
 
 Run with:  python3 lint/test_harness_scope.py -v
 """
@@ -21,8 +21,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
-STEP_FLAGS = ["code", "guard", "sweep"]
-ALL = JOB_FLAGS + STEP_FLAGS + ["mods"]  # the shell's ALL also holds mods (harness-scope.sh line 11)
+STEP_FLAGS = ["code", "guard", "sweep", "mods"]
+ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
 
 
@@ -161,7 +161,7 @@ class Scope(unittest.TestCase):
         for p in ("README.md", "decisions/some-record.md"):
             self.assertFlags(run([p]), want_false=["guard"])
 
-    # Round 2 hole: lint/guard_log_report.py imports hooks/guard_core.py at load, and decision_watch
+    # lint/guard_log_report.py imports hooks/guard_core.py at load, and decision_watch
     # reads guard.log through it at run time. So a change to it must select the same jobs as
     # lint/_transcript.py, the other module the decision watch loads (the rules at its line 36, 51).
     def test_guard_log_reader_change_selects_the_jobs_of_the_transcript_reader(self):
@@ -222,7 +222,7 @@ class Scope(unittest.TestCase):
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
 
-    # Review round 1: mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
+    # mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
     # and the Mod tests run that test. The lint/* rule sets `code` only, so a diff naming only the lint
     # file would skip its test.
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
@@ -253,6 +253,12 @@ class Scope(unittest.TestCase):
         p = "skills/ci-hygiene/SKILL.md"
         self.assertFlags(run([p], existing=[p]), want_false=ALL)
         self.assertEqual(self.true_set(run([p])), {"gates_windows", "shell_macos", "code", "guard"})
+
+    # The rm shim suite also runs in gates-macos: BSD rm and the /var symlink change what the shim reads,
+    # and a Linux pass proves neither. harness-scope.sh maps bin/rm and the suite to that job ahead of
+    # the lint/* rule, which sets `code` only, so a diff that names the suite alone still reaches it.
+    def test_an_rm_shim_suite_change_turns_on_the_macos_job(self):
+        self.assertFlags(run(["lint/test_rm_shim.py"], existing=["lint/test_rm_shim.py"]), want_true=["gates_macos", "code"])
 
 if __name__ == "__main__":
     unittest.main()

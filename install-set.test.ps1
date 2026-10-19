@@ -1,5 +1,5 @@
-# Tests for the install-set ruling (owner ruling 2026-10-15 17:40). An install swaps every guard
-# module at once. One install runs at a time. Each installer path logs one start and one end line.
+# Tests for the install set. An install swaps every guard module at once. One install runs at a
+# time. Each installer path logs one start and one end line.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-set.test.ps1
 #
@@ -8,7 +8,7 @@
 # covered: a link carries the repo file's placeholder line, so an install cannot make the guard see
 # an INSTALL_ID mix there.
 #
-# Cases. Each is red on a tree without the ruling. Each FAIL line names the bad outcome.
+# Cases. Each FAIL line names the bad outcome.
 #   swap1   A sibling guard file is held open with read sharing only, so the installer's rename
 #           over it is refused, as a reader holding it would refuse it. A second install then stalls
 #           mid-swap. No guard run made while that install is alive may be a guard-crash deny. After

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Cases for the wave-2 handoff hooks: decisions/handoff-hooks-wave-2.md, ruling items 1 and 2.
+"""Cases for the wave-2 handoff hooks: decisions/precompact-handoff.md, items 8 and 9.
 Standard library only, and no test runner.
 
 Run it from the repository root:
 
     python hooks/test_handoff_wave2.py
 
-Seams. The builder matches each one. Every seam is a CLI mode that reads one JSON payload on stdin.
+Seams. Every seam is a CLI mode that reads one JSON payload on stdin.
 
 Part 1, hooks/precompact_handoff.py:
   --session-end  (SessionEnd; session_id, reason, cwd). Reason `clear` writes one new file that
@@ -51,8 +51,7 @@ so `~/.claude` names the same folder as CLAUDE_CONFIG_DIR.
 Stubs. PRECOMPACT_HANDOFF_UNDER_TEST and READ_CHECK_UNDER_TEST replace the two modules. An
 always-pass stub (exit 0, no output) must fail every case, the /safe-stop pin included.
 
-Red on 8b9607e: the FAIL lines of one run name the open ruling items. The /safe-stop pin
-passes on purpose, because it guards a signature that works today.
+The /safe-stop pin guards a signature that already works, so it passes on the unchanged hook.
 
 Each negative case carries a positive twin on a separate session. So a pass cannot come from
 a hook that does nothing. The Read spelling cases and the twin use the same live check.
@@ -547,7 +546,7 @@ def case_reorient_matches_either_spelling_of_proj():
 
 
 def case_safe_stop_entry_pinned():
-    """The /safe-stop seam, pinned as it is today. Passes on the current tree on purpose."""
+    """The /safe-stop seam: a pin on a signature that already works."""
     c = Case("safe_stop")
     try:
         hooks_dir = os.path.dirname(PRECOMPACT)
@@ -832,7 +831,6 @@ def case_bad_stdin_and_live_control_per_mode():
             c.cleanup()
 
 
-# --------------------------------------------------------------------------- review round 2
 
 STALE_AGE = 400 * 86400  # seconds: no live session is this old
 

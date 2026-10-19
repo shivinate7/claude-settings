@@ -5,7 +5,7 @@ Run: python3 merge/test_cmd.py
 Both launchers must behave the same: refuse a checkout with the wrong origin before any
 pull request read, and pass every argument and the exit code of merge/launch.py through.
 On Windows this runs bin/merge.cmd. On other systems it runs bin/merge, the shim that
-merge.cmd starts. Plan: plans/shared-merge-tool.md. Never touches a real checkout.
+merge.cmd starts. README: "The `merge` command". Never touches a real checkout.
 """
 import os, shutil, subprocess, sys, tempfile, unittest
 

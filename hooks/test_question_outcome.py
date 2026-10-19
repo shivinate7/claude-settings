@@ -19,10 +19,9 @@ Interface the hook must match:
   "permissionDecisionReason": "..."}}`, and exit 0.
 - Allow: stdout is empty, or one JSON object holding only `systemMessage`, and exit 0.
 - Check did not run: stdout is one `{"systemMessage": "... did not run ..."}` line, exit 0.
-- Retry rule (ruling, batch review): after ANY deny in a session, the NEXT AskUserQuestion in
+- Retry rule: after ANY deny in a session, the NEXT AskUserQuestion in
   that session passes with no model call, whatever its text or options, and clears the state.
-  A third ask after that pass is judged again. Owner ruling 2026-10-13 20:12 CDT, "Keep the free
-  pass": the pass holds for a Problem-first ask too.
+  A third ask after that pass is judged again. The pass holds for a Problem-first ask too.
 - Deny-state age: the state file's mtime is its age. A deny state older than 30 minutes is
   not honored: the next ask is judged. A younger one still passes the next ask.
 - A deny-state that cannot be removed does not pass every later ask: a later ask is judged, or
@@ -35,7 +34,7 @@ Interface the hook must match:
   Machine lines (isMeta, no origin or origin not "human", task-notification, peer messages, Stop-hook
   feedback, compact summary, sidechain text, tool_result, system-reminder) never count.
   A human-origin owner message that quotes a `<cross-session-message` tag is owner text.
-- The span (owner ruling 22:21 CDT): the prompt holds all conversation text from the owner's 3rd-last
+- The span: the prompt holds all conversation text from the owner's 3rd-last
   message up to the question, in transcript order: owner messages, the assistant's text blocks, and
   relayed cross-session messages. Each is labeled by source. A relay is labeled as relayed, never as
   the owner's. Tool calls, tool results, task notifications, system reminders and other machine lines
@@ -44,15 +43,15 @@ Interface the hook must match:
 - Budget: the span text is trimmed from its oldest end to SPAN_BUDGET characters (20,000), labels,
   fences and separators included. The whole prompt stays within PROMPT_MAX (150,000). When the
   fixed text and the question alone exceed it, no model call is made and one did-not-run line is
-  written. The 3 owner messages stay whole, with no per-message cap (ruling 2026-10-14 00:00 CDT).
+  written. The 3 owner messages stay whole, with no per-message cap.
   Only when they overflow the room are they cut, oldest first, and each cut block shows CUT_MARK.
 - The model call keeps `timeout=MODEL_TIMEOUT` (90 s).
 - `Goal:` needs text on its own line. Blank or whitespace-only after the marker is missing.
-- Goal format (owner ruling 2026-10-13): a question with options needs a `Goal:` line and a
+- Goal format: a question with options needs a `Goal:` line and a
   `Problem:` line to pass the presence check. A question with only `You want:` is denied, with a
   reason that names `Goal:`, and no model call. A question with `Goal:` but no `Problem:` is denied,
-  with a reason that names `Problem:`, and no model call (owner ruling 2026-10-13 14:13 CDT).
-- Order (owner request 2026-10-13 19:48 CDT): in the question text, the `Goal:` line comes before the
+  with a reason that names `Problem:`, and no model call.
+- Order: in the question text, the `Goal:` line comes before the
   `Problem:` line. A `Problem:` line first is denied with no model call, and the reason says Goal goes
   first. Only the question text counts for either line, never an option's preview. A variant form
   of the Problem line (bold, NBSP-led, lowercase, quoted, bulleted, italic, or full-width colon) that
@@ -76,17 +75,16 @@ Interface the hook must match:
   one is in its rule bullet in output-styles/shiv-stylisms.md.
 - A missing style file, or a missing rule anchor: the check still runs (ALLOW gives empty
   stdout, FLAG gives a deny), and writes one stderr line that names the file or the anchor.
-- Plain words (incidents 2026-10-14, lane question-plain; owner ruling 11:00 CDT: no separate no-model
-  check, the model judge asks it all). The judge prompt asks six things: (1) does the Goal line match
-  the goal; (2) does each option serve it; (3) is a better option missing (the existing asks); (4) can
-  the owner answer from the box alone, with every id, code or name explained in words; (5) does the
-  question point at anything the box does not show, such as an earlier message or "item 4"; (6) does
-  each option say what the owner gains and what the owner loses, each as a change for the owner, not for
-  a record. A FLAG on each of the three incident questions denies, and the judge's reason reaches the
-  session.
-- Option descriptions (incident 2026-10-14): the judge input holds each option's description beside its
-  own label. A description is defanged like the other blocks: no fence token or forged BEGIN line
-  survives it. An option with no description renders its label alone.
+- Plain words (no separate no-model check; the model judge asks it all). The judge prompt asks six
+  things: (1) does the Goal line match the goal; (2) does each option serve it; (3) is a better
+  option missing (the existing asks); (4) can the owner answer from the box alone, with every id,
+  code or name explained in words; (5) does the question point at anything the box does not show,
+  such as an earlier message or "item 4"; (6) does each option say what the owner gains and what the
+  owner loses, each as a change for the owner, not for a record. A FLAG on each of the three
+  incident questions denies, and the judge's reason reaches the session.
+- Option descriptions: the judge input holds each option's description beside its own label. A
+  description is defanged like the other blocks: no fence token or forged BEGIN line survives it.
+  An option with no description renders its label alone.
 - Override the module under test with the env var QUESTION_OUTCOME_UNDER_TEST.
 """
 import atexit
@@ -441,8 +439,8 @@ def case_4_timeout_allows_and_says_so():
 
 
 # --------------------------------------------------------------------------- case 5
-# Re-pointed (batch review, orchestrator ruling Q2): after a deny, the NEXT ask passes with no
-# model call, whatever its text or options. The old rule passed only the identical question.
+# After a deny, the NEXT ask passes with no model call, whatever its text or options. It need not
+# be the identical question.
 
 # One deny, then the next ask. Each call makes its own session and stub, so no state crosses rows.
 # `first` and `second` are (question text, labels). `expect_rule`, when set, is the rule the first
@@ -544,8 +542,8 @@ def case_q1_machine_shapes_never_count_as_the_owner():
     prompt = stub.prompts[0] if stub.prompts else ""
     check(name + " [combined]: prompt holds the three genuine lines",
           all(tag in prompt for tag in ("GENUINE-A", "GENUINE-B", "GENUINE-C")), "prompt")
-    # The relay record sits in the span after the last owner line, so it is conversation text
-    # (owner ruling 22:21 CDT): PEER-SENTINEL may appear, labeled as relayed. No other sentinel may.
+    # The relay record sits in the span after the last owner line, so it is conversation text:
+    # PEER-SENTINEL may appear, labeled as relayed. No other sentinel may.
     check(name + " [combined]: prompt holds no machine sentinel but the relay's", not sentinels(prompt),
           sentinels(prompt))
 
@@ -577,11 +575,10 @@ def case_q8_originless_plain_text_is_not_owner_text():
 
 
 # --------------------------------------------------------------------------- case q9
-# Owner ruling 2026-10-08 (decisions/question-outcome-check.md): the owner's answers in
-# AskUserQuestion tool results are the owner's words. Fixture shape copied from one real
-# answer line under ~/.claude/projects: a tool_result with no origin key, whose content opens
-# "Your questions have been answered:" and ends "You can now continue with these answers in
-# mind." The toolUseResult carries the questions and the answers.
+# Per decisions/question-outcome-check.md, the owner's answers in AskUserQuestion tool results
+# are the owner's words. Fixture shape, as a real answer line has it: a tool_result with no
+# origin key, whose content opens "Your questions have been answered:" and ends "You can now
+# continue with these answers in mind." The toolUseResult carries the questions and the answers.
 
 def answered(question_text, answer_text, tool_use_id="toolu_fixture"):
     return {"parentUuid": "p-fixture", "isSidechain": False, "type": "user",
@@ -643,8 +640,8 @@ def case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last():
 
 
 # --------------------------------------------------------------------------- case q2
-# P-Q2 (review of 6351ac2): a questions/answers tool result is the owner's words ONLY when its
-# tool_use_id matches an AskUserQuestion tool_use in a main-chain assistant record.
+# A questions/answers tool result is the owner's words ONLY when its tool_use_id matches an
+# AskUserQuestion tool_use in a main-chain assistant record.
 
 def case_q2a_an_unlinked_questions_answers_result_is_not_owner_text():
     name = "caseQ2a owner text: a questions/answers result with no AskUserQuestion call is excluded"
@@ -693,7 +690,7 @@ def case_q2c_a_result_linked_only_from_a_sidechain_or_another_tool_is_not_owner_
 
 
 # --------------------------------------------------------------------------- case q3c
-# P-Q3 (review of 6351ac2): an array answer (multiSelect) is included and joined, not dropped.
+# An array answer (multiSelect) is included and joined, not dropped.
 
 def case_q3c_a_multiselect_array_answer_is_owner_text_with_every_pick_kept():
     name = "caseQ3c owner text: a multiSelect array answer is included, every pick kept"
@@ -738,8 +735,8 @@ def case_q3_unwritable_state_flag_is_allowed_with_a_note():
 
 
 def case_q3b_unwritable_state_restate_deny_is_not_a_loop():
-    """Extension of Q3 (the orchestrator to rule): the same no-loop reason covers a restate deny,
-    which also records state. With no state, the retry would deny again. This case says so."""
+    """Like Q3: the same no-loop reason covers a restate deny, which also records state. With no
+    state, the retry would deny again."""
     name = "caseQ3b state cannot be written: a restate deny does not loop (extension, ruling needed)"
     if not need_module(name):
         return
@@ -903,7 +900,7 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     check(name + ": no question text echoed", "ECHO-QUESTION-SENTINEL" not in out, out[:200])
 
 
-# --------------------------------------------------------------------------- round 3
+# ---------------------------------------------------------------------------
 # R1 a deny state that cannot be removed; R2 deny-state age; R3 UTF-8 stdin read as cp1252;
 # R4 the Goal: deny reason is sanitized.
 
@@ -1007,9 +1004,9 @@ def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
     check(name + ": no model call", stub.prompts == [], len(stub.prompts))
 
 
-# --------------------------------------------------------------------------- round 4
+# ---------------------------------------------------------------------------
 # R8 a stale deny state whose remove fails is ignored: the ask is judged, no did-not-run note.
-# Pin: a fresh deny state whose remove fails gives the did-not-run note and no deny.
+# A fresh deny state whose remove fails gives the did-not-run note and no deny.
 
 def case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged():
     name = "caseR8 deny-state 2 hours old, remove fails: ignored, the ask is judged once"
@@ -1051,20 +1048,19 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 
 
 # --------------------------------------------------------------------------- rulings in the judge input
-# The judge reads the Ruling sections of the session repo's decisions/ and deferred/ records. The repo
+# The judge reads the Ruling sections of the session repo's decisions/ and debts/ records. The repo
 # is the hook payload's `cwd`. A question the owner already settled is refused, and the reason cites the
 # record by id and title. The rulings block adds at most RULINGS_MAX chars to the prompt. These cases stub
 # the model. They pin what the judge is given and what the deny says. The model makes the split between a
 # settled question and a request to change a ruling, so no case here proves that split.
 #
-# Contract the hook must match (test-author proposal; the decision record names it):
-# - Rulings come from payload["cwd"]: decisions/*.md and deferred/*.md under it.
-# - A decision's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
+# Contract the hook must match:
+# - Rulings come from payload["cwd"]: decisions/*.md and debts/*.md under it.
+# - A decision's or debt's ruling is each H2 section titled "The ruling", "Ruling", "The rulings" or
 #   "The owner's rulings", with any suffix. A section runs to the next H2 outside a code fence.
-# - A deferred record's ruling is its "**Why it waits.**" paragraph (deferred records have no H2).
-# - Each ruling is shown with its record id (the file stem).
+# - Each ruling is shown with its record id, <folder>/<stem>.
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
-#   holds the id and the record's H1 title, and names no path.
+#   holds the id and the record's H1 title, and names no absolute path.
 
 # The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
 # module at test time. No case here keeps a copy of them.
@@ -1080,11 +1076,11 @@ FENCE_TEXT = "\n".join([
     "FENCE-SURVIVES after the fence, still in the ruling.", "",
     "## Holes, named", "",
     "AFTERRULING-HOLES body.", ""])
-BETA_DEFERRED = "\n".join([
+BETA_DEBT = "\n".join([
     "# Beta waits for the owner", "",
-    "**What waits.** A thing that waits.", "",
-    "**Why it waits.** Owner, 2026-10-06: BETA-DEFERRAL-WORD build it last.", "",
-    "**Trigger that brings it back.** When the owner asks.", ""])
+    "**What.** A thing that waits.", "",
+    "## Ruling", "",
+    "Owner, 2026-10-06: BETA-DEBT-WORD build it last.", ""])
 
 
 def fresh_repo(tag, files):
@@ -1128,7 +1124,7 @@ def run_guarded(name, payload):
 
 
 def case_rl1_judge_input_holds_the_ruling_sections_only():
-    name = "caseRL1 judge input: Ruling sections of decisions/ and deferred/, no other section"
+    name = "caseRL1 judge input: Ruling sections of decisions/ and debts/, no other section"
     if not need_module(name):
         return
     heads = ["The ruling", "Ruling (owner, 2026-10-03)", "The rulings", "The ruling, 2026-10-11 (owner)",
@@ -1139,7 +1135,7 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
         ("Why", "NOTRULING-WHY body."), ("The ruling", "RLMARK-SKIP body."),
         ("The question", "NOTRULING-QUESTION body."), ("Holes, named", "AFTERRULING-HOLES body.")])
     files["decisions/rl-fence.md"] = FENCE_TEXT
-    files["deferred/rl-beta.md"] = BETA_DEFERRED
+    files["debts/rl-beta.md"] = BETA_DEBT
     repo = fresh_repo("rl1", files)
     with model_stub(ALLOW) as stub:
         run_guarded(name, ruling_payload(fresh_session("rl1"), [question(GOOD_Q, LABELS)],
@@ -1155,19 +1151,42 @@ def case_rl1_judge_input_holds_the_ruling_sections_only():
     check(name + ": keeps a code-fenced ## line inside a Ruling section, and the text after the fence",
           "FENCE-SURVIVES" in prompt, "")
     check(name + ": keeps an apostrophe in a ruling", "Don't skip the check." in prompt, "")
-    check(name + ": holds the Why-it-waits paragraph of a deferred record", "BETA-DEFERRAL-WORD" in prompt, "")
-    check(name + ": shows the deferred record id rl-beta", "rl-beta" in prompt, "")
+    check(name + ": holds the Ruling of a debt record", "BETA-DEBT-WORD" in prompt, "")
+    check(name + ": shows the debt record id debts/rl-beta", "debts/rl-beta" in prompt, "")
+
+
+def case_rl1b_a_debt_ruling_section_is_read_and_the_rest_of_the_debt_is_not():
+    name = "caseRL1b judge input: the ## Ruling of a debts/ file is read, its other text is not"
+    if not need_module(name):
+        return
+    debt = "\n".join(["# Disk guard waits", "",
+                      "**What.** NOTRULING-DEBT-LEAD body.", "",
+                      "## Ruling", "",
+                      "Owner, 2026-10-11: RLDEBT-BODY build Part 1 first.", "",
+                      "## Notes", "",
+                      "NOTRULING-DEBT-NOTES body.", ""])
+    repo = fresh_repo("rl1b", {"debts/rl-disk.md": debt})
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl1b"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": holds the Ruling of the debt", "RLDEBT-BODY" in prompt, "")
+    check(name + ": labels it debts/rl-disk with its title",
+          "Ruling of record debts/rl-disk (Disk guard waits)" in prompt, "")
+    for mark in ("NOTRULING-DEBT-LEAD", "NOTRULING-DEBT-NOTES"):
+        check(name + ": omits %s, which is not in the Ruling section" % mark, mark not in prompt, mark)
 
 
 def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title():
-    name = "caseRL2 settled question: refused, reason cites the record's id and title, no path"
+    name = "caseRL2 settled question: refused, reason cites the record's folder/stem id and title, no absolute path"
     if not need_module(name):
         return
     for kind, rel, text, rid, title in (
             ("decision", "decisions/rl-alpha.md",
              decision_text("Retries wait between tries", [("The ruling", "RLALPHA-BODY: retries never wait.")]),
-             "rl-alpha", "Retries wait between tries"),
-            ("deferred", "deferred/rl-beta.md", BETA_DEFERRED, "rl-beta", "Beta waits for the owner")):
+             "decisions/rl-alpha", "Retries wait between tries"),
+            ("debt", "debts/rl-beta.md", BETA_DEBT, "debts/rl-beta", "Beta waits for the owner")):
         sub = "%s (%s)" % (name, kind)
         repo = fresh_repo("rl2" + kind, {rel: text})
         verdict = ({"verdict": "FLAG", "record": rid, "why": WHY}, None)
@@ -1180,7 +1199,64 @@ def case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id
         reason = reason or ""
         check(sub + ": reason cites the record id " + rid, rid in reason, reason)
         check(sub + ": reason gives the record title as its gloss", title in reason, reason)
-        check(sub + ": reason names no path or file", not re.search(r"decisions|deferred|\.md", reason), reason)
+        # A relative folder/stem id is fine; an absolute path or a .md file is not.
+        check(sub + ": reason names no absolute path and no .md file", repo not in reason and ".md" not in reason,
+              reason)
+
+
+# The judge labels each ruling `<folder>/<stem>`. One stem in two folders must keep
+# two distinct ids, so the cite cannot pick the wrong record's title.
+DUP_FILES = {
+    "decisions/rl-dup.md": decision_text("Decision dup record", [("The ruling", "RL8-DEC-BODY: retries never wait.")]),
+    "debts/rl-dup.md": "\n".join(["# Debt dup record", "", "## Ruling", "",
+                                  "Owner, 2026-10-06: RL8-DEBT-BODY waits for the owner.", ""]),
+}
+
+
+def case_rl2b_the_same_stem_in_decisions_and_debts_keeps_two_ids_and_each_flag_cites_its_own_title():
+    name = "caseRL2b same stem in decisions/ and debts/: two folder/stem ids, each FLAG cites its own title"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl8", DUP_FILES)
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the decision is labeled decisions/rl-dup with its own title",
+          "Ruling of record decisions/rl-dup (Decision dup record)" in prompt, "")
+    check(name + ": the debt is labeled debts/rl-dup with its own title",
+          "Ruling of record debts/rl-dup (Debt dup record)" in prompt, "")
+    check(name + ": both rulings' text reaches the judge", "RL8-DEC-BODY" in prompt and "RL8-DEBT-BODY" in prompt, "")
+    for rid, title, other in (("debts/rl-dup", "Debt dup record", "Decision dup record"),
+                              ("decisions/rl-dup", "Decision dup record", "Debt dup record")):
+        sub = "%s (FLAG %s)" % (name, rid)
+        with model_stub(({"verdict": "FLAG", "record": rid, "why": WHY}, None)):
+            _code, out, _ = run_guarded(sub, ruling_payload(fresh_session("rl8"), [question(GOOD_Q, LABELS)],
+                                                            default_transcript(), repo))
+        reason = deny_reason(out)
+        check(sub + ": denied", reason is not None, out)
+        reason = reason or ""
+        check(sub + ": reason cites the id " + rid, rid in reason, reason)
+        check(sub + ": reason cites its own title, " + title, title in reason, reason)
+        check(sub + ": reason does not cite the other record's title, " + other, other not in reason, reason)
+
+
+def case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records():
+    name = "caseRL2c bare stem reply, same stem in two records: no title is cited"
+    if not need_module(name):
+        return
+    repo = fresh_repo("rl9", DUP_FILES)
+    with model_stub(({"verdict": "FLAG", "record": "rl-dup", "why": WHY}, None)) as stub:
+        _code, out, _ = run_guarded(name, ruling_payload(fresh_session("rl9"), [question(GOOD_Q, LABELS)],
+                                                         default_transcript(), repo))
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    reason = deny_reason(out)
+    check(name + ": the FLAG is still denied", reason is not None, out)
+    reason = reason or ""
+    check(name + ": the bare id is not cited: no title of either record",
+          "Decision dup record" not in reason and "Debt dup record" not in reason, reason)
+    check(name + ": the deny keeps the judge's why", WHY in reason, reason)
 
 
 def case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed():
@@ -1296,16 +1372,38 @@ def case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark():
           isinstance(cap, int) and len(kept) > cap - 100, len(kept))
 
 
+def case_rl9_the_repos_own_records_all_fit_the_ruling_budget():
+    """The alarm: this repo's own decisions/ and debts/ grow, and the
+    judge must see every ruling. Red when record growth outruns RULINGS_MAX, until the budget is raised."""
+    name = "caseRL9 the repo's own tree: no record is left out of the rulings section"
+    if not need_module(name):
+        return
+    root = os.path.dirname(HERE)
+    with_ruling = 0
+    for kind in qo.RULINGS_DIRS:
+        folder = os.path.join(root, kind)
+        for n in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+            if n.endswith(".md"):
+                with open(os.path.join(folder, n), encoding="utf-8", errors="replace") as f:
+                    with_ruling += bool(qo._ruling_text(kind, f.read())[1])
+    section, titles = qo._rulings(root)
+    left_out = re.search(re.escape(qo.RULINGS_LEFT_OUT).replace(re.escape("%d"), r"(\d+)"), section)
+    check(name + ": the tree holds records with a ruling", with_ruling > 0, with_ruling)
+    check(name + ": the section has no left-out line", left_out is None, left_out and left_out.group(0))
+    check(name + ": every record with a ruling is in the section", len(titles) == with_ruling,
+          "%d of %d included" % (len(titles), with_ruling))
+
+
 # --------------------------------------------------------------------------- goal format
-# Owner ruling 2026-10-13: `You want:` is renamed `Goal:`, and the problem sentence opens with
-# `Problem:`. The prompt carries the two rule bullets, read from output-styles/shiv-stylisms.md.
+# The question text carries a `Goal:` line and a `Problem:` line (`You want:` no longer counts).
+# The prompt carries the two rule bullets, read from output-styles/shiv-stylisms.md.
 
 GOAL_RULE = "style-question-restates-goal"
 PROBLEM_RULE = "style-question-states-problem"
 STYLE_PATH = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
 GOAL_Q = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit.\n"
           "Should the retry wait between tries?")
-# A Goal: line with no Problem: line: the presence check denies it (owner ruling 14:13 CDT).
+# A Goal: line with no Problem: line: the presence check denies it.
 GOAL_ONLY_Q = "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?"
 GOAL_LINE_Q = "Goal: QGOAL-TOKEN\nProblem: PROBLEM-TOKEN\nShould the retry wait between tries?"
 YOU_WANT_ONLY_Q = "You want: a three-try limit on the upload retry.\nShould the retry wait between tries?"
@@ -1447,7 +1545,7 @@ def case_g5_prompt_reads_the_style_file_not_a_copy():
           "DECOY-FIX found")
 
 
-# --------------------------------------------------------------------------- goal format, review round 1
+# --------------------------------------------------------------------------- goal format
 # No order between the Problem and Goal lines; the literals tied to the style file by module
 # constants; one stderr line when the style file or a rule anchor is missing.
 ORDER_WORD = re.compile(
@@ -1569,8 +1667,8 @@ def case_g12_goal_without_problem_is_denied_with_no_model_call():
 
 
 # --------------------------------------------------------------------------- order: Goal before Problem
-# Owner request 2026-10-13 19:48 CDT: the `Goal:` line comes before the `Problem:` line. The order is
-# judged on the question text only, the way the presence check reads it. An option's preview is not read.
+# The `Goal:` line comes before the `Problem:` line. The order is judged on the question text only,
+# the way the presence check reads it. An option's preview is not read.
 
 ORDER_BAD_Q = ("Problem: the upload retry has no limit, so it can loop.\n"
                "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?")
@@ -1674,7 +1772,7 @@ def case_o6_problem_first_variant_forms_are_denied_with_no_model_call():
 
 
 def case_o7_after_any_deny_the_next_ask_passes_even_problem_first():
-    # Owner ruling 2026-10-13 20:12 CDT, "Keep the free pass". Green on the builder's branch: pinned.
+    # The free pass holds for a Problem-first ask too.
     name = "caseO7 after any deny, the next ask passes with no model call (owner 20:12 CDT)"
     if not need_module(name):
         return
@@ -1732,8 +1830,8 @@ def case_o10_problems_and_problem_solved_lines_do_not_deny():
         check(name + " (" + where + "): exit 0", code in (0, None), code)
 
 
-# --------------------------------------------------------------------------- judge span (22:21 CDT)
-# Owner spec (22:21 CDT): the judge reads all conversation text from the owner's 3rd-last message
+# --------------------------------------------------------------------------- judge span
+# The judge reads all conversation text from the owner's 3rd-last message
 # up to the question, in transcript order: owner messages, the assistant's text blocks, and relayed
 # cross-session messages, each labeled by source. Tool calls, tool results, task notifications and
 # system reminders are left out. The read goes back up to 16 MiB to find that 3rd-last owner message.
@@ -2071,7 +2169,7 @@ def case_j10_no_owner_message_in_16_mib_does_what_today_does():
 # each case). Owner messages are whole unless they overflow the bound; then each cut block keeps its
 # end and leads with CUT_MARK (K8-K10). The question alone over the bound makes no model call (K2).
 # The span is fenced, so no span text can open or close a fence early.
-# No per-message cap (ruling 2026-10-14 00:00 CDT). K4 and K7 pin that.
+# No per-message cap. K4 and K7 pin that.
 ARGV_UNITS = 32767  # the old Windows command-line cap, in UTF-16 units. argv is gone: a fixture figure only.
 SPAN_HEAD = "Conversation, from the owner's 3rd-last message:\n"
 SPAN_END = "\n\nQuestion: "  # the question body starts here, after the span
@@ -2147,7 +2245,7 @@ def case_k3_an_assistant_block_cannot_close_its_own_fence():
 
 
 def case_k4_owner_message_of_5000_chars_reaches_the_prompt_whole():
-    # Ruling 2026-10-14 00:00 CDT: no per-message cap. A 5000-char owner message is whole in the prompt.
+    # No per-message cap: a 5000-char owner message is whole in the prompt.
     name = "caseK4 owner message of 5000 chars: whole in the prompt"
     if not need_module(name):
         return
@@ -2265,12 +2363,12 @@ def case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_keep_t
         owner_claims(row, prompt, texts)
 
 
-# --------------------------------------------------------------------------- plain words, lane question-plain
-# Incidents 2026-10-14: three questions passed this hook and the owner could not use them. (1) and (2)
-# named ids, a branch, a sha and a key with no words saying what they were, and (1) pointed at messages
-# the box does not hold. (3) offered a false choice and left out the better option. Owner ruling 11:00
-# CDT: no separate no-model check; the model judge asks all of it, in one place. These cases pin the
-# asks in the judge prompt, and that a FLAG on each incident question denies with the judge's reason.
+# --------------------------------------------------------------------------- plain words
+# The owner must be able to use each question. Three question shapes fail that: (1) and (2) name ids,
+# a branch, a sha and a key with no words saying what they were, and (1) points at messages the box
+# does not hold; (3) offers a false choice and leaves out the better option. No separate no-model
+# check exists; the model judge asks all of it, in one place. These cases pin the asks in the judge
+# prompt, and that a FLAG on each of the three INCIDENT_n questions denies with the judge's reason.
 # Every ask is matched by words near an anchor word, not by exact wording, on the hook's own prompt text
 # (the question removed, lowercased) read from a hook copy on STYLE_FIXTURE, so the real style file's
 # own words cannot stand in for an ask.
@@ -2356,8 +2454,8 @@ INCIDENT_3_WHY = "A better option is missing: count only the check files in harn
 
 def judge_that_asks(question_text, why, *asks):
     """A stub judge. It FLAGs with WHY only when the prompt, less the question text, holds every one of
-    ASKS (the matchers above), and else ALLOWs. So an incident case is red until the judge prompt asks
-    what that incident needed, and green when it does."""
+    ASKS (the matchers above), and else ALLOWs. So a case denies only when the judge prompt asks
+    what that question needed."""
     def judge(prompt):
         rest = prompt.replace(question_text, "").lower()
         return ({"verdict": "FLAG", "why": why}, None) if all(a(rest) for a in asks) else ALLOW
@@ -2386,15 +2484,15 @@ def case_p2_the_three_incident_questions_reach_the_judge_and_are_denied():
                    ["Keep D-139", "Delete D-139"], INCIDENT_1_WHY, (asks_box_alone, asks_unseen_pointer), "p2a")
     check_incident(name + " (2) slug, sha, key: needs ask 1", mod, INCIDENT_2_Q,
                    ["Fix it", "Drop the debt"], INCIDENT_2_WHY, (asks_box_alone,), "p2b")
-    # Green on 1ac9851: the missing-option ask is already in the prompt. This guards that it stays.
+    # The missing-option ask is already in the prompt. This guards that it stays.
     check_incident(name + " (3) false choice, better option missing: needs ask 4", mod, INCIDENT_3_Q,
                    ["Test code", "Product code"], INCIDENT_3_WHY, (asks_better_option_missing,), "p2c")
 
 
 # --------------------------------------------------------------------------- option descriptions
-# Incident 2026-10-14: the judge refused four owner questions for no gain and no loss, though each
-# option's description held them. The judge must read each description beside its own label. A
-# description is fenced like the other text: no fence token or forged BEGIN line survives it.
+# Each option's description holds its gain and loss, so the judge must read each description beside
+# its own label. A description is fenced like the other text: no fence token or forged BEGIN line
+# survives it.
 
 OPT_LABELS = ["Ship the retry fix now", "Pause for review first"]
 OPT_DESCS = ["OPTA-DESC gains a same-day fix and loses the review step.",
@@ -2498,8 +2596,8 @@ def case_d3_an_option_with_no_description_renders_its_label_alone():
 
 
 # --------------------------------------------------------------------------- option text: size, fences, separator, preview; question text; options shape
-# Red cases for review round 1. Each names the defect in its case name. The cap value is the
-# builder's: these cases assert only that the judge runs and that the first owner message stays whole.
+# Each case names its defect in its case name. These cases assert only that the judge runs and
+# that the first owner message stays whole; the cap value is not pinned.
 
 FIRST_OWNER_CHARS = 8000  # the first owner message: enough to be cut once a huge option leaves little room
 
@@ -2653,7 +2751,7 @@ def case_d10_options_not_a_list_skips_or_denies_cleanly_and_does_not_crash():
 
 
 # --------------------------------------------------------------------------- option cut: whole text, and the mark that names it
-# Red cases for review round 2. Real option descriptions run to 375 chars at p99 (max 605). The Loss
+# Real option descriptions run to 375 chars at p99 (max 605). The Loss
 # text sits at the end, so a cut at 300 chars can hide the reason the judge needs.
 
 LOSS_TAIL = "Loss: D11-LOSS-TAIL drops the review step for one day."
@@ -2771,12 +2869,16 @@ def main():
     for case in cases:
         case()
     for case in (case_rl1_judge_input_holds_the_ruling_sections_only,
+                 case_rl1b_a_debt_ruling_section_is_read_and_the_rest_of_the_debt_is_not,
                  case_rl2_a_settled_question_is_refused_and_the_reason_cites_the_record_by_id_and_title,
                  case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed,
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
                  case_rl6_a_ruling_cannot_forge_an_owner_block,
-                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark):
+                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark,
+                 case_rl2b_the_same_stem_in_decisions_and_debts_keeps_two_ids_and_each_flag_cites_its_own_title,
+                 case_rl9_the_repos_own_records_all_fit_the_ruling_budget,
+                 case_rl2c_a_bare_stem_reply_is_not_cited_when_the_stem_is_in_two_records):
         case()
     if LOAD_ERROR is None:
         check("no real claude process started", _claude_calls() == 0, _claude_calls())
