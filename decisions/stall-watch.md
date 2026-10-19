@@ -21,9 +21,12 @@ guard rule, so the watcher does the waiting and the session is told once.
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
-  running and the watcher never stops it.
+  running and the watcher never stops it. The wrapper keeps exit 3 after a stall, so the session gets no
+  exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
+  2026-10-18 15:15 CDT).
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
-  of the session, and the guard denies a stop of a process outside the session.
+  of the session. The guard denies a stop of a process outside the session, unless the owner's override
+  pass covers it (`owner-override-pass`, the owner's typed pass).
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The watcher
   does not change, because a false STALL teaches the reader to scroll past a real one
   (guard-that-cries-wolf-is-spent). The merge tool prints `merge: waiting on ...` while it waits on checks,

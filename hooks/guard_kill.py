@@ -181,21 +181,15 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
 
 
-def foreign_pid_kill(tokens, transcript: str = "") -> str:
-    """Return the first numeric pid a `kill` segment names that this session did not start.
-
-    Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
-    the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
-    answer is "" (unknown, so allowed), never a guess. ponytail: a pid reused since launch, or
-    a child that reparented to init, reads as foreign; stop it through the harness.
-    """
+def _kill_pids(tokens):
+    """The numeric pid arguments of a `kill` segment, as text, in order. Nothing for any other
+    command, or for `kill -l`. Signal flags and their values are skipped."""
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) != "kill":
-        return ""
+        return
     rest = tokens[index + 1:]
     if any(arg == "-l" or arg == "-L" for arg in rest):
-        return ""
-    root = None
+        return
     skip = after_dashes = signal_given = False
     for arg in rest:
         if skip:
@@ -208,8 +202,25 @@ def foreign_pid_kill(tokens, transcript: str = "") -> str:
             skip = arg in KILL_SIGNAL_ARG_FLAGS
             signal_given = signal_given or not after_dashes
             continue
-        if not KILL_PID_RE.match(arg):
-            continue
+        if KILL_PID_RE.match(arg):
+            yield arg
+
+
+def kills_group_pid(tokens) -> bool:
+    """True when a `kill` segment names pid 0, 1 or -1. No override pass lifts it."""
+    return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
+
+
+def foreign_pid_kill(tokens, transcript: str = "") -> str:
+    """Return the first numeric pid a `kill` segment names that this session did not start.
+
+    Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
+    the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
+    answer is "" (unknown, so allowed), never a guess. ponytail: a pid reused since launch, or
+    a child that reparented to init, reads as foreign; stop it through the harness.
+    """
+    root = None
+    for arg in _kill_pids(tokens):
         number = int(arg)
         if number in (0, 1, -1):   # a whole group, init, or every process: judged with no root
             return arg

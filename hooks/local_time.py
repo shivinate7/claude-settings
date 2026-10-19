@@ -5,6 +5,8 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
   `fb` also starts feedback capture to the session's inbox file. Capture ends at `fb done`,
   after 10 minutes of quiet, or when a judge says a prompt is not feedback.
+  A prompt that is only `override`, `override <n>[m|h]` or `override off` also grants or ends the
+  owner override pass (decision owner-override-pass; hooks/override_pass.py) and prints one more line.
 - --subagent: At SubagentStart, gives the subagent the time in US Central as context.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
@@ -76,6 +78,21 @@ def line(clock=clock):
     local = now + CST + (timedelta(hours=1) if dst else timedelta())
     name, off = ("CDT", "UTC-05:00") if dst else ("CST", "UTC-06:00")
     return "Local time: %s %s (%s)" % (local.strftime("%Y-%m-%d %H:%M"), name, off)
+
+
+def central_hhmm(at):
+    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of a pass."""
+    return " ".join(line(lambda: at).split()[3:5])
+
+
+def override_line(result):
+    """The context line for a grant() result: names the pass and when it ends, Central time."""
+    kind, until = result
+    if kind == "off":
+        return "Override pass: ended."
+    if kind == "once":
+        return "Override pass: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
+    return "Override pass: every refused act goes through until %s." % central_hhmm(until)
 
 
 def inbox_paths(session_id):
@@ -158,6 +175,21 @@ def capture(raw, stamp, at=None):
               " Jot it by hand into the handoff." % e)
 
 
+def grant_override(raw, at):
+    """Owner prompt `override`, `override <n>[m|h]` or `override off` (decision owner-override-pass):
+    grants or ends the session's pass and prints one line. Any failure is one stderr line, no pass."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+        import override_pass
+        result = override_pass.grant(hook.get("session_id"), hook.get("prompt"), at)
+        if result:
+            print(override_line(result))
+    except (ValueError, AttributeError):
+        pass  # stdin is no hook payload: capture() reports that once
+    except Exception as e:  # advisory: the time line and capture still run
+        print("local_time: override pass: %s" % e, file=sys.stderr)
+
+
 def main(argv):
     try:
         now = clock()
@@ -167,7 +199,9 @@ def main(argv):
                                                       "additionalContext": text}})
         print(text)
         if "--subagent" not in argv:
-            capture(sys.stdin.buffer.read(), stamp[len("Local time: "):], now)
+            raw = sys.stdin.buffer.read()
+            grant_override(raw, now)
+            capture(raw, stamp[len("Local time: "):], now)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0
