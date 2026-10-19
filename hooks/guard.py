@@ -134,7 +134,10 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override pass
 (decision owner-override-pass): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. It never lifts `frozen-path`,
-`git-env-set` or a kill of pid 0, 1 or -1.
+`git-env-set`, a kill of pid 0, 1 or -1, the role and model guards (`subagent-model-cap`,
+`subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
+or `worktree-home`. No pass check reaches the missing-module deny, the `settings.json` deny list,
+the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
 """
 
 import importlib
@@ -2200,17 +2203,55 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
 
 
+def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule 0, worktree-home: return the log detail when a subagent's call reaches outside its own
+    worktree, else ''. `status` is "none" for the orchestrator (no `agent_id`) and for tools this
+    rule does not judge; "unknown" when the record could not be read at all, which allows (an
+    unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
+    "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
+    checked here: the agent must still be able to read and report
+    (decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
+    # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
+    # rule sees `cwd` as main does.
+    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
+    if home_status != "home":
+        return ""
+    if tool in SHELL_TOOLS:
+        # The one allowed call is a lone `cd` back into the home (a recovery step).
+        if (path_is_inside(home_cwd, home) is False
+                and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
+            return "shell cwd outside recorded agent home"
+    elif tool in WRITE_TOOLS:
+        for write_target in (write_targets(tool_input) if home_primary else ()):
+            # A relative `file_path` resolves against the CALLER's cwd, the payload's own
+            # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
+            # `is_project_config` for the same reason) joins it before either check.
+            try:
+                resolved_target = _resolved(write_target, home_cwd)
+            except Exception:
+                resolved_target = write_target
+            if (path_is_inside(resolved_target, home_primary) is True
+                    and path_is_inside(resolved_target, home) is False):
+                return "write target outside recorded agent home"
+    return ""
+
+
 def never_passed(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override pass lifts (decision owner-override-pass): a
-    git location variable, a frozen path, a kill of pid 0, 1 or -1, or a role or model guard.
-    refuse() asks this before it spends a pass, because a lifted act ends the check."""
-    if floor_hit(tool, tool_input) or step_up_hit(tool, tool_input):
+    git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
+    worktree-home refusal. refuse() asks this before it spends a pass, because a lifted act ends the
+    check."""
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+            or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
     if tool in SHELL_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
-                    or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped))))
+                    or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
@@ -2236,38 +2277,10 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_pass_veto(lambda: never_passed(payload, tool, tool_input, cwd))
-    # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
-    # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
-    # rule sees `cwd` as main does.
-    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
-
-    # 0. Each subagent stays inside its own worktree. `status` is "none" for the orchestrator
-    # (no `agent_id`) and for tools this rule does not judge; "unknown" when the record could
-    # not be read at all, which allows (an unreadable state is never a hit); "no-record" for a
-    # non-isolated agent, which allows everything; "home" once the agent's worktree is known,
-    # from this call or an earlier one. Read/Grep are never checked here: the agent must still be
-    # able to read and report (decisions/an-agent-outside-its-home-tree-must-stop.md).
-    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
-    if home_status == "home":
-        if tool in SHELL_TOOLS:
-            if path_is_inside(home_cwd, home) is False:
-                # The one allowed call is a lone `cd` back into the home (a recovery step).
-                if not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home):
-                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                           "shell cwd outside recorded agent home")
-        elif tool in WRITE_TOOLS:
-            for write_target in (write_targets(tool_input) if home_primary else ()):
-                # A relative `file_path` resolves against the CALLER's cwd, the payload's own
-                # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
-                # `is_project_config` for the same reason) joins it before either check.
-                try:
-                    resolved_target = _resolved(write_target, home_cwd)
-                except Exception:
-                    resolved_target = write_target
-                if (path_is_inside(resolved_target, home_primary) is True
-                        and path_is_inside(resolved_target, home) is False):
-                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
-                           "write target outside recorded agent home")
+    # 0. Each subagent stays inside its own worktree.
+    home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
+    if home_hit:
+        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
 
     # 9. The subagent model floor. A spawn that names a Haiku model is denied. The reason names no
     # model; the log holds what the call asked for.
