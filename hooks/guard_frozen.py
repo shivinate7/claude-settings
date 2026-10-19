@@ -72,6 +72,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("fresh-prose"),
     os.path.normcase("design-review"),
     os.path.normcase("impeccable"),
+    os.path.normcase("plain-english-map"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
