@@ -47,6 +47,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import _nowindow
 import sys
 import tempfile
 import time
@@ -67,7 +68,7 @@ TOOL_TIMEOUT = 5  # seconds for each ps or lsof call, so the report cannot hang
 
 def _run(args):
     try:
-        return subprocess.run(args, capture_output=True, text=True, errors="replace",
+        return _nowindow.run(args, capture_output=True, text=True, errors="replace",
                               timeout=TOOL_TIMEOUT).stdout
     except Exception as exc:
         return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
@@ -162,7 +163,7 @@ def watch(pid, log, quiet):
 def eof_backslash_literal():
     """True when /bin/sh keeps a backslash at end of input (dash, bash 5). Bash 3.2 drops it."""
     try:
-        return subprocess.run(["/bin/sh", "-c", "printf %s \\"], capture_output=True, text=True,
+        return _nowindow.run(["/bin/sh", "-c", "printf %s \\"], capture_output=True, text=True,
                               timeout=TOOL_TIMEOUT).stdout == "\\"
     except Exception:
         return False

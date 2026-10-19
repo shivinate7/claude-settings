@@ -21,6 +21,7 @@ import os
 import shutil
 import signal
 import subprocess
+import _nowindow
 import sys
 import tempfile
 
@@ -62,7 +63,7 @@ def receiver_state(name):
     # Stdout goes to a file, not a pipe: on Windows, subprocess.run reads the pipe again after the
     # kill, and a grandchild that holds the pipe then holds the hook with no bound.
     with tempfile.TemporaryFile() as out:
-        proc = subprocess.Popen([node, reader, name], stdin=subprocess.DEVNULL, stdout=out,
+        proc = _nowindow.Popen([node, reader, name], stdin=subprocess.DEVNULL, stdout=out,
                                 stderr=subprocess.DEVNULL, start_new_session=os.name != "nt")
         try:
             code = proc.wait(timeout=READER_TIMEOUT)
@@ -79,7 +80,7 @@ def kill_tree(proc):
     """Kill the reader and what it started. Only the process this hook started."""
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
         else:
             os.killpg(proc.pid, signal.SIGKILL)
     except Exception:

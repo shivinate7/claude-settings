@@ -255,7 +255,7 @@ function loadRecord(root, kind, rel) {
 function mergeOrder(root, folder) {
   const out = execFileSync("git", [
     "log", "--first-parent", "--diff-filter=A", "--name-only", "--reverse", "--format=%x00", "--", folder,
-  ], { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  ], { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   const order = [];
   let batch = [];
   for (const raw of out.split("\n")) {
@@ -614,7 +614,7 @@ export function baseRef(config, opts = {}) {
 
 function gitOut(root, args, input) {
   return execFileSync("git", args, {
-    cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], windowsHide: true,
   });
 }
 
@@ -931,7 +931,7 @@ export function claim(root, config, baseTip) {
   const result = stamp(root, config, taken);
   if (!result.problems.length && result.assigned.length && config.regenerate) {
     try {
-      execFileSync("bash", ["-c", config.regenerate], { cwd: root, stdio: "inherit" });
+      execFileSync("bash", ["-c", config.regenerate], { cwd: root, stdio: "inherit", windowsHide: true });
     } catch {
       throw new Error("the regenerate command failed. The tree holds the claim. Discard the tree, and do not commit it");
     }

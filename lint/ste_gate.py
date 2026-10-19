@@ -39,6 +39,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import paragraph_blocks, format_finding, advisory_lines  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 try:
     from _transcript import guard_logger  # noqa: E402
 except Exception:  # an older _transcript.py beside this script: the gate runs, with no log line
@@ -71,7 +73,7 @@ def lint(linter, text, suffix=".md", config_from=None):
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         try:
-            run = subprocess.run(
+            run = _nowindow.run(
                 [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never"]
                 + (["--config-from", config_from] if config_from else []) + [path],
                 capture_output=True, encoding="utf-8", errors="replace", timeout=15,
@@ -295,7 +297,7 @@ def run_autofix(tool, ti, old_text, scope):
     the time limit is the bound that holds."""
     payload = json.dumps({"tool": tool, "ti": ti, "old_text": old_text,
                           "scope": None if scope is None else sorted(scope)})
-    run = subprocess.run([sys.executable, os.path.abspath(__file__), "--autofix"],
+    run = _nowindow.run([sys.executable, os.path.abspath(__file__), "--autofix"],
                          input=payload.encode("ascii"), capture_output=True,
                          timeout=fixer_limit())
     if run.returncode != 0:

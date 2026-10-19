@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import _nowindow
 import sys
 import tempfile
 import threading
@@ -73,7 +74,7 @@ def gh(args, cwd, timeout=READ_TIMEOUT):
     if exe is None:
         raise Unknown("gh is not on PATH")
     try:
-        p = subprocess.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        p = _nowindow.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, cwd=cwd)
         out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

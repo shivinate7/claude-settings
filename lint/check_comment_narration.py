@@ -18,6 +18,8 @@ import re
 import subprocess
 import sys
 import tokenize
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 PATTERNS = {
     "review round": re.compile(r"\bround\s*\d|\breview\s+(?:round|finding|points?)\b", re.I),
@@ -36,7 +38,7 @@ class Unread(Exception):
 
 
 def git(*args):
-    r = subprocess.run(["git", "-c", "core.quotepath=off", *args], capture_output=True, encoding="utf-8", errors="replace")
+    r = _nowindow.run(["git", "-c", "core.quotepath=off", *args], capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         raise Unread("git %s failed: %s" % (" ".join(args[:2]), r.stderr.strip() or r.returncode))
     return r.stdout

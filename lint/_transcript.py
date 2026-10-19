@@ -23,6 +23,7 @@ for the first time.
 import json
 import os
 import re
+import sys
 
 FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 FINDING_MAX = 300
@@ -179,9 +180,10 @@ def last_human_epoch(path):
 
 
 def _git(cwd, *args):
-    import subprocess  # lazy, same reason
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+    import _nowindow  # lazy, same reason
     try:
-        run = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
+        run = _nowindow.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
                              timeout=10)
     except Exception:
         return None

@@ -2,6 +2,8 @@
 # Shim for the merge tool. Finds the claude-settings checkout and starts merge/launch.py there.
 # No merge logic lives here. README: "The `merge` command".
 import os, re, shutil, stat, subprocess, sys, tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 OK = r"(https://github\.com/|git@github\.com:)shivinate7/claude-settings(\.git)?/?"
 def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy of this
     def handler(func, p, exc):
@@ -12,7 +14,7 @@ def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy 
     if sys.version_info >= (3, 12): shutil.rmtree(path, onexc=handler)
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 def origin(d):
-    r = subprocess.run(["git", "-C", d, "config", "--get", "remote.origin.url"], capture_output=True, encoding="utf-8", errors="replace")
+    r = _nowindow.run(["git", "-C", d, "config", "--get", "remote.origin.url"], capture_output=True, encoding="utf-8", errors="replace")
     return re.fullmatch(OK, r.stdout.strip()) is not None
 def find():
     d = os.environ.get("CLAUDE_SETTINGS_DIR")
@@ -23,6 +25,7 @@ def find():
     m = re.search(r"^@(\S.*?)[/\\]CLAUDE\.md\s*$", text, re.M)
     if m: return os.path.expanduser(m.group(1))
     d = tempfile.mkdtemp(prefix="claude-settings-")  # the repo is public: no credential needed
+    # nowindow: the clone prints its errors on the caller's terminal; with no window that output goes to a hidden console
     if subprocess.run(["git", "clone", "-q", "https://github.com/shivinate7/claude-settings", d]).returncode:
         rmtree_retry(d)
         sys.exit("merge: clone of claude-settings failed")
@@ -32,6 +35,7 @@ made = []
 d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
+    # nowindow: launch.py and merge.py print the merge report on the caller's terminal; with no window that output goes to a hidden console
     rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode
 finally:
     for m in made: rmtree_retry(m)  # only a clone this shim made

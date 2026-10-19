@@ -70,6 +70,7 @@ import os
 import re
 import shutil
 import subprocess
+import _nowindow
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -281,7 +282,7 @@ def chat_text_after(records, idx, limit=6000):
 
 def _run_git(cwd, args, timeout=GIT_TIMEOUT):
     try:
-        return subprocess.run(
+        return _nowindow.run(
             ["git", "-C", cwd] + args, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
     except Exception:
@@ -697,7 +698,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     token = env.get(TOKEN_ENV, "")
     scrub = lambda text: text.replace(token, "[token]") if token else text
     try:
-        run = subprocess.run(
+        run = _nowindow.run(
             [
                 "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import _nowindow
 import sys
 import time
 
@@ -368,7 +369,7 @@ def _git_order(cwd):
     """The record paths ("decisions/x.md") of one `git log` call, newest change first. [] when git
     fails, so the caller falls back to file mtime."""
     try:
-        r = subprocess.run(["git", "-c", "core.quotepath=off", "log", "--format=", "--name-only", "--relative",
+        r = _nowindow.run(["git", "-c", "core.quotepath=off", "log", "--format=", "--name-only", "--relative",
                             "--", *RULINGS_DIRS], cwd=cwd, capture_output=True, encoding="utf-8",
                            errors="replace", timeout=GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):

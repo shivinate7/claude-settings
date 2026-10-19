@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import subprocess
+import _nowindow
 import sys
 import tempfile
 import time
@@ -32,7 +33,7 @@ BASH_GATE = re.compile(r"\b(?:simctl|xcodebuild|xcrun|xctest|fastlane|flutter|re
 def devices():
     """{udid: (state, record)} from `simctl list`, or None when it could not be read."""
     try:
-        answer = subprocess.run(["xcrun", "simctl", "list", "devices", "--json"],
+        answer = _nowindow.run(["xcrun", "simctl", "list", "devices", "--json"],
                                 capture_output=True, text=True, timeout=60)
         if answer.returncode != 0:
             return None
@@ -49,13 +50,13 @@ def launchd(udid):
     (`sweep._sim_live_launchd`); this hook stays standalone because a cloud copy has no janitor/."""
     try:
         env = {**os.environ, "LC_ALL": "C"}  # lstart text must not depend on the caller's locale
-        table = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
+        table = _nowindow.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
                                capture_output=True, text=True, timeout=30, env=env).stdout
         pids = [p[0] for p in (l.split(None, 3) for l in table.splitlines())
                 if len(p) == 4 and "launchd_sim" in p[3] and udid in p[3]]
         if len(pids) != 1:  # none, or two: unclear
             return None, None
-        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", pids[0]],
+        out = _nowindow.run(["ps", "-o", "pid=,lstart=", "-p", pids[0]],
                              capture_output=True, text=True, timeout=30, env=env).stdout
         for line in out.splitlines():
             parts = line.strip().split(None, 1)
@@ -111,7 +112,7 @@ def sim_ok(udid):
                 fd, shot = tempfile.mkstemp(suffix=".png")
                 os.close(fd)
                 argv[-1] = shot
-            ok = not subprocess.run(["xcrun", "simctl"] + argv, capture_output=True,
+            ok = not _nowindow.run(["xcrun", "simctl"] + argv, capture_output=True,
                                     timeout=wait).returncode and ok
         return ok
     except Exception:
@@ -128,7 +129,7 @@ def retry(udid):
     """Shut down and boot UDID once, then check again."""
     for step, wait in (("shutdown", 30), ("boot", 60)):  # boot runs even when shutdown failed
         try:
-            subprocess.run(["xcrun", "simctl", step, udid], capture_output=True, timeout=wait)
+            _nowindow.run(["xcrun", "simctl", step, udid], capture_output=True, timeout=wait)
         except Exception:
             pass
     return sim_ok(udid)

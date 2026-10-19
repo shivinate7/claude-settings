@@ -11,6 +11,8 @@ local base branch, afterMerge and the branch delete. GitHub half (`Host`): requi
 the minute read and `gh pr merge --match-head-commit`.
 """
 import argparse, contextlib, json, math, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
@@ -83,7 +85,7 @@ def shared_deadline(seconds):
 def sh(args, cwd=None, input=None, env=None):
     args = [resolve_program(args[0], env), *args[1:]]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else SH_TIMEOUT
-    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -960,7 +962,7 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
+        c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root)  # nowindow: the afterMerge command prints on the caller's terminal; with no window that output goes to a hidden console.returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c
     return ok

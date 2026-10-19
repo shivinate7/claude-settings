@@ -55,6 +55,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import mutate_shared  # noqa: E402
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
@@ -1418,7 +1419,7 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     only so nothing accidentally falls back to a real `~/.claude` before that line runs."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config_dir
-    result = subprocess.run(
+    result = _nowindow.run(
         # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
         [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=1200,
     )

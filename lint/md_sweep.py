@@ -101,6 +101,8 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work, advisory_lines  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 try:
     from _transcript import guard_logger  # noqa: E402
 except Exception:  # an older _transcript.py beside this script: the sweep runs, with no log line
@@ -172,7 +174,7 @@ def _run_git(cwd, args, timeout=20):
     plain non-zero exit, which the caller reads from `returncode`.
     """
     try:
-        return subprocess.run(
+        return _nowindow.run(
             ["git", "-C", cwd] + args, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
     except Exception:
@@ -428,7 +430,7 @@ def lint_files(paths, exclude):
         cmd += ["--exclude", exclude]
     cmd += paths
     try:
-        run = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+        run = _nowindow.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=30)
         data = json.loads(run.stdout or "{}")
     except Exception:
         return {}

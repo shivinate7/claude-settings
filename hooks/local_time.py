@@ -38,6 +38,7 @@ import json
 import os
 import re
 import subprocess
+import _nowindow
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -163,7 +164,7 @@ def capture(raw, stamp, at=None):
                 f.write(at.isoformat().encode("ascii"))
         if judge:
             try:  # the same detached-child pattern as janitor/agent_end_reap.py; the hook does not wait
-                child = subprocess.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
+                child = _nowindow.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
                                   hook["session_id"], at.isoformat(), prompt[:MESSAGE_MAX]], stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 if os.environ.get("FEEDBACK_JUDGE_INLINE"):

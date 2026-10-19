@@ -71,6 +71,7 @@ import json
 import os
 import re
 import subprocess
+import _nowindow
 import sys
 
 MEMORY_DIRNAME = "memory"
@@ -358,7 +359,7 @@ def _run_git(cwd, args, input_text=None):
     those callers turns a non-zero exit into a stand-down and which reads it as "no answer".
     """
     try:
-        return subprocess.run(
+        return _nowindow.run(
             ["git", "--literal-pathspecs", "-C", cwd] + args,
             input=input_text, capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT,
         )

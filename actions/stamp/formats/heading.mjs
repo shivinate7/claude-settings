@@ -441,7 +441,7 @@ export function stamp(root, config, h, extra) {
 
 function git(root, args) {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+    return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
   } catch {
     return null;
   }
