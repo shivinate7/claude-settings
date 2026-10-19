@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
+import ast, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -769,6 +769,311 @@ class CutBranch(Env):
         self.assertIn("local-only commits", out)
         self.assertTrue(self.exists())
 
+# ------------------------------------------------------------------ the lanes of a batch
+# One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
+LANE_DELETED = "merge: lane origin/{b}: deleted."
+LANE_KEPT = "merge: lane origin/{b}: kept: {why}"
+LANE_FAILED = "merge: lane origin/{b}: not deleted: "  # then the last line of git's reply, as cut_branch prints it
+WHY = {"open": "it has an open PR.", "keep": "it is in merge.keepBranches.", "unproven": "its tip is not in the merge commit.",
+       "unread": "the open PRs could not be read."}
+HELD = {"batch-map", "map-format-version", "map-skill-move", "claude-p-fetch-key"}  # the branches the repo's own config keeps
+
+def lane_batch(env, *names):
+    """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
+    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent."""
+    o, tips = env.other, {}
+    for n in names:
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", n, "origin/main")
+        put(os.path.join(o, n.replace("/", "-") + ".txt"), n + "\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {n}"); sh(o, "git", "push", "-q", "origin", n)
+        tips[n] = sh(o, "git", "rev-parse", "HEAD")
+    sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+    for n in names:
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into feat", tips[n])
+    sh(o, "git", "push", "-q", "origin", "feat")
+    return tips
+
+class LaneHost(FakeHost):
+    """FakeHost plus the open-PR read. style: how the merge lands, merge (a merge commit), squash or rebase.
+    unreadable: stop (raises Stop), none (returns None) or error (raises ValueError). on_merged runs once the merge is on origin."""
+    style, open, unreadable, on_merged = "merge", (), None, None
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.open_calls = 0
+
+    def open_heads(self):
+        self.open_calls += 1
+        if self.unreadable == "stop":
+            raise merge.Stop("gh pr list failed: HTTP 502")
+        if self.unreadable == "none":
+            return None
+        if self.unreadable == "error":
+            raise ValueError("not json")
+        return set(self.open)
+
+    def merge(self, n, method, sha):
+        if self.style == "merge":
+            got = super().merge(n, method, sha)
+        else:
+            o = self.other
+            sh(o, "git", "fetch", "-q", "origin")
+            if self.style == "squash":
+                sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+                sh(o, "git", "merge", "-q", "--squash", sha)
+                sh(o, "git", "commit", "-q", "-m", f"squash #{n}")
+                sh(o, "git", "push", "-q", "origin", "main")
+            else:  # rebase: the lane commits are replayed with new ids and the merge commits drop out
+                sh(o, "git", "checkout", "-q", "-B", "rebased", sha)
+                sh(o, "git", "rebase", "-q", "origin/main")
+                sh(o, "git", "push", "-q", "origin", "rebased:main")
+            got = sh(o, "git", "rev-parse", "HEAD"), ""
+        if self.on_merged:
+            self.on_merged()
+        return got
+
+class CutLanes(Env):
+    """After a merge, the lane branches the batch took in are deleted on origin. Driven end to end through merge.main,
+    so the split of work inside cut_lanes stays the builder's. Each keep case has a lane in the same batch that must go,
+    so a tool that deletes nothing fails it."""
+    def setUp(self):
+        super().setUp()
+        self.host = LaneHost(self.co, self.other)
+
+    def go(self):
+        return self.run_merge("7", "--confirm")
+
+    @contextlib.contextmanager
+    def spy(self, after=None):
+        """Every program merge.py runs through merge.sh, as arg lists. after(args, result) runs after each real call."""
+        real, calls = merge.sh, []
+        def wrapped(args, *a, **k):
+            r = real(args, *a, **k)
+            calls.append(list(args))
+            if after:
+                after(args, r)
+            return r
+        with unittest.mock.patch.object(merge, "sh", wrapped):
+            yield calls
+
+    def push_to(self, branch):
+        """A rival pushes one more commit to `branch`. -> its new tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        put(os.path.join(o, "rival.txt"), "pushed after the batch\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", branch)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def assert_deleted(self, out, *names):
+        for b in names:
+            self.assertIn(LANE_DELETED.format(b=b), out)
+            self.assertEqual(self.head(b), "", f"{b} is still on origin")
+
+    def assert_kept(self, out, b, why):
+        self.assertIn(LANE_KEPT.format(b=b, why=WHY[why]), out)
+        self.assertNotEqual(self.head(b), "", f"{b} was deleted")
+
+    def assert_merged(self):
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_two_lanes_in_the_batch_are_deleted_after_the_merge(self):
+        tips = lane_batch(self, "agent/lane1", "lane2")
+        with self.spy() as calls:
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_deleted(out, "agent/lane1", "lane2")
+        self.assertEqual(self.host.open_calls, 1)
+        self.assertEqual(self.head("feat"), "")  # the PR's own branch is cut_branch's, and it prints its own line
+        self.assertNotIn("merge: lane origin/feat", out)
+        self.assertNotIn("not deleted", out)
+        self.assertNotIn("keepBranches", out)  # a config without the field is no notice
+        self.assertNotEqual(self.head("main"), "")
+        for b, tip in tips.items():  # the delete is leased to the tip the batch took in
+            want = [f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}"]
+            self.assertTrue(any("push" in c and "origin" in c and all(w in c for w in want) for c in calls), f"no leased delete push for {b}")
+        self.assertFalse(self.lock_ref())
+
+    def test_a_lane_pushed_to_after_the_merge_is_kept(self):
+        lane_batch(self, "lane1", "lane2")
+        moved = []
+        self.host.on_merged = lambda: moved.append(self.push_to("lane2"))
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1")
+        self.assertEqual(self.head("lane2"), moved[0])
+        self.assertNotIn(LANE_DELETED.format(b="lane2"), out)
+
+    def test_a_lane_that_moves_between_the_read_and_the_delete_is_kept(self):
+        lane_batch(self, "lane1", "lane2")
+        moved = []
+        def rival(args, result):  # the first read of the heads that lists lane2
+            if "ls-remote" in args and "refs/heads/lane2" in result[1] and not moved:
+                moved.append(self.push_to("lane2"))
+        with self.spy(rival):
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(moved, "no read of the origin heads listed lane2")
+        self.assert_deleted(out, "lane1")
+        self.assertEqual(self.head("lane2"), moved[0])
+        self.assertNotIn(LANE_DELETED.format(b="lane2"), out)
+
+    def test_a_lane_with_an_open_pr_is_kept(self):
+        lane_batch(self, "lane1", "lane2")
+        self.host.open = {"lane1"}
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane2")
+        self.assert_kept(out, "lane1", "open")
+
+    def test_a_lane_in_keepBranches_is_kept(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["batch-map"]))))
+        lane_batch(self, "batch-map", "lane2")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane2")
+        self.assert_kept(out, "batch-map", "keep")
+
+    def unreadable(self, how):
+        """The open-PR read fails: nothing is deleted, each lane says why, and the merge still lands."""
+        lane_batch(self, "lane1", "lane2")
+        self.host.unreadable = how
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertEqual(self.host.open_calls, 1)
+        for b in ("lane1", "lane2"):
+            self.assert_kept(out, b, "unread")
+        self.assertNotIn("Traceback", out)
+
+    def test_an_open_pr_read_that_stops_deletes_nothing_and_the_merge_lands(self):
+        self.unreadable("stop")
+
+    def test_an_open_pr_read_that_returns_none_deletes_nothing_and_the_merge_lands(self):
+        self.unreadable("none")
+
+    def test_an_open_pr_read_that_raises_deletes_nothing_and_the_merge_lands(self):
+        self.unreadable("error")
+
+    def test_a_squash_merged_lane_is_not_proven_and_is_kept(self):
+        lane_batch(self, "lane1", "lane2")
+        self.host.style = "squash"  # no lane tip is in the squash commit, and no lane patch is alone in it
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        for b in ("lane1", "lane2"):
+            self.assert_kept(out, b, "unproven")
+
+    def test_a_rebase_merged_lane_is_proven_by_its_patches_and_deleted(self):
+        lane_batch(self, "lane1", "lane2")
+        self.host.style = "rebase"  # the lane commits sit on main under new ids: the tip is no ancestor, the patches are all there
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_deleted(out, "lane1", "lane2")
+
+    def test_a_delete_push_that_fails_does_not_fail_the_merge(self):
+        lane_batch(self, "agent/lane1", "lane2")
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put_lf(hook, '#!/bin/sh\nwhile read old new ref; do\n  if [ "$ref" = refs/heads/agent/lane1 ] && [ -z "$(echo "$new" | tr -d 0)" ]; then\n'
+                     '    echo "agent/lane1 may not be deleted" >&2; exit 1\n  fi\ndone\n')
+        os.chmod(hook, 0o755)
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertIn(LANE_FAILED.format(b="agent/lane1"), out)
+        self.assertNotEqual(self.head("agent/lane1"), "")
+        self.assert_deleted(out, "lane2")  # the failure stops no other lane
+        self.assertFalse(self.lock_ref())
+
+    def test_a_head_at_a_commit_already_on_main_is_not_a_lane(self):
+        # The batch merged main in ("sync main"): that merge commit's second parent is a main commit. A head still at that
+        # commit is no lane, and its tip is an ancestor of the merge, so only the base check keeps it.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "moves.txt"), "main moves\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "push", "-q", "origin", "HEAD:refs/heads/stale")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        lane_batch(self, "lane2")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane2")
+        self.assertNotEqual(self.head("stale"), "")
+        self.assertNotIn("origin/stale", out)
+
+    def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_prs(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
+        lane_batch(self, "lane1", "lane2")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.open_calls, 0)
+        self.assertNotIn("merge: lane", out)
+        for b in ("lane1", "lane2", "feat"):
+            self.assertNotEqual(self.head(b), "")
+
+    def test_a_batch_without_lanes_reads_no_open_prs_and_prints_no_lane_line(self):
+        rc, out = self.go()  # feat holds no merge commit
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.open_calls, 0)
+        self.assertNotIn("merge: lane", out)
+
+    def keepBranches_config(self, value):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=value))))
+        return self.run_merge("7")
+
+    def test_keepBranches_takes_a_list_of_names(self):
+        rc, out = self.keepBranches_config(["batch-map", "map-skill-move"])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("unknown field", out)
+
+    def test_keepBranches_that_is_not_a_list_of_names_stops_with_one_line(self):
+        for bad in ("batch-map", [""], [5], [None], None):
+            with self.subTest(bad=bad):
+                rc, out = self.keepBranches_config(bad)
+                lines = [l for l in out.splitlines() if l.strip()]
+                self.assertEqual(rc, 1, out)
+                self.assertEqual(len(lines), 1, out)
+                self.assertIn(".github/stamp.json", lines[0])
+                self.assertIn("merge.keepBranches is not valid", lines[0])
+
+    def test_the_repos_own_config_keeps_the_held_branches(self):
+        with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
+            kept = json.load(f)["merge"].get("keepBranches")
+        self.assertIsInstance(kept, list, "merge.keepBranches is missing from .github/stamp.json")
+        self.assertLessEqual(HELD, set(kept))
+
+class CutLanesHome(unittest.TestCase):
+    """The names the lane cleanup is built on. One home each: cut_lanes beside cut_branch and called from confirm, the proof
+    from guard's own branch_cherry_empty, the open-PR read on Host."""
+    def tree(self):
+        with open(merge.__file__, encoding="utf-8") as f:
+            return ast.parse(f.read())
+
+    def test_cut_lanes_is_defined_and_confirm_calls_it(self):
+        self.assertTrue(callable(getattr(merge, "cut_lanes", None)), "merge.py must define cut_lanes(root, lanes, commit)")
+        self.assertEqual(list(inspect.signature(merge.cut_lanes).parameters)[:3], ["root", "lanes", "commit"])
+        confirm = next(n for n in ast.walk(self.tree()) if isinstance(n, ast.FunctionDef) and n.name == "confirm")
+        self.assertTrue([n for n in ast.walk(confirm) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "cut_lanes"],
+                        "confirm must call cut_lanes where deleteBranch is honoured")
+
+    def test_the_open_pr_read_and_the_config_field_exist(self):
+        self.assertTrue(callable(getattr(merge.Host, "open_heads", None)), "merge.Host must define open_heads()")
+        self.assertIn("keepBranches", merge.MERGE_FIELDS)
+
+    def test_the_proof_calls_guards_cherry_test_and_holds_no_copy(self):
+        tree = self.tree()
+        copies = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "branch_cherry_empty"
+                  or isinstance(n, ast.Constant) and n.value == "cherry"]
+        self.assertEqual(copies, [], "merge.py copies guard.branch_cherry_empty at line %s. Call it." % copies)
+        uses = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "branch_cherry_empty"]
+        self.assertTrue(uses, "cut_lanes must call guard.branch_cherry_empty")
+
 class AfterPush(Env):
     """A crash between the claim push and the merge must stop cleanly: claim reverted, lock released."""
     def merge_tree(self):
@@ -1212,6 +1517,10 @@ elif a[:2] == ["pr", "merge"]:
     git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
     if msg: print(msg); sys.exit(code)
+elif a[:2] == ["pr", "list"]:  # open_heads: open_heads_fail is the text of a failing read, open_heads the head names of the open pull requests
+    if S.get("open_heads_fail"):
+        print(S["open_heads_fail"]); sys.exit(1)
+    print(json.dumps([{"headRefName": h} for h in S.get("open_heads", [])]))
 elif a[:2] == ["repo", "view"]:
     print(json.dumps({"defaultBranchRef": {"name": S.get("default_branch", "main")}}))
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
@@ -1352,6 +1661,42 @@ class GhHalf(Env):
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
+
+    def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
+        # gh pr list stops at 30 rows unless --limit says more. A lane whose open PR is past row 30 would be deleted, and its PR closed.
+        self.set(open_heads=["lane2", "agent/lane1"])
+        got = self.gh_host().open_heads()
+        self.assertEqual(set(got), {"lane2", "agent/lane1"})
+        calls = self.calls()
+        for part in ("pr list", "--state open", "--json headRefName"):
+            self.assertIn(part, calls)
+        limit = re.search(r"--limit (\d+)", calls)
+        self.assertTrue(limit and int(limit.group(1)) > 30, calls)
+
+    def test_a_failed_open_pr_read_is_never_an_empty_set(self):
+        # An empty set means no PR is open, and every lane would go. A failure stops (merge.Stop) or answers None.
+        self.set(open_heads_fail="HTTP 404: Not Found")
+        try:
+            got = self.gh_host().open_heads()
+        except merge.Stop:
+            return
+        self.assertIsNone(got)
+
+    def test_a_batch_with_lanes_reads_the_open_prs_through_gh_and_keeps_those_lanes(self):
+        lane_batch(self, "agent/lane1", "lane2")
+        self.set(open_heads=["lane2"])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("pr list", self.calls())
+        self.assertIn(LANE_DELETED.format(b="agent/lane1"), out)
+        self.assertEqual(self.head("agent/lane1"), "")
+        self.assertIn(LANE_KEPT.format(b="lane2", why=WHY["open"]), out)
+        self.assertNotEqual(self.head("lane2"), "")
+
+    def test_a_batch_without_lanes_makes_no_pr_list_call(self):
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("pr list", self.calls())
 
     def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
         sh(self.other, "git", "fetch", "-q", "origin")
