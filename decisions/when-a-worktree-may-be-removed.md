@@ -26,6 +26,10 @@ Each route keeps its own limit. A clean, pushed agent worktree that is not merge
 - A stale agent lock is judged by the rule in `the-janitor-is-one-machine-wide-sweep`.
 - Owner word, 2026-10-13 15:56 CDT: option A. The janitor's dirty test stays as it is. No junk-pattern change. Reaping dirty trees stays closed. The restore-point rule does not reopen it.
 - Re-measure `q_max` after the lane `worktree-hook-paths` merges. It is unmeasured until then.
+- Fetch, owner ruling 2026-10-19 (CDT): `sweep.py` runs `git fetch --prune` in each repo before it judges a tree. It moves only remote-tracking refs. It drops a remote head the clone lacks, and keeps no tree as unreadable for it. Why: a local `origin/*` ref lags the remote, and the live read cannot test a head the clone lacks.
+  - Orchestrator's call, 2026-10-19: the fetch runs in preview mode too.
+  - Orchestrator's call, 2026-10-19: it passes `--no-tags`. Its timeout is 10 s, or the time left to the run deadline if that is less.
+  - Orchestrator's call, 2026-10-19: a failed fetch adds `: fetch failed` to the reason of a tree kept as `unreadable-subject`. It keeps no other tree. The sweep judges other trees on the refs as they stand.
 
 Reason: the dirty trees in this clone are live work. Most `q_max` leftovers come from false refusals in its worktree-remove hook, not from dirt.
 
@@ -33,7 +37,7 @@ Reason: the dirty trees in this clone are live work. Most `q_max` leftovers come
 
 Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd included, needs both of these to remove a worktree:
 
-- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, read-only). It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
+- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, after the run's fetch, see Safe work). A listed head that the clone lacks is dropped: it cannot hold a commit of the tree. It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
 - Idle 1 hour.
 
 The worktree must also be clean and fully pushed. No live session and no process may be inside. An unreadable process is judged by `unattended-sweep-stops-proven-orphans`. The lock must be gone, or its host process must be gone.
@@ -65,7 +69,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 
 - Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
 - It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it.
-- Its tip is on GitHub. Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone), and `git branch -r --contains HEAD` is not empty.
+- Its tip is on GitHub, read after the run's fetch (see Safe work). Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone; a listed head the clone lacks is dropped), and `git branch -r --contains HEAD` is not empty.
 
 A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. A repo whose `package.json` defines the script `reap:worktrees` gets `npm run reap:worktrees -- --remove` run in its root instead of this rule. An unreadable `package.json` turns the rule off for that repo.
 
