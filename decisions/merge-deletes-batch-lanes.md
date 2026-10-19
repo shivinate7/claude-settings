@@ -23,7 +23,9 @@ Built on branch `merge-cuts-lanes` (commit 1cae7c63), in `merge/merge.py`: `lane
 - After the merge, `cut_lanes` takes only origin heads whose sha equals a tip.
 - It skips the default branch, the PR base and the PR's own branch. Those are not lanes, so they print no line.
 - It keeps a head named in `merge.keepBranches`.
-- It keeps a head with an open PR whose head sha differs from the tip. An open PR at the tip does not keep it.
+- It keeps a head with an open PR whose head sha differs from the tip. An open PR at the tip with the batch's
+  base does not keep it. At the tip with another base, it does (a backport).
+- It keeps a head with two or more open PRs ("more than one open PR").
   `Host.open_heads` raises on a failed read, or on 1000 or more rows. Then no head is deleted.
 - It keeps a head whose tip is neither an ancestor of the merge commit nor patch-equal to it, per
   `guard_core.branch_cherry_empty`. The patch test is in `a-branch-is-redundant-by-patch-not-by-ancestry`, a
@@ -42,3 +44,9 @@ Kind: process
 Home: merge/merge.py
 
 ## Holes, named
+
+- (a) Any origin head at a lane tip's sha is deleted. `merge.keepBranches` is the only guard, so a long-lived branch merged into a batch is lost. Its commits stay on main; restoring it is one push. Debt: `long-lived-head-lost-in-batch`.
+- (b) A fast-forwarded first lane is never a tip (0 of 112 recent lane merges did this). Debt: `ff-first-lane-not-a-tip`.
+- (c) Squash-merged lanes are kept. Debt: `squash-lane-branch-kept`.
+- (d) For a head with two open PRs, the first row's base is lost. A stacked PR on a same-batch lane can then be closed, depending on row order (`merge/merge.py`, `Host.open_heads`). Fix: keep the bases as a set. Debt: `two-open-prs-lose-first-base`.
+- (e) A merge tool older than this change refuses main's stamp.json (unknown field `keepBranches`) with a clear stop. `merge/install_from_main.sh` fixes it. Debt: `old-merge-tool-refuses-stamp`.
