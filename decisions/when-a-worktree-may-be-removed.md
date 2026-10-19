@@ -29,7 +29,7 @@ Each route keeps its own limit. A clean, pushed agent worktree that is not merge
 - Fetch, owner ruling 2026-10-19 (CDT): `sweep.py` runs `git fetch --prune` in each repo before it judges a tree. It moves only remote-tracking refs. It drops a remote head the clone lacks, and keeps no tree as unreadable for it. Why: a local `origin/*` ref lags the remote, and the live read cannot test a head the clone lacks.
   - Orchestrator's call, 2026-10-19: the fetch runs in preview mode too.
   - Orchestrator's call, 2026-10-19: it passes `--no-tags`. Its timeout is 10 s, or the time left to the run deadline if that is less.
-  - Orchestrator's call, 2026-10-19: a failed fetch keeps each tree, with the reason `fetch failed`.
+  - Orchestrator's call, 2026-10-19: a failed fetch adds `: fetch failed` to the reason of a tree kept as `unreadable-subject`. It keeps no other tree. The sweep judges other trees on the refs as they stand.
 
 Reason: the dirty trees in this clone are live work. Most `q_max` leftovers come from false refusals in its worktree-remove hook, not from dirt.
 
