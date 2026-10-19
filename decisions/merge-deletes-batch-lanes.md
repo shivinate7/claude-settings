@@ -26,7 +26,7 @@ Built on branch `merge-cuts-lanes` (commit 1cae7c63), in `merge/merge.py`: `lane
 - It prints one line per lane: deleted, or kept with the reason.
 - It never fails the merge. An unexpected error prints one line.
 
-The cleanup runs only when `merge.deleteBranch` is true. The default is true.
+The cleanup runs only when `merge.deleteBranch` is true. An absent key reads as false, so no lane is deleted.
 
 Note: a squash-merged lane has no merge commit parent, so no tip is read. Its branch is kept. The design does not
 prove that a squash-merged lane landed.
