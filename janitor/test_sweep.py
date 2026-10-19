@@ -5223,6 +5223,29 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertKept(tree, out)
         self.assertLogged(out, "agent-k3")
 
+    def test_k_drops_a_remote_head_the_clone_lacks_and_judges_a_tree_on_the_heads_it_has(self):
+        """A second remote lists a head this clone has not fetched, as a push that lands after
+        the run's fetch does. The commit is not in this clone, so it cannot hold the tree's
+        commit: the head is dropped, and the tree, pushed to origin, is judged on the rest. The
+        remote is not unreadable."""
+        tree = self.agent("k4")
+        side = os.path.join(self.base, "side.git")
+        require(run_vcs(self.base, "init", "-q", "--bare", side).returncode == 0,
+                "could not make the second remote")
+        require(run_vcs(self.repo, "remote", "add", "side", side).returncode == 0,
+                "could not add the second remote")
+        other = self.second_clone()
+        self.commit(other, "side.txt")
+        require(run_vcs(other, "push", "-q", side, "HEAD:refs/heads/side").returncode == 0,
+                "the second clone could not push to the second remote")
+        newest = run_vcs(other, "rev-parse", "HEAD").stdout.strip()
+        require(newest in run_vcs(self.repo, "ls-remote", "--heads", "side").stdout,
+                "the second remote does not list the new commit")
+        require(run_vcs(self.repo, "cat-file", "-e", newest + "^{commit}").returncode != 0,
+                "this clone already holds the second remote's commit")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+
 
 class MergedCountsAsSafeTests(unittest.TestCase):
     """A HEAD merged into the default branch, by ancestry or by patch,
