@@ -54,9 +54,9 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    import _nowindow  # the one home of a no-window child start
-except ImportError:  # the Stop check is a recovery control: each tool read then reports no answer, and it never dies
-    _nowindow = None
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 try:
     from guard_stream import until_note  # the one parser of the `until:` note
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies

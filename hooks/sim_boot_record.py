@@ -24,7 +24,10 @@ import sys
 import tempfile
 import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 # A Bash call that cannot touch a simulator skips the ~0.3 s `simctl list`. ponytail: a boot hidden
 # behind a script that never names these words goes unrecorded, and an unrecorded device is kept.

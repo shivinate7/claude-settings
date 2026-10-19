@@ -27,7 +27,10 @@ import tempfile
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
