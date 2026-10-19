@@ -194,7 +194,11 @@
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
+- override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants a pass. Decision: owner-override-pass
+- override-once-not-bound: a one-act pass lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a hole). Decision: owner-override-pass
 - override-removal-unreminded: nothing reminds an agent to remove a raised subagent-cap file early; only expiry reverts it (hooks/config_watch.py)
+- override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_pass_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_pass_context. Decision: owner-override-pass
+- override-veto-no-mutants: no mutant covers never_passed, take or the veto path. Decision: owner-override-pass
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)

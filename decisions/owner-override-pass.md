@@ -13,6 +13,8 @@ Owner words, 2026-10-18 CDT:
 - 15:34: `why cap it let me say`. A timed pass has no cap. The owner picks the length.
 - 15:34: an act that a typed pass lets through is not a safety hole under `roles-review-cap-three` (a change gets three review rounds).
 
+Owner, 2026-10-19 00:07 CDT, process-only: after round 3, a test-only re-point of mutation anchors lands with CI's mutation run as its proof, with no 4th review.
+
 Orchestrator's call, not an owner word:
 
 - A pass covers only the session where the owner typed it.
