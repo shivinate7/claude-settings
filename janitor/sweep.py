@@ -13,9 +13,9 @@ re-derive one here; a second copy of that logic is the outcome to avoid. This mo
 orchestration: which repositories, which branches, which order, the preview report, the
 tombstone, and the 90-day purge.
 
-Preview is the default. Nothing is deleted until `--confirm` is passed. The sweep never touches
-a remote. The one program it can stop is an orphaned TCP listener inside a repository this sweep
-already covers, once every read on it is a confirmed "yes, reap": it is orphaned (a per-OS read);
+Preview is the default. The run fetches and prunes remote-tracking refs; no branch or worktree is
+deleted until `--confirm` is passed. The sweep never pushes to a remote. The one program it can
+stop is an orphaned TCP listener inside a repository this sweep already covers, once every read on it is a confirmed "yes, reap": it is orphaned (a per-OS read);
 no live Claude session has a cwd in the same checkout (guard.py's own oracle); the current user
 owns it. An unreadable answer to any one of the three means KEEP. `--confirm` signals a reapable
 pid by NUMBER alone, never by a name or a command-line pattern, and never escalates past that
@@ -432,6 +432,7 @@ def stale_agent_lock_verdict(reason: str):
     return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
 
 
+_FETCH_FAILED = None  # a set of roots while `main` runs: those whose `fetch --prune` failed
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
 
@@ -445,8 +446,9 @@ def _common_dir_key(path: str):
 def _live_remote_heads(path: str):
     """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`, which
     moves no ref; the run's own `fetch --prune` is `_fetch_prune`), or None when any read failed.
-    A head whose commit this clone lacks is dropped: it cannot hold a commit the clone has, and
-    `rev-list` fails on an unknown SHA. Local refs/remotes/* are not used: they lag the remote."""
+    A head whose commit this clone lacks is dropped, because `rev-list` fails on an unknown SHA.
+    A dropped head can sit above a commit the clone has, so dropping it can only make a tree read
+    unpushed, and an unpushed tree is kept unless it is merged. Local refs/remotes/* are not used: they lag the remote."""
     key = _common_dir_key(path)
     if key is None:
         return None
@@ -534,8 +536,8 @@ def prime_pushed(root: str, entries):
 
 def fully_pushed(path: str):
     """True when every commit on HEAD is reachable from a head the remote lists now (a detached
-    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
-    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
+    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed
+    or rev-list failed. A live SHA missing locally is dropped, not unreadable. Every reap needs it, not only a
     stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
     HEAD is read now; `prime_pushed` may already have settled that commit this run."""
     live = _live_remote_heads(path)
@@ -2655,16 +2657,22 @@ def _oldest_idle_first(entries):
     return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
-def _fetch_prune(root: str):
-    """`git fetch --prune` in ROOT, so the pushed and merged reads see the remote as it is now:
-    its current default branch, and no tracking ref for a head deleted there. It moves only
-    remote-tracking refs, so a preview runs it too. A failed fetch is ignored: the reads that
-    follow keep each tree they cannot settle."""
+def _fetch_prune(root: str) -> bool:
+    """`git fetch --prune --no-tags` in ROOT, so the pushed and merged reads see the remote as it
+    is now: its current default branch, and no tracking ref for a head deleted there. It moves
+    only remote-tracking refs, so a preview runs it too. True when it succeeded. A failed fetch
+    does not stop the run: the reads that follow keep each tree they cannot settle. The timeout is
+    10 s, or the time left to the run's deadline when that is less."""
+    left = 10 if _DEADLINE is None else min(10, _DEADLINE - _now())
+    if left <= 0:
+        return False
     try:  # prompts off: an unattended run never waits on a login window
-        subprocess.run(["git", "-C", root, "fetch", "--prune"], capture_output=True, timeout=10,
-                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+        done = subprocess.run(
+            ["git", "-C", root, "fetch", "--prune", "--no-tags"], capture_output=True, timeout=left,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
     except Exception:
-        pass
+        return False
+    return done.returncode == 0
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
@@ -2688,7 +2696,8 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         return result
 
     if mode != "tier1" and not _past_deadline():
-        _fetch_prune(root)
+        if not _fetch_prune(root) and _FETCH_FAILED is not None:
+            _FETCH_FAILED.add(root)
     base = guard.resolve_default_base(root)
     if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
@@ -2767,6 +2776,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
+        if (decision["action"] == "keep" and decision["reason"] == "unreadable-subject"
+                and _FETCH_FAILED is not None and root in _FETCH_FAILED):
+            decision["reason"] += ": fetch failed"  # the likely cause of an unsettled read
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             if _past_deadline():
@@ -2850,7 +2862,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
 
 
 def print_sweep_report(results, confirm: bool, out=sys.stdout):
-    mode = "CONFIRM: reaping for real" if confirm else "PREVIEW: nothing is deleted"
+    mode = "CONFIRM: reaping for real" if confirm else "PREVIEW: no branch or worktree is deleted"
     print("janitor sweep -- %s" % mode, file=out)
 
     branch_counts = Counter()
@@ -3110,9 +3122,10 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
-    global _LIVE_HEADS, _DEADLINE
+    global _LIVE_HEADS, _DEADLINE, _FETCH_FAILED
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}
+    _FETCH_FAILED = set()
     # Only a run given `--deadline-seconds N` has a deadline: the SessionEnd run. The scheduled
     # job and a person's run judge everything. A NaN is no
     # time left, never no deadline: it compares false against every clock reading.
@@ -3122,7 +3135,7 @@ def main(argv=None) -> int:
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
-        _LIVE_HEADS = _DEADLINE = None
+        _LIVE_HEADS = _DEADLINE = _FETCH_FAILED = None
         undo()
 
 
