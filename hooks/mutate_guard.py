@@ -1094,43 +1094,45 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
      "guard", "worktree-home:"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
-     '            if path_is_inside(home_cwd, home) is False:',
-     '            if path_is_inside(home_cwd, home) is None:',
+     '        if (path_is_inside(home_cwd, home) is False\n',
+     '        if (path_is_inside(home_cwd, home) is None\n',
      "guard", "worktree-home:"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is None):',
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is None):',
      "guard", "worktree-home:"),
+    # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
+    # refuse; a mutant that returns a detail for a status that allows is a deny.
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
-     '    if home_status == "home":',
+     '    if home_status != "home":',
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "unknown":\n'
-     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "unreadable state")\n'
-     '    if home_status == "home":',
+     '        return "unreadable state"\n'
+     '    if home_status != "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
-     '    if home_status == "home":',
+     '    if home_status != "home":',
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status == "no-record":\n'
-     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "no record")\n'
-     '    if home_status == "home":',
+     '        return "no record"\n'
+     '    if home_status != "home":',
      "guard", "worktree-home:"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
-     '                try:\n                    resolved_target = _resolved(write_target, home_cwd)\n'
-     '                except Exception:\n                    resolved_target = write_target\n'
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
-     '                resolved_target = write_target\n'
-     '                if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                        and path_is_inside(resolved_target, home) is False):',
+     '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
+     '            except Exception:\n                resolved_target = write_target\n'
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
+     '            resolved_target = write_target\n'
+     '            if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                    and path_is_inside(resolved_target, home) is False):',
      "guard", "worktree-home:"),
     ("worktree-home: the write-target loop judges only the first path field",
-     '            for write_target in (write_targets(tool_input) if home_primary else ()):',
-     '            for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
+     '        for write_target in (write_targets(tool_input) if home_primary else ()):',
+     '        for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
      "guard", "worktree-home: a later path field outside"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
