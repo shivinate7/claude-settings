@@ -4492,9 +4492,10 @@ class StrictWorktreeTests(unittest.TestCase):
 
 class RemoteLivenessTests(unittest.TestCase):
     """A tree is "pushed" only when reachable from a head the remote lists NOW, read with `git
-    ls-remote` (read-only). This clone is never fetched or pruned, so a branch deleted on the
-    remote leaves a local refs/remotes/origin/<branch> that still names the commit. Local refs
-    alone would call the tree pushed and reap an idle one. An unreadable remote keeps."""
+    ls-remote` (read-only). These cases call the decisions, not the run, so this clone is never
+    fetched or pruned: a branch deleted on the remote leaves a local refs/remotes/origin/<branch>
+    that still names the commit. Local refs alone would call the tree pushed and reap an idle
+    one. An unreadable remote keeps."""
 
     @classmethod
     def setUpClass(cls):
@@ -5125,7 +5126,8 @@ class AgentWorktreeReapTests(unittest.TestCase):
     def test_j_keeps_a_tree_the_remote_lists_when_no_tracking_ref_holds_its_head(self):
         """The live ls-remote lists the head, so a rule that read only that would remove the
         tree. `git branch -r --contains HEAD` is empty, because the tracking ref is gone. The
-        tree stays until a fetch brings the ref back."""
+        run's own fetch fails here, so the rule is tested alone: the tree stays until a fetch
+        brings the ref back."""
         tree = self.agent("j2")
         sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
         require(run_vcs(self.repo, "update-ref", "-d", "refs/remotes/origin/lane-j2").returncode == 0,
@@ -5134,9 +5136,113 @@ class AgentWorktreeReapTests(unittest.TestCase):
                 "the remote does not list the head")
         require(not run_vcs(tree, "branch", "-r", "--contains", "HEAD").stdout.strip(),
                 "a remote-tracking ref still holds HEAD")
-        out = self.run_sweep(5)
+        out = self.run_sweep(5, fail=lambda argv, cwd: "fetch" in argv)
         self.assertKept(tree, out)
         require(run_vcs(self.repo, "fetch", "-q", "origin").returncode == 0, "fetch failed")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+
+    # ---- (k) `git fetch --prune` at the start of the run
+
+    def second_clone(self):
+        """Another machine's clone of origin, on main, with a commit identity."""
+        origin = run_vcs(self.repo, "remote", "get-url", "origin").stdout.strip()
+        path = os.path.join(self.base, "c2")
+        cloned = subprocess.run([VCS, "clone", "-q", origin, path], capture_output=True,
+                                text=True, timeout=30)
+        require(cloned.returncode == 0, "clone of origin failed: " + cloned.stderr.strip())
+        return path
+
+    def test_k_judges_a_tree_on_the_fetched_state_when_origin_holds_a_commit_the_clone_lacks(self):
+        """Origin's main holds the tree's commit and one commit more. This clone has fetched
+        neither: ls-remote names a commit the clone lacks, and no remote-tracking ref holds the
+        tree's commit. Read as it stands, the tree is kept as unreadable. The run fetches first,
+        so the tree is judged on origin's real main: its commit is pushed and merged, and it goes."""
+        tree = self.agent("k1", "local")
+        other = self.second_clone()
+        require(run_vcs(other, "fetch", "-q", self.repo, "wt-k1").returncode == 0,
+                "the second clone could not fetch the tree's branch")
+        require(run_vcs(other, *IDENT, "merge", "-q", "--ff-only", "FETCH_HEAD").returncode == 0,
+                "the second clone could not take the tree's commit onto main")
+        self.commit(other, "elsewhere.txt")
+        require(run_vcs(other, "push", "-q", "origin", "main").returncode == 0,
+                "the second clone could not push main")
+        newest = run_vcs(other, "rev-parse", "HEAD").stdout.strip()
+        require(newest in run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
+                "origin does not list the new commit")
+        require(run_vcs(self.repo, "cat-file", "-e", newest + "^{commit}").returncode != 0,
+                "this clone already holds origin's newest commit")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+        self.assertEqual(run_vcs(self.repo, "rev-parse", "refs/remotes/origin/main").stdout.strip(),
+                         newest, "the run did not fetch origin's main")
+
+    def test_k_prunes_a_head_deleted_on_origin_so_its_local_branch_is_not_counted_as_pushed(self):
+        """A branch deleted on origin leaves its tracking ref in this clone. While that ref
+        stays, the local branch of the same commit reads as safe on a remote and is reaped, though
+        the local branch is the only copy. The run prunes the ref, so the branch stays."""
+        other = self.second_clone()
+        require(run_vcs(other, "checkout", "-q", "-b", "lane-stale").returncode == 0,
+                "the second clone could not branch")
+        self.commit(other, "stale.txt")
+        require(run_vcs(other, "push", "-q", "origin", "lane-stale").returncode == 0,
+                "the second clone could not push lane-stale")
+        require(run_vcs(self.repo, "fetch", "-q", "origin").returncode == 0, "fetch failed")
+        require(run_vcs(self.repo, "branch", "--no-track", "lane-stale",
+                        "origin/lane-stale").returncode == 0, "could not branch lane-stale locally")
+        origin = run_vcs(self.repo, "remote", "get-url", "origin").stdout.strip()
+        require(run_vcs(origin, "update-ref", "-d", "refs/heads/lane-stale").returncode == 0,
+                "could not delete lane-stale on origin")
+        require("refs/heads/lane-stale" not in run_vcs(self.repo, "ls-remote", "origin").stdout,
+                "origin still lists lane-stale")
+        ref = "refs/remotes/origin/lane-stale"
+        require(run_vcs(self.repo, "rev-parse", "--verify", "-q", ref).returncode == 0,
+                "this clone has no tracking ref for lane-stale")
+        ctl = self.agent("ctl")  # removed in the same run, so a run that did nothing cannot pass
+        out = self.run_sweep(5)
+        self.assertRemoved(ctl, out)
+        self.assertNotEqual(run_vcs(self.repo, "rev-parse", "--verify", "-q", ref).returncode, 0,
+                            "the tracking ref of a head deleted on origin survives the run")
+        self.assertIn("lane-stale", sweep.list_local_branches(self.repo) or [],
+                      "the local branch was reaped as pushed. Report: "
+                      + self.lines_about(out, "lane-stale"))
+
+    def test_k_keeps_a_tree_and_says_why_when_origin_cannot_be_reached(self):
+        """Origin's path is gone, so the run's fetch and its ls-remote both fail. The tree is
+        clean, pushed and idle 5 hours, so only the failed read keeps it. The report or the run
+        log names the failed read."""
+        tree = self.agent("k3")
+        origin = run_vcs(self.repo, "remote", "get-url", "origin").stdout.strip()
+        missing = os.path.join(self.base, "no-such-origin.git")
+        require(run_vcs(self.repo, "remote", "set-url", "origin", missing).returncode == 0,
+                "pointing origin at a missing path failed")
+        try:
+            out = self.run_sweep(5)
+        finally:
+            run_vcs(self.repo, "remote", "set-url", "origin", origin)
+        self.assertKept(tree, out)
+        self.assertLogged(out, "agent-k3")
+
+    def test_k_drops_a_remote_head_the_clone_lacks_and_judges_a_tree_on_the_heads_it_has(self):
+        """A second remote lists a head this clone has not fetched, as a push that lands after
+        the run's fetch does. The commit is not in this clone, so it cannot hold the tree's
+        commit: the head is dropped, and the tree, pushed to origin, is judged on the rest. The
+        remote is not unreadable."""
+        tree = self.agent("k4")
+        side = os.path.join(self.base, "side.git")
+        require(run_vcs(self.base, "init", "-q", "--bare", side).returncode == 0,
+                "could not make the second remote")
+        require(run_vcs(self.repo, "remote", "add", "side", side).returncode == 0,
+                "could not add the second remote")
+        other = self.second_clone()
+        self.commit(other, "side.txt")
+        require(run_vcs(other, "push", "-q", side, "HEAD:refs/heads/side").returncode == 0,
+                "the second clone could not push to the second remote")
+        newest = run_vcs(other, "rev-parse", "HEAD").stdout.strip()
+        require(newest in run_vcs(self.repo, "ls-remote", "--heads", "side").stdout,
+                "the second remote does not list the new commit")
+        require(run_vcs(self.repo, "cat-file", "-e", newest + "^{commit}").returncode != 0,
+                "this clone already holds the second remote's commit")
         out = self.run_sweep(5)
         self.assertRemoved(tree, out)
 
