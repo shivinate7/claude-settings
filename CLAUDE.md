@@ -85,7 +85,7 @@ enforces a rule in this file needs no other incident.<!-- rule:building-guard-ne
 bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.<!-- rule:building-scanner-respects-strings --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
 the design abandoned.<!-- rule:building-land-design-or-abandon --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
-file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term -->
+file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term --> Comment only what complex code does and why. Never narrate history or review rounds.<!-- rule:building-comments-say-why -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite

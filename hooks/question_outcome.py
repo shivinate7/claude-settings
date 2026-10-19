@@ -1,46 +1,7 @@
 #!/usr/bin/env python3
 """Before an AskUserQuestion with two or more options, denies a question with no `Goal:` line or no `Problem:` line. Then a model judges whether the question serves the owner's goal. A FLAG verdict denies.
 
-Spec: decisions/question-outcome-check.md. Rule: style-question-restates-goal.
-
-Per question with two or more options (a clarifying question passes first):
-- No `Goal:` line, or no `Problem:` line: deny, no model call.
-- A `Problem:` line before the `Goal:` line: deny, no model call. Goal goes first.
-- Else one model call (decision_watch.invoke_model, the one model caller) judges whether the
-  `Goal:` line matches the owner's goal, whether each option serves that goal, whether
-  a better option is missing, whether the owner can answer from the box alone (every id, code
-  or name explained in words), whether the question points at anything the box does not show,
-  and whether each option says what the owner gains and what the owner loses, as a change for
-  the owner and not for a record. FLAG denies, and the reason goes to the session.
-- The judge reads the conversation text from the owner's 3rd-last message up to the question,
-  in transcript order, each block labeled by its source: owner messages, the assistant's text
-  blocks, and relayed cross-session messages. It never reads tool calls, tool results, task
-  notifications or system reminders. The read goes back up to SEARCH_BYTES (16 MiB), from the
-  end of the transcript, to find that message. Fewer than 3 owner messages in that range: the
-  span starts at the oldest owner message found, so an early-session question is still judged.
-  No owner message at all: the check did not run (the path below). Over SPAN_BUDGET chars
-  (labels, fences and separators count) the oldest assistant and relay text is cut. The owner
-  messages stay whole. The whole prompt stays within PROMPT_MAX; above it the oldest span text
-  goes first, and owner messages are cut only as a last resort, oldest first; each cut block leads
-  with CUT_MARK and none goes blank.
-- The judge also reads the rulings of the repo at the payload `cwd`: each "The ruling" / "Ruling" /
-  "The rulings" / "The owner's rulings" H2 section (any suffix, to the next H2 outside a code
-  fence) of decisions/*.md and debts/*.md. Each ruling
-  is fenced and labeled with its record id (`<folder>/<stem>`) and H1 title. A question the owner already
-  settled is FLAGged with the record id, and the deny reason gives the id and title, never an absolute path. A
-  question that asks to change a ruling passes. Each ruling is cut to RULING_CAP chars at a
-  sentence end. The section holds at most RULINGS_MAX (95,000) chars, and case rl9 checks that
-  every record of this repo fits. Records go most recently changed first (one git log call; file mtime
-  when git fails). Past the budget the oldest are left out, and a mark says how many. A ruling under another heading is not read.
-- After a deny, the next AskUserQuestion in the session passes with no model call and clears
-  the state, so no deny can loop. When the state cannot be written, nothing is denied.
-- The judge reads each option on one line: its label, description and preview, each defanged and
-  cut to OPTION_PART_CAP (800) chars. A cut part ends in OPTION_CUT, and the prompt names that mark.
-  The question text is defanged the same way.
-- A failed model call, an unreadable transcript, or hook input that is not readable lets the
-  question through, with one systemMessage saying the check did not run. It never echoes the
-  prompt. An options value that is not a list counts as no options: the question passes with
-  no model call and no message, as a clarifying question does.
+Spec: decisions/question-outcome-check.md (rule style-question-restates-goal); the rulings the judge reads: decisions/question-judge-reads-rulings.md. The limits are the constants below.
 
 Deny: stdout one PreToolUse deny JSON, exit 0. Allow: empty stdout, exit 0.
 """

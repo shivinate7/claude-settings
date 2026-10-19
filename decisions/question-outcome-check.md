@@ -29,7 +29,12 @@ never the chat, so it judges form alone (haiku-prompt-hooks).
   source. It reads no tool calls, results, task notices or reminders. The goal is read from owner records only:
   human user records and the owner's answers in `AskUserQuestion` tool results. Task notifications, hook
   feedback, peer messages and other tool results are not the owner's. A relay sender cannot forge an
-  Owner block.
+  Owner block. With fewer than 3 owner messages, the span starts at the oldest one found. With none,
+  the check did not run. Over the budget, the oldest assistant and relay text is cut first, then the
+  oldest owner message, each cut block led by a mark and none left blank.
+- **Option text.** Each option reaches the judge on one line: label, description and preview, each
+  defanged and cut at 800 chars with a `[cut]` mark. The question text is defanged the same way. An options value that is not a list counts as
+  no options, so the question passes with no model call and no message.
 - **Fail open.** A question is not a destructive act, so a lost check costs less than a blocked question.
   A failed or timed-out model call lets the question through. So do unreadable hook input and a question
   over the size cap. The hook prints one line that says the check did not run. That line never repeats the

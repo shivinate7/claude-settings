@@ -608,6 +608,13 @@
         "kind": "unmechanized",
         "reason": "A prose rule. No check reads the debt store yet; one would have to find each known gap in the repo and check that it has a debt entry."
       }
+    },
+    "building-comments-say-why": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/check_comment_narration.py",
+        "test": "lint/test_check_comment_narration.py::FlagsAddedLines.test_each_pattern_flags_an_added_comment"
+      }
     }
   }
 }
