@@ -543,19 +543,20 @@ class Host:
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests. A failed read, or one that may be cut short,
         raises Stop: never an empty set, which would say no PR is open. A head with two open PRs (a backport, or a fork's
-        branch of the same name) gets base None, so it is never one lane's own PR. Each later row is kept under name:index,
-        a key no branch can have, so its base still counts."""
+        branch of the same name) gets base None under its name, and every one of its rows is kept under name:index, a key no
+        branch can have, so every base still counts, in any row order."""
         c, out = self.gh(["pr", "list", "--state", "open", "--json", "headRefName,headRefOid,baseRefName", "--limit", str(self.OPEN_LIMIT), *self._repo_args()], self.cwd)
         if c:
             raise Stop("gh pr list failed: " + out)
         rows = json.loads(out)
         if len(rows) >= self.OPEN_LIMIT:
             raise Stop(f"gh pr list returned {len(rows)} open pull requests, the most it was asked for")
+        seen = [d["headRefName"] for d in rows]
         heads = {}
         for i, d in enumerate(rows):
             name, row = d["headRefName"], (d["headRefOid"], d["baseRefName"])
-            if name in heads:
-                heads[name] = (heads[name][0], None)
+            if seen.count(name) > 1:
+                heads.setdefault(name, (row[0], None))
                 name = f"{name}:{i}"
             heads[name] = row
         return heads
@@ -997,8 +998,9 @@ def lane_tips(wt, base_ref, sha):
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
     One line per lane, never a silent drop. A lane tip that no head sits at has moved or is gone. Kept, with a line why:
-    a name in `keep`; the base of an open PR (a stacked PR); one with an open PR at another sha than its tip, or at its
-    tip with another base than `base`, the batch's base (a backport); none when the open-PR read fails; one whose
+    a name in `keep`; the base of an open PR whose head is no lane of this batch at its tip (a partial stack); one with an
+    open PR at another sha than its tip, or at its tip with a base that is neither `base`, the batch's base, nor a lane of
+    this batch (a backport); none when the open-PR read fails; one whose
     tip is in `commit` neither by id nor by patch, or whose proof could not run. A name in `skip` is no lane.
     The delete is leased to the tip. Each lane has its own try. Never fails the merge."""
     try:
@@ -1022,8 +1024,9 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
         if not todo:
             return
         try:
-            opened = host.open_heads()  # {head name: (head sha, PR base)}
-            pr_bases = {pb for _, pb in opened.values()}
+            # {head name: (head sha, PR base)}; a head with two PRs has a None base, and one name:index row per PR
+            prs = [(k.split(":")[0], sha, pb) for k, (sha, pb) in host.open_heads().items() if pb is not None]
+            opened = True
         except Exception:  # unreadable or malformed: delete nothing
             opened = None
         for b in todo:
@@ -1032,12 +1035,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
                 why = None
                 if opened is None:
                     why = "the open PRs could not be read."
-                elif b in pr_bases:
-                    why = "it is the base of an open PR."
-                elif b in opened and opened[b][0] != tip:
+                elif outside := sorted({n for n, sha, pb in prs if pb == b and not (n in todo and heads[n] == sha)}):
+                    why = "it is the base of an open PR: " + ", ".join(outside) + "."  # a PR from a lane at its tip is done
+                elif any(n == b and sha != tip for n, sha, _ in prs):
                     why = "it has an open PR."
-                elif b in opened and opened[b][1] != base:  # at the tip with the batch's base: the lane's own PR, merged a moment ago
-                    why = f"its open PR at the tip has another base, {opened[b][1]}." if opened[b][1] else "it has more than one open PR."
+                elif other := sorted({pb for n, _, pb in prs if n == b and pb != base and pb not in todo}):
+                    why = "its open PR at the tip has another base: " + ", ".join(other) + "."  # the base or a batch lane: its own PR, done
                 else:
                     a = git(root, "merge-base", "--is-ancestor", tip, commit)[0]
                     if a == 1:
