@@ -7,7 +7,10 @@ import itertools
 import os
 import re
 import subprocess
-import _nowindow
+try:
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    _nowindow = subprocess
 import sys
 
 from guard_core import (
