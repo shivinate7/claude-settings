@@ -71,6 +71,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -78,16 +79,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-# GUARD_UNDER_TEST points the suite at another copy of the guard, the same contract
-# `hooks/test_guard.py` holds, so a mutation test needs no second copy of this file.
-_GUARD_PATH = os.environ.get("GUARD_UNDER_TEST")
-if _GUARD_PATH:
-    import importlib.util
-    _spec = importlib.util.spec_from_file_location("guard_under_test", _GUARD_PATH)
-    guard = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(guard)
-else:
-    import guard
+# The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
+# stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
+# the same contract `hooks/test_guard.py` holds, so a mutation test needs no second copy of this
+# file.
+guard = None
+
+
+def _load_guard() -> None:
+    """Import the guard once and bind it, with the names derived from it."""
+    global guard, WATCHED_NAMES
+    if guard is not None:
+        return
+    path = os.environ.get("GUARD_UNDER_TEST")
+    if path:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("guard_under_test", path)
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+    else:
+        import guard as loaded
+    guard = loaded
+    WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)
 
 
 # ------------------------------------------------------------------ the watched set
@@ -97,7 +110,9 @@ else:
 # is a symlink onto the clone of claude-settings, which is deliberately unfrozen so that the
 # repository can edit its own source. A hash watch that followed that symlink would revert the
 # repository's own work.
-WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)
+# The fast exit reads these before the guard loads, so it holds its own copy of the pair.
+# `_load_guard` replaces it with the guard's own constant for the full sweep.
+WATCHED_NAMES = (".claude/settings.json", ".claude/settings.local.json")
 
 STORE_DIR_NAME = "state"
 STORE_SUB = "config-watch"
@@ -159,8 +174,14 @@ def safe(text: str, limit: int) -> str:
 # the folder the bypass already writes to.
 
 
+def config_dir() -> str:
+    # Same answer as `guard.config_dir`, held here so the fast exit needs no guard import.
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude")
+
+
 def store_dir() -> str:
-    return os.path.join(guard.config_dir(), STORE_DIR_NAME, STORE_SUB)
+    return os.path.join(config_dir(), STORE_DIR_NAME, STORE_SUB)
 
 
 def store_key(path: str) -> str:
@@ -515,9 +536,9 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
 
     Five answers, in order:
 
-      no baseline  : record it. Report UNKNOWN when the file already sets the cap, because a first
-                     sight cannot tell a lift from a starting state, and silence there would read
-                     as clear.
+      no baseline  : record it. Report UNKNOWN when the file already sets the cap above Sonnet,
+                     because a first sight cannot tell a lift from a starting state, and silence
+                     there would read as clear. A cap at Sonnet is no lift, so it stays silent.
       unchanged    : fall through to the expiry check below, unchanged or not.
       cap unchanged: Decision 7. Re-baseline, carry `prior` forward, and say nothing yet.
       cap changed,
@@ -538,7 +559,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
     if baseline is None:
         save_baseline(path, current)
         reading = cap_reading(current)
-        if reading:
+        if cap_lift_value(reading):
             return UNKNOWN_MESSAGE.format(
                 where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
         return ""
@@ -591,8 +612,50 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
         kept=safe(kept or "(not kept)", guard.CAP_MAX_PATH))
 
 
+def lift_candidate(content) -> bool:
+    """True when a file's cap might be lifted, or cannot be read with the stdlib alone.
+
+    Any doubt reads as True, so the guard's own reading decides.
+    """
+    try:
+        text = content.decode("utf-8")
+        parsed = json.loads(text)
+    except Exception:
+        return True
+    if not isinstance(parsed, dict):
+        return True
+    env = parsed.get("env")
+    env = env if isinstance(env, dict) else {}
+    named = re.findall(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?", text)
+    if len(named) != sum(1 for key in env if key in named):
+        return True  # a cap name outside the env block: the guard's text scan reads it
+    return any(not isinstance(env.get(key), str) or env[key].strip().lower() != "sonnet"
+               for key in _MODEL_KEYS if key in env)
+
+
+def unchanged(payload, clock=None) -> bool:
+    """True when this call needs no guard: every watched file matches its stored baseline.
+
+    The hash is the only test of "unchanged", never mtime or size. A missing or unreadable
+    record, or a recorded lift whose deadline is not valid now, reads as False, because an
+    expiry is a clock event that no write marks.
+    """
+    cwd = payload.get("cwd", "") or os.getcwd() or ""
+    if not isinstance(cwd, str):
+        return False
+    for path in watched_paths(cwd):
+        baseline = load_baseline(path)
+        if baseline is None or baseline["digest"] != digest(read_file(path)):
+            return False
+        content = baseline["content"]
+        if content is not None and lift_candidate(content) and expiry_problem(content, clock):
+            return False
+    return True
+
+
 def sweep(payload, clock=None):
     """Judge every watched path for this payload. Return the messages, in path order."""
+    _load_guard()
     tool = payload.get("tool_name", "") or ""
     try:
         guard.set_log_session(payload.get("session_id"))  # the last column of a revert's log line
@@ -639,7 +702,6 @@ def _test_clock():
 
 
 def main() -> None:
-    guard._force_utf8_streams()
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -647,6 +709,10 @@ def main() -> None:
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
     try:
+        if unchanged(payload, _test_clock()):
+            sys.exit(0)
+        _load_guard()
+        guard._force_utf8_streams()
         messages = sweep(payload, _test_clock())
     except Exception:
         sys.exit(0)  # fail open on a watch defect
