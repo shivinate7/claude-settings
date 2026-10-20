@@ -22,7 +22,8 @@ Two reads, one verdict. Design: decisions/silent-undo-check-design.md.
               when the lost work is the rebase-base commit or later).
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
-path: `Drops-lines: <path> -- <reason>`. A trailer with no reason excuses nothing. Each use prints
+path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
+excuses its path. A trailer or line with no reason excuses nothing. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -85,12 +86,13 @@ def absent(cwd, rev, path):
     return ""
 
 
-def allowed(cwd, rng):
+def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
-    (a rev or a..b). A trailer with no reason excuses nothing."""
+    (a rev or a..b), and from such lines in pr_body. A line with no reason excuses nothing."""
     _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
+    body = re.findall(r"^" + TRAILER + r":(.*)$", pr_body, re.I | re.M | re.ASCII)
     res = {}
-    for line in out.splitlines():
+    for line in out.splitlines() + body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
             res[m.group(1)] = m.group(2)
@@ -528,7 +530,7 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def check(cwd, upstream, head, default=None, tool=None):
+def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
@@ -538,7 +540,7 @@ def check(cwd, upstream, head, default=None, tool=None):
     h = git(cwd, "rev-parse", head + "^{commit}")[1].strip()
     if git(cwd, "merge-base", "--is-ancestor", h, upstream, ok=(0, 1))[0] == 0:
         return [], []  # at or behind upstream: nothing lands
-    ok = allowed(cwd, "%s..%s" % (upstream, h))
+    ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items = []
