@@ -1961,14 +1961,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
     # command word, never a substring, and `ln` reads the filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)
-    for segment in split_segments(stripped):
+    ends = []
+    nm_segments = split_segments(stripped, ends)
+    for number, segment in enumerate(nm_segments):
         matched = gh_api_post_hit(segment)
         if matched:
             refuse(tool, "deny", "gh-api-method", GH_API_METHOD_REASON, matched)
         matched = ln_descends_hit(segment, run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        matched = linked_nm_hit(segment, run_in)
+        folder = dir_before_segment(nm_segments, number, cwd, ends)
+        matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 

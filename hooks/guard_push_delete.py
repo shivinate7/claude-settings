@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import stat
 
 import guard_core
 from guard_core import (
@@ -296,14 +297,26 @@ def rm_delete_hit(segment: str) -> str:
 
 # ------------------------------------------------------------------ a link to another install
 #
-# Owner ruling 2026-10-19 (linked-node-modules): q_max links a worktree's node_modules to another
-# checkout's install with a junction. Through that link a hand-run `npm ci`, or a recursive delete
-# of what is inside it, empties the other checkout's install (measured on npm 12.0.2; 24 of 219
-# worktrees hold such a link). The rule reads the filesystem: a real folder, or none, is judged as
-# it always was. A bare `rm node_modules` removes only the link, so it stays allowed.
-# ponytail: `npm --prefix <dir>` and a `-w` workspace flag are not read; the install is judged
-# against the working folder alone.
-NPM_INSTALLS = ("ci", "install", "i", "add", "uninstall", "update")
+# Some worktrees link their node_modules to another checkout's install with a junction or a symlink.
+# Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
+# other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
+# always was. A bare `rm node_modules` removes only the link, so it stays allowed.
+# ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
+# alone, and `install-test` and its aliases are not listed.
+NPM_ALIASES = {
+    "ci": "ci", "clean-install": "ci", "install-clean": "ci", "ic": "ci", "cit": "ci",
+    "install": "install", "i": "install", "in": "install", "ins": "install", "isntall": "install",
+    "add": "install", "uninstall": "uninstall", "remove": "uninstall", "rm": "uninstall",
+    "r": "uninstall", "un": "uninstall", "update": "update", "up": "update", "upgrade": "update",
+}
+# Global options that take the next word as their value, so that word is not the subcommand.
+NPM_VALUE_FLAGS = {
+    "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
+    "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
+    "--install-strategy", "--logs-dir",
+}
+# Options after which the command changes nothing in the working folder's install.
+NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -319,8 +332,17 @@ def _nm_recursive_delete(args) -> bool:
 
 
 def is_link(path: str) -> bool:
-    """True for a symlink, or a junction (`os.path.isjunction` exists from Python 3.12)."""
-    return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+    """True for a symlink, or a junction. A junction is a reparse point: `os.path.isjunction` reads
+    it only from Python 3.12, so the file attribute is read instead."""
+    if os.path.islink(path):
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        return bool(os.stat(path, follow_symlinks=False).st_file_attributes
+                    & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except OSError:
+        return False
 
 
 def _nm_inside(arg: str, where: str) -> str:
@@ -344,9 +366,20 @@ def linked_nm_hit(segment: str, where: str) -> str:
         return ""
 
     def install(args):
-        rest = [word for word in args if not word.startswith("-")]
-        if rest and rest[0].lower() in NPM_INSTALLS and is_link(os.path.join(where, "node_modules")):
-            return "npm " + rest[0].lower() + " in a folder whose node_modules is a link"
+        # A `)` glued to the last word closes the subshell or substitution the command sits in.
+        words = [arg.rstrip(")") for arg in args]
+        subcommand, at = "", 0
+        while at < len(words):
+            if words[at] in NPM_VALUE_FLAGS:
+                at += 2
+            elif words[at].startswith("-"):
+                at += 1
+            else:
+                subcommand = NPM_ALIASES.get(words[at].lower(), "")
+                break
+        if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
+                os.path.join(where, "node_modules")):
+            return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
     return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
