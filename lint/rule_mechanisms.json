@@ -389,7 +389,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/prose_judge.py, a PreToolUse command hook on Edit and Write that calls the model only for a .md path or a decisions/ or debts/ folder; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/prose_judge.py, a PreToolUse command hook on Edit and Write that calls the model only for a path inside a decisions folder; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-write-in-ste": {
