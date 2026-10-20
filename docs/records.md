@@ -112,6 +112,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`decisions/ci-unknown-is-red.md`](../decisions/ci-unknown-is-red.md) |
 | `cite-by-id-blocks-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard blocks `git commit -F <file>` when it cannot read the file at hook time. | [`decisions/cite-by-id-blocks-unread-file.md`](../decisions/cite-by-id-blocks-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`decisions/claude-md-shrink.md`](../decisions/claude-md-shrink.md) |
+| `config-watch-fast-exit` | Owner, 2026-10-20. | [`decisions/config-watch-fast-exit.md`](../decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`decisions/copy-mode-overwrites-no-backup.md`](../decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`decisions/cull-rules.md`](../decisions/cull-rules.md) |
 | `decision-watch-mod-limits` | The Stop-time decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
