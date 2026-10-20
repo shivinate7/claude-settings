@@ -216,8 +216,8 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
-            push_target, push_text, push_verdict, rm_delete_hit,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
+            cmd_exe_delete_hit, linked_nm_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -1961,13 +1961,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
     # command word, never a substring, and `ln` reads the filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)
-    for segment in split_segments(stripped):
+    ends = []
+    nm_segments = split_segments(stripped, ends)
+    for number, segment in enumerate(nm_segments):
         matched = gh_api_post_hit(segment)
         if matched:
             refuse(tool, "deny", "gh-api-method", GH_API_METHOD_REASON, matched)
         matched = ln_descends_hit(segment, run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
+        folder = dir_before_segment(nm_segments, number, cwd, ends)
+        matched = folder and linked_nm_hit(segment, folder)
+        if matched:
+            refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:

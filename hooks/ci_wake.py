@@ -10,7 +10,7 @@ ran has ended (a skipped draft run is no run), waits on it, and prints one line:
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
 Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
-or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
+when the repo has no active workflow, or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
 line, never 1. It lists runs, and reads a run's status, at most once per 30 s each. It never
 loops on a red run.
 
@@ -42,6 +42,7 @@ PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
+PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/\d+")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
 HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
@@ -100,13 +101,13 @@ def gh_json(args, cwd):
         raise Unknown("gh %s printed non-JSON" % " ".join(args[:2]))
 
 
-def watch_run(run_id, cwd, deadline):
+def watch_run(run_id, cwd, deadline, repo=""):
     """Read `gh run view <id> --json status` until the status is `completed` or the deadline
     passes. Reads are at least STATUS_PAUSE seconds apart, and the last pause ends at the
     deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
     gets one retry after the pause (never past the deadline); a second failure raises Unknown."""
     def read():
-        args = ["run", "view", str(run_id), "--json", "status"]
+        args = ["run", "view", str(run_id), *(["-R", repo] if repo else []), "--json", "status"]
         try:
             return gh_json(args, cwd)
         except Unknown:
@@ -124,17 +125,20 @@ def watch_run(run_id, cwd, deadline):
         time.sleep(STATUS_PAUSE)
 
 
-def ready_call(rest):
-    """-> (selector, repo) for the args of a `gh pr ready` call, else None."""
+def ready_call(rest, env_repo=""):
+    """-> (selector, repo) for the args of a `gh pr ready` call, else None. The repo is the -R or
+    --repo value (`-R o/r`, `-Ro/r`, `-R=o/r`, `--repo o/r`, `--repo=o/r`), else env_repo (GH_REPO)."""
     if rest[:2] != ["pr", "ready"] or any(a in ("--undo", "-h", "--help") for a in rest):
         return None
-    pos, repo, i = [], "", 2
+    pos, repo, i = [], env_repo, 2
     while i < len(rest):
         a = rest[i]
         if a in REPO_FLAGS and i + 1 < len(rest):
             repo, i = rest[i + 1], i + 1
         elif a.startswith("--repo="):
             repo = a[7:]
+        elif a.startswith("-R") and not a.startswith("--"):
+            repo = a[2:].lstrip("=")
         elif not a.startswith("-"):
             pos.append(a)
         i += 1
@@ -147,6 +151,7 @@ def triggers(command, powershell):
     quotes whole); a lone apostrophe in a word opens no quote. A lone `&` ends a command too
     (guard_env's quote-aware split); the `&` of `2>&1` leaves the call whole."""
     import guard_core
+    from guard_core import resolve_command, segment_tokens
     from guard_env import _ampersand_split
     from guard_merge import gh_call_of
     guard_core.POWERSHELL_CALL[0] = powershell
@@ -154,7 +159,11 @@ def triggers(command, powershell):
     found = []
     for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
         rest = gh_call_of(segment)
-        call = ready_call(rest) if rest is not None else None
+        call = None
+        if rest is not None:
+            tokens = segment_tokens(segment) or []
+            env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
+            call = ready_call(rest, env[-1] if env else "")
         if call:
             found.append(call)
     return found
@@ -179,21 +188,22 @@ def lock_pr(pr, lock_dir):
     return True
 
 
-def wait_for(sha, cwd, deadline):
+def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, STATUS_PAUSE apart; the last
     pause ends at the deadline, with one list there. Once a run that ran is judged, return it:
     later runs are not waited on (debt ci-wake-lists-runs-once)."""
-    list_args = ["run", "list", "--commit", sha, "--limit", "100", "--json", RUN_FIELDS]
+    extra = ["-R", repo] if repo else []
+    list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     while True:
         runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
         for r in runs:
             if r["conclusion"] == "cancelled" and r["name"] in live:
                 continue   # a cancelled twin: judge_runs reads the run that ran
-            watch_run(r["databaseId"], cwd, deadline)
-        viewed = [gh_json(["run", "view", str(r["databaseId"]), "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+            watch_run(r["databaseId"], cwd, deadline, repo)
+        viewed = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
                   for r in runs]
         viewed = [r for r in viewed if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         if viewed:
@@ -227,6 +237,21 @@ def verdict(sha, runs):
     return "CI %s on %s: %s" % ("cancelled" if cancelled else "red", sha[:7], ", ".join(dict.fromkeys(names)))
 
 
+def no_workflows(cwd, repo):
+    """True only when `gh workflow list` reads cleanly and shows no active workflow: no CI, so no
+    watch. A failed or non-JSON read is unknown, not "no workflows" (the watch runs)."""
+    try:
+        return gh_json(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd) == []
+    except (Unknown, NoPR):
+        return False
+
+
+def repo_of_url(url):
+    """The `[HOST/]OWNER/REPO` of a pull request url, for -R; "" when the url names none."""
+    m = PR_URL.match(url or "")
+    return "" if m is None else m.group(2) if m.group(1) == "github.com" else m.group(1) + "/" + m.group(2)
+
+
 def watch_pr(selector, repo, cwd, deadline, lock_dir):
     """-> one output line, or None when no watch starts."""
     ident = "PR" + selector if selector else "PR"
@@ -234,11 +259,14 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
         extra = ["-R", repo] if repo else []
         pr = gh_json(["pr", "view", *([selector] if selector else []), *extra, "--json", PR_FIELDS], cwd)
         ident = pr["headRefOid"][:7]
+        repo = repo_of_url(pr.get("url")) or repo   # the PR's own repo, whatever form named it
         if pr.get("isDraft"):
             return None   # gh pr ready did not take: a draft runs no CI
+        if no_workflows(cwd, repo):
+            return None   # a repo with no active workflow runs no CI: nothing to wait for
         if not lock_pr(pr, lock_dir):
             return None
-        return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline))
+        return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline, repo))
     except NoPR:
         return None
     except Unknown as e:

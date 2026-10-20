@@ -127,6 +127,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-env-set-denied` | No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. | [`decisions/git-env-set-denied.md`](../decisions/git-env-set-denied.md) |
 | `guard-command-position` | One resolver in `hooks/guard_core.py` finds the command word for every rule. | [`decisions/guard-command-position.md`](../decisions/guard-command-position.md) |
 | `guard-guards-mistakes-only` | Owner, 2026-10-17 09:07 CDT, "widen": every guard, gate and check stops Claude's mistakes, never an attacker. | [`decisions/guard-guards-mistakes-only.md`](../decisions/guard-guards-mistakes-only.md) |
+| `guard-linked-node-modules` | Yes. | [`decisions/guard-linked-node-modules.md`](../decisions/guard-linked-node-modules.md) |
 | `guard-log-read-weekly` | Owner, 2026-10-13. | [`decisions/guard-log-read-weekly.md`](../decisions/guard-log-read-weekly.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`decisions/guard-that-cries-wolf-is-spent.md`](../decisions/guard-that-cries-wolf-is-spent.md) |
 | `haiku-prompt-hooks` | **Prompt hooks judge rules that no script can parse.** Each blocks the call when it finds a breach (owner ruling 2026-10-07). | [`decisions/haiku-prompt-hooks.md`](../decisions/haiku-prompt-hooks.md) |
@@ -209,6 +210,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
+| `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`debts/ci-wake-export-gh-repo-unread.md`](../debts/ci-wake-export-gh-repo-unread.md) |
+| `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`debts/ci-wake-gh-host-bare-repo.md`](../debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
 | `dw-stop-delivery-unproven` | The decision-watch mod has shown no Stop event in the desktop app. | [`debts/dw-stop-delivery-unproven.md`](../debts/dw-stop-delivery-unproven.md) |
 | `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`debts/explain-accessvbom.md`](../debts/explain-accessvbom.md) |
@@ -221,6 +224,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`debts/install-set-reads-held-file.md`](../debts/install-set-reads-held-file.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`debts/lane-cycle-delete-order.md`](../debts/lane-cycle-delete-order.md) |
+| `linked-nm-prefix-workspace` | `-w`, `--workspace` and `--prefix` change the folder npm works in. | [`debts/linked-nm-prefix-workspace.md`](../debts/linked-nm-prefix-workspace.md) |
 | `long-lived-head-lost-in-batch` | `cut_lanes` deletes any origin head whose sha is a lane tip. | [`debts/long-lived-head-lost-in-batch.md`](../debts/long-lived-head-lost-in-batch.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
@@ -230,6 +234,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`debts/nowindow-fallback-silent.md`](../debts/nowindow-fallback-silent.md) |
 | `nowindow-git-prompt-hangs` | A git credential prompt on the terminal, from merge/merge.py sh(), has no console to show in, so it would wait with no end. | [`debts/nowindow-git-prompt-hangs.md`](../debts/nowindow-git-prompt-hangs.md) |
 | `nowindow-scan-misses-os-system` | lint/test_no_window_spawn.py reads subprocess and Node child_process calls only. | [`debts/nowindow-scan-misses-os-system.md`](../debts/nowindow-scan-misses-os-system.md) |
+| `npm-audit-fix-linked` | The rule judges only npm install, i, ci, update, uninstall and their aliases. | [`debts/npm-audit-fix-linked.md`](../debts/npm-audit-fix-linked.md) |
 | `old-merge-tool-refuses-stamp` | A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. | [`debts/old-merge-tool-refuses-stamp.md`](../debts/old-merge-tool-refuses-stamp.md) |
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`debts/pinoff1-freshness-flaky.md`](../debts/pinoff1-freshness-flaky.md) |
 | `playwright-rows-measure` | Unmeasured: whether the Playwright rows in `hooks/test_guard.py` still stop a real mistake. | [`debts/playwright-rows-measure.md`](../debts/playwright-rows-measure.md) |

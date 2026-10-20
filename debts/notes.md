@@ -158,6 +158,12 @@
 - lane-slug-piped-body-unread: a piped body such as echo ... | gh pr create -F - is not read (hooks/guard.py)
 - lane-slug-tag-messages-unchecked: the lane-slug rule does not read tag messages (lane-slug message readers)
 - late-workflow-reads-green: a workflow GitHub creates after the settle read is missed, so the head reads green without it (merge/merge.py wait_checks)
+- linked-nm-ancestor-link: a stray linked node_modules in an ancestor folder gives an accepted false alarm for npm in a child folder (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-bare-word-false-alarms: a bare word match refuses harmless text such as echo npm ci and git rm -r --cached node_modules/x (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-install-test: npm install-test and its aliases are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-other-deletes: find -delete, Get-ChildItem | Remove-Item, cmd rmdir /s, rimraf, cd node_modules && rm -rf x and -Recurse:$true are not read as recursive deletes into a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-other-managers: pnpm, yarn, bun, npx and npm.exe are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-shell-c-cd: an inner cd inside bash -c or sh -c is not tracked, so the working folder is the outer one (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - live-pin-first-move-gap: the first pin move renames the live directory, so <clone>-live is absent for milliseconds and links dangle; no check proves the retry covers it (merge/install_from_main.sh)
 - liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/guard.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)

@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import stat
 
 import guard_core
 from guard_core import (
@@ -256,31 +257,154 @@ def _rm_args_wide(args) -> str:
     return ""
 
 
-def rm_delete_hit(segment: str) -> str:
-    """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
-    directory or a glob, else ''. Read by tokens: the command word is `rm`, behind its wrappers
-    or a subshell, or inside the script a shell, `eval` or `ssh` hands on. A segment shlex cannot
-    parse is read as raw text."""
+def _command_hit(segment: str, names, judge, raw=None) -> str:
+    """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
+    segment, else ''. The command word sits behind its wrappers or a
+    subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
+    A segment shlex cannot parse is read as raw text with the pattern `raw`, when there is one."""
     tokens = segment_tokens(segment)
     if tokens is None:
-        found = RM_RAW.search(segment)
+        found = raw.search(segment) if raw else None
         return found.group(0) if found else ""
     for start in command_indexes(tokens):
-        if basename(tokens[start]) == "rm":
-            target = _rm_args_wide(tokens[start + 1:])
-            if target:
-                return "rm -rf " + target
+        if basename(tokens[start]) in names:
+            found = judge(tokens[start + 1:])
+            if found:
+                return found
     words, bare = bare_words(segment)
     for at in sorted(bare):
-        target = basename(words[at]) == "rm" and _rm_args_wide(words[at + 1:])
-        if target:
-            return "rm -rf " + target
+        found = basename(words[at]) in names and judge(words[at + 1:])
+        if found:
+            return found
     for script in inner_commands(tokens):
         for inner in split_segments(script):
-            found = rm_delete_hit(inner)
+            found = _command_hit(inner, names, judge, raw)
             if found:
                 return found
     return ""
+
+
+def _rm_wide_text(args) -> str:
+    target = _rm_args_wide(args)
+    return "rm -rf " + target if target else ""
+
+
+def rm_delete_hit(segment: str) -> str:
+    """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
+    directory or a glob, else ''. A segment shlex cannot parse is read as raw text."""
+    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW)
+
+
+# ------------------------------------------------------------------ a link to another install
+#
+# Some worktrees link their node_modules to another checkout's install with a junction or a symlink.
+# Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
+# other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
+# always was. A bare `rm node_modules` removes only the link, so it stays allowed.
+# ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
+# alone, and `install-test` and its aliases are not listed.
+NPM_ALIASES = {
+    "ci": "ci", "clean-install": "ci", "install-clean": "ci", "ic": "ci", "cit": "ci",
+    "install": "install", "i": "install", "in": "install", "ins": "install", "isntall": "install",
+    "add": "install", "uninstall": "uninstall", "remove": "uninstall", "rm": "uninstall",
+    "r": "uninstall", "un": "uninstall", "update": "update", "up": "update", "upgrade": "update",
+}
+# Global options that take the next word as their value, so that word is not the subcommand.
+NPM_VALUE_FLAGS = {
+    "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
+    "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
+    "--install-strategy", "--logs-dir",
+}
+# Options after which the command changes nothing in the working folder's install.
+NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
+DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
+
+
+def _nm_recursive_delete(args) -> bool:
+    """True when the delete arguments hold a recursive flag: `-r`, `-R`, `-rf`, `--recursive`, or
+    a PowerShell `-Recurse` spelled in full or in part."""
+    for arg in args:
+        flag = arg.lower()
+        if flag == "--recursive" or (len(flag) > 1 and "-recurse".startswith(flag)) or (
+                re.fullmatch(r"-[rfivd]*r[rfivd]*", flag)):
+            return True
+    return False
+
+
+def is_link(path: str) -> bool:
+    """True for a symlink, or a junction. A junction is a reparse point: `os.path.isjunction` reads
+    it only from Python 3.12, so the file attribute is read instead."""
+    if os.path.islink(path):
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        return bool(os.stat(path, follow_symlinks=False).st_file_attributes
+                    & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except OSError:
+        return False
+
+
+def _nm_inside(arg: str, where: str) -> str:
+    """The folder whose `node_modules` this path reaches into, or '' when it names no file inside
+    one. `node_modules` alone is the link itself, so it names none."""
+    parts = arg.replace("\\", "/").split("/")
+    for at, part in enumerate(parts):
+        if part.lower() == "node_modules":
+            return _absolute("/".join(parts[:at]) or ".", where) if at + 1 < len(parts) else ""
+    return ""
+
+
+def npm_prefix(where: str) -> str:
+    """The folder npm installs into, as `npm prefix` finds it: the first folder from `where` upward
+    that holds a package.json or a node_modules. With none up to the drive root, npm uses `where`."""
+    folder = where
+    while True:
+        if any(os.path.lexists(os.path.join(folder, name)) for name in ("package.json", "node_modules")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return where
+        folder = parent
+
+
+def linked_nm_hit(segment: str, where: str) -> str:
+    """Return the matched text when one segment runs a dependency install in `where`, or a
+    recursive delete of what is inside a `node_modules`, and that `node_modules` is a link, else ''."""
+    def delete(args):
+        if _nm_recursive_delete(args) and any(
+                (folder := _nm_inside(arg, where)) and is_link(os.path.join(folder, "node_modules"))
+                for arg in args):
+            return "recursive delete inside a linked node_modules"
+        return ""
+
+    def install(args):
+        # A `)` glued to the last word closes the subshell or substitution the command sits in.
+        words = [arg.rstrip(")") for arg in args]
+        subcommand, at = "", 0
+        while at < len(words):
+            if words[at] in NPM_VALUE_FLAGS:
+                at += 2
+            elif words[at].startswith("-"):
+                at += 1
+            else:
+                subcommand = NPM_ALIASES.get(words[at].lower(), "")
+                break
+        if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
+                os.path.join(npm_prefix(where), "node_modules")):
+            return "npm " + subcommand + " in a folder whose node_modules is a link"
+        return ""
+
+    return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
+
+
+LINKED_NM_REASON = (
+    "node_modules here is a link to another checkout's install, and this command would change that "
+    "install through the link, for every checkout that shares it. "
+    "Remedy: replace the link with a real folder first, for example with the repo's setup script "
+    "(npm run setup where it exists), then run the command again."
+)
+
 
 DELETE_REASON = (
     "Rule (shared trees): this deletes a whole root, a home directory or everything a "
