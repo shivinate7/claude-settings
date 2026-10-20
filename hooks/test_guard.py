@@ -5945,6 +5945,56 @@ nm_case_without_isjunction("linked-nm: npm ci in a junction is refused with os.p
                            "npm ci", "deny", NMLINKED)
 
 
+# THE WALK UP. npm runs an install in the first folder, from the working folder upward, that holds a
+# package.json or a node_modules. So a sub folder with neither installs into the linked root above it,
+# and a sub folder with either installs into its own tree, whatever the root holds.
+NMNEST = os.path.join(ROOT, "nmnest")    # a root whose node_modules is a link, with sub folders under it
+NM_SUB = os.path.join(NMNEST, "sub")                        # no package.json, no node_modules
+NM_DEEP = os.path.join(NMNEST, "sub", "deep", "er")         # two levels down, still neither
+NM_WEB = os.path.join(NMNEST, "packages", "web")            # a workspace folder with no package.json
+NM_OWN_REAL = os.path.join(NMNEST, "own_real")              # its own package.json and a real node_modules
+NM_OWN_PKG = os.path.join(NMNEST, "own_pkg")                # its own package.json, no node_modules
+NM_REAL_ONLY = os.path.join(NMNEST, "real_only")            # a real node_modules, no package.json
+
+
+def _build_linked_nm_nest():
+    write(os.path.join(NMNEST, "package.json"), NM_PKG)
+    _make_dir_link(NMTARGET, os.path.join(NMNEST, "node_modules"))
+    for folder in (NM_SUB, NM_DEEP, NM_WEB):
+        write(os.path.join(folder, "notes.txt"), "x\n")
+    write(os.path.join(NM_OWN_REAL, "package.json"), NM_PKG)
+    write(os.path.join(NM_OWN_REAL, "node_modules", "pkg.js"), "module.exports = {};\n")
+    write(os.path.join(NM_OWN_PKG, "package.json"), NM_PKG)
+    write(os.path.join(NM_REAL_ONLY, "node_modules", "pkg.js"), "module.exports = {};\n")
+
+
+lazy_fixture([NMNEST], _build_linked_nm_nest)
+
+for _command in ("npm ci", "npm install", "npm install left-pad"):
+    nm_case("linked-nm: walk: refuse " + _command + " in a sub folder with no package.json under a linked root",
+            _command, "deny", NM_SUB)
+nm_case("linked-nm: walk: refuse npm ci two levels below a linked root",
+        "npm ci", "deny", NM_DEEP)
+nm_case("linked-nm: walk: refuse npm install in a workspace folder under a linked root",
+        "npm install", "deny", NM_WEB)
+nm_case("linked-nm: walk: refuse cd packages/web, then npm install, from a linked root",
+        "cd packages/web && npm install", "deny", NMNEST)
+nm_case("linked-nm: walk: refuse cd into a sub folder by full path, then npm ci",
+        "cd " + slash(NM_SUB) + " && npm ci", "deny", NMABSENT)
+# The false-alarm controls. npm stops at the first package.json or node_modules, so each folder below
+# installs into its own tree and the linked root is never touched.
+nm_case("linked-nm: walk: npm ci in a sub folder with its own package.json and a real node_modules is allowed",
+        "npm ci", "allow", NM_OWN_REAL)
+nm_case("linked-nm: walk: npm install in a sub folder with its own package.json and no node_modules is allowed",
+        "npm install", "allow", NM_OWN_PKG)
+nm_case("linked-nm: walk: npm ci in a sub folder with a real node_modules and no package.json is allowed",
+        "npm ci", "allow", NM_REAL_ONLY)
+nm_case("linked-nm: walk: cd into a sub folder with its own package.json, then npm ci, is allowed",
+        "cd own_pkg && npm ci", "allow", NMNEST)
+nm_case("linked-nm: walk: npm run build in a sub folder under a linked root is allowed",
+        "npm run build", "allow", NM_SUB)
+
+
 # =========================================================================== 4. environment files
 FAMILY = "env"
 #
