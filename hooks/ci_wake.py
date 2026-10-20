@@ -42,6 +42,7 @@ PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
+PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/\d+")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
 HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
@@ -124,17 +125,20 @@ def watch_run(run_id, cwd, deadline, repo=""):
         time.sleep(STATUS_PAUSE)
 
 
-def ready_call(rest):
-    """-> (selector, repo) for the args of a `gh pr ready` call, else None."""
+def ready_call(rest, env_repo=""):
+    """-> (selector, repo) for the args of a `gh pr ready` call, else None. The repo is the -R or
+    --repo value (`-R o/r`, `-Ro/r`, `-R=o/r`, `--repo o/r`, `--repo=o/r`), else env_repo (GH_REPO)."""
     if rest[:2] != ["pr", "ready"] or any(a in ("--undo", "-h", "--help") for a in rest):
         return None
-    pos, repo, i = [], "", 2
+    pos, repo, i = [], env_repo, 2
     while i < len(rest):
         a = rest[i]
         if a in REPO_FLAGS and i + 1 < len(rest):
             repo, i = rest[i + 1], i + 1
         elif a.startswith("--repo="):
             repo = a[7:]
+        elif a.startswith("-R") and not a.startswith("--"):
+            repo = a[2:].lstrip("=")
         elif not a.startswith("-"):
             pos.append(a)
         i += 1
@@ -147,6 +151,7 @@ def triggers(command, powershell):
     quotes whole); a lone apostrophe in a word opens no quote. A lone `&` ends a command too
     (guard_env's quote-aware split); the `&` of `2>&1` leaves the call whole."""
     import guard_core
+    from guard_core import resolve_command, segment_tokens
     from guard_env import _ampersand_split
     from guard_merge import gh_call_of
     guard_core.POWERSHELL_CALL[0] = powershell
@@ -154,7 +159,11 @@ def triggers(command, powershell):
     found = []
     for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
         rest = gh_call_of(segment)
-        call = ready_call(rest) if rest is not None else None
+        call = None
+        if rest is not None:
+            tokens = segment_tokens(segment) or []
+            env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
+            call = ready_call(rest, env[-1] if env else "")
         if call:
             found.append(call)
     return found
@@ -237,6 +246,12 @@ def no_workflows(cwd, repo):
         return False
 
 
+def repo_of_url(url):
+    """The `[HOST/]OWNER/REPO` of a pull request url, for -R; "" when the url names none."""
+    m = PR_URL.match(url or "")
+    return "" if m is None else m.group(2) if m.group(1) == "github.com" else m.group(1) + "/" + m.group(2)
+
+
 def watch_pr(selector, repo, cwd, deadline, lock_dir):
     """-> one output line, or None when no watch starts."""
     ident = "PR" + selector if selector else "PR"
@@ -244,6 +259,7 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
         extra = ["-R", repo] if repo else []
         pr = gh_json(["pr", "view", *([selector] if selector else []), *extra, "--json", PR_FIELDS], cwd)
         ident = pr["headRefOid"][:7]
+        repo = repo_of_url(pr.get("url")) or repo   # the PR's own repo, whatever form named it
         if pr.get("isDraft"):
             return None   # gh pr ready did not take: a draft runs no CI
         if no_workflows(cwd, repo):
