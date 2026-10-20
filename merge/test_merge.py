@@ -4812,7 +4812,7 @@ class ScanProgress(Env):
         out, seen = io.StringIO(), []
         stub = unittest.mock.MagicMock()
 
-        def scan(cwd, upstream, head, default=None, tool=None):
+        def scan(cwd, upstream, head, default=None, tool=None, pr_body=""):
             seen.append(out.getvalue())
             return [], []
 
