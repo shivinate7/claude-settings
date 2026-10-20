@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -5764,8 +5765,7 @@ for _name, _command in (
 
 
 # =========================================================================== 3b. linked node_modules
-# Owner ruling 2026-10-19 21:31 CDT, "Hold for the guard first". q_max links a worktree's node_modules
-# to main's install with a Windows junction: 24 of 219 worktrees hold one. Through that link a
+# q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
 # hand-run `npm ci` empties main's node_modules (measured on npm 12.0.2). The guard refuses a
 # dependency install, and a recursive delete inside node_modules, when the working folder holds
 # node_modules as a link. A real folder, or no folder, is judged as it always was.
@@ -5778,13 +5778,26 @@ NMTARGET = os.path.join(ROOT, "nmtarget")    # stands in for main's install, out
 NMLINKED = os.path.join(ROOT, "nmlinked")    # a working folder whose node_modules is a link
 NMREAL = os.path.join(ROOT, "nmreal")        # a working folder whose node_modules is a real folder
 NMABSENT = os.path.join(ROOT, "nmabsent")    # a working folder with no node_modules
+NMSHIM = os.path.join(ROOT, "nmshim")        # a folder whose sitecustomize drops os.path.isjunction
 NM_PKG = ('{"name": "app", "scripts": {"setup": "node setup.js", "build": "node build.js",'
           ' "test": "node test.js"}}\n')
+NM_SHIM_SOURCE = ("import os.path\n"
+                  "if hasattr(os.path, 'isjunction'):\n"
+                  "    del os.path.isjunction\n")
 
 
 def _is_link(path):
-    """True for a symlink, or a junction (os.path.isjunction exists from Python 3.12)."""
-    return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+    """True for a symlink or a junction. A junction is a reparse point, read the same way on every
+    Python 3 that CI runs. os.path.isjunction exists only from Python 3.12."""
+    if os.path.islink(path):
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        attributes = os.stat(path, follow_symlinks=False).st_file_attributes
+    except OSError:
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _make_dir_link(target, link):
@@ -5799,15 +5812,17 @@ def _make_dir_link(target, link):
 
 
 def _build_linked_nm():
-    """The four working folders of this section. One is a link to the target, one holds a real folder."""
+    """The four working folders of this section, and the shim folder. One folder is a link to the target,
+    one holds a real folder."""
     for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT):
         write(os.path.join(folder, "package.json"), NM_PKG)
     write(os.path.join(NMTARGET, "pkg.js"), "module.exports = {};\n")
     _make_dir_link(NMTARGET, os.path.join(NMLINKED, "node_modules"))
     write(os.path.join(NMREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
+    write(os.path.join(NMSHIM, "sitecustomize.py"), NM_SHIM_SOURCE)
 
 
-lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT], _build_linked_nm)
+lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMSHIM], _build_linked_nm)
 
 
 def nm_case(name, command, expected, cwd, tool="Bash"):
@@ -5829,7 +5844,7 @@ NM_INSTALLS = (
     ("npm update", "Bash"), ("npm update left-pad", "Bash"),
 )
 # THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
-# file inside it, so it is not pinned here (see the Input Needed note in the commit report).
+# file inside it, so it is not pinned here.
 NM_DELETES = (
     ("rm -rf node_modules/", "Bash"), ("rm -rf node_modules/*", "Bash"),
     ("rm -rf ./node_modules/x", "Bash"), ("Remove-Item -Recurse node_modules\\*", "PowerShell"),
@@ -5875,6 +5890,59 @@ nm_case("linked-nm: scanner: npm ci in a multi-line quoted string is data, allow
         'echo "first line\nnpm ci later"', "allow", NMLINKED)
 nm_case("linked-nm: scanner: npm ci in a comment line is not run, allowed",
         "# install with npm ci later\necho ready", "allow", NMLINKED)
+
+
+# THE PER-SEGMENT FOLDER. A `cd` moves the working folder for the segments after it, and no others, so
+# each install is judged by the folder it runs in.
+nm_case("linked-nm: cd into the linked folder, npm ci, then cd .. is refused",
+        "cd " + slash(NMLINKED) + " && npm ci && cd ..", "deny", NMABSENT)
+nm_case("linked-nm: cd into the linked folder, npm ci, then cd into a real folder is refused",
+        "cd " + slash(NMLINKED) + " && npm ci && cd " + slash(NMREAL), "deny", NMABSENT)
+nm_case("linked-nm: cd into a real folder, npm ci, then cd into the linked folder is allowed",
+        "cd " + slash(NMREAL) + " && npm ci && cd " + slash(NMLINKED), "allow", NMLINKED)
+
+# THE GROUPS AND SUBSTITUTIONS. A subshell or a command substitution runs its install in the folder it is in.
+nm_case("linked-nm: a subshell that cds into the linked folder, then npm ci, is refused",
+        "(cd " + slash(NMLINKED) + " && npm ci)", "deny", NMABSENT)
+nm_case("linked-nm: npm ci in a subshell, run in the linked folder, is refused",
+        "(npm ci)", "deny", NMLINKED)
+nm_case("linked-nm: npm ci in a command substitution, run in the linked folder, is refused",
+        "echo $(npm ci)", "deny", NMLINKED)
+
+# THE ALIASES. npm resolves each of these to an install, an update or a removal of the same tree.
+NM_ALIASES = ("npm clean-install", "npm install-clean", "npm ic", "npm cit",
+              "npm remove x", "npm rm x", "npm r x", "npm un x", "npm up", "npm upgrade",
+              "npm in x", "npm ins x", "npm isntall x")
+for _command in NM_ALIASES:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+
+# THE VALUE FLAGS. A global flag that takes a value, placed before the subcommand, runs the same install.
+nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
+        "npm --loglevel error ci", "deny", NMLINKED)
+nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
+        "npm --prefix . ci", "deny", NMLINKED)
+
+# THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
+nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
+        "npm i -g x", "allow", NMLINKED)
+nm_case("linked-nm: npm install --help (Bash) in a linked folder is allowed",
+        "npm install --help", "allow", NMLINKED)
+nm_case("linked-nm: npm ci --dry-run (Bash) in a linked folder is allowed",
+        "npm ci --dry-run", "allow", NMLINKED)
+nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
+        'echo "npm ci"', "allow", NMLINKED)
+
+# THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
+# the link test must read the junction itself. This case runs the guard with that function removed.
+def nm_case_without_isjunction(name, command, expected, cwd, tool="Bash"):
+    """nm_case, run with os.path.isjunction removed from the guard's interpreter by NMSHIM."""
+    nm_case(name, command, expected, cwd, tool)
+    CASES[-1]["env"] = {"PYTHONPATH": os.pathsep.join(
+        filter(None, (NMSHIM, os.environ.get("PYTHONPATH"))))}
+
+
+nm_case_without_isjunction("linked-nm: npm ci in a junction is refused with os.path.isjunction removed",
+                           "npm ci", "deny", NMLINKED)
 
 
 # =========================================================================== 4. environment files
