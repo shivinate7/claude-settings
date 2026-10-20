@@ -64,3 +64,4 @@ Home: merge/merge.py
 - (b) A fast-forwarded first lane is never a tip (0 of 112 recent lane merges did this). Debt: `ff-first-lane-not-a-tip`.
 - (c) Squash-merged lanes are kept. Debt: `squash-lane-branch-kept`.
 - (d) A merge tool older than this change refuses main's stamp.json (unknown field `keepBranches`) with a clear stop. `merge/install_from_main.sh` fixes it. Debt: `old-merge-tool-refuses-stamp`.
+- (e) In a cycle of lanes (A based on B, and B based on A), the delete order is the heads order, not dependents first. A failed delete in the cycle can then close a PR whose base is gone. Debt: `lane-cycle-delete-order`.
