@@ -70,6 +70,11 @@ appears_at_list N: `run list` leaves it out until the Nth `run list` call of the
 log, all PRs together). A run with unfinished_to_list N: `run list` shows it in progress, with no
 conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
+A prs, runs or workflows entry with a `repo` field answers only a call that reaches that repo: a call
+with -R or --repo names it, and a call without one reaches the fixture's `cwd_repo`. An entry with no
+`repo` answers every call. `workflows` is the `gh workflow list` answer (one active `gates` workflow
+when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
+"garbage") fails that one call and no other.
 
 Draft run, then the real run (debt ci-wake-lists-runs-once): `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -81,6 +86,15 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
+
+Repo rules (owner request 2026-10-19, lane ci-wake-false-alarms):
+- Every gh call of a watch passes the PR's repo as -R, the same one each time. A watch that reads runs
+  from the folder's repo says "no run yet" for a PR that passed (incident 2026-10-19).
+- A repo with no active workflow starts no watch: no output, exit 0, no run read. The hook asks
+  `gh workflow list -R <repo>` for that (incidents f36bec0 and 20df322).
+- A repo with an active workflow and no run on the head still wakes "CI unknown on <sha7>: no run
+  yet" at the deadline. That is the real alert.
+- A failed `gh workflow list` read is not "no workflows": the watch runs as it does today.
 
 Scratch files live in one temp directory, removed at exit.
 """
@@ -124,6 +138,38 @@ def flag(args, name):
         if a.startswith(name + "="):
             return a[len(name) + 1:]
     return None
+
+def strip_repo(args):
+    """The words of one gh call without its -R or --repo flag and value, so the verb, the id and the
+    key read the same wherever -R sits. log_call keeps the raw argv: the -R check reads that."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in ("-R", "--repo"):
+            skip = True
+        elif not (a.startswith("-R=") or a.startswith("--repo=")):
+            out.append(a)
+    return out
+
+def repo_of(args):
+    """The -R or --repo value of one gh call's argv, or None."""
+    for i, a in enumerate(args):
+        if a in ("-R", "--repo") and i + 1 < len(args):
+            return args[i + 1]
+        if a.startswith("-R=") or a.startswith("--repo="):
+            return a.split("=", 1)[1]
+    return None
+
+def here(entry, args, fx):
+    """True when a gh call reaches a fixture entry. An entry with no repo is in every repo. A call with
+    -R or --repo reaches the repo it names; a call without one reaches the fixture's cwd_repo, the repo
+    of the folder the hook runs in."""
+    if entry.get("repo") is None:
+        return True
+    return entry["repo"] == (repo_of(args) or fx.get("cwd_repo", ""))
+
+DEFAULT_WORKFLOWS = [{"id": 1, "name": "gates", "path": ".github/workflows/gates.yml", "state": "active"}]
 
 _SEQ = [0]
 
@@ -179,11 +225,11 @@ def view(r, listed, n=1):
 def views_of(key):
     """How many `run view <key>` calls the log holds, this one too (log_call ran first). Each gh
     call is a new process, so the log is the only count that outlives one."""
-    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:3] == ["run", "view", key])
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if strip_repo(a)[:3] == ["run", "view", key])
 
 def lists_of():
     """How many `run list` calls the log holds, this one too, as views_of counts."""
-    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if a[:2] == ["run", "list"])
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if strip_repo(a)[:2] == ["run", "list"])
 
 def ready_ping():
     port = os.environ.get("GH_STUB_READY_PORT")
@@ -200,11 +246,12 @@ def main(args):
     if fx.get("mode") == "garbage":
         sys.stdout.write("<html>not json</html>\n")
         return 0
-    obj = args[0] if args else ""
-    verb = args[1] if len(args) > 1 else ""
-    key = args[2] if len(args) > 2 else ""
+    plain = strip_repo(args)
+    obj = plain[0] if plain else ""
+    verb = plain[1] if len(plain) > 1 else ""
+    key = plain[2] if len(plain) > 2 else ""
     if obj == "pr" and verb == "view":
-        hits = [p for p in fx["prs"] if str(p["number"]) == key or p["headRefName"] == key]
+        hits = [p for p in fx["prs"] if here(p, args, fx) and (str(p["number"]) == key or p["headRefName"] == key)]
         if not hits:
             sys.stderr.write("no pull requests found\n")
             return 1
@@ -212,21 +259,36 @@ def main(args):
         return 0
     if obj == "pr" and verb == "list":
         head = flag(args, "--head")
-        hits = [p for p in fx["prs"] if head is None or p["headRefName"] == head]
+        hits = [p for p in fx["prs"] if here(p, args, fx) and (head is None or p["headRefName"] == head)]
         sys.stdout.write(json.dumps(hits) + "\n")
         return 0
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
-        hits = [r for r in fx["runs"] if (commit is None or r["headSha"].startswith(commit))
+        hits = [r for r in fx["runs"] if here(r, args, fx) and (commit is None or r["headSha"].startswith(commit))
                 and r.get("appears_at_list", 1) <= n]
         sys.stdout.write(json.dumps([view(r, True, n) for r in hits]) + "\n")
+        return 0
+    if obj == "workflow" and verb == "list":
+        if fx.get("workflow_list") == "error":
+            sys.stderr.write("HTTP 401: Bad credentials\n")
+            return 1
+        if fx.get("workflow_list") == "garbage":
+            sys.stdout.write("<html>not json</html>\n")
+            return 0
+        # gh lists the active workflows unless --all; the fixture's repo field is not gh's, so it is dropped
+        wf = [{k: v for k, v in w.items() if k != "repo"} for w in fx.get("workflows", DEFAULT_WORKFLOWS)
+              if here(w, args, fx) and ("--all" in args or w.get("state") == "active")]
+        fields = flag(args, "--json")
+        if fields:
+            wf = [{k: v for k, v in w.items() if k in fields.split(",")} for w in wf]
+        sys.stdout.write(json.dumps(wf) + "\n")
         return 0
     if obj == "run" and verb == "watch":
         sys.stderr.write("stub gh: the hook must not run `gh run watch`\n")
         return 1
     if obj == "run" and verb == "view":
-        hits = [r for r in fx["runs"] if str(r["databaseId"]) == key]
+        hits = [r for r in fx["runs"] if here(r, args, fx) and str(r["databaseId"]) == key]
         if not hits:
             sys.stderr.write("could not find any workflow run with id %s\n" % key)
             return 1
@@ -306,9 +368,13 @@ with open(FAST_SLEEP_LAUNCHER, "w", encoding="utf-8") as f:
     f.write(FAST_SLEEP_SRC)
 
 
-def pr(number, draft=False, branch="hook-wave-2", sha=SHA):
-    return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
-            "state": "OPEN", "url": "https://github.com/shivinate7/claude-settings/pull/%d" % number}
+def pr(number, draft=False, branch="hook-wave-2", sha=SHA, repo=None):
+    out = {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
+           "state": "OPEN",
+           "url": "https://github.com/%s/pull/%d" % (repo or "shivinate7/claude-settings", number)}
+    if repo:
+        out["repo"] = repo   # answers only a gh call that reaches this repo (the stub's here())
+    return out
 
 
 def job(name, conclusion):
@@ -336,8 +402,9 @@ def run(run_id, name, conclusion, jobs, in_progress_at_list=False, sha=SHA,
     return out
 
 
-def fixture(prs=(), runs=(), mode="ok"):
-    return {"mode": mode, "prs": list(prs), "runs": list(runs)}
+def fixture(prs=(), runs=(), mode="ok", **extra):
+    """extra: cwd_repo (the folder's repo, for a call with no -R), workflows, workflow_list (the failure switch)."""
+    return dict({"mode": mode, "prs": list(prs), "runs": list(runs)}, **extra)
 
 
 def bash(command):
@@ -489,17 +556,18 @@ def start_watcher(payload, scen, extra=None):
 
 
 def watched(res):
-    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each."""
-    return [c[2] for c in res.calls if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
+    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each. The -R of
+    a call is not compared: GH.strip_repo drops it, so the check reads the same wherever -R sits."""
+    return [c[2] for c in map(GH.strip_repo, res.calls) if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
 
 
 def run_watches(res):
     """Every `gh run watch` call. The decision ci-wait-reads-run-status allows none."""
-    return [c for c in res.calls if c[:2] == ["run", "watch"]]
+    return [c for c in res.calls if GH.strip_repo(c)[:2] == ["run", "watch"]]
 
 
 def count(res, *prefix):
-    return sum(1 for c in res.calls if c[:len(prefix)] == list(prefix))
+    return sum(1 for c in res.calls if GH.strip_repo(c)[:len(prefix)] == list(prefix))
 
 
 def verdict_of(res):
@@ -1036,6 +1104,101 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
 
+# Owner request 2026-10-19 (lane ci-wake-false-alarms). Incidents: `gh pr ready 214 --repo
+# shivinate7/home-app` run from the shivinate7/home folder (the run reads went to the folder's repo, and
+# the hook said "no run yet" for a PR whose CI passed); `gh pr ready` in shivinate7/home, which has no
+# workflow files, waited the full deadline and said "no run yet" (f36bec0, 20df322). Every case runs the
+# real hook, with CI_WAKE_DEADLINE 4 where the case waits to a deadline, so a wrong answer ends in
+# seconds, not in the 3300 s default. A verdict case gets 15 s: once the deadline has passed, watch_run
+# makes no status read (by design), so a tight deadline under a slow stub start drops the status-read check.
+VERDICT_DEADLINE = "15"
+REPO_APP = "shivinate7/home-app"   # the PR's repo
+REPO_HOME = "shivinate7/home"      # the folder's repo: records only, no workflow files
+
+
+def wf(state="active", repo=None):
+    """One entry of `gh workflow list --json`, as the fixture holds it."""
+    out = {"id": 1, "name": "gates", "path": ".github/workflows/gates.yml", "state": state}
+    if repo:
+        out["repo"] = repo
+    return out
+
+
+def in_repo(entry, repo):
+    """A copy of a run fixture that exists only in repo."""
+    return dict(entry, repo=repo)
+
+
+def case_wrong_repo_every_gh_call_names_the_pr_repo():
+    """The watch passes the PR's -R on every gh call, and its verdict is that repo's own. The folder's
+    repo (cwd_repo) holds no run, so a call that drops -R reads nothing and the hook says "no run yet".
+    The rows spell the flag both ways and cover a green and a red run."""
+    rows = (
+        ("--repo, green", "--repo", GREEN, "green", [], ["901"]),
+        ("-R, green", "-R", GREEN, "green", [], ["901"]),
+        ("--repo, red", "--repo", RED, "red", ["unit", "e2e"], ["902"]),
+    )
+    for name, spelling, ran, want, names, ids in rows:
+        label = "wrong repo, %s" % name
+        fx = fixture([pr(214, repo=REPO_APP)], [in_repo(ran, REPO_APP)], cwd_repo=REPO_HOME,
+                     workflows=[wf(repo=REPO_APP)])
+        res = run_hook(bash("gh pr ready 214 %s %s" % (spelling, REPO_APP)), fx,
+                       extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        expect_verdict(label, res, want, names_in=names)
+        check("%s: every gh call passes -R %s" % (label, REPO_APP),
+              bool(res.calls) and all(GH.repo_of(c) == REPO_APP for c in res.calls), why(res))
+        expect_watch(label, res, ids)
+
+
+def case_repo_without_ci_starts_no_watch():
+    """A repo with no active workflow starts no watch: silent, exit 0, no run read. The rows: no repo
+    flag (the incident form), no workflows, and only a disabled workflow. The --repo rows also check
+    that the hook asked the PR's repo for its workflows."""
+    rows = (
+        ("no repo flag, no workflows", "gh pr ready 7", [], False),
+        ("--repo, no workflows", "gh pr ready 7 --repo " + REPO_HOME, [], True),
+        ("--repo, only a disabled workflow", "gh pr ready 7 --repo " + REPO_HOME,
+         [wf(state="disabled_manually", repo=REPO_HOME)], True),
+    )
+    for name, command, workflows, asks in rows:
+        label = "no CI, %s" % name
+        fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflows=workflows)
+        res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+        if asks:
+            check("%s: workflow list reads -R %s" % (label, REPO_HOME),
+                  any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
+                      for c in res.calls), why(res))
+
+
+def case_workflows_but_no_run_on_head_still_says_no_run_yet():
+    """Control, passes on f9f4e320. A repo with an active workflow and no run on the head is the real
+    alert: the hook waits to its deadline and wakes "CI unknown on <sha7>: no run yet"."""
+    fx = fixture([pr(214, repo=REPO_APP)], [], cwd_repo=REPO_APP, workflows=[wf(repo=REPO_APP)])
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": "4"})
+    label = "workflows, no run on the head (control)"
+    expect_verdict(label, res, "unknown")
+    v = verdict_of(res)
+    check("%s: the line says no run yet, on sha7" % label,
+          v is not None and v[1] == SHA7 and "no run yet" in v[2], why(res))
+    check("%s: wakes at its deadline (3.5 s to 15 s)" % label, 3.5 <= res.elapsed < 15, why(res))
+
+
+def case_failed_workflow_read_is_not_no_workflows():
+    """Control, passes on f9f4e320. A failed `gh workflow list` read is not "no workflows": the watch runs
+    as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
+    for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
+        label = "workflow list %s, red run (control)" % name
+        fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
+                     workflows=[wf(repo=REPO_APP)], workflow_list=switch)
+        res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+        expect_watch(label, res, ["902"])
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -1221,6 +1384,12 @@ def main():
     case_draft_run_ending_skipped_is_no_run_yet()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
+
+    # Owner request 2026-10-19: the repo flag, the no-CI repo, the real alert, a failed workflow read.
+    case_wrong_repo_every_gh_call_names_the_pr_repo()
+    case_repo_without_ci_starts_no_watch()
+    case_workflows_but_no_run_on_head_still_says_no_run_yet()
+    case_failed_workflow_read_is_not_no_workflows()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
