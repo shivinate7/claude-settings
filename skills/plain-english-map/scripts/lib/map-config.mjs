@@ -53,7 +53,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   const known = (obj, keys, label) => { for (const k of Object.keys(obj)) if (!keys.includes(k)) bad(`has an unknown key "${label ? `${label}.` : ''}${k}"`); };
   let tracked;
   const trackedFiles = () => (tracked ??= (() => {
-    try { return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').map((l) => l.trim()).filter(Boolean); }
+    try { return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).split('\n').map((l) => l.trim()).filter(Boolean); }
     catch { return bad(`codeExtensions: cannot list tracked files, because ${root} is not a git repository`); }
   })());
   // Every form and path check runs first. A check that needs git waits in this list, and runs last.
