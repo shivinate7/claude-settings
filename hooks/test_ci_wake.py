@@ -71,7 +71,8 @@ log, all PRs together). A run with unfinished_to_list N: `run list` shows it in 
 conclusion, up to the Nth `run list` call, and as its fixture says after. Fixture mode "error"
 makes every call fail with exit 1. Mode "garbage" makes every call print non-JSON with exit 0.
 A prs, runs or workflows entry with a `repo` field answers only a call that reaches that repo: a call
-with -R or --repo names it, and a call without one reaches the fixture's `cwd_repo`. An entry with no
+with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo, else GH_REPO, else the
+fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `gates` workflow
 when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
 "garbage") fails that one call and no other.
@@ -139,35 +140,52 @@ def flag(args, name):
             return a[len(name) + 1:]
     return None
 
+def is_repo_flag(a):
+    """True for one argv token that names a repo: -R or --repo (the value is the next token), or a token
+    that carries its value, as -Ro/r, -R=o/r and --repo=o/r do."""
+    return a in ("-R", "--repo") or a.startswith("--repo=") or (a.startswith("-R") and not a.startswith("--"))
+
 def strip_repo(args):
-    """The words of one gh call without its -R or --repo flag and value, so the verb, the id and the
-    key read the same wherever -R sits. log_call keeps the raw argv: the -R check reads that."""
+    """The words of one gh call without its repo flag and value, so the verb, the id and the key read the
+    same wherever the flag sits. log_call keeps the raw argv: the -R check reads that."""
     out, skip = [], False
     for a in args:
         if skip:
             skip = False
         elif a in ("-R", "--repo"):
             skip = True
-        elif not (a.startswith("-R=") or a.startswith("--repo=")):
+        elif not is_repo_flag(a):
             out.append(a)
     return out
 
 def repo_of(args):
-    """The -R or --repo value of one gh call's argv, or None."""
+    """The repo a gh call names with its own flag, in any spelling gh takes, or None."""
     for i, a in enumerate(args):
-        if a in ("-R", "--repo") and i + 1 < len(args):
-            return args[i + 1]
-        if a.startswith("-R=") or a.startswith("--repo="):
-            return a.split("=", 1)[1]
+        if a in ("-R", "--repo"):
+            if i + 1 < len(args):
+                return args[i + 1]
+        elif a.startswith("--repo="):
+            return a[len("--repo="):]
+        elif a.startswith("-R") and not a.startswith("--"):
+            return a[3:] if a.startswith("-R=") else a[2:]
     return None
 
+def call_repo(args, fx):
+    """The repo a gh call reaches, as gh picks it: its own -R or --repo, else the repo in a PR URL selector,
+    else GH_REPO, else the folder's repo (the fixture's cwd_repo)."""
+    named = repo_of(args)
+    if named:
+        return named
+    plain = strip_repo(args)
+    if len(plain) > 2 and plain[:2] == ["pr", "view"] and plain[2].startswith("https://github.com/"):
+        return "/".join(plain[2].split("/")[3:5])
+    return os.environ.get("GH_REPO") or fx.get("cwd_repo", "")
+
 def here(entry, args, fx):
-    """True when a gh call reaches a fixture entry. An entry with no repo is in every repo. A call with
-    -R or --repo reaches the repo it names; a call without one reaches the fixture's cwd_repo, the repo
-    of the folder the hook runs in."""
+    """True when a gh call reaches a fixture entry. An entry with no repo is in every repo."""
     if entry.get("repo") is None:
         return True
-    return entry["repo"] == (repo_of(args) or fx.get("cwd_repo", ""))
+    return entry["repo"] == call_repo(args, fx)
 
 DEFAULT_WORKFLOWS = [{"id": 1, "name": "gates", "path": ".github/workflows/gates.yml", "state": "active"}]
 
@@ -251,7 +269,8 @@ def main(args):
     verb = plain[1] if len(plain) > 1 else ""
     key = plain[2] if len(plain) > 2 else ""
     if obj == "pr" and verb == "view":
-        hits = [p for p in fx["prs"] if here(p, args, fx) and (str(p["number"]) == key or p["headRefName"] == key)]
+        hits = [p for p in fx["prs"] if here(p, args, fx)
+                and (str(p["number"]) == key or p["headRefName"] == key or p.get("url") == key)]
         if not hits:
             sys.stderr.write("no pull requests found\n")
             return 1
@@ -503,7 +522,7 @@ def base_env(search, fixture_path, log, lock, extra):
     # Drop every spelling of PATH first: on Windows os.environ keys are case-insensitive.
     # Drop CI_WAKE_* from the caller's shell too, so only the case sets the seams.
     env = {k: v for k, v in os.environ.items()
-           if k.upper() != "PATH" and not k.startswith("CI_WAKE_")}
+           if k.upper() != "PATH" and not k.startswith("CI_WAKE_") and k.upper() != "GH_REPO"}
     env.update(PATH=search, GH_STUB_FIXTURE=fixture_path, GH_STUB_LOG=log, CI_WAKE_LOCK_DIR=lock)
     env.update(extra or {})
     return env
@@ -1198,6 +1217,61 @@ def case_failed_workflow_read_is_not_no_workflows():
         expect_watch(label, res, ["902"])
 
 
+# Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
+# is REPO_HOME, which has no workflow. Each form must give the PR's verdict, and every gh call after the
+# pr view must name REPO_APP with -R, taken from the PR's own url field.
+URL_APP = "https://github.com/%s/pull/214" % REPO_APP
+
+
+def after_pr_view(res):
+    """The gh calls made after the watch's pr view, in order. [] when there is no pr view."""
+    idx = next((i for i, c in enumerate(res.calls) if GH.strip_repo(c)[:2] == ["pr", "view"]), None)
+    return [] if idx is None else res.calls[idx + 1:]
+
+
+def pins_pr_repo_after_pr_view(label, command):
+    """Run the hook from the folder, with the PR in REPO_APP. The verdict must be the PR's green run. The
+    gh calls after the pr view must include a workflow list and a run list, and each must carry -R REPO_APP."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict(label, res, "green")
+    after = after_pr_view(res)
+    kinds = [GH.strip_repo(c)[:2] for c in after]
+    check("%s: after its pr view, the watch makes a workflow list and a run list" % label,
+          ["workflow", "list"] in kinds and ["run", "list"] in kinds, why(res))
+    check("%s: every gh call after pr view passes -R %s" % (label, REPO_APP),
+          bool(after) and all(GH.repo_of(c) == REPO_APP for c in after), why(res))
+    expect_watch(label, res, ["901"])
+
+
+def case_url_selector_pins_pr_repo_on_later_calls():
+    pins_pr_repo_after_pr_view("URL selector, no -R", "gh pr ready " + URL_APP)
+
+
+def case_gh_repo_prefix_pins_pr_repo_on_later_calls():
+    pins_pr_repo_after_pr_view("GH_REPO prefix", "GH_REPO=%s gh pr ready 214" % REPO_APP)
+
+
+def case_attached_short_repo_flag_pins_pr_repo_on_later_calls():
+    pins_pr_repo_after_pr_view("attached -R, -Ro/r", "gh pr ready 214 -R%s" % REPO_APP)
+
+
+def case_equals_short_repo_flag_pins_pr_repo_on_later_calls():
+    pins_pr_repo_after_pr_view("-R=o/r", "gh pr ready 214 -R=%s" % REPO_APP)
+
+
+def case_folder_without_workflows_still_watches_the_pr_repo():
+    """The folder's repo has no workflow and the PR's repo has one. The watch must still run, and report
+    the PR repo's verdict. The run here is red, so an empty folder cannot pass for it."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    res = run_hook(bash("gh pr ready " + URL_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "folder without workflows, PR repo with a red run"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -1389,6 +1463,13 @@ def main():
     case_repo_without_ci_starts_no_watch()
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
+
+    # Selector forms that leave the repo blank, and the folder without workflows.
+    case_url_selector_pins_pr_repo_on_later_calls()
+    case_gh_repo_prefix_pins_pr_repo_on_later_calls()
+    case_attached_short_repo_flag_pins_pr_repo_on_later_calls()
+    case_equals_short_repo_flag_pins_pr_repo_on_later_calls()
+    case_folder_without_workflows_still_watches_the_pr_repo()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
