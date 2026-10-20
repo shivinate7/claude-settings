@@ -721,5 +721,10 @@ def main() -> None:
     sys.exit(0)
 
 
+# An importer, such as a test calling `sweep`, finds the guard bound at once. Only the hook run
+# keeps it lazy.
+if __name__ != "__main__":
+    _load_guard()
+
 if __name__ == "__main__":
     main()
