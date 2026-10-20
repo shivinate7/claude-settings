@@ -23,6 +23,8 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
         sys.exit(_why)
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
@@ -536,6 +538,28 @@ class Host:
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
                 "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"], "draft": d["isDraft"]}
 
+    OPEN_LIMIT = 1000  # gh pr list stops at 30 rows without --limit
+
+    def open_heads(self):
+        """-> {head branch name: (head sha, PR base)} of the open pull requests. A failed read, or one that may be cut short,
+        raises Stop: never an empty set, which would say no PR is open. A head with two open PRs (a backport, or a fork's
+        branch of the same name) gets base None, so it is never one lane's own PR. Each later row is kept under name:index,
+        a key no branch can have, so its base still counts."""
+        c, out = self.gh(["pr", "list", "--state", "open", "--json", "headRefName,headRefOid,baseRefName", "--limit", str(self.OPEN_LIMIT), *self._repo_args()], self.cwd)
+        if c:
+            raise Stop("gh pr list failed: " + out)
+        rows = json.loads(out)
+        if len(rows) >= self.OPEN_LIMIT:
+            raise Stop(f"gh pr list returned {len(rows)} open pull requests, the most it was asked for")
+        heads = {}
+        for i, d in enumerate(rows):
+            name, row = d["headRefName"], (d["headRefOid"], d["baseRefName"])
+            if name in heads:
+                heads[name] = (heads[name][0], None)
+                name = f"{name}:{i}"
+            heads[name] = row
+        return heads
+
     def required_names(self):
         """The required check names. Never empty: an empty list would pass the wait without a read."""
         if isinstance(self.required, list):
@@ -956,6 +980,81 @@ def cut_branch(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
+def lane_tips(wt, base_ref, sha):
+    """The tips the batch took in: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
+    (a merge of the base into the branch has a base commit as its second parent). Read before the merge.
+    A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
+    try:
+        c, out = git(wt, "log", "--merges", "--format=%P", f"{base_ref}..{sha}")
+        if c:
+            raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
+        tips = dict.fromkeys(t for line in out.splitlines() for t in line.split()[1:])
+        return [t for t in tips if git(wt, "merge-base", "--is-ancestor", t, base_ref)[0]]
+    except Exception as e:
+        say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
+        return []
+
+def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
+    """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
+    One line per lane, never a silent drop. A lane tip that no head sits at has moved or is gone. Kept, with a line why:
+    a name in `keep`; the base of an open PR (a stacked PR); one with an open PR at another sha than its tip, or at its
+    tip with another base than `base`, the batch's base (a backport); none when the open-PR read fails; one whose
+    tip is in `commit` neither by id nor by patch, or whose proof could not run. A name in `skip` is no lane.
+    The delete is leased to the tip. Each lane has its own try. Never fails the merge."""
+    try:
+        import guard_core  # hooks/guard_core.py: the one home of the cherry test
+        c, out = git(root, "ls-remote", "--heads", "origin")
+        if c:
+            say("merge: no lane branch is deleted: the heads on origin could not be read: " + (out.splitlines() or ["?"])[-1])
+            return
+        rows = [l.split("\t", 1) for l in out.splitlines()]
+        heads = {r[1].removeprefix("refs/heads/"): r[0] for r in rows if len(r) == 2 and r[0] in lanes}
+        for tip in lanes:
+            if tip not in heads.values():
+                say(f"merge: lane {tip[:9]}: no head on origin sits at this tip: it moved or is gone.")
+        heads = {b: t for b, t in heads.items() if b not in skip}
+        todo = []
+        for b in heads:
+            if b in keep:
+                say(f"merge: lane origin/{b}: kept: it is in merge.keepBranches.")
+            else:
+                todo.append(b)
+        if not todo:
+            return
+        try:
+            opened = host.open_heads()  # {head name: (head sha, PR base)}
+            pr_bases = {pb for _, pb in opened.values()}
+        except Exception:  # unreadable or malformed: delete nothing
+            opened = None
+        for b in todo:
+            try:
+                tip = heads[b]
+                why = None
+                if opened is None:
+                    why = "the open PRs could not be read."
+                elif b in pr_bases:
+                    why = "it is the base of an open PR."
+                elif b in opened and opened[b][0] != tip:
+                    why = "it has an open PR."
+                elif b in opened and opened[b][1] != base:  # at the tip with the batch's base: the lane's own PR, merged a moment ago
+                    why = f"its open PR at the tip has another base, {opened[b][1]}." if opened[b][1] else "it has more than one open PR."
+                else:
+                    a = git(root, "merge-base", "--is-ancestor", tip, commit)[0]
+                    if a == 1:
+                        proven = guard_core.branch_cherry_empty(root, commit, tip)
+                        why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
+                    elif a:
+                        why = "the proof could not run."
+                if why:
+                    say(f"merge: lane origin/{b}: kept: {why}")
+                    continue
+                c, out = git(root, "push", "-q", "origin", f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}")
+                say(f"merge: lane origin/{b}: " + (f"deleted at {tip[:9]}." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+            except Exception as e:  # one lane's failure never stops the next lane
+                say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
+    except Exception as e:  # a lane cleanup never fails a merge that landed
+        say(f"merge: the lane cleanup stopped: {type(e).__name__}: {e}")
+
 def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
@@ -968,7 +1067,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -1015,10 +1114,15 @@ def load_config(root, base, path):
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
     ne = lambda v: isinstance(v, str) and v.strip()
+    # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
+    # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.
+    plain_name = lambda v: (ne(v) and not re.search(r"[\s*?\[:~^\\]|\.\.|^-", v) and not v.startswith(("refs/", "origin/"))
+                            and git(root, "check-ref-format", "--branch", v) == (0, v))
     rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
     for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
                   (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
+                  (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
             raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.")
@@ -1102,7 +1206,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
-        f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
+        f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
@@ -1237,6 +1341,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
+            lanes = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else []  # read before the merge: after it the lane tips are on the base
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
@@ -1258,6 +1363,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         ok = after_merge(root, m.get("afterMerge", [])) and ok
         if m.get("deleteBranch"):
             cut_branch(root, branch, sha)
+            if lanes:
+                cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []))
         return 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
