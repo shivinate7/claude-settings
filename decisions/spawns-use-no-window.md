@@ -20,3 +20,6 @@ Outcome protected: the owner's screen stays still while hooks and tools run.
 - (c) Under the flag, Ctrl-C under `verdict` may leave orphan grandchildren. Unmeasured. Debt: `nowindow-ctrl-c-orphans`.
 - (d) A git terminal credential prompt in `merge/merge.py` `sh()` would hang. Git Credential Manager's window is not affected. Unmeasured. Debt: `nowindow-git-prompt-hangs`.
 - (e) The scan covers `subprocess` and Node `child_process` only. It does not read `os.system` or `os.popen`, and product code has none today. Debt: `nowindow-scan-misses-os-system`.
+
+Kind: process
+Home: hooks/_nowindow.py
