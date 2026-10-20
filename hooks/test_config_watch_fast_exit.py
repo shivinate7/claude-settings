@@ -206,6 +206,27 @@ def missing_record_lifted(project):
     return ok, "rc=%s guards=%s message=%r" % (rc, guards, message_of(out)[:60])
 
 
+def first_sight_case(label, body, silent):
+    """First sight of a file that sets only the given cap keys. Only a Sonnet cap stays silent."""
+    verdict = "silent" if silent else "reported unknown"
+
+    @case("d2 first sight, %s: %s" % (label, verdict))
+    def run(project):
+        base.write(project.settings, body)
+        rc, out, guards, _ = probe(project, *(EDIT[0], EDIT[1](project)))
+        message = message_of(out)
+        heard = "no baseline" in message
+        ok = rc == 0 and guards and (out == "" if silent else heard)
+        return ok, "rc=%s guards=%s message=%r" % (rc, guards, message[:60])
+
+
+first_sight_case("force key = opus alone", base.cap_json(force="opus"), silent=False)
+first_sight_case("model key = opus alone", base.cap_json(model="opus"), silent=False)
+first_sight_case("workflow force key = opus alone", json.dumps(
+    {"env": {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE": "opus"}}), silent=False)
+first_sight_case("model key = sonnet",base.cap_json(model="sonnet"), silent=True)
+
+
 @case("d3 one of two records missing: guard imported")
 def one_record_missing(project):
     project.settle()
