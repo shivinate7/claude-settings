@@ -355,6 +355,19 @@ def _nm_inside(arg: str, where: str) -> str:
     return ""
 
 
+def npm_prefix(where: str) -> str:
+    """The folder npm installs into, as `npm prefix` finds it: the first folder from `where` upward
+    that holds a package.json or a node_modules. With none up to the drive root, npm uses `where`."""
+    folder = where
+    while True:
+        if any(os.path.lexists(os.path.join(folder, name)) for name in ("package.json", "node_modules")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return where
+        folder = parent
+
+
 def linked_nm_hit(segment: str, where: str) -> str:
     """Return the matched text when one segment runs a dependency install in `where`, or a
     recursive delete of what is inside a `node_modules`, and that `node_modules` is a link, else ''."""
@@ -378,7 +391,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 subcommand = NPM_ALIASES.get(words[at].lower(), "")
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
-                os.path.join(where, "node_modules")):
+                os.path.join(npm_prefix(where), "node_modules")):
             return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
