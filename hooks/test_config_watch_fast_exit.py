@@ -311,6 +311,57 @@ def expired_lift_on_unchanged_file(project):
         rc, guards, project.lifted(), message_of(out)[:60])
 
 
+# --------------------------------------------------------------------------- (g) fast-path fault
+
+
+# Runs the hook as `probe` does, but first makes every content hash raise until the guard is
+# imported. A path hash (the store key, which ends in ".json") still works, so the fault sits in
+# `unchanged` itself and not in the baseline loader's own try block. The full check runs after the
+# guard loads, so a hook that falls through to it is unaffected.
+FAULT_PRELUDE = r"""
+import hashlib, sys
+_real = hashlib.sha256
+def _faulty(data=b"", *args, **kwargs):
+    guard_loaded = any(name in sys.modules for name in ("guard", "guard_under_test"))
+    if not guard_loaded and not bytes(data).endswith(b".json"):
+        raise RuntimeError("injected fault in the fast path")
+    return _real(data, *args, **kwargs)
+hashlib.sha256 = _faulty
+"""
+
+
+def fault_probe(project, tool, tool_input):
+    """Run the hook with the fast-path fault in place. Return (rc, stdout, guards)."""
+    side = os.path.join(project.root, "fault.json")
+    code = FAULT_PRELUDE + PROBE
+    done = subprocess.run(
+        [sys.executable, "-c", code, base.WATCH, side],
+        input=json.dumps(project.payload(tool, tool_input)),
+        capture_output=True, text=True, env=project.env())
+    try:
+        with open(side, "r", encoding="utf-8") as handle:
+            seen = json.load(handle)
+    except Exception:
+        seen = {"guards": []}
+    return done.returncode, done.stdout, seen["guards"]
+
+
+@case("g1 a fault in the fast check on a changed file: full check runs, raise reverted")
+def fault_falls_through_to_revert(project):
+    project.settle()
+    base.write(project.settings, base.LIFT)
+    rc, out, guards = fault_probe(project, "Bash", {"command": "cp x .claude/settings.local.json"})
+    ok = rc == 0 and bool(guards) and "unasked write" in message_of(out) and not project.lifted()
+    return ok, "rc=%s guards=%s lifted=%s stdout=%r" % (rc, guards, project.lifted(), out[:60])
+
+
+@case("g2 a fault in the fast check on unchanged files: the guard is still imported")
+def fault_imports_guard(project):
+    project.settle()
+    rc, out, guards = fault_probe(project, *(EDIT[0], EDIT[1](project)))
+    return rc == 0 and bool(guards), "rc=%s guards=%s stdout=%r" % (rc, guards, out[:60])
+
+
 def main() -> int:
     print("config_watch fast-exit cases, %d in all" % len(CASES))
     failed = 0

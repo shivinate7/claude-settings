@@ -102,6 +102,22 @@ def case_config_watch_has_no_literal_copy():
     return not found, "literal copies in config_watch.py: %s" % (found or "none")
 
 
+def case_guard_modules_hold_no_literal_copy():
+    """guard_frozen.py and guard_core.py import the names with no fallback. The install lands
+    shared_names.py inside the guard set, so no `except ImportError` copy is needed."""
+    banned = set(WATCHED) | set(FROZEN_FILES)
+    found = []
+    for module in ("guard_frozen.py", "guard_core.py"):
+        with open(os.path.join(HERE, module), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value in banned:
+                found.append("%s:%d string %r" % (module, node.lineno, node.value))
+            elif isinstance(node, ast.FunctionDef) and node.name == "config_dir":
+                found.append("%s:%d def config_dir" % (module, node.lineno))
+    return not found, "literal copies in the guard modules: %s" % (found or "none")
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -109,6 +125,8 @@ CASES = [
     ("(b) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
     ("(d) config_watch.py holds no literal watched name", case_config_watch_has_no_literal_copy),
+    ("(e) guard_frozen.py and guard_core.py hold no literal copy of a watched name or config_dir",
+     case_guard_modules_hold_no_literal_copy),
 ]
 
 
