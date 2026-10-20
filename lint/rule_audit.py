@@ -76,7 +76,10 @@ import subprocess
 import sys
 from typing import Dict, List
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 # Stub for node:test: `test(n)` prints `LISTED <JSON name>` and runs nothing. A file that imports another export fails.
 NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";registerHooks({load(u,c,n){'
