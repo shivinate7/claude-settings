@@ -209,6 +209,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
+| `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`debts/ci-wake-export-gh-repo-unread.md`](../debts/ci-wake-export-gh-repo-unread.md) |
+| `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`debts/ci-wake-gh-host-bare-repo.md`](../debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
 | `dw-stop-delivery-unproven` | The decision-watch mod has shown no Stop event in the desktop app. | [`debts/dw-stop-delivery-unproven.md`](../debts/dw-stop-delivery-unproven.md) |
 | `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`debts/explain-accessvbom.md`](../debts/explain-accessvbom.md) |
