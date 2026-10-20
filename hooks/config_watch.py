@@ -79,7 +79,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only, a flat hooks/ file
+
+
+def _add_guard_set_dir() -> None:
+    """Put the installed guard set, guard.d/<id>/, on the path after this folder.
+
+    The id is the INSTALL_ID stamped in the guard.py beside this file, the same key guard.py
+    loads its set by, so the watch finds the set's shared_names.py when no flat copy is there.
+    A repo copy has no stamp and no set.
+    """
+    try:
+        with open(os.path.join(HERE, "guard.py"), encoding="utf-8") as handle:
+            found = re.search(r'^INSTALL_ID = "([^"]*)"', handle.read(), re.MULTILINE)
+    except Exception:
+        return
+    if found:
+        set_dir = os.path.join(HERE, "guard.d", found.group(1))
+        if os.path.isdir(set_dir) and set_dir not in sys.path:
+            sys.path.insert(sys.path.index(HERE) + 1, set_dir)
+
+
+_add_guard_set_dir()
+
+from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
 
 # The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
 # stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
@@ -703,8 +725,12 @@ def main() -> None:
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
     try:
-        if unchanged(payload, _test_clock()):
-            sys.exit(0)
+        fast_exit = unchanged(payload, _test_clock())
+    except Exception:
+        fast_exit = False  # a fault in the fast check runs the full check, never a silent exit
+    if fast_exit:
+        sys.exit(0)
+    try:
         _load_guard()
         guard._force_utf8_streams()
         messages = sweep(payload, _test_clock())
