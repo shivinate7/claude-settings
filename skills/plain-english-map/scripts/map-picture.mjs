@@ -603,7 +603,7 @@ export const insideRepo = (root, out, p = path) => {
   return !rel.startsWith('..') && !p.isAbsolute(rel);
 };
 
-const git = (root, ...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
+const git = (root, ...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
 const keyOf = (f) => path.posix.basename(f, '.md');
 
 // Reads a file made by hand or by a script outside git: { commit, ... }. A BOM is stripped. The commit must be one of this repo's

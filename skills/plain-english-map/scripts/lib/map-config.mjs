@@ -21,6 +21,17 @@ export const boundSeamReader = () => seamReader;
 // The optional keys. `requireAllKeys` makes each one required, and the test reads this same list.
 export const OPTIONAL_KEYS = Object.freeze(['screenKeys', 'modelSeam', 'workerStage', 'migrationsDir']);
 
+/** The map format this skill reads and writes. `map.config.json` holds `formatVersion`, and a missing key means version 1. Raise it with one step in `map-upgrade.mjs`. */
+export const MAP_FORMAT_VERSION = 2;
+
+/** The format version of a parsed config. A value that is no whole number, or a version newer than the skill, is an error. It never answers a version the skill cannot read. */
+export const readFormatVersion = (cfg) => {
+  const v = cfg.formatVersion ?? 1;
+  if (!Number.isInteger(v) || v < 1) throw new Error(`map.config.json "formatVersion" must be a whole number, 1 or more, and it is ${JSON.stringify(v)}`);
+  if (v > MAP_FORMAT_VERSION) throw new Error(`map.config.json "formatVersion" is ${v}, and this skill reads up to ${MAP_FORMAT_VERSION}. Update the skill: it never changes a newer map.`);
+  return v;
+};
+
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const kindOf = (abs) => {
   try { return statSync(abs).isDirectory() ? 'folder' : 'file'; } catch { return null; }
@@ -42,7 +53,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   const known = (obj, keys, label) => { for (const k of Object.keys(obj)) if (!keys.includes(k)) bad(`has an unknown key "${label ? `${label}.` : ''}${k}"`); };
   let tracked;
   const trackedFiles = () => (tracked ??= (() => {
-    try { return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').map((l) => l.trim()).filter(Boolean); }
+    try { return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).split('\n').map((l) => l.trim()).filter(Boolean); }
     catch { return bad(`codeExtensions: cannot list tracked files, because ${root} is not a git repository`); }
   })());
   // Every form and path check runs first. A check that needs git waits in this list, and runs last.
@@ -61,7 +72,9 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     for (const k of keys) text(cfg[key], k, `${key}.${k}`);
   };
   if (!isObject(cfg)) bad('is not an object: the top level must be a JSON object');
-  known(cfg, ['title', 'codeExtensions', ...OPTIONAL_KEYS, 'requireAllKeys']);
+  // The version first: a newer map may hold keys this skill does not know, and the refusal must say "update the skill", not "unknown key".
+  if (readFormatVersion(cfg) < MAP_FORMAT_VERSION) bad(`"formatVersion" is ${readFormatVersion(cfg)}, and this skill reads version ${MAP_FORMAT_VERSION}. Run node <skill>/scripts/map-upgrade.mjs from the repository root, then run this command again.`);
+  known(cfg, ['formatVersion', 'title', 'codeExtensions', ...OPTIONAL_KEYS, 'requireAllKeys']);
   text(cfg, 'title', 'title');
   if ('requireAllKeys' in cfg && typeof cfg.requireAllKeys !== 'boolean') bad('"requireAllKeys" must be true or false');
   // With the flag on, a left-out optional key is an error, so a deleted key goes red and never skips in silence.
@@ -106,6 +119,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   }
   for (const run of withGit) run();
   const out = Object.freeze({
+    formatVersion: MAP_FORMAT_VERSION,
     title: cfg.title,
     codeExtensions: Object.freeze([...cfg.codeExtensions]),
     ...(cfg.requireAllKeys && { requireAllKeys: true }),

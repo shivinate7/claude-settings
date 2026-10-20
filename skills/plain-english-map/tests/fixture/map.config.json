@@ -1,4 +1,5 @@
 {
+  "formatVersion": 2,
   "title": "Fixture",
   "codeExtensions": ["ts"],
   "screenKeys": { "file": "src/screens.ts", "name": "SCREEN_KEYS" },

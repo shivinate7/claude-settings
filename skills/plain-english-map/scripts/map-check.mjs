@@ -967,7 +967,7 @@ const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */
 export const gitLsFiles = (root) =>
-  execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);

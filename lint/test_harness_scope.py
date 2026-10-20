@@ -228,10 +228,10 @@ class Scope(unittest.TestCase):
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
         self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
 
-    # Review round 3: the skill's own tests (skills/plain-english-map/tests) run as a step of the
-    # `gates` job, gated on `mods`. The `*.md) ;;` arm gave a .md path under the skill no flag, so a
-    # diff naming only SKILL.md (test 3 reads it) or a fixture .md skipped them. Any path under the
-    # skill, .md included, turns `mods` on, as a new file and as an edit.
+    # Any path under the map skill turns `mods` on, .md files included, as a new file or an edit.
+    # The gates job runs the skill's tests only when `mods` is on. Those tests read SKILL.md and
+    # .md fixtures, so a .md path with no flag would skip them. The skill and its tests live in
+    # this repo (ruling `map-skill-lives-here`: the tests run in the gates workflow).
     MAP_SKILL = "skills/plain-english-map/"
 
     def test_a_map_skill_md_change_turns_on_mods(self):
