@@ -275,10 +275,10 @@
         "reason": "No check reads whether a block-list was tested by running it for real. The guard suite drives the guard as a subprocess, but nothing proves a dry run would be refused."
       }
     },
-    "verification-bump-first-fix-version": {
+    "verification-newest-that-passes": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check compares a dependency bump's target version against the first version that fixed the named problem."
+        "reason": "No check confirms that a dependency bump takes the newest version that passes its checks, or that a pin records why."
       }
     },
     "verification-checked-reader-for-numbers": {
