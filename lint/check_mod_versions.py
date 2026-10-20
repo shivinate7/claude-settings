@@ -18,6 +18,8 @@ import os
 import re
 import subprocess
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLUGIN = ".claude-plugin/plugin.json"
@@ -26,7 +28,7 @@ FAIL = "check_mod_versions: FAIL: "
 
 
 def git(*args):
-    r = subprocess.run(("git",) + args, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
+    r = _nowindow.run(("git",) + args, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("check_mod_versions: UNKNOWN, git %s failed: %s" % (args[0], r.stderr.strip()))
         sys.exit(1)

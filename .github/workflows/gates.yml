@@ -136,6 +136,9 @@ jobs:
       - name: Daily note fixture suite
         run: python3 hooks/test_daily_note.py
 
+      - name: No-window helper fixture suite
+        run: python3 hooks/test_nowindow.py
+
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
@@ -263,6 +266,9 @@ jobs:
 
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
+
+      - name: No-window spawn check
+        run: python3 lint/test_no_window_spawn.py
 
       - name: PowerShell syntax check, install.ps1
         if: ${{ needs.scope.outputs.code == 'true' }}

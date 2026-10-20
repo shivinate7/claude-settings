@@ -1551,6 +1551,8 @@ class RecordsPage(unittest.TestCase):
         for name in self.SHIPPED:
             with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
                 shipped["lint/" + name] = f.read()
+        with open(os.path.join(HERE, "..", "hooks", "_nowindow.py"), encoding="utf-8", newline="") as f:
+            shipped["hooks/_nowindow.py"] = f.read()  # the checker imports it from hooks/
         self.put_lf(r, shipped)
         self.put_lf(r, {"plans/keep.md": self.KEEP})
         self.regenerate(r)

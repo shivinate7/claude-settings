@@ -27,6 +27,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("RULING_KIND_UNDER_TEST") or os.path.join(HERE, "check_ruling_kind.py")
+HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
 
 PLAN = "plans/build-plan.md"
 L1 = PLAN + "#phase-1-the-sweep"
@@ -88,6 +89,8 @@ class RulingKindTests(unittest.TestCase):
         self.addCleanup(rm_tree, self.tree)
         os.makedirs(os.path.join(self.tree, "lint"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_ruling_kind.py"))
+        os.makedirs(os.path.join(self.tree, "hooks"))
+        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
         self.put("CLAUDE.md", CLAUDE_TEXT)
         self.put(PLAN, PLAN_TEXT)
 

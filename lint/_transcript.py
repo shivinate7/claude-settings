@@ -23,6 +23,13 @@ for the first time.
 import json
 import os
 import re
+import subprocess
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 FINDING_MAX = 300
@@ -179,10 +186,9 @@ def last_human_epoch(path):
 
 
 def _git(cwd, *args):
-    import subprocess  # lazy, same reason
     try:
-        run = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
-                             timeout=10)
+        run = _nowindow.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
+                            timeout=10)
     except Exception:
         return None
     return run.stdout if run.returncode == 0 else None

@@ -7,6 +7,10 @@ import itertools
 import os
 import re
 import subprocess
+try:
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    _nowindow = subprocess
 import sys
 
 from guard_core import (
@@ -97,7 +101,7 @@ def _ps_ppid(pid: int):
     No such process is exit 1 with no output at all. Any other failure is unknown, not death.
     """
     try:
-        answer = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+        answer = _nowindow.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
                                 text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -124,7 +128,7 @@ def session_root_pid():
         if not parent or parent <= 1:
             return 0
         try:
-            name = subprocess.run(["ps", "-o", "comm=", "-p", str(parent)], capture_output=True,
+            name = _nowindow.run(["ps", "-o", "comm=", "-p", str(parent)], capture_output=True,
                                   text=True, timeout=5).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return 0
@@ -159,7 +163,7 @@ def _pid_cwd(pid: int):
     try:
         if sys.platform.startswith("linux"):
             return os.readlink("/proc/%d/cwd" % pid)
-        answer = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+        answer = _nowindow.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
                                 capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None

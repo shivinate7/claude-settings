@@ -6,6 +6,8 @@
 # Exit 0 is FAIL if the output holds a runner marker.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
 CAP = 30
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
@@ -27,7 +29,7 @@ def main(argv):
         try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)
         except ValueError: beat = 120
         if beat < 1: beat = 120
-        try: proc = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
+        try: proc = _nowindow.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
             say = True

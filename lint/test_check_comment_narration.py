@@ -26,6 +26,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.path.join(HERE, "check_comment_narration.py")
+HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
 GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
 
 # Text that one of the six patterns must flag, in a comment or in a docstring line.
@@ -67,6 +68,8 @@ class Case(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tree, True)
         os.makedirs(os.path.join(self.tree, "lint"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_comment_narration.py"))
+        os.makedirs(os.path.join(self.tree, "hooks"))
+        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
 

@@ -12,6 +12,10 @@ import os
 import re
 import shlex
 import subprocess
+try:
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    _nowindow = subprocess
 import sys
 import time
 from datetime import datetime
@@ -1150,7 +1154,7 @@ def command_root(cmd: str, shell_cwd: str) -> str:
 
 def _git(where: str, *args):
     try:
-        return subprocess.run(
+        return _nowindow.run(
             ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
         )
     except Exception:
@@ -1540,7 +1544,7 @@ def _process_start_ms(pid: int):
     if sys.platform.startswith("win"):
         return _process_start_ms_windows(pid)
     try:
-        answer = subprocess.run(
+        answer = _nowindow.run(
             ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
         )
     except Exception:

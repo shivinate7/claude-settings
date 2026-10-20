@@ -6,13 +6,15 @@
 # input default, so an EXCLUDE in the caller's environment is ignored.
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, shutil, subprocess, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 ACTION = os.path.join(ROOT, "actions", "ste-lint")
 
 
 def out(*a):
-    return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+    return _nowindow.run(["git", *a], capture_output=True, text=True).stdout.strip()
 
 
 def default(text, name):
@@ -41,6 +43,7 @@ def main(argv):
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
                DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
+    # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
     sys.exit(subprocess.run([find_bash(), run], env=env).returncode)
 
 

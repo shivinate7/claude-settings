@@ -26,6 +26,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("MOD_VERSIONS_UNDER_TEST") or os.path.join(HERE, "check_mod_versions.py")
+HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
 PLUGIN = ".claude-plugin/plugin.json"
 MARKET = ".claude-plugin/marketplace.json"
 PREFIX = "check_mod_versions: FAIL:"
@@ -70,6 +71,8 @@ class ModVersionTests(unittest.TestCase):
         self.addCleanup(rm_tree, self.tree)
         os.makedirs(os.path.join(self.tree, "lint"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_mod_versions.py"))
+        os.makedirs(os.path.join(self.tree, "hooks"))
+        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
 
     def put(self, rel, text="# file\n"):
         path = os.path.join(self.tree, *rel.split("/"))

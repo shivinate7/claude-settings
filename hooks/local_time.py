@@ -44,6 +44,10 @@ from datetime import datetime, timedelta, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture
@@ -163,7 +167,7 @@ def capture(raw, stamp, at=None):
                 f.write(at.isoformat().encode("ascii"))
         if judge:
             try:  # the same detached-child pattern as janitor/agent_end_reap.py; the hook does not wait
-                child = subprocess.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
+                child = _nowindow.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
                                   hook["session_id"], at.isoformat(), prompt[:MESSAGE_MAX]], stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 if os.environ.get("FEEDBACK_JUDGE_INLINE"):

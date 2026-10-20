@@ -78,6 +78,8 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import read_transcript, tool_uses  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 GIT_TIMEOUT_SECONDS = 10
 REACH_WORD_MIN = 8
@@ -303,7 +305,7 @@ def reach_test(cwd, text, timeouts):
     if not collapsed:
         return "unknown"
     try:
-        run = subprocess.run(
+        run = _nowindow.run(
             ["git", "-C", cwd, "log", "--all", "-S", collapsed, "-1", "--format=%h"],
             capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
         )
@@ -465,7 +467,7 @@ def get_remote(cwd, cache):
         return cache[cwd]
     remote = None
     try:
-        run = subprocess.run(
+        run = _nowindow.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
             capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
         )
@@ -490,7 +492,7 @@ def cwd_present(cwd, cache):
     present = False
     if os.path.isdir(cwd):
         try:
-            run = subprocess.run(
+            run = _nowindow.run(
                 ["git", "-C", cwd, "rev-parse", "--git-dir"],
                 capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
             )
