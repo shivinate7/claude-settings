@@ -43,6 +43,7 @@ REQUIRED = [
     "python hooks/test_ruling_home.py",
     "python lint/test_ruling_census.py",
     "python lint/test_verdict.py",
+    "python lint/test_hook_platform_exit.py",
     "python lint/check_unknown_reads_contract.py",
     "python janitor/test_session_end_sweep.py",
     "python janitor/test_install_launchd.py",
