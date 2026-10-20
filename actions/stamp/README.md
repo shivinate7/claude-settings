@@ -339,7 +339,10 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
    after the local base branch moves. `merge.deleteBranch` is a boolean. When it is true, the
    command deletes the head branch on origin after the merge. It deletes the local branch too,
-   unless a worktree holds it or it has local-only commits.
+   unless a worktree holds it or it has local-only commits. The same run also deletes the lane
+   branches the batch took in: `merge-deletes-batch-lanes`, a merge deletes its batch's lane branches.
+6. `merge.keepBranches` is an optional list of branch names. The lane cleanup never deletes a name
+   in the list. Name each long-lived branch that must survive a merge.
 
 ## Adoption checklist, the merge tool
 

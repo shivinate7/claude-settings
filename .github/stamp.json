@@ -6,6 +6,7 @@
     "requiredChecks": ["scope", "gates", "gates-windows", "gates-windows-guard", "gates-mutate-guard", "gates-windows-merge", "gates-windows-rest", "gates-macos", "shell-macos", "pointer-windows"],
     "deadlineMinutes": 30,
     "afterMerge": ["bash merge/install_from_main.sh"],
-    "deleteBranch": true
+    "deleteBranch": true,
+    "keepBranches": ["batch-map", "map-format-version", "map-skill-move", "claude-p-fetch-key"]
   }
 }

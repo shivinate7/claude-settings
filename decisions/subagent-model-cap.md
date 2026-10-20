@@ -40,6 +40,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `design-review` | no model pin; runs on the caller's model | none |
 | skill `fresh-prose` | no model pin; runs on the caller's model | none |
 | skill `impeccable` | no model pin; runs on the caller's model | none |
+| skill `plain-english-map` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |

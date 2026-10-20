@@ -72,6 +72,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("fresh-prose"),
     os.path.normcase("design-review"),
     os.path.normcase("impeccable"),
+    os.path.normcase("plain-english-map"),
 )
 # THE LIVE PINNED CHECKOUT IS FROZEN (decision merge-reinstalls-from-main, ruling 1: no work runs in
 # the pinned checkout). The links in the config directory load
