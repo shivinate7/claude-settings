@@ -71,7 +71,10 @@ REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
 import guard_core  # noqa: E402  (the preview cache patches the guard reads where they live)
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)

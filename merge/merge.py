@@ -962,7 +962,8 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root)  # nowindow: the afterMerge command prints on the caller's terminal; with no window that output goes to a hidden console.returncode
+        # nowindow: the afterMerge command prints on the caller's terminal; with no window that output goes to a hidden console
+        c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c
     return ok

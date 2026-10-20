@@ -1,7 +1,7 @@
 """One home for starting a child process with no console window.
 
-Incident: owner report, 2026-10-19, that console windows keep popping into the foreground on
-Windows when a hook, mod or tool starts a helper program. Every product file that starts a child
+Why: console windows kept popping into the foreground on
+Windows when a hook, mod or tool started a helper program. Every product file that starts a child
 process calls the wrappers here, never `subprocess` directly. lint/test_no_window_spawn.py scans for
 a raw call. hooks/test_nowindow.py pins this contract.
 
