@@ -62,8 +62,8 @@ a window or a screen capture lands on my screen, say so in one line.<!-- rule:ve
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
-on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
-fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
+on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Take the newest version that passes its checks. Read its changelog
+first. If it breaks a check, pin the newest one that passes and say why.<!-- rule:verification-newest-that-passes --> If this repo lints markdown, give every
 published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
 rely on it, a document's own claims too. Report a read that could not run as unknown,
 never as clear or broken.<!-- rule:verification-report-unknown-reads -->

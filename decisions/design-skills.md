@@ -12,7 +12,7 @@ Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each
 - Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month and waits 14 days after a release
   (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
   commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`.
-- Exception to `verification-bump-first-fix-version`: these three sources bump to the newest release that has waited 14 days. The owner
+- Narrowing of `verification-newest-that-passes`: these three sources take the newest release only after it has waited 14 days. The owner
   wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
   impeccable plugin: it installs hooks that run `impeccable hook` on SessionStart, PostToolUse and Stop in every session, and an agent with
