@@ -87,11 +87,11 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
 
-Repo rules (owner request 2026-10-19, lane ci-wake-false-alarms):
+Repo rules, each pinned by a case below:
 - Every gh call of a watch passes the PR's repo as -R, the same one each time. A watch that reads runs
-  from the folder's repo says "no run yet" for a PR that passed (incident 2026-10-19).
+  from the folder's repo finds none, and says "no run yet" for a PR whose CI passed.
 - A repo with no active workflow starts no watch: no output, exit 0, no run read. The hook asks
-  `gh workflow list -R <repo>` for that (incidents f36bec0 and 20df322).
+  `gh workflow list -R <repo>` for that.
 - A repo with an active workflow and no run on the head still wakes "CI unknown on <sha7>: no run
   yet" at the deadline. That is the real alert.
 - A failed `gh workflow list` read is not "no workflows": the watch runs as it does today.
@@ -1104,13 +1104,12 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
 
-# Owner request 2026-10-19 (lane ci-wake-false-alarms). Incidents: `gh pr ready 214 --repo
-# shivinate7/home-app` run from the shivinate7/home folder (the run reads went to the folder's repo, and
-# the hook said "no run yet" for a PR whose CI passed); `gh pr ready` in shivinate7/home, which has no
-# workflow files, waited the full deadline and said "no run yet" (f36bec0, 20df322). Every case runs the
-# real hook, with CI_WAKE_DEADLINE 4 where the case waits to a deadline, so a wrong answer ends in
-# seconds, not in the 3300 s default. A verdict case gets 15 s: once the deadline has passed, watch_run
-# makes no status read (by design), so a tight deadline under a slow stub start drops the status-read check.
+# The watch names the PR's repo on every gh call and gives that repo's verdict. The rows put the PR in
+# one repo and the session folder in another. A run read that drops -R searches the folder's repo, finds
+# no run, and the hook says "no run yet" for a PR whose CI passed.
+# Every case runs the real hook. The cases that wait to a deadline use CI_WAKE_DEADLINE 4, so a wrong
+# answer ends in seconds. A verdict case uses 15 s: once the deadline has passed, watch_run makes no status
+# read (by design), so a tight deadline under a slow stub start would drop the status-read check.
 VERDICT_DEADLINE = "15"
 REPO_APP = "shivinate7/home-app"   # the PR's repo
 REPO_HOME = "shivinate7/home"      # the folder's repo: records only, no workflow files
@@ -1175,8 +1174,8 @@ def case_repo_without_ci_starts_no_watch():
 
 
 def case_workflows_but_no_run_on_head_still_says_no_run_yet():
-    """Control, passes on f9f4e320. A repo with an active workflow and no run on the head is the real
-    alert: the hook waits to its deadline and wakes "CI unknown on <sha7>: no run yet"."""
+    """Pins existing behaviour (a control). A repo with an active workflow and no run on the head is the
+    real alert: the hook waits to its deadline and wakes "CI unknown on <sha7>: no run yet"."""
     fx = fixture([pr(214, repo=REPO_APP)], [], cwd_repo=REPO_APP, workflows=[wf(repo=REPO_APP)])
     res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": "4"})
     label = "workflows, no run on the head (control)"
@@ -1188,8 +1187,8 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 
 
 def case_failed_workflow_read_is_not_no_workflows():
-    """Control, passes on f9f4e320. A failed `gh workflow list` read is not "no workflows": the watch runs
-    as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
+    """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
+    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
@@ -1385,7 +1384,7 @@ def main():
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
 
-    # Owner request 2026-10-19: the repo flag, the no-CI repo, the real alert, a failed workflow read.
+    # The repo flag, the no-CI repo, the real alert, and a failed workflow read.
     case_wrong_repo_every_gh_call_names_the_pr_repo()
     case_repo_without_ci_starts_no_watch()
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
