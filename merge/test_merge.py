@@ -1627,9 +1627,9 @@ class BaseAware(Env):
             if "fetch" in a:
                 self.fetches.append((len(self.host.waits), a))
             return real_git(cwd, *a, **k)
-        def undo(wt, base_ref, unknown_ok=""):
+        def undo(wt, base_ref, unknown_ok="", pr_body=""):
             self.undo_bases.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok)
+            return real_undo(wt, base_ref, unknown_ok, pr_body)
         for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
             p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
 
@@ -3180,9 +3180,9 @@ class GhHalf(Env):
         self.set(draft=True)
         before = self.refs()
         real, seen = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body=""):
             seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
-            return real(wt, base_ref, unknown_ok)
+            return real(wt, base_ref, unknown_ok, pr_body)
         with unittest.mock.patch.object(merge, "undo_check", spy):
             rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
@@ -3460,11 +3460,11 @@ class SilentUndo(Env):
     def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
         calls = []
         real = merge.undo_check
-        def second_is_red(wt, base, unknown_ok=""):
+        def second_is_red(wt, base, unknown_ok="", pr_body=""):
             calls.append(base)
             if len(calls) == 2:
                 raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
-            return real(wt, base, unknown_ok)
+            return real(wt, base, unknown_ok, pr_body)
         with unittest.mock.patch.object(merge, "undo_check", second_is_red):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(len(calls), 2)
@@ -3537,9 +3537,9 @@ class DraftPreview(Env):
 
     def test_a_closed_or_merged_pr_is_refused_at_preview_and_the_check_never_runs(self):  # control
         real, calls = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body=""):
             calls.append(base_ref)
-            return real(wt, base_ref, unknown_ok)
+            return real(wt, base_ref, unknown_ok, pr_body)
         before = self.refs()
         with unittest.mock.patch.object(merge, "undo_check", spy):
             for state in ("CLOSED", "MERGED"):
@@ -3673,9 +3673,9 @@ class UndoMemo(Env):
             scans.append(a[1])
             return real_check(*a, **k)
 
-        def spy_undo(wt, base_ref, unknown_ok=""):
+        def spy_undo(wt, base_ref, unknown_ok="", pr_body=""):
             undos.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok)
+            return real_undo(wt, base_ref, unknown_ok, pr_body)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
         return res, len(scans), len(undos)
