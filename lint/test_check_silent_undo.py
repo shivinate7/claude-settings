@@ -190,6 +190,47 @@ class Red(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
+class PrBodyEscape(unittest.TestCase):
+    """A `Drops-lines: <path> -- <reason>` line in the PR body excuses its path, as a commit trailer does.
+    A line with no reason, or one for another path, excuses nothing. Each use prints ALLOWED."""
+
+    def setUp(self):
+        r = self.r = base_repo()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("tidy other", other_txt="other v2\n")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+
+    def test_a_pr_body_line_excuses_its_path(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD",
+                             pr_body="Drops-lines: other.txt -- not this file\nDrops-lines: app.txt -- the owner wants Card back\n")
+        self.assertEqual(got, [])
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_pr_body_line_without_a_reason_excuses_nothing(self):
+        for body in ("Drops-lines: app.txt\n", "Drops-lines: app.txt --\n", "Drops-lines: app.txt -- \n"):
+            with self.subTest(body=body):
+                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+                self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_pr_body_line_for_another_path_does_not_excuse(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body="Drops-lines: other.txt -- wrong file\n")
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+        self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_commit_trailer_still_excuses_with_no_pr_body(self):  # control
+        r = self.r
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt -- the owner wants Card back")
+        got, notes = C.check(r.dir, "origin/main", "HEAD")
+        self.assertEqual(got, [])
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 
