@@ -74,6 +74,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
+    "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
@@ -5760,6 +5761,120 @@ for _name, _command in (
     ("a lone apostrophe in a trailing comment", "rm -rf build # don't"),
 ):
     sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
+
+
+# =========================================================================== 3b. linked node_modules
+# Owner ruling 2026-10-19 21:31 CDT, "Hold for the guard first". q_max links a worktree's node_modules
+# to main's install with a Windows junction: 24 of 219 worktrees hold one. Through that link a
+# hand-run `npm ci` empties main's node_modules (measured on npm 12.0.2). The guard refuses a
+# dependency install, and a recursive delete inside node_modules, when the working folder holds
+# node_modules as a link. A real folder, or no folder, is judged as it always was.
+FAMILY = "linked-node-modules"
+NM_RULE = "linked-node-modules"
+# The remedy names the link and the real folder to make, and never names the refused act.
+NM_REMEDY = ("link", ("real folder", "real directory"), "setup")
+NM_LACKS = ("npm ci", "rm -rf")
+NMTARGET = os.path.join(ROOT, "nmtarget")    # stands in for main's install, outside every working folder
+NMLINKED = os.path.join(ROOT, "nmlinked")    # a working folder whose node_modules is a link
+NMREAL = os.path.join(ROOT, "nmreal")        # a working folder whose node_modules is a real folder
+NMABSENT = os.path.join(ROOT, "nmabsent")    # a working folder with no node_modules
+NM_PKG = ('{"name": "app", "scripts": {"setup": "node setup.js", "build": "node build.js",'
+          ' "test": "node test.js"}}\n')
+
+
+def _is_link(path):
+    """True for a symlink, or a junction (os.path.isjunction exists from Python 3.12)."""
+    return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+
+
+def _make_dir_link(target, link):
+    """A junction on Windows, which needs no symlink privilege, else a directory symlink."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(target, link)   # the source comes first: `link` points at `target`
+    else:
+        os.symlink(target, link, target_is_directory=True)
+    if not _is_link(link):
+        sys.exit("fixture setup failed: %r is not a link to %r" % (link, target))
+
+
+def _build_linked_nm():
+    """The four working folders of this section. One is a link to the target, one holds a real folder."""
+    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT):
+        write(os.path.join(folder, "package.json"), NM_PKG)
+    write(os.path.join(NMTARGET, "pkg.js"), "module.exports = {};\n")
+    _make_dir_link(NMTARGET, os.path.join(NMLINKED, "node_modules"))
+    write(os.path.join(NMREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
+
+
+lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT], _build_linked_nm)
+
+
+def nm_case(name, command, expected, cwd, tool="Bash"):
+    """One case of this section. Each is tagged for the Windows slice, because a junction is Windows-only."""
+    if expected == "deny":
+        add(name, expected, rule=NM_RULE, tool=tool, cwd=cwd, windows=True, command=command,
+            carries=NM_REMEDY, lacks=NM_LACKS)
+    else:
+        add(name, expected, tool=tool, cwd=cwd, windows=True, command=command)
+
+
+# THE INSTALLS. Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
+NM_INSTALLS = (
+    ("npm ci", "Bash"), ("npm ci", "PowerShell"),
+    ("npm install", "Bash"), ("npm install left-pad", "Bash"),
+    ("npm i", "Bash"), ("npm i left-pad", "Bash"),
+    ("npm add", "Bash"), ("npm add left-pad", "Bash"),
+    ("npm uninstall", "Bash"), ("npm uninstall left-pad", "Bash"),
+    ("npm update", "Bash"), ("npm update left-pad", "Bash"),
+)
+# THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
+# file inside it, so it is not pinned here (see the Input Needed note in the commit report).
+NM_DELETES = (
+    ("rm -rf node_modules/", "Bash"), ("rm -rf node_modules/*", "Bash"),
+    ("rm -rf ./node_modules/x", "Bash"), ("Remove-Item -Recurse node_modules\\*", "PowerShell"),
+)
+
+for _command, _tool in NM_INSTALLS + NM_DELETES:
+    nm_case("linked-nm: refuse " + _command + " (" + _tool + ") in a linked folder",
+            _command, "deny", NMLINKED, _tool)
+    nm_case("linked-nm: " + _command + " (" + _tool + ") in a real folder is allowed",
+            _command, "allow", NMREAL, _tool)
+    nm_case("linked-nm: " + _command + " (" + _tool + ") in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT, _tool)
+
+# THE CD FORMS. The working folder is the one the cd names, not the payload cwd.
+nm_case("linked-nm: cd into the linked folder, then npm ci, is refused",
+        "cd " + slash(NMLINKED) + " && npm ci", "deny", NMABSENT)
+nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the payload cwd is linked",
+        "cd " + slash(NMREAL) + " && npm ci", "allow", NMLINKED)
+nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
+        "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
+
+# THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
+for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
+                        ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
+    nm_case("linked-nm: " + _command + " (" + _tool + ") in a linked folder is allowed",
+            _command, "allow", NMLINKED, _tool)
+nm_case("linked-nm: cd into the linked folder, then npm run setup, is allowed",
+        "cd " + slash(NMLINKED) + " && npm run setup", "allow", NMABSENT)
+
+# SCANNER CASES. The guard reads the command as shell text. A comment opener, or a lone quote, inside a
+# string must not hide a real `npm ci` after it, and a `npm ci` inside a string, heredoc or comment is data.
+nm_case("linked-nm: scanner: a # inside quotes does not hide npm ci after it",
+        'echo "# ready"; npm ci', "deny", NMLINKED)
+nm_case("linked-nm: scanner: a /* inside quotes does not hide npm ci after it",
+        'echo "/* open"; npm ci', "deny", NMLINKED)
+nm_case("linked-nm: scanner: a lone apostrophe inside quotes does not hide npm ci after it",
+        "echo \"Don't\"; npm ci", "deny", NMLINKED)
+nm_case("linked-nm: scanner: npm ci in a single-quoted echo is data, allowed",
+        "echo 'run npm ci later'", "allow", NMLINKED)
+nm_case("linked-nm: scanner: npm ci in a heredoc body with a lone apostrophe is data, allowed",
+        "cat <<'EOF'\nDon't run npm ci here\nEOF", "allow", NMLINKED)
+nm_case("linked-nm: scanner: npm ci in a multi-line quoted string is data, allowed",
+        'echo "first line\nnpm ci later"', "allow", NMLINKED)
+nm_case("linked-nm: scanner: npm ci in a comment line is not run, allowed",
+        "# install with npm ci later\necho ready", "allow", NMLINKED)
 
 
 # =========================================================================== 4. environment files
