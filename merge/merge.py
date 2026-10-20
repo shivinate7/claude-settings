@@ -998,11 +998,13 @@ def lane_tips(wt, base_ref, sha):
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
     One line per lane, never a silent drop. A lane tip that no head sits at has moved or is gone. Kept, with a line why:
-    a name in `keep`; the base of an open PR whose head is no lane of this batch at its tip (a partial stack); one with an
-    open PR at another sha than its tip, or at its tip with a base that is neither `base`, the batch's base, nor a lane of
-    this batch (a backport); none when the open-PR read fails; one whose
-    tip is in `commit` neither by id nor by patch, or whose proof could not run. A name in `skip` is no lane.
-    The delete is leased to the tip. Each lane has its own try. Never fails the merge."""
+    a name in `keep`; one whose open PR is at another sha than its tip, or at its tip with a base that is neither `base`,
+    the batch's base, nor a lane of this batch (a backport); none when the open-PR read fails; one whose tip is in
+    `commit` neither by id nor by patch, or whose proof could not run; the base of an open PR whose head is no lane of
+    this batch at its tip (a partial stack), and the base of a lane that is itself kept, to a fixpoint. A PR is done when
+    its head sits at a lane tip of this batch; a base is a lane of this batch whether kept or not. A name in `skip` is
+    no lane. Dependents are deleted before their base, each delete leased to the tip. A base whose dependent was not
+    deleted is kept, with a line. Each lane has its own try. Never fails the merge."""
     try:
         import guard_core  # hooks/guard_core.py: the one home of the cherry test
         c, out = git(root, "ls-remote", "--heads", "origin")
@@ -1015,13 +1017,10 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
             if tip not in heads.values():
                 say(f"merge: lane {tip[:9]}: no head on origin sits at this tip: it moved or is gone.")
         heads = {b: t for b, t in heads.items() if b not in skip}
-        todo = []
-        for b in heads:
-            if b in keep:
-                say(f"merge: lane origin/{b}: kept: it is in merge.keepBranches.")
-            else:
-                todo.append(b)
-        if not todo:
+        kept = {b: "kept: it is in merge.keepBranches." for b in heads if b in keep}  # b -> the line's words
+        for b in kept:
+            say(f"merge: lane origin/{b}: {kept[b]}")
+        if len(kept) == len(heads):
             return
         try:
             # {head name: (head sha, PR base)}; a head with two PRs has a None base, and one name:index row per PR
@@ -1029,32 +1028,71 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
             opened = True
         except Exception:  # unreadable or malformed: delete nothing
             opened = None
-        for b in todo:
-            try:
-                tip = heads[b]
+        proofs = {}
+        def proof(b):  # why the tip is not in the merge commit, or None; one run per lane
+            if b not in proofs:
+                a = git(root, "merge-base", "--is-ancestor", heads[b], commit)[0]
                 why = None
-                if opened is None:
-                    why = "the open PRs could not be read."
-                elif outside := sorted({n for n, sha, pb in prs if pb == b and not (n in todo and heads[n] == sha)}):
-                    why = "it is the base of an open PR: " + ", ".join(outside) + "."  # a PR from a lane at its tip is done
-                elif any(n == b and sha != tip for n, sha, _ in prs):
-                    why = "it has an open PR."
-                elif other := sorted({pb for n, _, pb in prs if n == b and pb != base and pb not in todo}):
-                    why = "its open PR at the tip has another base: " + ", ".join(other) + "."  # the base or a batch lane: its own PR, done
-                else:
-                    a = git(root, "merge-base", "--is-ancestor", tip, commit)[0]
-                    if a == 1:
-                        proven = guard_core.branch_cherry_empty(root, commit, tip)
-                        why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
-                    elif a:
-                        why = "the proof could not run."
-                if why:
-                    say(f"merge: lane origin/{b}: kept: {why}")
+                if a == 1:
+                    proven = guard_core.branch_cherry_empty(root, commit, heads[b])
+                    why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
+                elif a:
+                    why = "the proof could not run."
+                proofs[b] = why
+            return proofs[b]
+        def reason(b):
+            tip = heads[b]
+            if opened is None:
+                return "the open PRs could not be read."
+            # an open PR is done when its head sits at a lane tip of this batch; a kept head still needs its base
+            if needs := sorted({n for n, sha, pb in prs if pb == b and (heads.get(n) != sha or n in kept)}):
+                return "it is the base of an open PR: " + ", ".join(needs) + "."
+            if any(n == b and sha != tip for n, sha, _ in prs):
+                return "it has an open PR."
+            if other := sorted({pb for n, _, pb in prs if n == b and pb != base and pb not in heads}):
+                return "its open PR at the tip has another base: " + ", ".join(other) + "."  # the base or a batch lane: its own PR, done
+            return proof(b)
+        changed = True
+        while changed:  # a kept lane keeps its base, which may keep its own: until no lane changes
+            changed = False
+            for b in heads:
+                if b in kept:
                     continue
-                c, out = git(root, "push", "-q", "origin", f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}")
-                say(f"merge: lane origin/{b}: " + (f"deleted at {tip[:9]}." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
-            except Exception as e:  # one lane's failure never stops the next lane
-                say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
+                try:
+                    why = reason(b)
+                    line = why and "kept: " + why
+                except Exception as e:  # one lane's failure never stops the next lane
+                    line = f"not deleted: {type(e).__name__}: {e}"
+                if line:
+                    kept[b] = line
+                    changed = True
+        for b in heads:
+            if b in kept and b not in keep:
+                say(f"merge: lane origin/{b}: {kept[b]}")
+        rest = [b for b in heads if b not in kept]
+        order = []
+        while rest:  # dependents first: a lane waits while a lane left in `rest` has an open PR based on it
+            ready = [b for b in rest if not any(pb == b and n in rest for n, _, pb in prs)] or rest
+            order += ready
+            rest = [b for b in rest if b not in ready]
+        blocked = {}  # base -> the lane whose delete did not happen
+        for b in order:
+            tip = heads[b]
+            if b in blocked:
+                say(f"merge: lane origin/{b}: kept: {blocked[b]} was not deleted, and its open PR is based on this lane.")
+                undone = True
+            else:
+                try:
+                    c, out = git(root, "push", "-q", "origin", f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}")
+                    say(f"merge: lane origin/{b}: " + (f"deleted at {tip[:9]}." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+                    undone = bool(c)
+                except Exception as e:  # one lane's failure never stops the next lane
+                    say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
+                    undone = True
+            if undone:
+                for n, _, pb in prs:
+                    if n == b:
+                        blocked.setdefault(pb, b)
     except Exception as e:  # a lane cleanup never fails a merge that landed
         say(f"merge: the lane cleanup stopped: {type(e).__name__}: {e}")
 
