@@ -227,7 +227,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
+            FROZEN_REASON, PROJECT_FROZEN_FILES, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
             project_config_shell_hit,
         )
         _loading = "guard_env"

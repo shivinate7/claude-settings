@@ -1741,10 +1741,13 @@ def worktree_prune_subject(args, where: str):
     return not (answer.stdout.strip() or answer.stderr.strip())
 
 
-def config_dir() -> str:
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
-        os.path.expanduser("~"), ".claude"
-    )
+try:
+    from shared_names import config_dir  # the one home, shared with the config watch (hooks/shared_names.py)
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    def config_dir() -> str:
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+            os.path.expanduser("~"), ".claude"
+        )
 
 
 def _expanded(path: str, cwd: str) -> str:

@@ -79,6 +79,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only, a flat hooks/ file
+
 # The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
 # stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
 # the same contract `hooks/test_guard.py` holds, so a mutation test needs no second copy of this
@@ -88,7 +90,7 @@ guard = None
 
 def _load_guard() -> None:
     """Import the guard once and bind it, with the names derived from it."""
-    global guard, WATCHED_NAMES
+    global guard
     if guard is not None:
         return
     path = os.environ.get("GUARD_UNDER_TEST")
@@ -100,7 +102,6 @@ def _load_guard() -> None:
     else:
         import guard as loaded
     guard = loaded
-    WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)
 
 
 # ------------------------------------------------------------------ the watched set
@@ -110,9 +111,8 @@ def _load_guard() -> None:
 # is a symlink onto the clone of claude-settings, which is deliberately unfrozen so that the
 # repository can edit its own source. A hash watch that followed that symlink would revert the
 # repository's own work.
-# The fast exit reads these before the guard loads, so it holds its own copy of the pair.
-# `_load_guard` replaces it with the guard's own constant for the full sweep.
-WATCHED_NAMES = (".claude/settings.json", ".claude/settings.local.json")
+# `shared_names` is stdlib only, so the fast exit reads the names before the guard loads.
+WATCHED_NAMES = tuple(name.lstrip("/") for name in PROJECT_FROZEN_FILES)
 
 STORE_DIR_NAME = "state"
 STORE_SUB = "config-watch"
@@ -172,12 +172,6 @@ def safe(text: str, limit: int) -> str:
 #
 # The store is NOT put beside the watched file, under the project's own `.claude`, because that is
 # the folder the bypass already writes to.
-
-
-def config_dir() -> str:
-    # Same answer as `guard.config_dir`, held here so the fast exit needs no guard import.
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
-        os.path.expanduser("~"), ".claude")
 
 
 def store_dir() -> str:

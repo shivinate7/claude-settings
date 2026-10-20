@@ -86,7 +86,10 @@ CONFIG_FROZEN_SKILLS = (
 LIVE_PIN_SUFFIX = "-live"
 _LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
 _CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
-PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
+try:
+    from shared_names import PROJECT_FROZEN_FILES  # the one home, shared with the config watch (hooks/shared_names.py)
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still freezes
+    PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 
 FROZEN_REASON = (
