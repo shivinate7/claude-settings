@@ -20,6 +20,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
+HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
 
 OK = "a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
@@ -50,6 +51,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.addCleanup(rm_tree, self.tree)
         os.makedirs(os.path.join(self.tree, "lint"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
+        os.makedirs(os.path.join(self.tree, "hooks"))
+        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
 
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))
