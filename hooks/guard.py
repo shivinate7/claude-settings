@@ -216,8 +216,8 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
-            push_target, push_text, push_verdict, rm_delete_hit,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
+            cmd_exe_delete_hit, linked_nm_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -1968,6 +1968,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = ln_descends_hit(segment, run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
+        matched = linked_nm_hit(segment, run_in)
+        if matched:
+            refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:
