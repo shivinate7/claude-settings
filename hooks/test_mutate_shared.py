@@ -18,6 +18,7 @@ import contextlib
 import io
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -93,14 +94,15 @@ class GuardTreeTests(unittest.TestCase):
             "guard_x.py": "beta-anchor\n",
             "test_guard.py": "beta-anchor\n",
             "mutate_guard.py": "beta-anchor\n",
+            "shared_names.py": "NAMES\n",
         })
         patcher = mock.patch.object(mutate_shared, "HOOKS_DIR", self.src, create=True)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_guard_tree_copies_every_guard_module_and_nothing_else(self):
+    def test_guard_tree_copies_every_guard_module_and_shared_names_and_nothing_else(self):
         mutate_shared.guard_tree(self.dest)
-        self.assertEqual(sorted(os.listdir(self.dest)), ["guard.py", "guard_x.py"])
+        self.assertEqual(sorted(os.listdir(self.dest)), ["guard.py", "guard_x.py", "shared_names.py"])
         self.assertEqual(read_file(self.dest, "guard_x.py"), "beta-anchor\n")
 
     def test_one_match_in_a_sibling_mutates_the_sibling(self):
@@ -132,6 +134,22 @@ class GuardTreeTests(unittest.TestCase):
         with self.assertRaises(mutate_shared.AmbiguousMutant):
             mutate_shared.apply_mutant(self.dest, "dup", "X")
         self.assertEqual(read_file(self.dest, "guard.py"), "dup dup\n")
+
+
+class GuardTreeImportsTests(unittest.TestCase):
+    """The copy a harness runs must import: config_watch.py and guard_core.py need shared_names,
+    and a copy without it dies on the import, a kill with no bearing on the mutation."""
+
+    def test_copied_guard_and_watch_import_from_the_tree_alone(self):
+        dest = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, dest, True)
+        mutate_shared.guard_tree(dest)
+        shutil.copy(os.path.join(HOOKS, "config_watch.py"), dest)
+        for module in ("guard", "config_watch"):
+            result = subprocess.run(
+                [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import " + module, dest],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, module + ": " + result.stderr[-300:])
 
 
 class BuildScaffoldSiblingTests(unittest.TestCase):
