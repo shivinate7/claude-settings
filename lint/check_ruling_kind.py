@@ -25,7 +25,10 @@ import re
 import subprocess
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # actions/ruling-kind runs this file in a tree without hooks/
+    _nowindow = subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = "decisions/"  # the records folder; --dir replaces it
