@@ -163,7 +163,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`decisions/silent-undo-check-design.md`](../decisions/silent-undo-check-design.md) |
 | `sim-boot-is-verified` | The record hook of `sweep-shuts-down-idle-simulators` (ruling 1) checks each device that a `simctl boot` or an MCP `launch` took from `Shutdown` to `Booted`. | [`decisions/sim-boot-is-verified.md`](../decisions/sim-boot-is-verified.md) |
 | `source-prose-lint-ships-dark` | The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and `check_source`). | [`decisions/source-prose-lint-ships-dark.md`](../decisions/source-prose-lint-ships-dark.md) |
-| `spawns-use-no-window` | Owner, 2026-10-19 16:20 CDT: helper programs that hooks, mods and tools start use the "no window" option. | [`decisions/spawns-use-no-window.md`](../decisions/spawns-use-no-window.md) |
 | `stale-safe-force-push` | The owner gets no prompt for a safe push, and no push overwrites newer remote work with a stale copy. | [`decisions/stale-safe-force-push.md`](../decisions/stale-safe-force-push.md) |
 | `stall-watch` | The session learns within minutes that a background command stalled, and diagnoses the cause. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
 | `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
@@ -207,8 +206,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
-| `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`debts/ci-wake-export-gh-repo-unread.md`](../debts/ci-wake-export-gh-repo-unread.md) |
-| `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`debts/ci-wake-gh-host-bare-repo.md`](../debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
@@ -218,11 +215,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
 | `merge-revert-cancels-running-ci` | `wait_checks` returns on the first red check while other jobs still run. | [`debts/merge-revert-cancels-running-ci.md`](../debts/merge-revert-cancels-running-ci.md) |
-| `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`debts/nowindow-bin-no-fallback.md`](../debts/nowindow-bin-no-fallback.md) |
-| `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`debts/nowindow-ctrl-c-orphans.md`](../debts/nowindow-ctrl-c-orphans.md) |
-| `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`debts/nowindow-fallback-silent.md`](../debts/nowindow-fallback-silent.md) |
-| `nowindow-git-prompt-hangs` | A git credential prompt on the terminal, from merge/merge.py sh(), has no console to show in, so it would wait with no end. | [`debts/nowindow-git-prompt-hangs.md`](../debts/nowindow-git-prompt-hangs.md) |
-| `nowindow-scan-misses-os-system` | lint/test_no_window_spawn.py reads subprocess and Node child_process calls only. | [`debts/nowindow-scan-misses-os-system.md`](../debts/nowindow-scan-misses-os-system.md) |
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`debts/pinoff1-freshness-flaky.md`](../debts/pinoff1-freshness-flaky.md) |
 | `playwright-rows-measure` | Unmeasured: whether the Playwright rows in `hooks/test_guard.py` still stop a real mistake. | [`debts/playwright-rows-measure.md`](../debts/playwright-rows-measure.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
