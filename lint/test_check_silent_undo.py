@@ -290,6 +290,38 @@ class PrBodyEscape(unittest.TestCase):
                 ok, why = self.excused(body)
                 self.assertTrue(ok, why)
 
+    # Claude Code ends every PR body with one attribution paragraph. A trailer just above it must still count.
+    ATTR = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+
+    def test_a_trailer_above_the_attribution_paragraph_excuses_its_path(self):
+        L, A = self.LINE, self.ATTR
+        for body in ("Summary.\n\n%s\n\n%s\n" % (L, A),
+                     "Summary.\n\n%s\n\n  %s  \n\n\n" % (L, A),
+                     "Summary.\n\n%s\n\n%s\n" % (L, A.split(" ", 1)[1])):  # without the emoji
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_paragraph_excuses_its_path_with_crlf(self):
+        L, A = self.LINE, self.ATTR
+        ok, why = self.excused("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A))
+        self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_and_more_prose_excuses_nothing(self):  # control
+        L, A = self.LINE, self.ATTR
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nClosing prose.\n" % (L, A)])
+
+    def test_a_trailer_in_the_same_paragraph_as_the_attribution_still_excuses(self):  # control, current behaviour
+        L, A = self.LINE, self.ATTR
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, A))
+        self.assertTrue(ok, why)
+
+    def test_a_paragraph_with_other_text_and_the_attribution_is_not_skipped(self):  # control
+        L, A = self.LINE, self.ATTR
+        self.assert_nothing_excused(["Summary.\n\n%s\n\nSee notes. %s\n" % (L, A),
+                                     "Summary.\n\n%s\n\n%s extra\n" % (L, A),
+                                     "Summary.\n\n%s\n\nNotes:\n%s\n" % (L, A)])
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
