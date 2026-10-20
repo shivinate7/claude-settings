@@ -183,6 +183,10 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
         self.assertEqual(read_file(hooks, "guard_x.py"), "MUTATED SIBLING\n")
         self.assertEqual(read_file(hooks, "guard.py"), "GUARD\n")
 
+    def test_scaffold_carries_shared_names_so_the_copied_guard_imports(self):
+        mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
+        self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "shared_names.py")))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -126,7 +126,7 @@ function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git)
     [IO.File]::WriteAllText((Join-Path $Dir 'settings.json'), "{}`n", $Utf8)
     $lands = if ($Skills -gt 0) { "hooks`nskills`n" } else { "hooks`n" }
     [IO.File]::WriteAllText((Join-Path $Dir 'landed-dirs.txt'), $lands, $Utf8)
-    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' })) {
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' -or $_.Name -ceq 'shared_names.py' })) {
         Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Dir ('hooks\' + $f.Name))
     }
     Add-BuildLine $Dir $Build
