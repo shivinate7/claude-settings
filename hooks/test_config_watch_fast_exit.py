@@ -268,7 +268,12 @@ corrupt_case("empty-object", overwrite("{}"))
 # --------------------------------------------------------------------------- (e) stdlib only
 
 
-@case("e the unchanged-path run loads only standard-library modules")
+# shared_names is the one home of the watched names and is stdlib only, so the fast path
+# imports it. The hook's own module name is allowed for a probe that runs it by name.
+FAST_PATH_MODULES = {"config_watch", "shared_names"}
+
+
+@case("e the unchanged-path run loads only standard-library modules plus shared_names")
 def stdlib_only_hash_step(project):
     project.settle()
     control = os.path.join(project.root, "noop.py")
@@ -279,8 +284,8 @@ def stdlib_only_hash_step(project):
     with open(side, "r", encoding="utf-8") as handle:
         baseline_loaded = set(json.load(handle)["loaded"])
     rc, out, guards, loaded = probe(project, *(EDIT[0], EDIT[1](project)))
-    extra = stdlib_only(set(loaded) - baseline_loaded)
-    extra = ["%d modules" % len(extra)] if extra else []
+    extra = [m for m in stdlib_only(set(loaded) - baseline_loaded)
+             if m not in FAST_PATH_MODULES]
     ok = rc == 0 and not extra and not guards
     return ok, "rc=%s non-stdlib modules=%s guards=%s" % (rc, extra, guards)
 
