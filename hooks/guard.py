@@ -272,8 +272,9 @@ while True:
             _loading = "guard_core"
             continue
         # A recovery path must not depend on the module it recovers (CLAUDE.md
-        # verification-recovery-not-gated-on-own-state). guard_core holds `record` and `config_dir`,
-        # so this writer repeats their few lines: one guard.log line that names the module.
+        # verification-recovery-not-gated-on-own-state). guard_core holds `record` and imports
+        # `config_dir` from shared_names, so this writer repeats their few lines: one guard.log line
+        # that names the module.
         try:
             folder = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
             os.makedirs(folder, exist_ok=True)

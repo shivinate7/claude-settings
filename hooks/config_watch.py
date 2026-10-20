@@ -128,7 +128,7 @@ def _load_guard() -> None:
 
 # ------------------------------------------------------------------ the watched set
 #
-# The project's own settings files, the pair `guard.PROJECT_FROZEN_FILES` already names. The
+# The project's own settings files, the pair `shared_names.PROJECT_FROZEN_FILES` names. The
 # config directory is NOT watched here. Rule 7 denies a write there, and `~/.claude/settings.json`
 # is a symlink onto the clone of claude-settings, which is deliberately unfrozen so that the
 # repository can edit its own source. A hash watch that followed that symlink would revert the
@@ -367,6 +367,21 @@ EXPIRY_FIELD = "_subagentCapUntil"
 EXPIRY_MAX_AHEAD_HOURS = 24
 
 
+# A `_FORCE` key is an on/off flag (decision `subagent-model-cap`), so these values set no model.
+_FORCE_FLAGS = ("0", "1", "true", "false")
+
+
+def first_sight_silent(reading) -> bool:
+    """True when a first-sight reading may pass in silence: every cap key reads Sonnet, or a
+    `_FORCE` key holds a plain flag. Any other value, a model name on a `_FORCE` key too, is
+    reported unknown."""
+    for key, value in reading.items():
+        text = str(value or "").strip().lower()
+        if text != "sonnet" and not (key.endswith("_FORCE") and text in _FORCE_FLAGS):
+            return False
+    return True
+
+
 def cap_lift_value(reading) -> bool:
     """True when a cap reading sets the model above Sonnet, the state the expiry rule watches.
 
@@ -575,7 +590,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
     if baseline is None:
         save_baseline(path, current)
         reading = cap_reading(current)
-        if cap_lift_value(reading):
+        if not first_sight_silent(reading):
             return UNKNOWN_MESSAGE.format(
                 where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
         return ""

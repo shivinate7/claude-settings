@@ -1741,7 +1741,7 @@ def worktree_prune_subject(args, where: str):
     return not (answer.stdout.strip() or answer.stderr.strip())
 
 
-from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch; the guard set holds a copy
+from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
 def _expanded(path: str, cwd: str) -> str:
