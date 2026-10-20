@@ -54,7 +54,7 @@ except Exception as exc:  # the module does not exist yet: every case fails, non
 
 FAILED = []
 
-# Verbatim from the Edit and Write prompt hooks in settings.json at origin/main ab592de2,
+# Verbatim from the Edit and Write prompt hooks this hook replaces,
 # after "Judge this edit to a file: $ARGUMENTS\n".
 EDIT_RULE = (
     "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
