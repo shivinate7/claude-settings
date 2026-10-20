@@ -766,7 +766,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"baseRefName": base, "headRefOid": "abc1234", "headRefName": "feat",
-               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False},
+               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "body": ""},
         "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "gates"}],

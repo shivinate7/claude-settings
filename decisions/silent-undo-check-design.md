@@ -14,9 +14,17 @@
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
   commit added on the branch alone is the branch's.
 
-The escape is the trailer `Drops-lines: <path> -- <reason>`, one per path, on any commit of the branch. A
-bare path excuses nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the
-reviewer reads every reason. No switch turns the check off.
+The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
+commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
+nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
+reason. No switch turns the check off.
+
+- **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
+  Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
+- **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
+  line. A session in another repo that uses `bin/merge` asked for this.
+- **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
+  line and exits 1. An unreadable history is a plain refusal with no BLOCKED line.
 
 **The window starts at the fork point,** not at the plain merge-base, which moves to main's tip once the
 branch merges main. There is no `--since` time. Reason: a commit-time window let the same shape pass or

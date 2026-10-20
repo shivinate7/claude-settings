@@ -228,6 +228,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `long-lived-head-lost-in-batch` | `cut_lanes` deletes any origin head whose sha is a lane tip. | [`debts/long-lived-head-lost-in-batch.md`](../debts/long-lived-head-lost-in-batch.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
+| `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`debts/merge-records-stale-base.md`](../debts/merge-records-stale-base.md) |
 | `merge-revert-cancels-running-ci` | `wait_checks` returns on the first red check while other jobs still run. | [`debts/merge-revert-cancels-running-ci.md`](../debts/merge-revert-cancels-running-ci.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`debts/nowindow-bin-no-fallback.md`](../debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`debts/nowindow-ctrl-c-orphans.md`](../debts/nowindow-ctrl-c-orphans.md) |

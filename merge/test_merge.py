@@ -82,6 +82,7 @@ class FakeHost:
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
         self.draft = False
+        self.body = ""  # the PR body gh reports: a `Drops-lines:` line in it excuses a path at the silent-undo check
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
@@ -89,7 +90,7 @@ class FakeHost:
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
-                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft}
+                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
 
     def required_names(self):
         return ["gates"]
@@ -1626,9 +1627,9 @@ class BaseAware(Env):
             if "fetch" in a:
                 self.fetches.append((len(self.host.waits), a))
             return real_git(cwd, *a, **k)
-        def undo(wt, base_ref, unknown_ok=""):
+        def undo(wt, base_ref, unknown_ok="", pr_body=""):
             self.undo_bases.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok)
+            return real_undo(wt, base_ref, unknown_ok, pr_body)
         for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
             p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
 
@@ -1886,7 +1887,7 @@ if a[:2] == ["pr", "view"]:
         draft = bool(S.get("draft")) or (S.get("draft_from_view") is not None and views >= S["draft_from_view"])
         print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN",
-                          "isDraft": draft}))  # set draft=True in a test; false by default
+                          "isDraft": draft, "body": S.get("body", "")}))  # set draft=True in a test; false by default. body: the PR body text
     else:  # the state read. state_read_fail: its plain-text failure. state_head: the head GitHub reports (default: the branch head)
         if S.get("state_read_fail"):
             print(S["state_read_fail"]); sys.exit(1)
@@ -2095,6 +2096,15 @@ class GhHalf(Env):
         except merge.Stop:
             return
         self.assertIsNone(got)
+
+    def test_the_pr_body_gh_reports_reaches_the_silent_undo_check_at_preview(self):
+        # Host.pr reads the body in its `gh pr view --json` read, so a Drops-lines line in the body excuses its path.
+        SilentUndo.stale_feat(self)
+        self.set(body="Drops-lines: docs/decisions/first.md -- the lines are dead")
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
+        self.assertRegex(self.calls(), r"(?m)^pr view .*--json [^\n]*\bbody\b")
 
     def test_a_batch_with_lanes_reads_the_open_prs_through_gh_and_keeps_those_lanes(self):
         # Ruling 1: the open PR's head is a newer commit than lane2's tip, so lane2 is kept. Origin's lane2 stays at the tip.
@@ -3170,9 +3180,9 @@ class GhHalf(Env):
         self.set(draft=True)
         before = self.refs()
         real, seen = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body=""):
             seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
-            return real(wt, base_ref, unknown_ok)
+            return real(wt, base_ref, unknown_ok, pr_body)
         with unittest.mock.patch.object(merge, "undo_check", spy):
             rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
@@ -3450,11 +3460,11 @@ class SilentUndo(Env):
     def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
         calls = []
         real = merge.undo_check
-        def second_is_red(wt, base, unknown_ok=""):
+        def second_is_red(wt, base, unknown_ok="", pr_body=""):
             calls.append(base)
             if len(calls) == 2:
                 raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
-            return real(wt, base, unknown_ok)
+            return real(wt, base, unknown_ok, pr_body)
         with unittest.mock.patch.object(merge, "undo_check", second_is_red):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(len(calls), 2)
@@ -3471,7 +3481,8 @@ class DraftPreview(Env):
         SilentUndo.stale_feat(self)
         self.host.draft = True
         before = self.refs()
-        rc, out = self.run_merge("7")  # the exit code is not pinned here: see the report
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
         self.assertIn("silently undoes", out)
         self.assertIn("first.md", out)
         self.assertIn("draft", out.lower())
@@ -3484,11 +3495,32 @@ class DraftPreview(Env):
         SilentUndo.stale_feat(self)
         before = self.refs()
         rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
         self.assertIn("silently undoes", out)
         self.assertIn("first.md", out)
         self.assertEqual(self.refs(), before)
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.host.waits, [])
+
+    def blocked_lines(self, out):
+        return [l for l in out.splitlines() if l.startswith("BLOCKED: ")]
+
+    def test_a_ready_preview_of_a_dropped_line_prints_one_blocked_line(self):
+        SilentUndo.stale_feat(self)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        blocked = self.blocked_lines(out)
+        self.assertEqual(len(blocked), 1, out)
+        self.assertIn("first.md", blocked[0])
+
+    def test_a_draft_preview_of_a_dropped_line_prints_one_blocked_line(self):
+        SilentUndo.stale_feat(self)
+        self.host.draft = True
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        blocked = self.blocked_lines(out)
+        self.assertEqual(len(blocked), 1, out)
+        self.assertIn("first.md", blocked[0])
 
     def test_a_clean_draft_preview_passes_and_names_the_draft(self):
         self.host.draft = True
@@ -3505,9 +3537,9 @@ class DraftPreview(Env):
 
     def test_a_closed_or_merged_pr_is_refused_at_preview_and_the_check_never_runs(self):  # control
         real, calls = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body=""):
             calls.append(base_ref)
-            return real(wt, base_ref, unknown_ok)
+            return real(wt, base_ref, unknown_ok, pr_body)
         before = self.refs()
         with unittest.mock.patch.object(merge, "undo_check", spy):
             for state in ("CLOSED", "MERGED"):
@@ -3517,6 +3549,78 @@ class DraftPreview(Env):
                 self.assertIn("the pull request is " + state, out)
         self.assertEqual(calls, [])
         self.assertEqual(self.refs(), before)
+
+
+class PrBodyEscape(Env):
+    """`Drops-lines: <path> -- <reason>` in the PR body excuses its path at preview, as a commit trailer does.
+    A line with no reason, or one for another path, excuses nothing. Each use prints ALLOWED."""
+
+    def preview(self):
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.host.waits, [])
+        return rc, out
+
+    def test_a_pr_body_line_excuses_its_path_at_preview(self):
+        SilentUndo.stale_feat(self)
+        self.host.body = "Drops-lines: docs/decisions/first.md -- the lines are dead"
+        rc, out = self.preview()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_a_pr_body_line_without_a_reason_excuses_nothing(self):
+        SilentUndo.stale_feat(self)
+        for body in ("Drops-lines: docs/decisions/first.md", "Drops-lines: docs/decisions/first.md --"):
+            with self.subTest(body=body):
+                self.host.body = body
+                rc, out = self.preview()
+                self.assertEqual(rc, 1, out)
+                self.assertIn("first.md", out)
+                self.assertNotIn("ALLOWED", out)
+
+    def test_a_pr_body_line_for_another_path_does_not_excuse(self):
+        SilentUndo.stale_feat(self)
+        self.host.body = "Drops-lines: docs/decisions/second.md -- wrong path"
+        rc, out = self.preview()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("first.md", out)
+        self.assertNotIn("ALLOWED", out)
+
+    def test_a_commit_trailer_still_excuses_its_path_at_preview(self):  # control
+        SilentUndo.stale_feat(self)
+        o = self.other
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Drop them on purpose\n\nDrops-lines: docs/decisions/first.md -- the lines are dead")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.preview()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
+    def test_the_undo_memo_is_not_reused_across_pr_bodies(self):
+        SilentUndo.stale_feat(self)
+        co = self.co
+        sh(co, "git", "fetch", "-q", "origin")
+        sh(co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        excuse = "Drops-lines: docs/decisions/first.md -- the lines are dead"
+        cwd = os.getcwd()
+        os.chdir(co)
+        try:
+            for first, second in (("", excuse), (excuse, "")):
+                with self.subTest(first=first, second=second):
+                    merge.UNDO_MEMO.clear()
+                    outcomes = []
+                    for body in (first, second):
+                        try:
+                            with contextlib.redirect_stdout(io.StringIO()):
+                                merge.undo_check(co, "origin/main", pr_body=body)
+                            outcomes.append("ok")
+                        except merge.Stop:
+                            outcomes.append("refused")
+                    want = ["ok" if b else "refused" for b in (first, second)]
+                    self.assertEqual(outcomes, want)
+        finally:
+            os.chdir(cwd)
+            merge.UNDO_MEMO.clear()
 
 
 class StampEnv(unittest.TestCase):
@@ -3569,9 +3673,9 @@ class UndoMemo(Env):
             scans.append(a[1])
             return real_check(*a, **k)
 
-        def spy_undo(wt, base_ref, unknown_ok=""):
+        def spy_undo(wt, base_ref, unknown_ok="", pr_body=""):
             undos.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok)
+            return real_undo(wt, base_ref, unknown_ok, pr_body)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
         return res, len(scans), len(undos)
@@ -4708,7 +4812,7 @@ class ScanProgress(Env):
         out, seen = io.StringIO(), []
         stub = unittest.mock.MagicMock()
 
-        def scan(cwd, upstream, head, default=None, tool=None):
+        def scan(cwd, upstream, head, default=None, tool=None, pr_body=""):
             seen.append(out.getvalue())
             return [], []
 

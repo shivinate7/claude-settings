@@ -2,7 +2,8 @@
 """The shared merge tool, git half. The flow is `confirm` in merge/merge.py.
 
   merge <pr>              preview: what it would claim and merge, and the silent-undo check on the head. Presses
-                          nothing. A draft is previewed too; a dropped line exits 1.
+                          nothing. A draft is previewed too; a dropped line prints one `BLOCKED:` line and exits 1.
+                          A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
 
@@ -35,6 +36,9 @@ class Stop(Exception):
 
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
+
+class Dropped(Stop):
+    """The silent-undo check found a dropped line."""
 
 class Held(Stop):
     pass
@@ -186,17 +190,17 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
 
 UNDO_MEMO = {}
 
-def undo_check(wt, base_ref, unknown_ok=""):
+def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the owner passed
     --undo-check-unknown-ok "<reason>": that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
-    # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip,
+    # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
     # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
     try:
-        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
+        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
             c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
             say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
@@ -211,7 +215,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS)  # a base with no generator: the page is judged by the generator that rebuilds it
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
@@ -232,7 +236,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
     for n in notes:
         say("merge: " + n)
     if problems:
-        raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
+        raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
 
 def say(*lines):
     text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
@@ -535,13 +539,13 @@ class Host:
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = self.gh(["pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft"], self.cwd)
+        c, out = self.gh(["pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft,body"], self.cwd)
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
         self.base = d["baseRefName"]  # the PR's own base drives required_names
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
-                "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"], "draft": d["isDraft"]}
+                "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"], "draft": d["isDraft"], "body": d.get("body") or ""}
 
     OPEN_LIMIT = 1000  # gh pr list stops at 30 rows without --limit
 
@@ -1235,7 +1239,11 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     resumed = trailer = records = None
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
-        undo_check(wt, f"origin/{base}", unknown_ok)
+        try:
+            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
+        except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
+            say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
+            raise
         if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
             sc = base_stamp_config(wt, tmp, cfgrel, f"origin/{base}")
             if sc:
@@ -1274,7 +1282,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
-        undo_check(wt, base_ref, unknown_ok)
+        undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
@@ -1338,7 +1346,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c:  # never check against a stale base tip
                     stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                    undo_check(wt, base_ref, unknown_ok)
+                    undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
                 except Stop as e:
                     stop(str(e))
                 if not os.path.exists(os.path.join(wt, ".git")):
