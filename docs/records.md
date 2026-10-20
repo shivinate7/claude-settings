@@ -207,9 +207,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
+| `dw-stop-delivery-unproven` | The decision-watch mod has shown no Stop event in the desktop app. | [`debts/dw-stop-delivery-unproven.md`](../debts/dw-stop-delivery-unproven.md) |
+| `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`debts/explain-accessvbom.md`](../debts/explain-accessvbom.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
+| `hooks-to-mods-judges` | Plan step E has four parts. | [`debts/hooks-to-mods-judges.md`](../debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`debts/install-set-reads-held-file.md`](../debts/install-set-reads-held-file.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
