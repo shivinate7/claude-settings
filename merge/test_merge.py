@@ -809,6 +809,12 @@ def lane_deleted_line(test, out, b):
     test.assertIn(test.tips[b][:9], lines[0], "the deleted line of %s must name its tip %s" % (b, test.tips[b][:9]))
     return lines[0]
 
+def kept_line(test, out, b):
+    """The one kept line of lane origin/b. -> that line."""
+    lines = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}: kept:")]
+    test.assertEqual(len(lines), 1, out)
+    return lines[0]
+
 def raw_tab_strings(source):
     """Source scan through tokenize. -> (line, text) of each string token that holds a raw TAB character. Tokenize reads a string
     whole, so a '#' or a quote inside a string, and a string over several lines, are never taken for code or for a comment."""
@@ -819,9 +825,11 @@ def raw_tab_strings(source):
 class LaneHost(FakeHost):
     """FakeHost plus the open-PR read. style: how the merge lands, merge (a merge commit), squash or rebase.
     unreadable: stop (raises Stop), none (returns None) or error (raises ValueError). on_merged runs once the merge is on origin.
-    open: {head name: (head sha, PR base)} of the open pull requests, the shape Host.open_heads returns (round 3, finding 1).
-    A PR at the lane tip is the lane's own only when its base is the batch's base."""
-    style, open, unreadable, on_merged = "merge", {}, None, None
+    open: {head name: (head sha, PR base)} of the open pull requests, the shape Host.open_heads returned in round 3, finding 1.
+    A PR at the lane tip is the lane's own only when its base is the batch's base.
+    prs: raw gh rows [(head name, head sha, PR base), ...], one per open PR, in the order gh lists them. When set, open_heads
+    runs the real Host.open_heads over these rows, so a case does not pin the shape that read returns."""
+    style, open, unreadable, on_merged, prs = "merge", {}, None, None, None
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -835,6 +843,11 @@ class LaneHost(FakeHost):
             return None
         if self.unreadable == "error":
             raise ValueError("not json")
+        if self.prs is not None:
+            host = merge.Host()
+            rows = [{"headRefName": h, "headRefOid": s, "baseRefName": b} for h, s, b in self.prs]
+            host.gh = lambda args, cwd=None: (0, json.dumps(rows))
+            return host.open_heads()
         return dict(self.open)
 
     def merge(self, n, method, sha):
@@ -1011,6 +1024,154 @@ class CutLanes(Env):
         self.assertEqual(rc, 0, out)
         self.assert_kept_line(out, "lane1")
         self.assert_deleted(out, "lane2")
+
+    def test_a_full_stack_of_two_is_deleted_in_full(self):
+        # Owner ruling, 2026-10-19 17:2x CDT: lane2's open PR sits at its tip with base lane1, a lane of this batch, so it is done.
+        # lane1's only PR-base reference comes from that lane, so nothing outside the batch keeps it. Both lanes go.
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1")]
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1", "lane2")
+        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
+
+    def test_a_partial_stack_keeps_its_base_and_names_the_stacked_branch(self):
+        # Owner ruling: stack-top is an open PR outside the batch, based on lane1, so lane1 stays. Its kept line names stack-top.
+        # lane2 is a lane of the batch with no PR, so it must still go: a cut that deletes nothing fails here.
+        lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("stack-top", self.head("main"), "lane1")]
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stack-top", kept_line(self, out, "lane1"))
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.assert_deleted(out, "lane2")
+
+    def test_a_three_deep_full_stack_is_deleted_in_full(self):
+        # Owner ruling: each lane's open PR sits at its tip, based on the lane below it or on the batch's base.
+        tips = lane_batch(self, "lane1", "lane2", "lane3")
+        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1"), ("lane3", tips["lane3"], "lane2")]
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1", "lane2", "lane3")
+        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
+
+    def test_a_backport_pr_beside_the_lane_own_pr_keeps_the_lane(self):
+        # Owner ruling: lane1 has its own PR to main at its tip, and a second open PR at the same tip to release/1.0. The second base
+        # is neither the batch's base nor a batch lane, so lane1 stays. Passes on the old code (a head with two PRs is never its own).
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane1", tips["lane1"], "release/1.0")]
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_kept_line(out, "lane1")
+        self.assert_deleted(out, "lane2")
+
+    def test_a_stacked_pr_whose_head_is_past_the_lane_tip_keeps_its_base(self):
+        # Control, passes on the old code. A PR counts as inside the batch only when its head sits at a lane tip. lane2's head is
+        # past its tip here, so that PR is outside, and lane1 stays as the base of an open PR. A cut that counts it as inside
+        # deletes a live base. The kept line's wording is not pinned here.
+        lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("lane2", self.head("main"), "lane1")]
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        kept = [l for l in out.splitlines() if l.startswith("merge: lane origin/lane1: kept:")]
+        self.assertEqual(len(kept), 1, out)
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+
+    def stack_of_three(self):
+        """Lanes lane1 <- lane2 <- lane3 in one batch, each open at its tip, each PR based on the lane below it. -> tips."""
+        tips = lane_batch(self, "lane1", "lane2", "lane3")
+        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1"), ("lane3", tips["lane3"], "lane2")]
+        return tips
+
+    def one_lane_line_matches_state(self, out, b):
+        """One lane line for origin/b, and it says deleted exactly when no origin head is left for b. -> that line."""
+        lines = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}:")]
+        self.assertEqual(len(lines), 1, out)
+        self.assertEqual(" deleted at " in lines[0], self.head(b) == "", lines[0])
+        return lines[0]
+
+    def delete_index(self, calls, b):
+        """The position of the leased delete push of lane b among the git calls. Each lane is pushed once."""
+        hits = [i for i, c in enumerate(calls) if "push" in c and f":refs/heads/{b}" in c]
+        self.assertEqual(len(hits), 1, f"{b}: {len(hits)} delete pushes")
+        return hits[0]
+
+    def proof_fails_for(self, tip):
+        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real."""
+        real = merge.sh
+        def broken(args, *a, **k):
+            if "merge-base" in args and tip in args:
+                return 128, "fatal: simulated: the ancestry proof cannot run"
+            return real(args, *a, **k)
+        return unittest.mock.patch.object(merge, "sh", broken)
+
+    def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
+        # Round 2, pin 1 (fixpoint). lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
+        # lane3 gets one line that matches its state. The proof is made to fail for lane2 only.
+        tips = self.stack_of_three()
+        with self.proof_fails_for(tips["lane2"]):
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(LANE_PROOF_NOT_RUN, kept_line(self, out, "lane2"))
+        self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
+        kept_line(self, out, "lane1")
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.one_lane_line_matches_state(out, "lane3")
+
+    def test_a_stack_whose_middle_lane_moved_keeps_the_base_below_it_as_a_control(self):
+        # Control, passes on the old code. lane2's origin head moves after the merge, so it sits at no lane tip and is not cut.
+        # Its open PR still needs lane1, so lane1 stays. lane3 gets one line that matches its state.
+        tips = self.stack_of_three()
+        def moved():
+            sha = self.push_to("lane2")
+            self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", sha, "lane1"), ("lane3", tips["lane3"], "lane2")]
+        self.host.on_merged = moved
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        kept_line(self, out, "lane1")
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.one_lane_line_matches_state(out, "lane3")
+
+    def test_a_keepBranches_middle_lane_keeps_the_base_below_it_like_an_unproven_one(self):
+        # Control, passes on the old code. lane2 is in merge.keepBranches, so it is kept, and lane1 is kept as its base, as in the unproven case.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["lane2"]))))
+        self.stack_of_three()
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_kept(out, "lane2", "keep")
+        kept_line(self, out, "lane1")
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.one_lane_line_matches_state(out, "lane3")
+
+    def test_a_stack_is_deleted_dependents_first(self):
+        # Round 2, pin 3 (delete order). A dependent is deleted before its base: lane3's delete is pushed first, then lane2's, then lane1's.
+        self.stack_of_three()
+        with self.spy() as calls:
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1", "lane2", "lane3")
+        order = [self.delete_index(calls, b) for b in ("lane3", "lane2", "lane1")]
+        self.assertEqual(order, sorted(order), out)
+
+    def test_a_stack_whose_middle_lane_delete_goes_stale_keeps_the_base_below_it_and_says_why(self):
+        # Round 2, pin 3 (stale delete). lane2 moves after the cleanup reads the heads, so its leased delete fails with stale info.
+        # lane3, its dependent, is deleted. lane1 is kept, with a line, because lane2 is still on origin and its PR needs lane1.
+        self.stack_of_three()
+        merged, moved = [], []
+        self.host.on_merged = lambda: merged.append(True)
+        def rival(args, result):  # the first read of the heads after the merge that lists lane2: the cleanup's read
+            if merged and not moved and "ls-remote" in args and "--heads" in args and "refs/heads/lane2" in result[1]:
+                moved.append(self.push_to("lane2"))
+        with self.spy(rival):
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(moved, "the cleanup never read the heads after the merge")
+        self.assertEqual(self.head("lane2"), moved[0])
+        self.assertEqual(len([l for l in out.splitlines() if LANE_FAILED.format(b="lane2") in l]), 1, out)
+        kept_line(self, out, "lane1")
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        lane_deleted_line(self, out, "lane3")
+        self.assertEqual(self.head("lane3"), "", "lane3 is still on origin")
 
     def test_a_deleted_lane_line_names_its_nine_character_tip(self):
         # Round 3, finding 4: the line that deletes a lane names its branch and the first 9 characters of its tip.
@@ -1979,6 +2140,50 @@ class GhHalf(Env):
         self.assertEqual(len(kept), 1, out)
         self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
         lane_deleted_line(self, out, "agent/lane1")
+
+    def batch_with_open_prs(self, rows_of):
+        """Two lanes in one batch, then the open-PR rows that rows_of(tips) returns, in the order gh lists them. -> (tips, out)."""
+        tips = lane_batch(self, "lane1", "lane2")
+        self.set(open_prs=rows_of(tips))
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        return tips, out
+
+    def assert_both_lanes_deleted(self, out):
+        for b in ("lane1", "lane2"):
+            lane_deleted_line(self, out, b)
+            self.assertEqual(self.head(b), "", f"{b} is still on origin")
+        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
+
+    def test_a_same_batch_lane_with_a_main_pr_first_and_a_stacked_pr_second_is_deleted(self):
+        # Round 3, finding 5, through gh: lane2 has two open PRs at its tip, to main then to lane1. Both are done, so both lanes go.
+        # Before the fix, the second row's base was kept under a new key, and lane2 read as having more than one PR.
+        _, out = self.batch_with_open_prs(lambda t: [["lane2", t["lane2"], "main"], ["lane2", t["lane2"], "lane1"]])
+        self.assert_both_lanes_deleted(out)
+
+    def test_a_same_batch_lane_with_a_stacked_pr_first_and_a_main_pr_second_is_deleted(self):
+        # Round 3, finding 5, through gh: the same two PRs in the other row order. The result must not change with the order.
+        _, out = self.batch_with_open_prs(lambda t: [["lane2", t["lane2"], "lane1"], ["lane2", t["lane2"], "main"]])
+        self.assert_both_lanes_deleted(out)
+
+    def test_an_outside_head_whose_stacked_pr_comes_first_keeps_the_base_lane(self):
+        # Round 3, finding 5, through gh: outside head stack-top has two open PRs, to lane1 then to main. Its PR to lane1 keeps lane1.
+        # The first row's base must not be lost: before the fix it was, and lane1 was deleted under an open PR.
+        _, out = self.batch_with_open_prs(lambda t: [["stack-top", self.head("main"), "lane1"], ["stack-top", self.head("main"), "main"]])
+        self.assertIn("stack-top", kept_line(self, out, "lane1"))
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.assert_deleted_lane2(out)
+
+    def test_an_outside_head_whose_main_pr_comes_first_keeps_the_base_lane(self):
+        # Round 3, finding 5, through gh: the same two PRs, main row first. It passes on the old code and must keep passing.
+        _, out = self.batch_with_open_prs(lambda t: [["stack-top", self.head("main"), "main"], ["stack-top", self.head("main"), "lane1"]])
+        self.assertIn("stack-top", kept_line(self, out, "lane1"))
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
+        self.assert_deleted_lane2(out)
+
+    def assert_deleted_lane2(self, out):
+        lane_deleted_line(self, out, "lane2")
+        self.assertEqual(self.head("lane2"), "", "lane2 is still on origin")
 
     def test_a_batch_without_lanes_makes_no_pr_list_call(self):
         rc, out = self.go()
