@@ -61,6 +61,7 @@ ROOT = os.path.dirname(HERE)
 TEST_INSTALL_SRC = os.path.join(ROOT, "hooks", "test_install_src.sh")
 
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 def guard_subject_unread_member() -> Tuple[bool, str]:
     """Reuse hooks/test_guard.py's own fixture. Import, not re-implement: the blind-`git`
@@ -80,7 +81,7 @@ def session_start_freshness_unknown_member() -> Tuple[bool, str]:
     and a fetch timeout a second time in Python."""
     if not os.path.exists(TEST_INSTALL_SRC):
         return False, "hooks/test_install_src.sh does not exist"
-    result = subprocess.run(
+    result = _nowindow.run(
         ["sh", TEST_INSTALL_SRC, "caseF4", "caseF6"], capture_output=True, text=True, timeout=180,
     )
     lines = result.stdout.splitlines()

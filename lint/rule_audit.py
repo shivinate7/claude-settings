@@ -75,6 +75,11 @@ import re
 import subprocess
 import sys
 from typing import Dict, List
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 # Stub for node:test: `test(n)` prints `LISTED <JSON name>` and runs nothing. A file that imports another export fails.
 NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";registerHooks({load(u,c,n){'
@@ -206,7 +211,7 @@ def citation_problem(test_id: str, root: str = ROOT):
         else:
             return f"`{path}` has no known way to list its tests."
         try:
-            run = subprocess.run(cmd, env=env, cwd=os.path.dirname(full), capture_output=True,
+            run = _nowindow.run(cmd, env=env, cwd=os.path.dirname(full), capture_output=True,
                                  encoding="utf-8", errors="replace", timeout=NODE_LIST_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as e:
             return f"names in `{path}` could not be read: {e}."

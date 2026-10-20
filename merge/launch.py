@@ -7,9 +7,11 @@ be proven, prints a warning block and runs the checkout's own tree. --dev runs t
 own tree and nothing else. README: "The `merge` command".
 """
 import os, shutil, stat, subprocess, sys, tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 def git(co, *a):
-    r = subprocess.run(["git", "-C", co, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = _nowindow.run(["git", "-C", co, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't import this
@@ -22,6 +24,7 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
 def run(tree, args):
+    # nowindow: merge.py prints its report on the caller's terminal; with no window that output goes to a hidden console
     return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
 
 def warn(sha, behind, why):

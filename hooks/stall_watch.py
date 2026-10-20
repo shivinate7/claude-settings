@@ -54,6 +54,10 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
+try:
     from guard_stream import until_note  # the one parser of the `until:` note
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
     def until_note(description) -> str:
@@ -67,7 +71,7 @@ TOOL_TIMEOUT = 5  # seconds for each ps or lsof call, so the report cannot hang
 
 def _run(args):
     try:
-        return subprocess.run(args, capture_output=True, text=True, errors="replace",
+        return _nowindow.run(args, capture_output=True, text=True, errors="replace",
                               timeout=TOOL_TIMEOUT).stdout
     except Exception as exc:
         return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
@@ -162,7 +166,7 @@ def watch(pid, log, quiet):
 def eof_backslash_literal():
     """True when /bin/sh keeps a backslash at end of input (dash, bash 5). Bash 3.2 drops it."""
     try:
-        return subprocess.run(["/bin/sh", "-c", "printf %s \\"], capture_output=True, text=True,
+        return _nowindow.run(["/bin/sh", "-c", "printf %s \\"], capture_output=True, text=True,
                               timeout=TOOL_TIMEOUT).stdout == "\\"
     except Exception:
         return False

@@ -42,8 +42,12 @@ class Launch(unittest.TestCase):
         sh(self.t, "git", "init", "-q", "-b", "main", self.work, env=self.env)
         os.makedirs(os.path.join(self.work, "bin"))
         os.makedirs(os.path.join(self.work, "merge"))
-        for f in ("bin/merge", "merge/launch.py"):
+        os.makedirs(os.path.join(self.work, "hooks"))
+        for f in ("bin/merge", "merge/launch.py", "hooks/_nowindow.py"):  # launch.py imports the helper from hooks/
             shutil.copy(os.path.join(ROOT, f), os.path.join(self.work, f))
+        # Same ignore rules as the real repo. launch.py imports the helper from the clone's hooks/, and
+        # that import writes hooks/__pycache__ when bytecode is on (CI), which would read as a dirty tree.
+        put(os.path.join(self.work, ".gitignore"), "__pycache__/\n*.pyc\n")
         put(os.path.join(self.work, "notes.txt"), "clean\n")
         self.release("v1")
         sh(self.work, "git", "remote", "add", "origin", self.bare, env=self.env)

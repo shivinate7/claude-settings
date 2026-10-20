@@ -38,6 +38,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook loads this file; a missing helper never stops that hook
+    _nowindow = subprocess
 
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
@@ -50,7 +55,7 @@ class Unknown(Exception):
 
 def git(cwd, *a, ok=(0,)):
     # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
+    r = _nowindow.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -264,7 +269,7 @@ class Blobs:
     def __init__(self, cwd):
         self.cwd = cwd
         try:
-            self.proc = subprocess.Popen(["git", "-C", cwd, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self.proc = _nowindow.Popen(["git", "-C", cwd, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except OSError as e:
             raise Unknown("git cat-file failed: %s" % e)
 
@@ -511,7 +516,7 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
         oracle = os.path.join(base, "lint", "hook_catalog.py")
         if not os.path.isfile(oracle) and tool:
             oracle = tool  # upstream has no generator: the merge tool's own, never the head's
-        run = subprocess.run([sys.executable, "-B", oracle, "--records-only", "--root", wt],
+        run = _nowindow.run([sys.executable, "-B", oracle, "--records-only", "--root", wt],
                              cwd=wt, capture_output=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         if run.returncode != 0 or not os.path.isfile(out):
             return gen.RECORDS_PAGE, False

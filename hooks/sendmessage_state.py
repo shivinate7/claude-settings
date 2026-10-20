@@ -27,6 +27,10 @@ import tempfile
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
@@ -62,7 +66,7 @@ def receiver_state(name):
     # Stdout goes to a file, not a pipe: on Windows, subprocess.run reads the pipe again after the
     # kill, and a grandchild that holds the pipe then holds the hook with no bound.
     with tempfile.TemporaryFile() as out:
-        proc = subprocess.Popen([node, reader, name], stdin=subprocess.DEVNULL, stdout=out,
+        proc = _nowindow.Popen([node, reader, name], stdin=subprocess.DEVNULL, stdout=out,
                                 stderr=subprocess.DEVNULL, start_new_session=os.name != "nt")
         try:
             code = proc.wait(timeout=READER_TIMEOUT)
@@ -79,7 +83,7 @@ def kill_tree(proc):
     """Kill the reader and what it started. Only the process this hook started."""
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
         else:
             os.killpg(proc.pid, signal.SIGKILL)
     except Exception:

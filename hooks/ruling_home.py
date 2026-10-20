@@ -72,6 +72,11 @@ import os
 import re
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 MEMORY_DIRNAME = "memory"
 INDEX_FILE = "MEMORY.md"
@@ -358,7 +363,7 @@ def _run_git(cwd, args, input_text=None):
     those callers turns a non-zero exit into a stand-down and which reads it as "no answer".
     """
     try:
-        return subprocess.run(
+        return _nowindow.run(
             ["git", "--literal-pathspecs", "-C", cwd] + args,
             input=input_text, capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT,
         )

@@ -37,6 +37,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 # Both overridable by environment, so a test fixture can point at a fake sweep or a short fuse
 # without editing this file.
@@ -184,7 +188,7 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
         return
 
     try:
-        subprocess.run(
+        _nowindow.run(
             [sys.executable, SWEEP_PATH, root, "--confirm",
              "--deadline-seconds", str(sweep_timeout)],  # the only run with a deadline
             capture_output=True, text=True, timeout=sweep_timeout,

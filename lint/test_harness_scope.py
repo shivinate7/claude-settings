@@ -228,6 +228,32 @@ class Scope(unittest.TestCase):
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
         self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
 
+    # Any path under the map skill turns `mods` on, .md files included, as a new file or an edit.
+    # The gates job runs the skill's tests only when `mods` is on. Those tests read SKILL.md and
+    # .md fixtures, so a .md path with no flag would skip them. The skill and its tests live in
+    # this repo (ruling `map-skill-lives-here`: the tests run in the gates workflow).
+    MAP_SKILL = "skills/plain-english-map/"
+
+    def test_a_map_skill_md_change_turns_on_mods(self):
+        for p in (self.MAP_SKILL + "SKILL.md", self.MAP_SKILL + "tests/fixture/docs/map/core.md",
+                  self.MAP_SKILL + "tests/fixture/docs/map/traces/home.md"):
+            for existing in ((), (p,)):
+                with self.subTest(path=p, edit=bool(existing)):
+                    self.assertEqual(run([p], existing=existing).get("mods"), "true")
+
+    # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm.
+    def test_a_map_skill_script_change_still_turns_everything_on(self):
+        p = self.MAP_SKILL + "scripts/map-check.mjs"
+        for existing in ((), (p,)):
+            with self.subTest(edit=bool(existing)):
+                self.assertFlags(run([p], existing=existing), want_true=ALL)
+
+    # Control: another skill's .md keeps today's flags. The new rule must name the map skill only.
+    def test_another_skills_md_keeps_its_current_flags(self):
+        p = "skills/ci-hygiene/SKILL.md"
+        self.assertFlags(run([p], existing=[p]), want_false=ALL)
+        self.assertEqual(self.true_set(run([p])), {"gates_windows", "shell_macos", "code", "guard"})
+
     # The rm shim suite also runs in gates-macos: BSD rm and the /var symlink change what the shim reads,
     # and a Linux pass proves neither. harness-scope.sh maps bin/rm and the suite to that job ahead of
     # the lint/* rule, which sets `code` only, so a diff that names the suite alone still reaches it.

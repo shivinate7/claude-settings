@@ -6,7 +6,7 @@ import { parseAgentsJson, receiverState } from './lib.mjs'
 
 let out = 'unseen'
 try {
-  const json = execSync('claude agents --json', { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] })
+  const json = execSync('claude agents --json', { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
   out = receiverState(parseAgentsJson(json), process.argv[2])
 } catch { /* unseen */ }
 console.log(out)

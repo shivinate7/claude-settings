@@ -35,6 +35,8 @@ import sys
 import tempfile
 
 import mutate_shared
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
@@ -1010,10 +1012,10 @@ MUTATIONS = [
     # == theirs` (wrongly denied).
     ("root-scope: _git drops -C, so it reads whichever tree the guard process happens to stand "
      "in, not the tree it was asked about",
-     '        return subprocess.run(\n'
+     '        return _nowindow.run(\n'
      '            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
      '        )',
-     '        return subprocess.run(\n'
+     '        return _nowindow.run(\n'
      '            ["git", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
      '        )',
      "guard", 'pointer: checkout of a branch in another checkout is allowed'),
@@ -1527,7 +1529,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to DEVNULL, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
-    result = subprocess.run(
+    result = _nowindow.run(
         # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
         [sys.executable, suite], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
         env=env, timeout=1200,
