@@ -34,8 +34,8 @@ If the task is too large for one worker, stop at a clean point and report PARTIA
 split you propose. Never review your own work. The orchestrator sends a reviewer.
 
 Prove your change once: show the test-author's new cases green on your code. Run only the
-suites your change touches. Never run the full suites or a mutation harness locally; CI
-runs them.
+suites your change touches. Never run the full suites locally. When your lane changes a file a
+mutation harness targets, run that harness once through `verdict` before pushing.
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run
