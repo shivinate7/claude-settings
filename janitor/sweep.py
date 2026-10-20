@@ -71,6 +71,10 @@ REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
 import guard_core  # noqa: E402  (the preview cache patches the guard reads where they live)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)
@@ -461,7 +465,7 @@ def _live_remote_heads(path: str):
     else:
         for remote in remotes.stdout.split():
             try:  # prompts off: an unattended run never waits on a login window
-                listed = subprocess.run(
+                listed = _nowindow.run(
                     ["git", "-C", path, "ls-remote", "--heads", remote], capture_output=True,
                     text=True, encoding="utf-8", errors="replace", timeout=10,
                     env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
@@ -473,7 +477,7 @@ def _live_remote_heads(path: str):
             shas.update(line.split("\t", 1)[0] for line in listed.stdout.splitlines() if "\t" in line)
     if shas:
         try:
-            held = subprocess.run(
+            held = _nowindow.run(
                 ["git", "-C", path, "cat-file", "--batch-check"],
                 input="".join(sha + "\n" for sha in sorted(shas)),
                 capture_output=True, text=True, timeout=10)
@@ -498,7 +502,7 @@ def _unpushed_among(path: str, heads, live):
     if not live:  # no remote head at all: nothing is pushed, and no walk is needed to say so
         return set(heads)
     try:
-        answer = subprocess.run(
+        answer = _nowindow.run(
             ["git", "-C", path, "rev-list", "--stdin"],
             input="".join(h + "\n" for h in heads) + "--not\n" + "".join(
                 sha + "\n" for sha in sorted(live)),
@@ -820,7 +824,7 @@ def _list_listeners_lsof():
     until the next `p`. lsof's own exit code is 1, with empty output, when nothing at all
     matches; that is a confirmed empty answer, not a read failure."""
     try:
-        answer = subprocess.run(
+        answer = _nowindow.run(
             ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"],
             capture_output=True, text=True, timeout=10,
         )
@@ -854,7 +858,7 @@ def _list_listeners_ss():
     the pid is pulled out with a regex, not a full parse. `None` when `ss` itself is missing or
     refuses to run, so the caller falls back to lsof."""
     try:
-        answer = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=10)
+        answer = _nowindow.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=10)
     except Exception:
         return None
     if answer.returncode != 0:
@@ -956,7 +960,7 @@ def _process_cwd_macos(pid: int):
         if table is not None:
             return _memo("cwd-by-pid", lambda: _first_cwd_by_pid(table)).get(pid)
     try:
-        answer = subprocess.run(
+        answer = _nowindow.run(
             ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
             capture_output=True, text=True, timeout=10,
         )
@@ -1087,7 +1091,7 @@ def _process_command_posix(pid: int):
     if row is not _NO_TABLE:
         return (row[2].strip() or None) if row else None
     try:
-        answer = subprocess.run(
+        answer = _nowindow.run(
             ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
         )
     except Exception:
@@ -1180,7 +1184,7 @@ def _is_orphan_linux(pid: int):
 
 def _is_orphan_posix_ppid(argv):
     try:
-        answer = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        answer = _nowindow.run(argv, capture_output=True, text=True, timeout=5)
     except Exception:
         return None
     if answer.returncode != 0:
@@ -1325,7 +1329,7 @@ def _list_all_pids_posix():
         if table is not None:
             return list(table)
     try:
-        answer = subprocess.run(["ps", "-axo", "pid="], capture_output=True, text=True, timeout=10)
+        answer = _nowindow.run(["ps", "-axo", "pid="], capture_output=True, text=True, timeout=10)
     except Exception:
         return None
     if answer.returncode != 0:
@@ -1372,7 +1376,7 @@ def _is_current_user_linux(pid: int):
 
 def _is_current_user_posix_uid(argv):
     try:
-        answer = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        answer = _nowindow.run(argv, capture_output=True, text=True, timeout=5)
     except Exception:
         return None
     if answer.returncode != 0:
@@ -1676,7 +1680,7 @@ def sim_available():
 def sim_read_devices():
     """Every simulator as {udid, name, state, deviceTypeIdentifier, runtime}; None if unreadable."""
     try:
-        answer = subprocess.run(["xcrun", "simctl", "list", "devices", "--json"],
+        answer = _nowindow.run(["xcrun", "simctl", "list", "devices", "--json"],
                                 capture_output=True, text=True, timeout=60)
         if answer.returncode != 0:
             return None
@@ -1715,7 +1719,7 @@ def _sim_live_launchd(table, udid):
     if len(pids) != 1:  # none, or two: no single launchd_sim is this boot, so unclear
         return None, None
     try:
-        answer = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", str(pids[0])],
+        answer = _nowindow.run(["ps", "-o", "pid=,lstart=", "-p", str(pids[0])],
                                 capture_output=True, text=True, timeout=30, env=_ps_env())
         if answer.returncode == 0:
             for line in answer.stdout.splitlines():
@@ -1795,7 +1799,7 @@ def sim_tier(confirm, record_path=None):
             decision["action"] = "shutdown"
             if confirm:
                 try:
-                    run = subprocess.run(["xcrun", "simctl", "shutdown", udid],
+                    run = _nowindow.run(["xcrun", "simctl", "shutdown", udid],
                                          capture_output=True, text=True, timeout=60)
                     if run.returncode != 0:
                         decision["error"] = "exit %d" % run.returncode
@@ -1912,7 +1916,7 @@ def _ps_env():
 def _read_ps_table():
     """`{pid: (ppid, uid, command)}` (strings) from ONE `ps`, or None when it could not answer."""
     try:
-        answer = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
+        answer = _nowindow.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
                                 capture_output=True, text=True, timeout=30, env=_ps_env())
     except Exception:
         return None
@@ -1986,7 +1990,7 @@ def _read_all_cwds_macos(timeout=60):
     per-pid `None`). An EMPTY table is also `None`: lsof printed nothing, which cannot be
     "no process anywhere"."""
     try:
-        answer = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
+        answer = _nowindow.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
                                 timeout=timeout)
     except Exception:
         return None
@@ -2613,7 +2617,7 @@ def run_repo_reaper(root: str):
     if npm is None:
         return "npm not found"
     try:
-        done = subprocess.run(
+        done = _nowindow.run(
             [npm, "run", REAPER_SCRIPT, "--", "--remove"], cwd=root, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=REAPER_TIMEOUT_SECONDS,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
@@ -2667,7 +2671,7 @@ def _fetch_prune(root: str) -> bool:
     if left <= 0:
         return False
     try:  # prompts off: an unattended run never waits on a login window
-        done = subprocess.run(
+        done = _nowindow.run(
             ["git", "-C", root, "fetch", "--prune", "--no-tags"], capture_output=True, timeout=left,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
     except Exception:

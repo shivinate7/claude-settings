@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
 import agent_end_reap  # noqa: E402
 import sweep  # noqa: E402
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 VCS = "g" + "it"
 IDENT = ["-c", "user.email=reap-proof@example.invalid", "-c", "user.name=reap-proof"]
@@ -45,7 +46,7 @@ def git_bash():
 
 
 def vcs(where, *args):
-    answer = subprocess.run([VCS, "-C", where, *IDENT, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+    answer = _nowindow.run([VCS, "-C", where, *IDENT, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                             timeout=20)
     if answer.returncode != 0:
         sys.exit("proof setup failed: %s %s: %s" % (VCS, " ".join(args), answer.stderr.strip()))
@@ -62,7 +63,7 @@ def start_leaking_server(cwd, port):
     python = sys.executable.replace("\\", "/")
     script = ('"%s" -m http.server %d --bind 127.0.0.1 >/dev/null 2>&1 </dev/null &\n'
               "echo started" % (python, port))
-    subprocess.run([git_bash(), "-c", script], cwd=cwd, capture_output=True, timeout=20)
+    _nowindow.run([git_bash(), "-c", script], cwd=cwd, capture_output=True, timeout=20)
     deadline = time.time() + 15
     while time.time() < deadline:  # bounded readiness read for a fixture this file started
         for entry in sweep.list_listeners() or []:
@@ -111,13 +112,13 @@ def main(argv):
         env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
         if old:
             print("firing: sweep.py --confirm on the primary checkout (the cleanup before this fix)")
-            subprocess.run([sys.executable, os.path.join(HERE, "sweep.py"), primary, "--confirm"],
+            _nowindow.run([sys.executable, os.path.join(HERE, "sweep.py"), primary, "--confirm"],
                            env=env, capture_output=True, text=True, timeout=120)
         else:
             payload = {"hook_event_name": "SubagentStop", "agent_id": id_a, "cwd": wt_a,
                        "session_id": "proof"}
             print("firing: agent_end_reap.py with SubagentStop for agent-%s" % id_a)
-            subprocess.run([sys.executable, os.path.join(HERE, "agent_end_reap.py")],
+            _nowindow.run([sys.executable, os.path.join(HERE, "agent_end_reap.py")],
                            input=json.dumps(payload), env=env, capture_output=True, text=True,
                            timeout=120)
             with open(os.path.join(config, "state", "agent-end-payloads.jsonl")) as handle:

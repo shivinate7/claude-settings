@@ -49,6 +49,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
 import guard  # noqa: E402
 import sweep  # noqa: E402
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+    _nowindow = subprocess
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
@@ -147,7 +151,7 @@ def parent_pid(pid: int):
     if sys.platform.startswith("win"):
         return sweep._parent_pid_windows(pid)
     try:
-        answer = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
+        answer = _nowindow.run(["ps", "-o", "ppid=", "-p", str(pid)],
                                 capture_output=True, text=True, timeout=5)
         return int(answer.stdout.strip()) if answer.returncode == 0 else None
     except Exception:
@@ -277,7 +281,7 @@ def reap_build_dirs(target: str, cwds):
         doomed.append(new)
     if doomed:
         try:
-            subprocess.Popen([sys.executable, "-c", DELETE_CHILD, *doomed], stdin=subprocess.DEVNULL,
+            _nowindow.Popen([sys.executable, "-c", DELETE_CHILD, *doomed], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         except OSError:

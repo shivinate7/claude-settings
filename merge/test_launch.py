@@ -42,7 +42,8 @@ class Launch(unittest.TestCase):
         sh(self.t, "git", "init", "-q", "-b", "main", self.work, env=self.env)
         os.makedirs(os.path.join(self.work, "bin"))
         os.makedirs(os.path.join(self.work, "merge"))
-        for f in ("bin/merge", "merge/launch.py"):
+        os.makedirs(os.path.join(self.work, "hooks"))
+        for f in ("bin/merge", "merge/launch.py", "hooks/_nowindow.py"):  # launch.py imports the helper from hooks/
             shutil.copy(os.path.join(ROOT, f), os.path.join(self.work, f))
         put(os.path.join(self.work, "notes.txt"), "clean\n")
         self.release("v1")
