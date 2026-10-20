@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Edit or Write of prose, against speak-rewrite-superseded-in-place and
 rulings-declare-kind. One command hook replaces the two `type: prompt` hooks on Edit and Write: a
-prompt hook cannot look at the path, so it paid a model call for every file.
+prompt hook cannot look at the path, so it judged every file.
 
-Only a path ending `.md` (any case), or one under a decisions/ or debts/ folder, is judged. Any other
+Only a path with a `decisions` folder segment (either slash, any case) is judged. Any other
 path exits 0 at once with no output and no model call. The model call is `decision_watch.invoke_model`,
 the one home for it.
 
@@ -22,7 +22,6 @@ from decision_watch import invoke_model  # looked up at call time, so a test can
 
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}
-RECORD_DIRS = ("decisions", "debts")
 
 COMMON = (
     "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
@@ -48,7 +47,7 @@ RULES = {
 
 def is_prose(path):
     parts = path.replace("\\", "/").lower().split("/")
-    return parts[-1].endswith(".md") or any(p in RECORD_DIRS for p in parts[:-1])
+    return "decisions" in parts[:-1]
 
 
 def main():
