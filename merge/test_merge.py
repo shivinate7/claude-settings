@@ -3596,6 +3596,32 @@ class PrBodyEscape(Env):
         rc, out = self.preview()
         self.assertEqual(rc, 0, out)
         self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
+    def test_the_undo_memo_is_not_reused_across_pr_bodies(self):
+        SilentUndo.stale_feat(self)
+        co = self.co
+        sh(co, "git", "fetch", "-q", "origin")
+        sh(co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        excuse = "Drops-lines: docs/decisions/first.md -- the lines are dead"
+        cwd = os.getcwd()
+        os.chdir(co)
+        try:
+            for first, second in (("", excuse), (excuse, "")):
+                with self.subTest(first=first, second=second):
+                    merge.UNDO_MEMO.clear()
+                    outcomes = []
+                    for body in (first, second):
+                        try:
+                            with contextlib.redirect_stdout(io.StringIO()):
+                                merge.undo_check(co, "origin/main", pr_body=body)
+                            outcomes.append("ok")
+                        except merge.Stop:
+                            outcomes.append("refused")
+                    want = ["ok" if b else "refused" for b in (first, second)]
+                    self.assertEqual(outcomes, want)
+        finally:
+            os.chdir(cwd)
+            merge.UNDO_MEMO.clear()
+
 
 class StampEnv(unittest.TestCase):
     def test_the_stamp_child_never_sees_the_runners_ref(self):

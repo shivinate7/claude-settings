@@ -230,6 +230,66 @@ class PrBodyEscape(unittest.TestCase):
         self.assertEqual(got, [])
         self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
 
+    # Trailer rule for the body: drop fenced blocks and <!-- --> comments first, then only the last paragraph counts.
+    LINE = "Drops-lines: app.txt -- the owner wants Card back"
+
+    def excused(self, body):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        return got == [] and notes == ["ALLOWED app.txt: the owner wants Card back"], (got, notes)
+
+    def assert_nothing_excused(self, bodies):
+        for body in bodies:
+            with self.subTest(body=body):
+                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+                self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_line_inside_a_fenced_block_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "```\n%s\n```\n" % L,
+            "Example of the trailer:\n\n```\n%s\n```\n" % L,
+            "```text\n%s\n```\n\nDone.\n" % L,
+            "~~~\n%s\n~~~\n" % L,
+        ])
+
+    def test_a_line_inside_an_html_comment_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "<!--\n%s\n-->\n" % L,
+            "<!-- template\n%s -->\n" % L,
+            "Summary.\n\n<!--\nold note\n\n%s\n-->\n" % L,
+            "<!-- %s -->\n" % L,  # not at column 0: a guard that must stay green
+        ])
+
+    def test_a_line_in_an_earlier_paragraph_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "%s\n\nSome closing prose.\n" % L,
+            "Summary.\n\n%s\n\nTest plan: ran it.\n" % L,
+        ])
+
+    def test_a_line_in_the_last_paragraph_excuses_its_path(self):  # control
+        L = self.LINE
+        for body in ("Summary.\n\n%s\n" % L,
+                     "Summary.\n\nCo-Authored-By: x <x@x>\n%s\n" % L,
+                     "%s\n" % L):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_trailing_blank_lines_a_fence_or_a_comment_do_not_hide_the_last_paragraph(self):  # control
+        # Pick: drop fences and comments first, then take the last paragraph. A PR template often ends with a
+        # checklist fence or a comment; the trailer above it is still the last prose paragraph.
+        L = self.LINE
+        for body in ("Summary.\n\n%s\n\n\n" % L,
+                     "Summary.\n\n%s\n\n```\nlog output\n\nmore\n```\n" % L,
+                     "Summary.\n\n%s\n\n<!--\nreviewer note\n-->\n" % L,
+                     "Summary.\n\n%s\n\n```\nx\n```\n\n<!-- y -->\n\n" % L):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
