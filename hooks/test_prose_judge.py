@@ -19,9 +19,9 @@ Interface the hook must match:
   time in the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
   shape={"ok": (True, False)})`, returning (verdict_dict, error) as reply_judge.py uses it. The
   prompt is the first positional argument. The module exposes the int `MODEL_TIMEOUT`.
-- Which files: a path ending `.md` (any case) is judged. A path under a `decisions/` or `debts/`
-  folder is judged (records are Markdown). Any other path ends the hook at once: no model call, empty
-  stdout, exit 0.
+- Which files: a path with a `decisions` folder segment (either slash, any case) is judged, as main's
+  `Edit(**/decisions/**)` rows did. Any other path ends the hook at once: no model call, empty
+  stdout, exit 0. That covers README.md, docs/x.md, debts/x.md and a file named decisions.md.
 - The prompt holds the rule text of today's prompt hook for that tool, verbatim (EDIT_RULE and
   WRITE_RULE below), and the change: file_path, and for Edit old_string and new_string, for Write content.
 - Block: model answer `{"ok": false, "reason": R}` -> stdout is one JSON object
@@ -140,7 +140,8 @@ def need_module():
 
 # (a) a path that is not prose ends the hook at once.
 SKIP_PATHS = ["src/app.ts", "src/App.tsx", "settings.json", "hooks/guard.py", "C:\\r\\lint\\x.json",
-              "notes.md.json", "docs.md/run.py", "README.md.bak"]
+              "notes.md.json", "docs.md/run.py", "README.md.bak", "README.md", "docs/x.md", "debts/x.md",
+              "debts/x.json", "src/decisions.md"]
 
 
 def case_a_other_paths_make_no_model_call():
@@ -164,8 +165,8 @@ def case_a_prose_named_in_a_ts_body_is_not_judged():
     check("a: .ts body that names a .md file: no call, no output", stub.prompts == [] and out == "" and code == 0)
 
 
-# (b) a .md file is judged once, with the verbatim rule text and the change.
-MD_PATHS = ["README.md", "docs/a.md", "C:\\Users\\x\\repo\\notes\\A.md", "README.MD"]
+# (b) a file under a decisions folder is judged once, with the verbatim rule text and the change.
+MD_PATHS = ["decisions/x.md", "C:\\repo\\decisions\\x.md", "a/DECISIONS/x.md", "decisions/sub/x.md"]
 
 
 def case_b_md_edit_calls_model_once_with_rule_and_change():
@@ -198,7 +199,7 @@ def case_b_md_write_calls_model_once_with_rule_and_change():
 def case_b_model_call_shape_and_timeout():
     if not need_module():
         return
-    _, _, stub = run(edit("a.md"))
+    _, _, stub = run(edit("decisions/a.md"))
     kw = stub.kwargs[0] if stub.kwargs else {}
     check("b: shape is the ok/not-ok verdict", kw.get("shape") == {"ok": (True, False)}, kw)
     check("b: timeout is MODEL_TIMEOUT", isinstance(getattr(pj, "MODEL_TIMEOUT", None), int)
@@ -213,9 +214,9 @@ def case_b_model_call_shape_and_timeout():
           len(rows) == 1 and rows[0].get("timeout", 0) > pj.MODEL_TIMEOUT, rows)
 
 
-# (c) decision records are judged.
-def case_c_decision_and_debt_records_are_judged():
-    for path in ("decisions/x.md", "debts/x.md", "docs/decisions/x.md"):
+# (c) a decisions folder deeper in the path is judged too.
+def case_c_decisions_folder_is_judged():
+    for path in ("docs/decisions/x.md", "Decisions/x.md"):
         for payload in (edit(path), write(path)):
             if not need_module():
                 return
@@ -225,7 +226,7 @@ def case_c_decision_and_debt_records_are_judged():
 
 # (d) a model block answer blocks; a model failure fails open.
 def case_d_model_block_denies_with_the_reason():
-    for payload in (edit("a.md"), write("decisions/x.md")):
+    for payload in (edit("decisions/a.md"), write("decisions/x.md")):
         if not need_module():
             return
         code, out, _ = run(payload, ({"ok": False, "reason": REASON}, None))
@@ -240,7 +241,7 @@ def case_d_model_block_denies_with_the_reason():
 
 def case_d_model_error_fails_open():
     for result in ((None, "model subprocess timed out"), (None, "model exited 1: x"), RuntimeError("boom")):
-        for payload in (edit("a.md"), write("a.md")):
+        for payload in (edit("decisions/a.md"), write("decisions/a.md")):
             if not need_module():
                 return
             name = "d: %s fail-open on %r" % (payload["tool_name"], result)
@@ -270,7 +271,7 @@ def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
                  case_b_md_write_calls_model_once_with_rule_and_change,
-                 case_b_model_call_shape_and_timeout, case_c_decision_and_debt_records_are_judged,
+                 case_b_model_call_shape_and_timeout, case_c_decisions_folder_is_judged,
                  case_d_model_block_denies_with_the_reason, case_d_model_error_fails_open,
                  case_d_bad_input_allows):
         try:
