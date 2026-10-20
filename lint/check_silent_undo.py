@@ -86,14 +86,21 @@ def absent(cwd, rev, path):
     return ""
 
 
+ATTRIBUTION = "Generated with [Claude Code](https://claude.com/claude-code)"
+
+
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body. A line with no reason excuses nothing.
-    The body reads as git reads a message: fenced blocks and <!-- --> comments drop out, then only the last paragraph counts."""
+    The body reads as git reads a message: fenced blocks and <!-- --> comments drop out, then only the last paragraph counts,
+    skipping closing paragraphs that hold only the Claude Code attribution line."""
     _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
     prose = re.sub(r"^ {0,3}(```|~~~).*?(?:^ {0,3}\1[^\n]*|\Z)", "", pr_body, flags=re.M | re.S)  # an unclosed fence runs to the end
     prose = re.sub(r"<!--.*?(?:-->|\Z)", "", prose, flags=re.S)
-    last = re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n").strip())[-1]
+    paras = re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n").strip())
+    while len(paras) > 1 and norm(paras[-1]).removeprefix("\U0001F916 ") == ATTRIBUTION:
+        paras.pop()
+    last = paras[-1]
     body = re.findall(r"^" + TRAILER + r":(.*)$", last, re.I | re.M | re.ASCII)
     res = {}
     for line in out.splitlines() + body:
