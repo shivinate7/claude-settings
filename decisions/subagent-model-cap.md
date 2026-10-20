@@ -46,7 +46,8 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
 | safety-classifier fallback | on, the default | n/a |
-| prompt-hook judges: AskUserQuestion, Agent, Edit, Write, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| prompt-hook judges: AskUserQuestion, Agent, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a `.md` path or a decisions/ or debts/ folder) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | feedback judge (`hooks/feedback_judge.py`, a detached child of `hooks/local_time.py`; runs only while `fb` capture is open and the prompt does not open with `fb`) | claude-sonnet-5-5, through `decision_watch.invoke_model` | xhigh |
 | question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
