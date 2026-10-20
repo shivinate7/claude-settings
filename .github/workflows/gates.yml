@@ -338,7 +338,7 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
-      # Last step, so a red mod test skips none of the steps above, and a red step above does not hide
+      # This step and the skill test step below come last, so a red test in them skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
       # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
       # fails the step. The find runs first and fails the step if it errors or lists nothing. No pipe.
@@ -353,6 +353,19 @@ jobs:
             node "$f" || fail=1
           done <<< "$list"
           exit "$fail"
+
+      # The plain-english-map skill: its tests load typescript from this checkout's node_modules, as an
+      # install does. They run from the skill's own tests/ folder, with no q_max path. Same `mods` flag
+      # as the step above. A .md path under skills/plain-english-map/ turns `mods` on through its own
+      # arm in harness-scope.sh. Any other path under the skill, or package*.json, turns it on, because
+      # harness-scope.sh runs every job for a path it does not name.
+      - name: Plain-english-map skill tests
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        shell: bash
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd skills/plain-english-map/tests
+          node --test
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
