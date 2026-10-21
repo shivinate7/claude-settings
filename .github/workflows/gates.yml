@@ -412,6 +412,12 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
+      - name: Install bin eol test, Windows PowerShell 5.1
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        timeout-minutes: 3
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
+
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either. gates-macos
   # below covers the rest of the suite, so this job stays narrow, on purpose.
