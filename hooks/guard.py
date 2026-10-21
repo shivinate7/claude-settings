@@ -219,8 +219,8 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
-            cmd_exe_delete_hit, linked_nm_hit, parent_delete_hit, push_target, push_text, push_verdict,
-            rm_delete_hit,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
+            push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -1980,7 +1980,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
-    delete_segments = split_segments(cmd)
+    # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
+    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
     for number in range(len(delete_segments)):
         matched, reason = parent_delete_hit(delete_segments, number, cwd)
         if matched:
@@ -1989,7 +1990,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in split_segments(cmd):
+    for segment in delete_segments:
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)

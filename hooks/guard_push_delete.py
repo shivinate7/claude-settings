@@ -10,9 +10,9 @@ import stat
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
-    _segment_git_c_target, shell_abs, CONTRACTION, quote_advance,
+    _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, resolve_command, segment_tokens, split_segments,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -218,7 +218,22 @@ WIDE_TARGET = (
 )
 # The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
-# parse, so an unmatched quote elsewhere in the line does not hide a delete.
+# parse. There a match inside quotes is text too, and a quote the shell leaves open hides what
+# follows it, as it does from the shell. An escaped quote (`it\'s`, kept by `delete_text`) and a
+# contraction open no quote.
+_ESCAPED = re.compile(r"\\(.?)", re.S)
+
+
+def delete_text(segment):
+    """`segment` with its backslashes turned into slashes, as `norm` does, so `C:\\` reads as `C:/`.
+    In bash a backslash before a quote stays: `it\\'s` and `"a\\"b"` open no quote, and `it/'s`
+    would. Each pair is read whole, so `\\\\'` is an escaped backslash and then an open quote."""
+    if is_powershell(segment):
+        return type(segment)(norm(segment))
+    return type(segment)(_ESCAPED.sub(
+        lambda m: m.group(0) if m.group(1) in ("'", '"') else "/" + norm(m.group(1)), segment))
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
@@ -312,6 +327,21 @@ def _in_group(args, tick=False):
     return out
 
 
+def _git_subcommands(words):
+    """The indexes of the words that name a git subcommand, such as the `rm` of `git rm -r .`. Such
+    a word is no command word. A force flag keeps the word read: `git rm` without one refuses to drop an edited
+    file, so git can restore what it removes, and `git rm -f` discards the edits."""
+    found = set()
+    for at, word in enumerate(words):
+        if basename(word) in ("git", "git.exe"):
+            sub = _git_subcommand_index(words, at)
+            args = words[sub + 1:]
+            args = args[:args.index("--")] if "--" in args else args
+            if not any(a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
+                found.add(sub)
+    return found
+
+
 def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
@@ -337,7 +367,7 @@ def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
                 if found:
                     return found
     words, bare = bare_words(segment)
-    for at in sorted(bare):
+    for at in sorted(bare - _git_subcommands(words)):
         opened = SUBST_OPEN.match(words[at])
         word = words[at][opened.end():] if opened else words[at]
         args = _in_group(words[at + 1:], bool(opened) and opened.group(1) == "`")
