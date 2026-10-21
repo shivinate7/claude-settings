@@ -240,7 +240,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
+            "command": "case \"$(uname -s 2>/dev/null)\" in MINGW*|MSYS*|CYGWIN*) exit 0;; esac; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
             "timeout": 10
           }
         ]
@@ -332,7 +332,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "command -v xcrun >/dev/null 2>&1 || exit 0; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -407,7 +407,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; i=$(cat); case \"$i\" in *[Rr][Ee][Aa][Dd][Yy]*) ;; *) exit 0;; esac; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\"; exit $?; done; exit 0",
             "timeout": 3600,
             "asyncRewake": true
           }
@@ -418,7 +418,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "command -v xcrun >/dev/null 2>&1 || exit 0; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 600
           }
         ]
