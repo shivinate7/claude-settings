@@ -15,8 +15,9 @@ Interface the hook must match:
 - File: hooks/prose_judge.py. Module-level `main()`; exit 0 on every path (a return or SystemExit(0)).
 - Payload: `{"hook_event_name": "PreToolUse", "tool_name": "Edit"|"Write", "tool_input": {...}}`.
   Edit input: file_path, old_string, new_string. Write input: file_path, content.
-- The model caller is `invoke_model` imported from hooks/decision_watch.py and looked up at call
-  time in the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
+- The model caller is `invoke_model`, a module-level function of hooks/prose_judge.py that calls
+  hooks/decision_watch.py's `invoke_model` on first use. main() looks the name up at call time in
+  the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
   shape={"ok": (True, False)})`, returning (verdict_dict, error) as reply_judge.py uses it. The
   prompt is the first positional argument. The module exposes the int `MODEL_TIMEOUT`.
 - Lazy load: the hook loads no other module of this repo (decision_watch, guard, and what they pull
@@ -271,8 +272,9 @@ def case_d_bad_input_allows():
         check("d: bad input %r: no call, no deny, exit 0" % raw[:20],
               stub.prompts == [] and "deny" not in out and code == 0, (code, out))
 
-# (e) nothing heavy loads until the hook has work. Each case runs the hook in a fresh interpreter,
-# because the other cases import decision_watch into this process.
+# (e) nothing heavy loads until the hook has work. Each case runs the hook in a fresh interpreter:
+# sys.modules here is shared by every case, so only a new process shows what this hook alone loads,
+# and the stand-in for decision_watch must not leak into the other cases.
 CHILD = r"""
 import io, json, os, sys, types
 hooks, root, mode = sys.argv[1:4]
@@ -299,6 +301,7 @@ root = os.path.normcase(os.path.abspath(root))
 loaded = sorted(n for n, m in sys.modules.items() if n != "prose_judge" and getattr(m, "__file__", None)
                 and os.path.normcase(os.path.abspath(m.__file__)).startswith(root))
 sys.stdout.write("\n" + json.dumps({"code": code, "calls": calls, "loaded": loaded}))
+sys.exit(code)  # as the hook's own `sys.exit(main())` does, so the parent reads main's exit code
 """
 
 
