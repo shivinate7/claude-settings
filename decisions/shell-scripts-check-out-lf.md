@@ -16,4 +16,5 @@ Why: on Windows, `core.autocrlf=true` checked out the pin's `bin/rm` with CRLF, 
 - A checkout made before the rule keeps its CRLF files until they are checked out again.
 
 Kind: build
+Plan: decisions/shell-scripts-check-out-lf.md#the-ruling (all)
 Home: .gitattributes
