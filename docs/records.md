@@ -60,7 +60,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verification-recovery-not-gated-on-own-state` | A recovery control must not depend on the state it recovers, or it fails on the one day it is needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-verify-against-repo` | Verify long work against the repo, not your status line. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-never-dry-run-blocklist` | Never dry-run a block-list. | [`CLAUDE.md`](../CLAUDE.md) |
-| `verification-bump-first-fix-version` | Bump a dependency to the first version fixing the problem, never the latest. | [`CLAUDE.md`](../CLAUDE.md) |
+| `verification-newest-that-passes` | Take the newest version that passes its checks. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-report-unknown-reads` | Verify a claim before you rely on it, a document's own claims too. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-never-load-whole-doc` | Never load a long document whole. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -174,6 +174,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `stop-guardrail-became-a-command-hook` | The Stop guardrail is never a `type: agent` hook. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
 | `subagent-model-cap` | Each agent role has its own model and effort, in the table below. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
+| `subagent-powershell-tool` | With Claude Code's PowerShell tool. | [`decisions/subagent-powershell-tool.md`](../decisions/subagent-powershell-tool.md) |
 | `sweep-shuts-down-idle-simulators` | Sessions boot simulators. The sweep stops idle ones. | [`decisions/sweep-shuts-down-idle-simulators.md`](../decisions/sweep-shuts-down-idle-simulators.md) |
 | `test-strategy-reset` | A test must not fail on runner speed. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
 | `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch that holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
