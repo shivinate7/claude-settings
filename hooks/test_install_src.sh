@@ -2417,7 +2417,9 @@ guardset2() {
   file="$proj/.claude/settings.local.json"
   printf '{"env": {"%s": "sonnet"}}\n' "$key" > "$file"
   rm -f "$cfg/hooks/shared_names.py"
-  payload=$(printf '{"tool_name": "Bash", "tool_input": {"command": "cp x .claude/settings.local.json"}, "cwd": "%s", "session_id": "c"}' "$proj")
+  # Claude Code sends a native cwd. On Windows the MSYS form (/c/...) is no folder to native Python.
+  wproj=$(cd "$proj" && pwd -W 2>/dev/null || pwd)
+  payload=$(printf '{"tool_name": "Bash", "tool_input": {"command": "cp x .claude/settings.local.json"}, "cwd": "%s", "session_id": "c"}' "$wproj")
   watch_run() {
     printf '%s' "$payload" | env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" HOME="$h" PYTHONPATH= \
       python3 -B "$cfg/hooks/config_watch.py" 2> "$work/guardset2-err"
