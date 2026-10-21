@@ -175,9 +175,12 @@ def case_no_literal_machine_tags_elsewhere():
             with open(path, encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
             # Any string literal equal to a tag is a copy, whether alone or in a collection.
+            # A tag without its angle brackets, as str or bytes (a pre-filter), is a copy too.
+            bare = {t.strip("<>") for t in MACHINE_TAGS}
             found += ["%s/%s:%d" % (folder, name, n.lineno) for n in ast.walk(tree)
-                      if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                      and n.value in MACHINE_TAGS]
+                      if isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes))
+                      and (n.value.decode("utf-8", "replace") if isinstance(n.value, bytes)
+                           else n.value) in set(MACHINE_TAGS) | bare]
     return not found, "literal copies of a machine tag: %s" % (found or "none")
 
 
