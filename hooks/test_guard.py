@@ -5779,8 +5779,7 @@ for _name, _command in (
 # MUTATE_ONLY=rm-parent runs this block and nothing else. The existing `delete:` cases pin the rest.
 # Where a folder change comes first (`cd`, `pushd`, `Set-Location`, `sl`, `chdir`) the reason must
 # also say how to write the delete so it passes.
-RM_PARENT_HINT = (("rm -rf ./build", "rm -rf build", "Remove-Item -Recurse build",
-                   "Remove-Item -Recurse ./build"),)
+RM_PARENT_HINT = {"Bash": "rm -rf build", "PowerShell": "Remove-Item -Recurse build"}
 
 
 def rm_parent(name, command, expected="deny", **kw):
@@ -5799,6 +5798,10 @@ for _flags in ("-rf", "-r -f", "-fr", "-Rf", "-rfv", "-r", "-R", "--recursive",
 for _target in ("./", "../", "../..", "./..", "../../..", ".\\", "..\\", "..\\..", '"."', '".."',
                 "'..'", '"../.."'):
     rm_parent("rm -r " + _target, "rm -r " + _target)
+# A root, a home and the glob of a parent, recursive with no force flag.
+for _command in ("rm -r /", "rm -R /", "rm --recursive /", "rm -r ~", "rm -r ~/", "rm -r ~/*",
+                 "rm -r ../*", "rm -r ../../*"):
+    rm_parent(_command, _command)
 # A segment shlex cannot parse (one lone quote) is read as raw text: the same act must still deny.
 for _command in ("rm -rf .. it's", "rm -rf ../ it's", "rm -r .. it's", "rm -r ./ it's"):
     rm_parent("a lone apostrophe: " + _command, _command)
@@ -5841,7 +5844,7 @@ for _tool, _command in (
     ("PowerShell", "Set-Location build\nri -r .."),
 ):
     rm_parent("a folder change ahead of it: " + _command, _command, tool=_tool,
-              carries=RM_PARENT_HINT)
+              carries=RM_PARENT_HINT[_tool])
 # Scanner pins (building-scanner-respects-strings) for the same reads: a comment opener inside
 # quotes, a multi-line quote and a lone apostrophe ahead of the delete must hide nothing.
 for _name, _command in (
@@ -5857,7 +5860,7 @@ for _name, _command in (
     ("a // inside quotes", 'echo "a // b"; cd build && rm -r .'),
     ("a multi-line quote", 'echo "first line\nsecond line"\ncd build\nrm -r .'),
 ):
-    rm_parent("the folder change behind " + _name, _command, carries=RM_PARENT_HINT)
+    rm_parent("the folder change behind " + _name, _command, carries=RM_PARENT_HINT["Bash"])
 
 # The working folder and its parents by ABSOLUTE path, in every spelling Windows reads: `C:/x`,
 # `C:\x` and Git Bash `/c/x`. NOGIT is the working folder of each case, and ROOT is its parent.
