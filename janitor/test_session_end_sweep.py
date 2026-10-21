@@ -533,7 +533,7 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
 
 
-FETCH_THROTTLE_SECONDS = 600  # the window: one fetch per repository per 10 minutes
+from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home
 
 
 def make_repo_with_remote(where):
@@ -733,6 +733,42 @@ class SessionEndFetchThrottle(unittest.TestCase):
         listed = run_vcs(repo, "worktree", "list", "--porcelain").stdout
         self.assertNotIn(os.path.basename(gone), listed,
                          "a throttled call must still prune a stale worktree registration")
+
+
+    def pushed_branch(self, repo, name):
+        """A branch with one commit no other branch holds, pushed to origin, `main` checked out."""
+        require(run_vcs(repo, "checkout", "-q", "-b", name).returncode == 0, "checkout %s" % name)
+        write(os.path.join(repo, name + ".txt"), name + chr(10))
+        require(run_vcs(repo, "add", "-A").returncode == 0, "add %s" % name)
+        require(run_vcs(repo, *IDENT, "commit", "-q", "-m", name).returncode == 0, "commit %s" % name)
+        require(run_vcs(repo, "push", "-q", "origin", name).returncode == 0, "push %s" % name)
+        require(run_vcs(repo, "checkout", "-q", "main").returncode == 0, "back to main")
+
+    def test_a_throttled_call_reaps_no_branch_on_a_stale_on_remote_read(self):
+        # The remote lost `gone-upstream` after our last fetch, so the local remote-tracking ref
+        # is stale and the branch holds the only copy of its commit. A throttled run must keep
+        # it, as a fetching run on the same state does. `still-pushed` is on the remote now, but
+        # a throttled run cannot know that from a ref up to 10 minutes old: it is kept too.
+        repo = self.repo("throttle_stale_remote")
+        remote = repo + "_remote.git"
+        self.session_end(repo)  # fetches, records the time
+        self.pushed_branch(repo, "gone-upstream")
+        self.pushed_branch(repo, "still-pushed")
+        require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
+        first = self.counts(repo)
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+        self.assertIn("gone-upstream", local_branches(repo),
+                      "a throttled call reaped a branch holding the only copy, on a stale ref")
+        self.assertIn("still-pushed", local_branches(repo),
+                      "a throttled call reaped a branch on the strength of an on-remote read")
+        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
+        self.assertIn("gone-upstream", local_branches(repo),
+                      "a fetching run must keep the only copy once the stale ref is pruned")
+        self.assertNotIn("still-pushed", local_branches(repo),
+                         "a fetching run must still reap a branch the fresh remote holds")
 
 
 if __name__ == "__main__":
