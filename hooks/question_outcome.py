@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 from decision_watch import invoke_model  # noqa: E402  looked up at call time, in main()
 from _transcript import is_last_human, safe_finding_text, tail_records  # noqa: E402
 from rule_audit import ANCHOR_RE  # noqa: E402  the one anchor parser (lint/ lands beside hooks/)
+from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the notice tags
 
 RULE = "style-question-restates-goal"
 # THE TIME BUDGET. One git call and one model call per ask, so the settings.json PreToolUse
@@ -46,7 +47,6 @@ CUT_MARK = "[older text cut to fit the budget]"
 # Real descriptions run to 375 chars at p99 (605 max), and the Loss text sits at the end.
 OPTION_PART_CAP = 800
 OPTION_CUT = " [cut]"
-MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
 RELAY_TAG = re.compile(r"<cross-session-message\b[^>]*>(.*?)</cross-session-message>", re.DOTALL)
 # The two labels. Each sits in its style-file rule bullet; every use below reads these.
 GOAL_LABEL = "Goal:"

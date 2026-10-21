@@ -24,7 +24,7 @@ when the Sonnet judge says a prompt is not feedback. Every prompt is saved first
 (feedback_judge.py) judges it, off the prompt path: the call takes 8 s or more. On a not-feedback
 answer the child adds a note item under that message and closes capture, if no newer message was
 captured. A failed or late judge changes nothing. A notice (a prompt that starts with a
-question_outcome.MACHINE_TAGS tag) is never captured or judged, and does not close capture. With
+shared_names.MACHINE_TAGS tag) is never captured or judged, and does not close capture. With
 capture closed, no `fb ... done` form opens it;
 with capture open, `fb - done` is captured as a message.
 While open, each prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md in a
@@ -48,6 +48,7 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
+from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
 
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture
@@ -134,8 +135,7 @@ def capture(raw, stamp, at=None):
         return
     inbox, marker = paths
     said = prompt.strip()
-    import question_outcome  # the one list of notice tags; loaded only when a prompt arrives
-    if said.startswith(question_outcome.MACHINE_TAGS):
+    if said.startswith(MACHINE_TAGS):
         return  # a notice is not an owner message: never captured, judged or closing
     at = at or clock()
     opened = is_open(marker, at)
