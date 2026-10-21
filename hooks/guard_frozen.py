@@ -86,7 +86,7 @@ CONFIG_FROZEN_SKILLS = (
 LIVE_PIN_SUFFIX = "-live"
 _LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<stamp>-[0-9a-f]{12})?")
 _CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
-PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
+from shared_names import PROJECT_FROZEN_FILES  # noqa: E402  the one home, shared with the config watch
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 
 FROZEN_REASON = (

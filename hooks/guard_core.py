@@ -1741,10 +1741,7 @@ def worktree_prune_subject(args, where: str):
     return not (answer.stdout.strip() or answer.stderr.strip())
 
 
-def config_dir() -> str:
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
-        os.path.expanduser("~"), ".claude"
-    )
+from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
 def _expanded(path: str, cwd: str) -> str:

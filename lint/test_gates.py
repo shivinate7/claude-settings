@@ -2819,7 +2819,8 @@ def gl_copy_tree(root, old_transcript=False):
         if not os.path.basename(src).startswith("test_"):
             shutil.copy(src, lint_copy)
     os.makedirs(os.path.join(root, "hooks"))
-    shutil.copy(os.path.join(HOOKS, "guard_core.py"), os.path.join(root, "hooks"))
+    for name in ("guard_core.py", "shared_names.py"):  # guard_core imports shared_names with no fallback
+        shutil.copy(os.path.join(HOOKS, name), os.path.join(root, "hooks"))
     if old_transcript:
         path = os.path.join(lint_copy, "_transcript.py")
         with open(path, encoding="utf-8") as handle:
@@ -2932,7 +2933,8 @@ class SteGateLogTests(unittest.TestCase):
                 shutil.copy(src, lint_copy)
         if with_guard_core:
             os.makedirs(os.path.join(root, "hooks"))
-            shutil.copy(os.path.join(HOOKS, "guard_core.py"), os.path.join(root, "hooks"))
+            for name in ("guard_core.py", "shared_names.py"):  # guard_core imports shared_names with no fallback
+                shutil.copy(os.path.join(HOOKS, name), os.path.join(root, "hooks"))
         return os.path.join(lint_copy, "ste_gate.py")
 
     def _crash_gate(self):

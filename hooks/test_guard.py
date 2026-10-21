@@ -457,6 +457,15 @@ def slash(path):
     return path.replace("\\", "/")
 
 
+def copy_guard_family(dest):
+    """guard.py, its guard_* siblings and shared_names.py (which guard_core.py imports) from
+    GUARD's folder into `dest`. A copy without shared_names.py crashes on import."""
+    source = os.path.dirname(GUARD)
+    for name in os.listdir(source):
+        if (name.startswith("guard") and name.endswith(".py")) or name == "shared_names.py":
+            shutil.copy(os.path.join(source, name), dest)
+
+
 def write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
@@ -7364,9 +7373,7 @@ def cite_unread_folders_case():
     os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
     copy = os.path.join(folder, "hooks", "guard.py")
     os.makedirs(os.path.dirname(copy), exist_ok=True)
-    for name in os.listdir(os.path.dirname(GUARD)):
-        if name.startswith("guard") and name.endswith(".py"):
-            shutil.copy(os.path.join(os.path.dirname(GUARD), name), os.path.dirname(copy))
+    copy_guard_family(os.path.dirname(copy))
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
@@ -11198,9 +11205,7 @@ def merge_tool_missing_case():
     os.makedirs(os.path.dirname(copy), exist_ok=True)
     # The whole guard family beside GUARD (guard.py and its guard_* siblings), so the copy finds
     # guard_core.py. mutate_shared.guard_tree copies from the real hooks/, not from GUARD's folder.
-    for name in os.listdir(os.path.dirname(GUARD)):
-        if name.startswith("guard") and name.endswith(".py"):
-            shutil.copy(os.path.join(os.path.dirname(GUARD), name), os.path.dirname(copy))
+    copy_guard_family(os.path.dirname(copy))
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
@@ -11243,9 +11248,7 @@ def merge_import_exits_case():
     hooks = os.path.join(folder, "hooks")
     for sub in (hooks, os.path.join(folder, "merge"), os.path.join(folder, "lint"), os.path.join(folder, "cfg")):
         os.makedirs(sub, exist_ok=True)
-    for name in os.listdir(os.path.dirname(GUARD)):
-        if name.startswith("guard") and name.endswith(".py"):
-            shutil.copy(os.path.join(os.path.dirname(GUARD), name), hooks)
+    copy_guard_family(hooks)
     # Read at run time, so a fix to the real tool is the one this case judges.
     shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(folder, "merge", "merge.py"))
     env = dict(os.environ)
@@ -12712,6 +12715,7 @@ def _guard_copy(name, drop):
     for module in _guard_siblings(source):
         if module + ".py" != drop:
             shutil.copy(os.path.join(source, module + ".py"), folder)
+    shutil.copy(os.path.join(source, "shared_names.py"), folder)
     return folder
 
 
@@ -12925,6 +12929,7 @@ def _reload_copy_stamped(name, first_line_for):
         with open(src, encoding="utf-8") as handle:
             good[entry] = (first_line_for(entry) or "") + handle.read()
         _put_whole(os.path.join(folder, entry), good[entry])
+    shutil.copy(os.path.join(source, "shared_names.py"), folder)
     return folder, good
 
 
