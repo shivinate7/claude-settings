@@ -209,6 +209,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`debts/agent-end-log-loses-row.md`](../debts/agent-end-log-loses-row.md) |
+| `agents-write-main-clone` | On 2026-10-20 at 16:53 CDT, two lane agents working in scratchpad worktrees wrote into the main clone `C:\Users\ShivamSemwal\Clones\claude-settings` through relative paths. | [`debts/agents-write-main-clone.md`](../debts/agents-write-main-clone.md) |
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
@@ -224,6 +225,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`debts/hooks-to-mods-judges.md`](../debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
+| `install-checkout-flake` | On Windows CI the `install.sh` checkout-detection suite failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`debts/install-checkout-flake.md`](../debts/install-checkout-flake.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`debts/install-set-reads-held-file.md`](../debts/install-set-reads-held-file.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`debts/lane-cycle-delete-order.md`](../debts/lane-cycle-delete-order.md) |
 | `linked-nm-prefix-workspace` | `-w`, `--workspace` and `--prefix` change the folder npm works in. | [`debts/linked-nm-prefix-workspace.md`](../debts/linked-nm-prefix-workspace.md) |
@@ -232,6 +234,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`debts/merge-records-stale-base.md`](../debts/merge-records-stale-base.md) |
 | `merge-revert-cancels-running-ci` | `wait_checks` returns on the first red check while other jobs still run. | [`debts/merge-revert-cancels-running-ci.md`](../debts/merge-revert-cancels-running-ci.md) |
+| `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`debts/merge-silent-exit.md`](../debts/merge-silent-exit.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`debts/nowindow-bin-no-fallback.md`](../debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`debts/nowindow-ctrl-c-orphans.md`](../debts/nowindow-ctrl-c-orphans.md) |
 | `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`debts/nowindow-fallback-silent.md`](../debts/nowindow-fallback-silent.md) |
