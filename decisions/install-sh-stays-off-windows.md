@@ -8,8 +8,8 @@ Reason: the Mac/Linux installer ran on every Windows session start and landed th
 
 ## The Windows update path (known choice, owner ruling 2026-10-21)
 
-- The SessionStart pull targets the detached `-live` pin, so it updates nothing.
-- After a merge, `merge/install_from_main.sh` runs `install.ps1` on MINGW (lines 165-173). That moves the pin and makes new links.
+- The SessionStart pull is skipped at `settings.json:160`: the `-live` pin is a worktree, so its `.git` is a file, and the `[ -d "$d/.git" ]` test fails. It updates nothing.
+- After a merge, `merge/install_from_main.sh` moves the pin, then runs `install.ps1` on MINGW (lines 165-174, the call at 169). `install.ps1` makes new links. It only creates a missing pin (`install.ps1:107-108`).
 - Existing files in `~/.claude` update through the pin link.
 - New files appear only after that `install.ps1` run, or a manual one.
 - The `install.ps1` post-merge hook runs `install.ps1` only.
