@@ -89,7 +89,7 @@ class T(unittest.TestCase):
 
     def test_no_heartbeat_after_the_child_exits(self):
         """A beat after exit is a false alarm: the beat count cannot exceed the whole seconds the verdict line reports."""
-        r = run("import time\ntime.sleep(1.5)", None, {"VERDICT_HEARTBEAT": "1"})
+        r = run("import time\ntime.sleep(1.2)", None, {"VERDICT_HEARTBEAT": "1"})
         lines = r.stdout.splitlines()
         m = re.match(r"PASS .* \(([0-9.]+)s\)$", lines[-1])
         self.assertTrue(m, r.stdout)
