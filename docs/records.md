@@ -209,7 +209,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`debts/agent-end-log-loses-row.md`](../debts/agent-end-log-loses-row.md) |
-| `agents-write-main-clone` | On 2026-10-20 at 16:53 CDT, two lane agents working in scratchpad worktrees wrote into the main clone `C:\Users\ShivamSemwal\Clones\claude-settings` through relative paths. | [`debts/agents-write-main-clone.md`](../debts/agents-write-main-clone.md) |
+| `agents-write-main-clone` | On 2026-10-20 at 16:53 CDT, two lane agents wrote into the main clone `C:\Users\ShivamSemwal\Clones\claude-settings` through relative paths. | [`debts/agents-write-main-clone.md`](../debts/agents-write-main-clone.md) |
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |
