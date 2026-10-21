@@ -10,7 +10,7 @@ import stat
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
-    _segment_git_c_target, shell_abs,
+    _segment_git_c_target, shell_abs, CONTRACTION, quote_advance,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     is_powershell, resolve_command, segment_tokens, split_segments,
 )
@@ -219,22 +219,47 @@ WIDE_TARGET = (
 # The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
 # parse, so an unmatched quote elsewhere in the line does not hide a delete.
-RM_RAW = re.compile(
-    r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
-)
+class UnquotedStart:
+    """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
+    pattern's own `search`, so a caller loops over it without knowing the difference. An
+    apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
+    `don't` must not turn the rest of the line into one quote."""
+
+    def __init__(self, pattern):
+        self.pattern = pattern
+
+    def search(self, text):
+        inside, quote, index = set(), "", 0
+        while index < len(text):
+            if not quote and text[index] == "'" and CONTRACTION.match(text, index):
+                width, after = 1, ""
+            else:
+                width, after = quote_advance(text, index, quote)
+            if quote:
+                inside.update(range(index, index + width))
+            quote, index = after, index + width
+        return next((m for m in self.pattern.finditer(text) if m.start() not in inside), None)
+
+
+RM_RAW = UnquotedStart(re.compile(
+    r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
+))
+
+
 DESTRUCTIVE_DELETE = (
     re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
-        r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
+        r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
     ),
-    # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here.
-    re.compile(
+    # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
+    # that starts inside quotes is text (an echo, a commit message), so it is not read.
+    UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
-        r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
-    ),
+        r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
+    )),
 )
 # The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
 # home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
@@ -261,25 +286,63 @@ def _rm_args_wide(args) -> str:
     return ""
 
 
+# A substitution glued to an assignment or a backtick (`x=$(rm`, `` `rm ``): the command follows it.
+SUBST_OPEN = re.compile(r"^(?:[A-Za-z_]\w*=)?(\$\(|`)(?=.)")
+
+
+def _in_group(args, tick=False):
+    """`args` up to the `)` (or, with `tick`, the backtick) that closes a group opened before them,
+    with that mark cut off its token: `(rm -rf .)` hands rm `.)`, and rm's target is `.`. A `)` that
+    closes a `$(` inside `args` stays."""
+    depth, out = 0, []
+    for arg in args:
+        if tick:
+            cut = arg.find("`")
+            if cut >= 0:
+                out += [arg[:cut]] if cut else []
+                break
+        else:
+            depth += arg.count("(")
+            extra = arg.count(")") - depth
+            if extra > 0:
+                out += [arg[:-extra]] if arg[:-extra] else []
+                break
+            depth -= arg.count(")")
+        out.append(arg)
+    return out
+
+
 def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
     subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
-    A segment shlex cannot parse is read as raw text with the pattern `raw`, when there is one.
-    With `by_word`, `judge` also gets the command word it judges."""
+    A group's closing `)` is no part of the last argument. A segment shlex cannot parse is read as
+    raw text with the pattern `raw`, when there is one. With `by_word`, `judge` also gets the
+    command word it judges."""
     tokens = segment_tokens(segment)
     if tokens is None:
         found = raw.search(segment) if raw else None
         return found.group(0) if found else ""
-    for start in command_indexes(tokens):
-        if basename(tokens[start]) in names:
-            found = judge(tokens[start + 1:], basename(tokens[start])) if by_word else judge(tokens[start + 1:])
-            if found:
-                return found
+    quoted = getattr(tokens, "quoted", ())
+    views = [(tokens, False)]
+    for at, token in enumerate(tokens):
+        opened = SUBST_OPEN.match(token) if at not in quoted else None
+        if opened:
+            views.append(([token[opened.end():]] + tokens[at + 1:], opened.group(1) == "`"))
+    for view, tick in views:
+        for start in command_indexes(view):
+            if basename(view[start]) in names:
+                args = _in_group(view[start + 1:], tick)
+                found = judge(args, basename(view[start])) if by_word else judge(args)
+                if found:
+                    return found
     words, bare = bare_words(segment)
     for at in sorted(bare):
-        found = basename(words[at]) in names and (
-            judge(words[at + 1:], basename(words[at])) if by_word else judge(words[at + 1:]))
+        opened = SUBST_OPEN.match(words[at])
+        word = words[at][opened.end():] if opened else words[at]
+        args = _in_group(words[at + 1:], bool(opened) and opened.group(1) == "`")
+        found = basename(word) in names and (
+            judge(args, basename(word)) if by_word else judge(args))
         if found:
             return found
     for script in inner_commands(tokens):
@@ -305,16 +368,17 @@ def rm_delete_hit(segment: str) -> str:
 #
 # A recursive delete, forced or not, of `.`, a relative parent, the working folder or a folder above
 # it (decision rm-path-wrapper). The rm shim holds the same line on Mac and Linux, at run time; on
-# Windows this reader is the only one, and it reads the command text. One reader serves `rm`, the
-# PowerShell delete verbs and the cmd.exe verbs, in either shell. `.`, `..` and a relative parent
-# deny by their text, so a folder change ahead of them needs no tracking. Any other relative name is
+# Windows this reader is the only one. It reads the command text, and resolves a named folder through
+# links already on disk, so it misses a link made earlier in the same command. One reader serves
+# `rm`, the PowerShell delete verbs and the cmd.exe verbs, in either shell. `.`, `..` and a relative
+# parent deny by their text, so a folder change ahead of them needs no tracking. Any other relative name is
 # resolved against the shell's own folder only when no folder change comes first.
 REL_PARENT = re.compile(r"(?:\.{1,2}/)*\.{1,2}(?:/\*?)?")
 CMD_FLAG = re.compile(r"/[A-Za-z?]")
-RM_PARENT_RAW = re.compile(
+RM_PARENT_RAW = UnquotedStart(re.compile(
     r"\brm\s+(?:-\S+\s+)*?-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\s+(?:-\S+\s+)*['\"]?"
-    + REL_PARENT.pattern + r"['\"]?(?:\s|$)"
-)
+    + REL_PARENT.pattern + r"['\"]?(?:\s|\)|$)"
+))
 
 
 def _parent_target(target: str, cwd: str, moved: bool) -> bool:

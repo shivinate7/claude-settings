@@ -39,9 +39,9 @@ Owner ruling 2026-10-21: on Windows the shim does not judge. Its refusals sit in
   PowerShell the fix is `Remove-Item -Recurse build`.
 - Allowed: `rm -rf ./build`, a sibling that is not a parent, and a call that is not recursive.
 
-Accepted risk (owner, 2026-10-21): on Windows the guard judges command text only. It misses a delete inside a script, a Makefile or an
-npm script, a variable that expands at run time to a parent, and a symlink to a parent. On Mac and Linux the shim still catches those.
-How often Claude writes such a delete is unmeasured.
+Accepted risk (owner, 2026-10-21): on Windows the guard reads the command text. It resolves a named folder through links already on disk.
+It misses a link made earlier in the same command. It also misses a delete inside a script, a Makefile or an npm script, and a variable that
+expands at run time to a parent. On Mac and Linux the shim still catches those. How often Claude writes such a delete is unmeasured.
 
 Kind: build
 Plan: decisions/rm-path-wrapper.md#the-ruling (macos)
