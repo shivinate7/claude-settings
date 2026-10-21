@@ -4,6 +4,7 @@
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" every $VERDICT_HEARTBEAT s (default 120).
 # Why: a quiet background verdict over 300 s draws a false STALL (decision stall-watch, "Tools that are quiet by design").
 # Exit 0 is FAIL if the output holds a runner marker.
+# A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -11,9 +12,23 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
 CAP = 30
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
+KEEP = 7 * 86400
+HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?")
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
+def prune(folder, own):
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                try:
+                    if (e.name.startswith("verdict-") and e.name.endswith(".log") and os.path.normcase(e.path) != own
+                            and e.is_file(follow_symlinks=False) and time.time() - e.stat(follow_symlinks=False).st_mtime > KEEP):
+                        with open(e.path, "rb") as g: ours = g.read(len(HEADER)) == HEADER
+                        if ours: os.remove(e.path)
+                except OSError: pass
+    except OSError: pass
 def main(argv):
+
     for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe cannot print the excerpt
     if not argv: sys.exit("usage: verdict <cmd...>")
     name = " ".join(argv)
@@ -23,7 +38,10 @@ def main(argv):
         fd, log = tempfile.mkstemp(prefix="verdict-", suffix=".log"); os.close(fd)
     t = time.time()
     note = ""
-    with open(log, "ab") as f:
+    if not os.environ.get("VERDICT_LOG"): prune(os.path.dirname(os.path.abspath(log)), os.path.normcase(os.path.abspath(log)))
+    try: f = open(log, "ab")
+    except OSError as e: print(f"FAIL {name} rc=1 cannot open log: {e} ({time.time() - t:.1f}s) log={log}"); return 1
+    with f:
         f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
         start = f.tell()
         try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)

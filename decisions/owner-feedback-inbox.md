@@ -18,7 +18,7 @@ item of a burst and lost the rest.
   adds a note item "judged not feedback" under that message and closes capture, only while that message
   is still the last one captured. An error, a timeout, an odd answer or a late answer changes nothing.
   The judge never drops a message.
-- **Notices.** A message that starts with a tag in `question_outcome.MACHINE_TAGS` is agent or system
+- **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured or judged. It does not close capture, and it does not reset the quiet-time
   clock. Messages from other sessions are not captured.
 - **Capture.** The UserPromptSubmit hook appends each captured message verbatim, with its Central time,

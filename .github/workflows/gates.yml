@@ -208,6 +208,9 @@ jobs:
       - name: Settings matcher fixture suite
         run: python3 lint/test_settings_matcher.py
 
+      - name: Hook platform exit fixture suite
+        run: python3 lint/test_hook_platform_exit.py
+
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
@@ -465,6 +468,10 @@ jobs:
       - name: rm shim fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_rm_shim.py
+
+      - name: Hook platform exit fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_hook_platform_exit.py
 
       # No Guard mutation harness here: it runs on the gates job (Linux) only. Accepted risk: a
       # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
@@ -893,6 +900,10 @@ jobs:
       - name: Verdict runner fixture suite
         if: ${{ !cancelled() }}
         run: python lint/test_verdict.py
+
+      - name: Hook platform exit fixture suite
+        if: ${{ !cancelled() }}
+        run: python lint/test_hook_platform_exit.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}

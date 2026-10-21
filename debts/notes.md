@@ -526,3 +526,5 @@
 - drops-body-read-at-run-start: `confirm` reads the PR body once at run start, so an edit during the wait is not read. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-mixed-paragraph: a last paragraph that mixes prose and a Drops-lines line still excuses; see drops-mixed-paragraph-exempt. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - sweep-failed-fetch-stale-reap: when the SessionEnd fetch fails with time left, decide_branch still reaps on the stale on-remote read, as on main and as janitor/GUIDE.md documents (janitor/sweep.py _fetch_prune). Decision: when-a-worktree-may-be-removed
+- ci-wake-prefilter-unicode-escape: the ci_wake shell prefilter misses a "ready" written as a JSON unicode escape (ready), which python decodes; Claude Code never escapes ASCII letters (settings.json ci_wake row). Decision: none
+- verdict-prune-reused-temp-log: a caller that reuses a VERDICT_LOG named verdict-*.log inside the temp folder can lose it to another run's prune once it is 7 days idle (bin/verdict prune). Decision: none
