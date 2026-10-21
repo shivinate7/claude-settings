@@ -5,7 +5,8 @@
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
 Opus runs only for Plan, the advisor (agents inherit it), and the builder's third try by standing word,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
-Any other spawn runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
+An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. Any other spawn
+runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. Prose alone enforces the ceiling.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
@@ -20,7 +21,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
-| Explore that audits or judges meaning, not a plain search | sonnet, set per spawn, which overrides the frontmatter `haiku` | high |
+| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's word (2026-10-21 ruling, class level); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
@@ -57,8 +58,10 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and gate | no model; plain code | n/a |
 
-The Agent prompt judge blocks an Explore whose brief asks it to audit, review, judge, rate or compare
-meaning, unless the call sets model sonnet. A plain search passes on the Haiku default. The caller
+The Agent prompt judge blocks an audit Explore (a brief that asks it to audit, review, judge, rate or
+compare meaning) unless the call sets model sonnet or opus; haiku or no model blocks. Explore stays a
+Haiku role, so Sonnet is the floor for the judge only. Opus for an audit Explore is the owner's word,
+given at class level on 2026-10-21; the judge passes it, and only prose holds the ceiling. A plain search passes on the Haiku default. The caller
 spot-checks findings before it acts on an audit.
 
 `lint/check_skill_model_rows.py` fails CI when a skill under `skills/` has no row, or a row names a
