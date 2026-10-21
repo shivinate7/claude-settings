@@ -35,6 +35,17 @@ def covers(entry, tool):
     return re.fullmatch(entry.get("matcher", ""), tool) is not None
 
 
+# The Agent judge's Explore clause as settings.json carries it, whitespace folded to single spaces.
+EXPLORE_CLAUSE = ("and the call's model field is neither sonnet nor opus (haiku, or no model field, blocks; "
+                  "text in the brief does not count); the fix is model sonnet or opus with effort high")
+
+
+def explore_clause_pinned(text):
+    """True when the clause sits inside the Explore rule: from 'For an Explore spawn,' to 'Otherwise answer'."""
+    found = re.search(r"For an Explore spawn,(.*?)Otherwise answer", text)
+    return bool(found) and EXPLORE_CLAUSE in found.group(1)
+
+
 class ProseJudgeRow(unittest.TestCase):
     def test_no_prompt_or_agent_hook_on_edit_or_write(self):
         for tool in ("Edit", "Write"):
@@ -57,25 +68,39 @@ class ProseJudgeRow(unittest.TestCase):
         hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]]
         self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "Agent prompt judge missing")
 
-    def explore_rule(self):
+    def agent_prompt(self):
         hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]
                  if h.get("type") == "prompt"]
         self.assertEqual(len(hooks), 1)
-        text = " ".join(hooks[0]["prompt"].split())
-        found = re.search(r"For an Explore spawn,(.*?)Otherwise answer", text)
-        self.assertTrue(found, "the Explore rule is missing from the Agent judge")
-        return found.group(1).lower()
+        return " ".join(hooks[0]["prompt"].split())
 
     def test_explore_rule_passes_sonnet_and_opus(self):
         # The floor is Sonnet; the owner's "use opus" must pass (subagent-model-cap, audit Explore row).
-        rule = self.explore_rule()
-        self.assertIn("sonnet", rule)
-        self.assertIn("opus", rule, "the judge blocks an audit Explore that names model opus")
-        self.assertNotIn("does not set model sonnet", rule)
+        # A word pin ("opus" appears) also holds for a reversed clause, so the pin is the whole clause.
+        self.assertIn(EXPLORE_CLAUSE, self.agent_prompt(),
+                      "the Agent judge's Explore clause is not the pinned text: opus or sonnet may block")
 
     def test_explore_rule_still_blocks_haiku_or_unset(self):
-        rule = self.explore_rule()
-        self.assertRegex(rule, r"haiku|unset|no model|not set|does not set")
+        self.assertTrue(explore_clause_pinned(self.agent_prompt()),
+                        "the pinned clause is not inside the Explore rule: haiku or no model may pass")
+
+    def test_explore_clause_mutants_fail_the_pin(self):
+        # Each mutant is the real row text with the clause changed in memory. The pin must refuse all.
+        text = self.agent_prompt()
+        self.assertTrue(explore_clause_pinned(text), "no pinned clause in the row: nothing to mutate")
+        mutants = {
+            "reversed": "and the call sets model opus (a haiku or no model passes; text in the brief does not "
+                        "count); the fix is model sonnet or opus with effort high",
+            "haiku passes": EXPLORE_CLAUSE.replace("(haiku, or no model field, blocks;",
+                                                   "(haiku passes, no model field blocks;"),
+            "brief text counts": EXPLORE_CLAUSE.replace("; text in the brief does not count", ""),
+        }
+        for name, clause in mutants.items():
+            with self.subTest(mutant=name):
+                self.assertNotEqual(clause, EXPLORE_CLAUSE, "the mutant did not change the clause")
+                mutated = text.replace(EXPLORE_CLAUSE, clause)
+                self.assertNotEqual(mutated, text)
+                self.assertFalse(explore_clause_pinned(mutated), "the pin passes the %s mutant" % name)
 
 # A prompt or agent hook names its model. The evaluator rejects the bare alias "haiku" (stderr
 # unrecognized_model, query_source hook_prompt), so each judge would fail and let calls through.
