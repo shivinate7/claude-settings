@@ -47,6 +47,7 @@
 - dw-slash-cache-hit-reads-clean: a repeat /dw after a FLAG prints 'nothing to say' like a clean turn; Stops seen is capped at 500 (mods/decision-watch)
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
 - dw-stop-row-unproven: unproven live that classic.Stop reaches a mod in the desktop app; the Stop row drop awaits STOP seen log lines (settings.json, mods/decision-watch)
+- dw-where-exe-both-phases: pickPython runs where.exe in both phases instead of once per turn or cached (mods/decision-watch/hooks/register.mjs)
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a hole with no pinning case (hooks/guard_env.py)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
