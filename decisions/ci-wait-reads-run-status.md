@@ -5,7 +5,7 @@
 Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. Each wait reads the run's status until the run ends or its deadline passes. `bin/merge` reads once every 30 s. The CI wake reads 30 s apart for the first 4 minutes, then at gaps that grow to 120 s (owner, 2026-10-21, back-off).
 
 - `merge/merge.py`, `block`: no watch. It pauses 30 s. The next pass of the wait loop reads the checks and runs.
-- `hooks/ci_wake.py`, `watch_run`: no watch. It reads `gh run view <id> --json status` on one schedule (`pauses`): 30 s apart through 240 s, then gaps that grow by 30 s up to 120 s, never shorter than the gap before. `wait_for` lists the head's runs on the same schedule. The watch returns when the status is `completed` or the deadline passes. The deadline stays 3300 s, with no read at or after it. A failed read gets one retry after a 30 s pause, never past the deadline. A second failure ends the wait as unknown, never green.
+- `hooks/ci_wake.py`, `watch_run`: no watch. It reads `gh run view <id> --json status` on one schedule (`pauses`): 30 s apart through 240 s, then gaps that grow by 30 s up to 120 s, never shorter than the gap before. `wait_for` lists the head's runs on the same schedule. The watch returns when the status is `completed` or the deadline passes. The deadline stays 3300 s, and `watch_run` makes no status read at or after it. A failed read gets one retry after a 30 s pause, never past the deadline. A second failure ends the wait as unknown, never green.
 - A session waits on CI through the CI-wake notice that follows `gh pr ready`. The guard's remedy never names `bin/merge`, because it merges when the wait ends.
 
 Why: one `gh run watch` made 131 API calls in 60 s, about 7,900 an hour. The core limit is 5,000 an hour, shared by every session on the account. Merges failed on it.
@@ -16,7 +16,7 @@ Owner, 2026-10-13 11:20 CDT: the CI wake-up hook lives in claude-settings. The m
 
 A PostToolUse hook on Bash and PowerShell (`hooks/ci_wake.py`) starts an `asyncRewake` watcher after `gh pr ready <n>`.
 
-- Each `gh pr ready` in one command gets its own watch. A push alone starts no watch, because a PR goes ready after its last push and a push read can see the old head. A draft PR starts no watch. The hook's `settings.json` row starts python only when the command holds `gh pr ready` (a quoted or full-path gh, any case of gh, quotes round the words, spaces or tabs between them), and reads `tool_input` only.
+- Each `gh pr ready` in one command gets its own watch. A push alone starts no watch, because a PR goes ready after its last push and a push read can see the old head. A draft PR starts no watch. The hook's `settings.json` row reads `tool_input` only. It starts python only when gh, pr and ready occur in that order, each at most 16 characters after the one before (any case of gh).
 - The watcher reads the PR head once and waits on its runs. A head whose only runs are skipped counts as no run yet.
 - It exits 2 with a one-line verdict, which wakes the session even when idle. It stops at its own deadline, under the hook `timeout`, and wakes with "still running".
 - One watcher runs per PR: a second one for the same PR exits at once.

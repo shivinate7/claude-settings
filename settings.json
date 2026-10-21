@@ -391,7 +391,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; i=$(cat); j=${i#*'\"tool_input\":'}; [ \"$j\" = \"$i\" ] || { j=${j%%'\"tool_response\":'*}; printf %s \"$j\" | grep -Eq '[gG][hH](\\.[eE][xX][eE])?[^[:alnum:] ]*([ ]|[\\]t)+[^[:alnum:] ]*pr[^[:alnum:] ]*([ ]|[\\]t)+[^[:alnum:] ]*ready'; [ $? -ne 1 ] || exit 0; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\"; exit $?; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; i=$(cat); j=${i#*'\"tool_input\":'}; [ \"$j\" = \"$i\" ] || { j=${j%%'\"tool_response\":'*}; printf %s \"$j\" | grep -Eq '[gG][hH].{0,16}pr.{0,16}ready'; [ $? -ne 1 ] || exit 0; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\"; exit $?; done; exit 0",
             "timeout": 3600,
             "asyncRewake": true
           }
