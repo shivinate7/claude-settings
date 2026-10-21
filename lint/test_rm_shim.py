@@ -26,6 +26,8 @@ REAL_RM = next((p for p in REAL_RMS if os.path.exists(p)), REAL_RMS[0])
 REAL_SH = "/bin/sh"
 REAL_CAT = next((p for p in ("/bin/cat", "/usr/bin/cat") if os.path.exists(p)), "/bin/cat")
 WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
+PY_ALIAS = "exit 9"  # the Store alias: it prints a pointer to the Store and exits
+PY_REAL = 'exec "%s" "$@"' % sys.executable
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
 
 
@@ -351,34 +353,37 @@ class Shim(unittest.TestCase):
 
     # Elsewhere: python3, then python; a path under WindowsApps is the Store alias and is skipped.
 
-    def test_python_is_found_like_the_hook_launchers_find_it(self):
-        alias, wrap = "exit 9", 'exec "%s" "$@"' % sys.executable
-        # label, stubs under WindowsApps, stubs after it, the stub that must run (None: no python is usable)
-        cases = (
-            ("python3 is the Store alias, python is real", {"python3": alias}, {"python": wrap}, "python"),
-            ("no python3, python is real", {}, {"python": wrap}, "python"),
-            ("python3 and python are both real: python3 wins", {}, {"python3": wrap, "python": "exit 0"}, "python3"),
-            ("only the Store alias", {"python3": alias}, {}, None),
-        )
-        for n, (label, store_stubs, ok_stubs, want) in enumerate(cases):
-            with self.subTest(label):
-                root = self.path("py%d" % n)
-                os.mkdir(root)
-                store = self.bindir("py%d/WindowsApps" % n)
-                ok = self.bindir("py%d/ok" % n, rm=REAL_RM, cat=REAL_CAT)
-                self.exe(ok, "uname", "echo Linux")
-                for d, stubs in ((store, store_stubs), (ok, ok_stubs)):
-                    for tool, tail in stubs.items():
-                        self.recorder(d, tool, tail)
-                path = os.pathsep.join([store, ok])
-                r = self.rm("-rf", self.home if want else self.sub, path=path)
-                ran = self.calls(root)
-                self.assertEqual(ran,[os.path.join(ok, want)] if want else [], "the python that ran")
-                if want:
-                    self.assertRefusal(r, ["-rf", self.home], [self.home])
-                else:
-                    self.assertEqual(r.returncode, 0, r.stderr)
-                    self.assertFalse(os.path.exists(self.sub), "no python: the real rm still runs")
+    def python_lookup(self, store_stubs, ok_stubs, want):
+        """Run the shim on a PATH of two folders, WindowsApps then ok. Each stub is name -> its body. The stub
+        named want must be the only python that runs, and the interpreter behind it must refuse HOME. With
+        want None no python is usable: none runs, and the real rm still deletes."""
+        root = self.path("py")
+        os.mkdir(root)
+        store = self.bindir("py/WindowsApps")
+        ok = self.bindir("py/ok", rm=REAL_RM, cat=REAL_CAT)
+        self.exe(ok, "uname", "echo Linux")
+        for d, stubs in ((store, store_stubs), (ok, ok_stubs)):
+            for tool, body in stubs.items():
+                self.recorder(d, tool, body)
+        r = self.rm("-rf", self.home if want else self.sub, path=os.pathsep.join([store, ok]))
+        self.assertEqual(self.calls(root), [os.path.join(ok, want)] if want else [], "the python that ran")
+        if want:
+            self.assertRefusal(r, ["-rf", self.home], [self.home])
+        else:
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse(os.path.exists(self.sub), "no python: the real rm still runs")
+
+    def test_a_store_alias_python3_is_skipped_for_python(self):
+        self.python_lookup({"python3": PY_ALIAS}, {"python": PY_REAL}, "python")
+
+    def test_python_is_used_when_there_is_no_python3(self):
+        self.python_lookup({}, {"python": PY_REAL}, "python")
+
+    def test_python3_comes_before_python(self):
+        self.python_lookup({}, {"python3": PY_REAL, "python": "exit 0"}, "python3")
+
+    def test_only_a_store_alias_means_no_python(self):
+        self.python_lookup({"python3": PY_ALIAS}, {}, None)
 
 
 class ShimSource(unittest.TestCase):
