@@ -240,7 +240,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
+            "command": "case \"$(uname -s 2>/dev/null)\" in MINGW*) exit 0;; esac; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
             "timeout": 10
           }
         ]
@@ -285,28 +285,12 @@
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Judge this edit to a file: $ARGUMENTS\nRule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Rule: rulings-declare-kind (refuse only an edit whose new text deletes a `Kind:`, `Plan:` or `Home:` line, or adds a ruling section with no `Kind:` line in the same text; you see only the changed text, so never refuse for a Kind line you cannot see). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "if": "Edit(**/decisions/**)",
-            "timeout": 30,
-            "model": "claude-sonnet-5-5",
-            "continueOnBlock": true
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Judge this edit to a file: $ARGUMENTS\nRule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Rule: rulings-declare-kind (refuse a decision record that has no `Kind: build` with `Plan: <path>#<slug> (<platform>)` lines, or `Kind: process` with a `Home:` line). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "if": "Write(**/decisions/**)",
-            "timeout": 30,
-            "model": "claude-sonnet-5-5",
-            "continueOnBlock": true
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/prose_judge.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 45
           }
         ]
       },
@@ -332,7 +316,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "command -v xcrun >/dev/null 2>&1 || exit 0; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -407,7 +391,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; i=$(cat); j=${i#*'\"tool_input\":'}; [ \"$j\" = \"$i\" ] || { j=${j%%'\"tool_response\":'*}; case \"$j\" in *[Rr][Ee][Aa][Dd][Yy]*) ;; *) exit 0;; esac; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\"; exit $?; done; exit 0",
             "timeout": 3600,
             "asyncRewake": true
           }
@@ -418,7 +402,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "command -v xcrun >/dev/null 2>&1 || exit 0; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 600
           }
         ]

@@ -58,9 +58,10 @@ def guard_files(folder: str):
 
 def guard_tree(dest: str) -> None:
     """Copy every guard module in HOOKS_DIR into `dest`, so a copied guard.py finds its
-    siblings beside it, never the real ones."""
+    siblings beside it, never the real ones. shared_names.py goes too: guard_core.py and
+    config_watch.py import it, and a copy without it dies on that import."""
     os.makedirs(dest, exist_ok=True)
-    for path in guard_files(HOOKS_DIR):
+    for path in guard_files(HOOKS_DIR) + [os.path.join(HOOKS_DIR, "shared_names.py")]:
         shutil.copy(path, dest)
 
 

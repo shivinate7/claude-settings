@@ -904,7 +904,7 @@ MUTATIONS = [
      'if reading != was and not (',
      'if True and not (', "watch", 'an ordinary project config edit is allowed and not reverted'),
     ("watch: watch settings.json alone, so the local file is unwatched",
-     'WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)',
+     'WATCHED_NAMES = tuple(name.lstrip("/") for name in PROJECT_FROZEN_FILES)',
      'WATCHED_NAMES = ("\x2eclaude/settings.json",)', "watch", 'python3 -c writes the path'),
     ("watch: an absent file reads the same as an empty one, so a created file is not a change",
      '    if content is None:\n        return ""\n    return hashlib.sha256(content).hexdigest()',

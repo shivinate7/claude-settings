@@ -2177,6 +2177,8 @@ make_guard_clone() {
     b=$(basename "$f")
     { cat "$f"; printf '\n# build %s\n' "$2"; } > "$1/hooks/$b"
   done
+  # shared_names.py is the one home of the names the guard and the config watch share (not stamped).
+  cp "$REPO_ROOT/hooks/shared_names.py" "$1/hooks/shared_names.py"
 }
 
 # The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
@@ -2379,6 +2381,63 @@ pinlive2() {
   rm -rf "$h"
 }
 
+# ---- guardset1, guardset2: shared_names.py lands inside the atomic guard set -------------------------
+# Owner ruling: hooks/shared_names.py is the one home of PROJECT_FROZEN_FILES and config_dir. The guard
+# imports it with no fallback copy, so a guard run that loads guard.d/<id>/ must find it there. The flat
+# copy is the other way in, and the config watch is a flat hook that must find the set's copy the way
+# guard.py finds the set.
+guardset_install() {
+  install_set_setup
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/$1-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/$1-clone" one
+  cp "$REPO_ROOT/hooks/config_watch.py" "$work/$1-clone/hooks/config_watch.py"
+  ev="$work/$1-ev"; : > "$ev"
+  run_cloud "$work/$1-clone" "$cfg" "$ev" > "$work/$1-run" 2>&1; rc=$?
+  set_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$cfg/hooks/guard.py" 2>/dev/null | head -n1)
+}
+
+guardset1() {
+  name="guardset1: the guard set landed by a copy-mode install holds shared_names.py"
+  guardset_install guardset1
+  if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
+    bad "$name" "setup: install exit $rc, stamped id [$set_id]: $(tail -n 3 "$work/guardset1-run")"
+  elif [ ! -f "$cfg/hooks/guard.d/$set_id/shared_names.py" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$cfg/hooks/guard.d/$set_id" | tr '\n' ' ')], no shared_names.py"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+guardset2() {
+  name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py beside it"
+  guardset_install guardset2
+  key="CLAUDE_CODE_""SUBAGENT_MODEL"
+  proj="$h/proj"; mkdir -p "$proj/.claude"
+  file="$proj/.claude/settings.local.json"
+  printf '{"env": {"%s": "sonnet"}}\n' "$key" > "$file"
+  rm -f "$cfg/hooks/shared_names.py"
+  # Claude Code sends a native cwd. On Windows the MSYS form (/c/...) is no folder to native Python.
+  wproj=$(cd "$proj" && pwd -W 2>/dev/null || pwd)
+  payload=$(printf '{"tool_name": "Bash", "tool_input": {"command": "cp x .claude/settings.local.json"}, "cwd": "%s", "session_id": "c"}' "$wproj")
+  watch_run() {
+    printf '%s' "$payload" | env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" HOME="$h" PYTHONPATH= \
+      python3 -B "$cfg/hooks/config_watch.py" 2> "$work/guardset2-err"
+  }
+  watch_run > /dev/null; rc_a=$?
+  printf '{"env": {"%s": "opus"}}\n' "$key" > "$file"
+  out=$(watch_run); rc_b=$?
+  if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
+    bad "$name" "setup: install exit $rc, stamped id [$set_id]"
+  elif [ "$rc_a" -ne 0 ] || [ "$rc_b" -ne 0 ]; then
+    bad "$name" "the watch exited $rc_a then $rc_b: $(tail -n 1 "$work/guardset2-err")"
+  elif ! printf '%s' "$out" | grep -q 'unasked write' || grep -q opus "$file"; then
+    bad "$name" "the raise was not reverted and reported: stdout [$out], file [$(cat "$file")], stderr [$(tail -n 1 "$work/guardset2-err")]"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2453,6 +2512,8 @@ run swap1sh
 run lock1sh
 run pinlive1
 run pinlive2
+run guardset1
+run guardset2
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

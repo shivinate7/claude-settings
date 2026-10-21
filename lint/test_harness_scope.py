@@ -193,6 +193,13 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(run([p], existing=[p]), want)
 
+    def test_shared_names_change_sets_the_same_flags_as_guard_py(self):
+        # guard_core.py and config_watch.py import it, so the guard harnesses must run on it.
+        want = run(["hooks/guard.py"])
+        self.assertEqual(run(["hooks/shared_names.py"]), want)
+        self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
+                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
         p = "hooks/guard_test_x.py"
