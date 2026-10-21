@@ -11,8 +11,8 @@ ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 
 Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
 when the repo has no active workflow, or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
-line, never 1. It lists runs, and reads a run's status, at most once per 30 s each. It never
-loops on a red run.
+line, never 1. It lists runs, and reads a run's status, 30 s apart for the first 4 minutes, then at
+gaps that grow to 120 s (`pauses`). It never loops on a red run.
 
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
@@ -36,7 +36,9 @@ if HERE not in sys.path:
 # failed import ends in an unknown line, never a traceback and exit 1.
 
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
-STATUS_PAUSE = 30         # seconds between two status reads of one run
+STATUS_PAUSE = 30         # seconds between two reads in the first BACKOFF_FLAT seconds, and before a retry
+BACKOFF_FLAT = 240        # seconds the gap stays STATUS_PAUSE
+BACKOFF_CAP = 120         # seconds, the longest gap
 READ_TIMEOUT = 60         # seconds for each gh read
 PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
@@ -101,10 +103,20 @@ def gh_json(args, cwd):
         raise Unknown("gh %s printed non-JSON" % " ".join(args[:2]))
 
 
+def pauses():
+    """The one schedule of the watch's reads and lists: STATUS_PAUSE gaps through BACKOFF_FLAT seconds,
+    then each gap grows by STATUS_PAUSE up to BACKOFF_CAP, and never shrinks."""
+    for _ in range(BACKOFF_FLAT // STATUS_PAUSE):
+        yield STATUS_PAUSE
+    gap = STATUS_PAUSE
+    while True:
+        gap = min(BACKOFF_CAP, gap + STATUS_PAUSE)
+        yield gap
+
+
 def watch_run(run_id, cwd, deadline, repo=""):
     """Read `gh run view <id> --json status` until the status is `completed` or the deadline
-    passes. Reads are at least STATUS_PAUSE seconds apart, and the last pause ends at the
-    deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
+    passes. Reads follow `pauses`, and the last pause ends at the deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
     gets one retry after the pause (never past the deadline); a second failure raises Unknown."""
     def read():
         args = ["run", "view", str(run_id), *(["-R", repo] if repo else []), "--json", "status"]
@@ -115,14 +127,16 @@ def watch_run(run_id, cwd, deadline, repo=""):
             if deadline - time.monotonic() <= 0:
                 raise
             return gh_json(args, cwd)
+    gaps = pauses()
     while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
         if read().get("status") == "completed":
             return
         left = deadline - time.monotonic()
-        if left <= STATUS_PAUSE:  # the last pause is clamped to the deadline, and the wait ends there
+        gap = next(gaps)
+        if left <= gap:  # the last pause is clamped to the deadline, and the wait ends there
             time.sleep(max(0, left))
             return
-        time.sleep(STATUS_PAUSE)
+        time.sleep(gap)
 
 
 def ready_call(rest, env_repo=""):
@@ -191,11 +205,12 @@ def lock_pr(pr, lock_dir):
 def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
-    comes after it. While no run that ran is judged, list again, STATUS_PAUSE apart; the last
+    comes after it. While no run that ran is judged, list again, `pauses` apart; the last
     pause ends at the deadline, with one list there. Once a run that ran is judged, return it:
     later runs are not waited on (debt ci-wake-lists-runs-once)."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
+    gaps = pauses()
     while True:
         runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
@@ -211,7 +226,7 @@ def wait_for(sha, cwd, deadline, repo=""):
         left = deadline - time.monotonic()
         if left <= 0:
             raise Unknown("no run yet")
-        time.sleep(min(STATUS_PAUSE, left))
+        time.sleep(min(next(gaps), left))
 
 
 def verdict(sha, runs):

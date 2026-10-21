@@ -93,6 +93,8 @@ if _GUARD_PATH:
 else:
     import guard
 
+from shared_names import STATE_DIR_NAME  # noqa: E402  stdlib only
+
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
 # (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -475,7 +477,7 @@ def committed_this_turn(cwd, baseline):
 # CLAUDE.md's Verification rule is about never mistaking a failed read for a CLEAR answer,
 # not about this cache.
 
-SEEN_DIR_NAME = "state"
+SEEN_DIR_NAME = STATE_DIR_NAME
 SEEN_SUB = "decision-watch"
 
 

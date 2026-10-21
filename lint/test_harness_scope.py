@@ -122,6 +122,11 @@ class Scope(unittest.TestCase):
         # `guard` too: the janitor launcher turns the guard suite on.
         self.assertFlags(run(["bin/claude-janitor"]), want_true=["gates_windows", "shell_macos", "guard"])
 
+    def test_windows_install_test_change_turns_on_the_windows_install_job(self):
+        # The file is in the base, so an edit to it is no new file in a landed dir; the job that runs it must start.
+        self.assertFlags(run(["hooks/test_install_windows.sh"], existing=["hooks/test_install_windows.sh"]),
+                         want_true=["gates_windows", "code"])
+
     def test_silent_undo_checker_change_turns_on_the_merge_job(self):
         self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["gates_windows_merge"])
 
