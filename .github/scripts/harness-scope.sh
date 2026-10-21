@@ -26,7 +26,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       landed-dirs.txt) on="$on $W $R $X $S code guard " ;;
       hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
-      install.sh|hooks/test_install_src.sh) on="$on $W $X $S code guard " ;;
+      install.sh|hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $X $S code guard " ;;
       hooks/test_mutate_shared.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.

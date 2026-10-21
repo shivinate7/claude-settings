@@ -6,6 +6,14 @@
 
 Reason: the Mac/Linux installer ran on every Windows session start and landed the POSIX-only rm shim.
 
+## The Windows update path (known choice, owner ruling 2026-10-21)
+
+- The SessionStart pull targets the detached `-live` pin, so it updates nothing.
+- After a merge, `merge/install_from_main.sh` runs `install.ps1` on MINGW (lines 165-173). That moves the pin and makes new links.
+- Existing files in `~/.claude` update through the pin link.
+- New files appear only after that `install.ps1` run, or a manual one.
+- The `install.ps1` post-merge hook runs `install.ps1` only.
+
 Kind: build
 Plan: decisions/install-sh-stays-off-windows.md#the-ruling (all)
 Home: install.sh

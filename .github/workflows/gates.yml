@@ -619,7 +619,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows == 'true' || github.event_name != 'pull_request' }}
-    # Cut F moved the guard suite out. Expected about 190 s (install.sh 180 s, plus setup); 10 min leaves room.
+    # Cut F moved the guard suite out. Expected about 190 s plus setup; 10 min leaves room.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -696,10 +696,10 @@ jobs:
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
-      - name: install.sh checkout-detection suite
+      - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
-        run: sh hooks/test_install_src.sh
+        run: sh hooks/test_install_windows.sh
 
   # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:
