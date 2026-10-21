@@ -1,12 +1,13 @@
 # decision-watch
 
-A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
+A mod. It runs the decision watch on each completed turn (`turn.complete`) with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
 
 ## What it does
 
-- On every Stop, the mod writes one "STOP seen" line to the log. It waits at most 0.5 s for that write. Then it returns at once.
-- It then judges the turn in the background. It skips the judge when `stop_hook_active` is set.
-- One judge runs at a time. A Stop that arrives during a judge logs "SKIP busy" and does not judge.
+- On each main-loop turn (`turn.complete`), the mod finds the transcript from the session id, read on each turn, and the cwd. The lookup waits at most 0.5 s and runs in the background. A lookup that passes the limit, or an id that cannot be read, logs a SKIP line and judges nothing.
+- It writes one "STOP seen" line to the log. The handler waits at most 50 ms for that line, then returns the turn. The judging runs in the background.
+- A subagent turn (`agentId` set) is skipped. A turn with `isAborted` set, or a reason other than `answer`, is skipped with a SKIP line. A turn with no transcript logs a SKIP line.
+- One judge runs at a time. A turn that arrives during a judge logs "SKIP busy" and does not judge.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
   2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error. Then `--model-text` or `--model-error` gives the verdict.
@@ -22,7 +23,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 ## Log
 
 - The log is `shadow.log` (the file name is kept) in the state folder `decision-watch-shadow`, inside the config folder.
-- Each judged Stop has a START line and an END line. The END line holds the timings and the verdict line. The log never holds the prompt.
+- Each judged turn has a START line and an END line. The END line holds the timings and the verdict line. The log never holds the prompt.
 - The log keeps the newest 500 lines. A line is cut at 2000 characters.
 - Writes go one at a time. The host writes the folder if it is missing.
 - If the host refuses to read a log that is too big, the log starts over with the new line.
@@ -36,7 +37,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 
 ## /dw
 
-The command runs the same judgment on the latest turn. It shows the timings, the result and each notice. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
+The command runs the same judgment on the latest turn. It shows the timings, the result and each notice. It never shows the prompt. Before the first judged turn, it finds the transcript from the session id.
 
 The last line is "Stops seen: N". N counts the STOP seen lines now in the log. The log keeps 500 lines, so N is at most 500.
 
@@ -52,15 +53,15 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
-- A Stop that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message. So a Stop for a new turn that lands during a judge is never judged. Hole in `decision-watch-mod-limits`.
-- The ruling and the holes: `decision-watch-mod-limits` (limits of the mod).
+- A turn that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message. So a new turn that lands during a judge is never judged.
+- The ruling and what is unverified: `decision-watch-mod-limits` (limits of the mod).
 
 ## Try in the desktop app
 
-Refresh the installed `~/.claude/hooks/decision_watch.py` first. Replace it with this repo's `hooks/decision_watch.py`. An old copy ignores `--emit-prompt`, so each Stop runs `claude -p`.
+Refresh the installed `~/.claude/hooks/decision_watch.py` first. Replace it with this repo's `hooks/decision_watch.py`. An old copy ignores `--emit-prompt`, so each turn runs `claude -p`.
 
 1. Install: `/plugin install decision-watch --marketplace shivinate7/claude-settings`, then restart the session.
-2. Finish a turn. Run `/dw`. Check that the last line counts the Stop.
+2. Finish a turn. Run `/dw`. Check that the last line counts the turn.
 
 ## Check
 

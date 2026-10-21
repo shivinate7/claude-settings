@@ -1,12 +1,14 @@
-// decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
+// decision-watch: runs the decision watch on each completed turn (hooks/decision_watch.py) with the session's
 // own model login, and writes the verdict to a log. A FLAG or UNKNOWN verdict shows in the session
 // with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
-// as a notice (decision decision-watch-mod-limits). It never blocks and never changes the Stop result.
+// as a notice (decision decision-watch-mod-limits). It never blocks and never changes the turn result.
 //
-// turn.complete returns next(e) at once. The judging runs in the background, one judge at a time, and is
-//               skipped on a subagent turn (agentId set). The app's sec-default mod reroutes every classic.*
-//               event past user mods, so a classic.Stop handler never ran; turn.* events pass. The event
-//               carries no transcript path, so the judge finds it the way /dw does (deriveStop).
+// turn.complete returns next(e) after at most SEEN_WAIT_MS (50 ms), for the "STOP seen" line. The lookup and
+//               the judging run in the background, one judge at a time. A subagent turn (agentId set) is skipped,
+//               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). The
+//               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
+//               handler never ran; turn.* events pass. The event carries no transcript path, so the judge
+//               finds it the way /dw does (deriveStop), from the session id read on each turn.
 // /dw           runs the same judgment on the latest turn and shows the result.
 //
 // The python script has two phases: --emit-prompt prints the prompt when a model call is due,
@@ -19,7 +21,6 @@
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally.
 
 let lastStop; // the last Stop-shaped input built from a main-loop turn, for /dw
-let keptId; // the session id read at session.start, the fallback when $.session.id() fails later
 let busy = false; // true while a background judge runs
 let foundPy; // the python path pickPython found, kept for the module's life; cleared when a run with it is rejected
 
@@ -34,11 +35,6 @@ const textOf = (r) => (typeof r === "string" ? r : String((r && r.text) ?? ""));
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
-    try {
-      keptId = await $.session.id();
-    } catch {
-      // deriveStop asks again on each turn
-    }
     await $.command.register({
       name: "dw",
       description: "Run the decision watch on the latest turn with this session's own model login",
@@ -65,32 +61,39 @@ export function register(on) {
     return { text: lines.join("\n") };
   });
 
-  // Background judge. Waits at most STOP_WAIT_MS for the lookup and again for one "STOP seen" line, then
-  // returns next(e). The judging is fire-and-forget, one judge at a time. A turn that finds one running
-  // logs "SKIP busy". A turn with no transcript logs a SKIP line and judges nothing.
+  // Background judge. The lookup, the "STOP seen" line and the judge start run off the return path. The
+  // handler waits at most SEEN_WAIT_MS for that "STOP seen" line, then returns next(e). One judge at a time:
+  // a turn that finds one running logs "SKIP busy". A turn that is not judged logs a SKIP line.
   on("turn.complete", async ($, e, next) => {
     if (!e.agentId) {
-      try {
-        const d = await within(deriveStop($), STOP_WAIT_MS);
-        if (d) {
-          await within(log($, `STOP seen ${d.stop.session_id}`), STOP_WAIT_MS);
-          if (!d.found) {
-            void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
-          } else {
-            lastStop = d.stop;
-            if (busy) {
-              void log($, `SKIP busy ${d.stop.session_id}`);
-            } else {
-              busy = true;
-              void shadow($, d.stop).finally(() => {
-                busy = false;
-              });
-            }
-          }
+      const work = (async () => {
+        if (e.isAborted || e.reason !== "answer") {
+          void log($, `SKIP no full answer | reason ${e.reason}, isAborted ${e.isAborted}`);
+          return;
         }
-      } catch (err) {
-        void log($, `SKIP no session | ${msg(err)}`);
-      }
+        let d;
+        try {
+          d = await deadline(deriveStop($), LOOKUP_MS);
+        } catch (err) {
+          void log($, `SKIP no session | ${msg(err)}`);
+          return;
+        }
+        await log($, `STOP seen ${d.stop.session_id}`);
+        if (!d.found) {
+          void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
+          return;
+        }
+        lastStop = d.stop;
+        if (busy) {
+          void log($, `SKIP busy ${d.stop.session_id}`);
+        } else {
+          busy = true;
+          void shadow($, d.stop).finally(() => {
+            busy = false;
+          });
+        }
+      })().catch(() => {});
+      await within(work, SEEN_WAIT_MS);
     }
     return next(e);
   });
@@ -106,13 +109,8 @@ async function configDir($) {
 // The one lookup for a turn's transcript, used by turn.complete and /dw: rebuild transcript_path from the
 // session id and cwd the way the app names it. found says whether the file is there.
 async function deriveStop($) {
-  let id;
-  try {
-    id = await $.session.id();
-  } catch (err) {
-    if (!keptId) throw err;
-    id = keptId;
-  }
+  // The id is read per turn, never kept: a /clear gives a new id with no session.start.
+  const id = await $.session.id();
   const cwd = await $.session.cwd();
   const path = `${await configDir($)}/projects/${cwd.replace(/[^A-Za-z0-9]/g, "-")}/${id}.jsonl`;
   return {
@@ -294,7 +292,8 @@ const MAX_LOG_LINES = 500;
 const MAX_LINE = 2000;
 const TIME_LEN = 24; // length of an ISO timestamp, the start of each log line
 const LOG_WAIT_MS = 2000;
-const STOP_WAIT_MS = 500;
+const LOOKUP_MS = 500; // the transcript lookup, off the return path
+const SEEN_WAIT_MS = 50; // the most the handler waits for the STOP seen line
 const MODEL_MS = 50000;
 const PY_MS = 30000; // each python run (unmeasured; split mode calls no model); the mod's timer adds 1 s
 const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
