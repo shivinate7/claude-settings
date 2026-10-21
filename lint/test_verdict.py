@@ -68,46 +68,60 @@ class T(unittest.TestCase):
         self.assertIn("killed by signal 15", r.stdout)
 
     def test_heartbeat_while_slow(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import time\ntime.sleep(3.5)\nprint('done')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 3, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertTrue(b.endswith(f"log={log}"), b)
             self.assertTrue(r.stdout.splitlines()[-1].startswith("PASS "), r.stdout)
 
     def test_fast_command_prints_no_heartbeat(self):
-        r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "1"})
+        """A child shorter than the beat interval gets no beat; 30 s is wide enough that Python start cost cannot reach it."""
+        r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "30"})
         self.assertEqual(r.returncode, 0)
         self.assertEqual(heartbeats(r.stdout), [], r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
+    def test_no_heartbeat_after_the_child_exits(self):
+        """A beat after exit is a false alarm: the beat count cannot exceed the whole seconds the verdict line reports."""
+        r = run("import time\ntime.sleep(1.5)", None, {"VERDICT_HEARTBEAT": "1"})
+        lines = r.stdout.splitlines()
+        m = re.match(r"PASS .* \(([0-9.]+)s\)$", lines[-1])
+        self.assertTrue(m, r.stdout)
+        self.assertGreaterEqual(len(heartbeats(r.stdout)), 1, r.stdout)
+        self.assertLessEqual(len(heartbeats(r.stdout)), int(float(m.group(1))), r.stdout)
+        self.assertEqual(heartbeats(lines[-1]), [], r.stdout)
+
     def test_slow_fail_heartbeats_then_same_excerpt(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import sys, time\nprint('one')\ntime.sleep(2.5)\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 7)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 2, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             lines = r.stdout.splitlines()
-            self.assertEqual(lines[:2], beats, r.stdout)
-            first = lines[2]
+            self.assertEqual(lines[:len(beats)], beats, r.stdout)
+            first = lines[len(beats)]
             self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first and f"log={log}" in first, first)
-            body = lines[3:]
+            body = lines[len(beats) + 1:]
             self.assertIn("FAIL boom", body)
             self.assertNotIn("one", body)
             self.assertFalse(any("still running" in l for l in body), body)
 
     def test_heartbeat_never_carries_command_output(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import time\nprint('SECRET-OUT-7731', flush=True)\ntime.sleep(2.5)\nprint('SECRET-OUT-7731 again')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 2, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertNotIn("SECRET-OUT-7731", b)
