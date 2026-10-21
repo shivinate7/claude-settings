@@ -33,6 +33,7 @@ declare module 'claude-code' {
     'desktop-statusline': {
       snap: Snapshot | null
       git: GitRead | null
+      gitFailed: boolean
       warned: string[]
       lastTurn: TurnStat | null
       compactions: Compactions | null

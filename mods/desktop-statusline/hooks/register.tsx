@@ -9,6 +9,7 @@ const lastTurn = atom({ plugin: 'desktop-statusline', key: 'lastTurn' } as const
 const compactions = atom({ plugin: 'desktop-statusline', key: 'compactions' } as const, null)
 
 const gitRead = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
+const gitFailed = atom({ plugin: 'desktop-statusline', key: 'gitFailed' } as const, false)
 
 const REFRESH_MS = 60_000 // the band's own snapshot (idle time, limit countdowns); it reads no git
 const GIT_IDLE_MS = 300_000 // an idle session reads git this often at most; a turn end and an attach read too
@@ -102,7 +103,8 @@ const warn = async ($: EngineInterface, limits: Limit[], now: number) => {
   if (fresh.length > 0) await update($, warned, s => [...s, ...fresh].slice(-50))
 }
 
-// Reads git when asked to, or when the last read is GIT_IDLE_MS old; otherwise the last read stands.
+// Reads git when asked to, when the last read is GIT_IDLE_MS old, or when the last try failed; otherwise the last
+// good read stands. A failed read is never stored: the band keeps the last good values.
 const refresh = async ($: EngineInterface, isGitDue = false) => {
   if (!(await isOnDesktop($))) return
 
@@ -114,25 +116,29 @@ const refresh = async ($: EngineInterface, isGitDue = false) => {
     $.session.turns(),
   ])
   let git = await read($, gitRead)
-  if (isGitDue || git === null || now - git.at >= GIT_IDLE_MS) {
+  if (isGitDue || git === null || now - git.at >= GIT_IDLE_MS || (await read($, gitFailed))) {
     const [status, dirs] = await Promise.all([
       output($.process.run(['git', 'status', '--porcelain=v2', '--branch'], { cwd, timeoutMs: 5000 })),
       output($.process.run(['git', 'rev-parse', '--git-dir', '--git-common-dir'], { cwd, timeoutMs: 5000 })),
     ])
-    const lines = status?.split('\n') ?? []
-    const head = lines.find(l => l.startsWith('# branch.head '))?.slice(14)
-    const ab = lines.find(l => l.startsWith('# branch.ab '))?.match(/\+(\d+) -(\d+)/)
-    const [gitDir, commonDir] = dirs?.split('\n') ?? []
-    const fresh: GitRead = {
-      at: now,
-      branch: head && head !== '(detached)' ? head : null,
-      isWorktree: gitDir !== commonDir,
-      ahead: Number(ab?.[1] ?? 0),
-      behind: Number(ab?.[2] ?? 0),
-      changed: lines.filter(l => l && !l.startsWith('#')).length,
+    const isFailed = status === null || dirs === null
+    await update($, gitFailed, () => isFailed)
+    if (!isFailed) {
+      const lines = status.split('\n')
+      const head = lines.find(l => l.startsWith('# branch.head '))?.slice(14)
+      const ab = lines.find(l => l.startsWith('# branch.ab '))?.match(/\+(\d+) -(\d+)/)
+      const [gitDir, commonDir] = dirs.split('\n')
+      const fresh: GitRead = {
+        at: now,
+        branch: head && head !== '(detached)' ? head : null,
+        isWorktree: gitDir !== commonDir,
+        ahead: Number(ab?.[1] ?? 0),
+        behind: Number(ab?.[2] ?? 0),
+        changed: lines.filter(l => l && !l.startsWith('#')).length,
+      }
+      git = fresh
+      await update($, gitRead, () => fresh)
     }
-    git = fresh
-    await update($, gitRead, () => fresh)
   }
   const limits = usage.rateLimits.map(r => ({
     kind: r.kind,
@@ -144,11 +150,11 @@ const refresh = async ($: EngineInterface, isGitDue = false) => {
     startedAt: usage.startedAt,
     prompts,
     dir: cwd.split('/').pop() || cwd,
-    branch: git.branch,
-    isWorktree: git.isWorktree,
-    ahead: git.ahead,
-    behind: git.behind,
-    changed: git.changed,
+    branch: git?.branch ?? null,
+    isWorktree: git?.isWorktree ?? false,
+    ahead: git?.ahead ?? 0,
+    behind: git?.behind ?? 0,
+    changed: git?.changed ?? 0,
     costUsd: usage.cost?.usd ?? null,
     limits,
     agents: agents
