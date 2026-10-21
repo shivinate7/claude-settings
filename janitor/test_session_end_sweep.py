@@ -573,8 +573,15 @@ class SessionEndFetchThrottle(unittest.TestCase):
         self.saved_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
         os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
         _nowindow.run = self._counting_run
+        # A slow machine must not end a pass at "not judged: deadline" and fake a keep.
+        self.saved_budget = sweep.JUDGE_BUDGET_SECONDS
+        sweep.JUDGE_BUDGET_SECONDS = 600
+        self.saved_timeout = session_end_sweep.SWEEP_TIMEOUT_SECONDS
+        session_end_sweep.SWEEP_TIMEOUT_SECONDS = 600  # the budget is then the ceiling less its tails
 
     def tearDown(self):
+        self.sweep.JUDGE_BUDGET_SECONDS = self.saved_budget
+        self.hook.SWEEP_TIMEOUT_SECONDS = self.saved_timeout
         self.nowindow.run = self.real_run
         if self.saved_cfg is None:
             os.environ.pop("CLAUDE_CONFIG_DIR", None)

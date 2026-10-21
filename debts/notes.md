@@ -525,3 +525,4 @@
 - drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-read-at-run-start: `confirm` reads the PR body once at run start, so an edit during the wait is not read. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-mixed-paragraph: a last paragraph that mixes prose and a Drops-lines line still excuses; see drops-mixed-paragraph-exempt. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- sweep-failed-fetch-stale-reap: when the SessionEnd fetch fails with time left, decide_branch still reaps on the stale on-remote read, as on main and as janitor/GUIDE.md documents (janitor/sweep.py _fetch_prune). Decision: when-a-worktree-may-be-removed
