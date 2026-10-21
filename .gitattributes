@@ -1,2 +1,4 @@
+bin/* text eol=lf
+*.sh text eol=lf
+install.sh text eol=lf
 *.cmd text eol=crlf
-actions/ste-lint/run.sh text eol=lf
