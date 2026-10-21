@@ -1099,11 +1099,13 @@ await test('dw-unread-dir round 2 (2): a space at a piece boundary survives the 
   same(pieces.join(''), SPACE_NOTICE, 'the joined pieces')
 })
 
-// ---- python is found once per module load (debt dw-where-exe-both-phases, where.exe on every Stop)
+// ---- python is found once per module load
 // The scope is the module load. A /clear gives the process a new session id with no session.start and no reload
 // (SessionEndInput in the host types), and the module's variables survive it. A reload starts them over. The path
 // is a fact of the machine, so a new session id does not look again.
-// "Fails to start" is a rejected $.process.run. A python that starts and exits non-zero has started.
+// "Fails to start" is a rejected $.process.run. A host may resolve a failed start with a non-zero exit instead, so a
+// non-zero exit from a cached path whose file is gone ($.fs.exists false) also counts. A python that exits
+// non-zero from a file that exists has started.
 
 const FINDER = /^(where(\.exe)?|which)$/
 const finds = h => h.procs.filter(p => FINDER.test(p.argv[0]))
@@ -1161,8 +1163,29 @@ await test('python once: a cached path that fails to start is tried first, then 
   same(pyCalls(h).at(-1).argv[0], PY2, 'path of the last python call')
 })
 
-await test('python once: a python that starts and exits non-zero does not send the next Stop to the finder', async () => {
+// The host resolves a failed start with a non-zero exit, and the cached file is gone.
+await test('python once: a non-zero exit from a cached path whose file is gone sends the next Stop to the finder, and its new path is used', async () => {
   const h = await load(host())
+  h.files.set(PY, '')
+  await stopJudged(h)
+  h.files.delete(PY)
+  const gone = argv => (argv[0] === PY ? { exitCode: 127, stdout: '', stderr: 'cannot start ' + PY } : undefined)
+  h.py1 = gone
+  h.py2 = gone
+  h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
+  const mark = h.procs.length
+  await stopJudged(h)
+  await stopJudged(h)
+  const after = h.procs.slice(mark)
+  same(after[0].argv[0], PY, 'the first call after the file was deleted: the cached path, not the finder')
+  same(finds(h).length, 2, 'finder calls: one at the start, one after the cached file was deleted')
+  same(after.filter(p => p.argv[0] === PY).length, 1, 'tries of the deleted path')
+  same(pyCalls(h).at(-1).argv[0], PY2, 'path of the last python call')
+})
+
+await test('python once: a python that exits non-zero from a file that exists keeps the path, so the next Stop does not run the finder', async () => {
+  const h = await load(host())
+  h.files.set(PY, '')
   await stopJudged(h)
   h.py1 = { exitCode: 1, stdout: '', stderr: 'script error' }
   await stopJudged(h)
