@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Cases for hooks/prose_judge.py, the one PreToolUse command hook that judges an Edit or Write of
+prose against speak-rewrite-superseded-in-place and rulings-declare-kind. It replaces the two
+`type: prompt` hooks on Edit and Write. Standard library only, and no test runner.
+
+Run it from the repository root:
+
+    python hooks/test_prose_judge.py
+
+Each case feeds one PreToolUse payload to `main()` on stdin (UTF-8 bytes, as Claude Code writes
+them), then reads stdout and the exit code. `invoke_model` is replaced by a stub, so no case starts
+a real `claude` process.
+
+Interface the hook must match:
+- File: hooks/prose_judge.py. Module-level `main()`; exit 0 on every path (a return or SystemExit(0)).
+- Payload: `{"hook_event_name": "PreToolUse", "tool_name": "Edit"|"Write", "tool_input": {...}}`.
+  Edit input: file_path, old_string, new_string. Write input: file_path, content.
+- The model caller is `invoke_model` imported from hooks/decision_watch.py and looked up at call
+  time in the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
+  shape={"ok": (True, False)})`, returning (verdict_dict, error) as reply_judge.py uses it. The
+  prompt is the first positional argument. The module exposes the int `MODEL_TIMEOUT`.
+- Which files: a path with a `decisions` folder segment (either slash, any case) is judged, as main's
+  `Edit(**/decisions/**)` rows did. Any other path ends the hook at once: no model call, empty
+  stdout, exit 0. That covers README.md, docs/x.md, debts/x.md and a file named decisions.md.
+- The prompt holds the rule text of today's prompt hook for that tool, verbatim (EDIT_RULE and
+  WRITE_RULE below), and the change: file_path, and for Edit old_string and new_string, for Write content.
+- Block: model answer `{"ok": false, "reason": R}` -> stdout is one JSON object
+  `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+  "permissionDecisionReason": <holds R>}}`, exit 0. The prompt hook it replaces blocks the same way:
+  ok false stops the tool and hands the reason to Claude (continueOnBlock).
+- Allow: model answer `{"ok": true}` -> empty stdout, exit 0.
+- Model error or timeout: FAIL OPEN. Never a deny; stdout is empty or one `systemMessage` JSON; exit 0.
+  Today's prompt hook fails open the same way (a hook that errors is a non-blocking error), and a
+  judge outage must not stop every edit of a Markdown file.
+- Malformed stdin, or no file_path: allow, no model call, exit 0.
+- settings.json: the row's `timeout` exceeds MODEL_TIMEOUT.
+"""
+import contextlib
+import io
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(HERE)
+SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
+sys.path.insert(0, HERE)
+
+try:
+    import prose_judge as pj
+    LOAD_ERROR = None
+except Exception as exc:  # the module does not exist yet: every case fails, none crashes
+    pj, LOAD_ERROR = None, "%s: %s" % (type(exc).__name__, exc)
+
+FAILED = []
+
+# Verbatim from the Edit and Write prompt hooks this hook replaces,
+# after "Judge this edit to a file: $ARGUMENTS\n".
+EDIT_RULE = (
+    "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
+    "and no superseded ruling kept beside the new one). A record may state a current fact with its history in "
+    "one clause; that is not a breach. Rule: rulings-declare-kind (refuse only an edit whose new text deletes a "
+    "`Kind:`, `Plan:` or `Home:` line, or adds a ruling section with no `Kind:` line in the same text; you see "
+    "only the changed text, so never refuse for a Kind line you cannot see). Block only on a clear breach; when "
+    "unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and "
+    "the fix, one line>\"}."
+)
+WRITE_RULE = (
+    "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
+    "and no superseded ruling kept beside the new one). A record may state a current fact with its history in "
+    "one clause; that is not a breach. Rule: rulings-declare-kind (refuse a decision record that has no "
+    "`Kind: build` with `Plan: <path>#<slug> (<platform>)` lines, or `Kind: process` with a `Home:` line). "
+    "Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
+    "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
+)
+OLD, NEW, BODY = "OLDTEXT-3c1f", "NEWTEXT-9b7d", "BODYTEXT-52ea"
+REASON = "speak-rewrite-superseded-in-place: rewrite the ruling in place."
+
+
+def check(name, ok, detail=""):
+    if not ok:
+        FAILED.append(name)
+        print("FAIL: %s  %s" % (name, detail))
+
+
+class Stub:
+    def __init__(self, result):
+        self.result, self.prompts, self.kwargs = result, [], []
+
+    def __call__(self, prompt, *args, **kwargs):
+        self.prompts.append(prompt)
+        self.kwargs.append(kwargs)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+def run(payload, result=({"ok": True}, None)):
+    """Run main() on PAYLOAD with a stubbed model. Return (exit_code, stdout, stub)."""
+    stub, out, code = Stub(result), io.StringIO(), None
+    prior_stdin, prior_model = sys.stdin, pj.invoke_model
+    raw = payload if isinstance(payload, str) else json.dumps(payload)
+    sys.stdin = io.TextIOWrapper(io.BytesIO(raw.encode("utf-8")), encoding="utf-8")
+    pj.invoke_model = stub
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                pj.main()
+            except SystemExit as exc:
+                code = exc.code
+    finally:
+        sys.stdin, pj.invoke_model = prior_stdin, prior_model
+    return (0 if code is None else code), out.getvalue(), stub
+
+
+def edit(path):
+    return {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+            "tool_input": {"file_path": path, "old_string": OLD, "new_string": NEW}}
+
+
+def write(path):
+    return {"hook_event_name": "PreToolUse", "tool_name": "Write",
+            "tool_input": {"file_path": path, "content": BODY}}
+
+
+def json_or_none(text):
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def need_module():
+    if pj is None:
+        check("module hooks/prose_judge.py importable", False, LOAD_ERROR)
+        return False
+    return True
+
+
+# (a) a path that is not prose ends the hook at once.
+SKIP_PATHS = ["src/app.ts", "src/App.tsx", "settings.json", "hooks/guard.py", "C:\\r\\lint\\x.json",
+              "notes.md.json", "docs.md/run.py", "README.md.bak", "README.md", "docs/x.md", "debts/x.md",
+              "debts/x.json", "src/decisions.md"]
+
+
+def case_a_other_paths_make_no_model_call():
+    for path in SKIP_PATHS:
+        for payload in (edit(path), write(path)):
+            name = "a: %s %s" % (payload["tool_name"], path)
+            if not need_module():
+                return
+            code, out, stub = run(payload, ({"ok": False, "reason": REASON}, None))
+            check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+            check(name + ": exit 0", code == 0, code)
+            check(name + ": no stdout", out == "", repr(out))
+
+
+def case_a_prose_named_in_a_ts_body_is_not_judged():
+    if not need_module():
+        return
+    p = edit("src/a.ts")
+    p["tool_input"]["new_string"] = "see decisions/x.md and README.md"
+    code, out, stub = run(p, ({"ok": False, "reason": REASON}, None))
+    check("a: .ts body that names a .md file: no call, no output", stub.prompts == [] and out == "" and code == 0)
+
+
+# (b) a file under a decisions folder is judged once, with the verbatim rule text and the change.
+MD_PATHS = ["decisions/x.md", "C:\\repo\\decisions\\x.md", "a/DECISIONS/x.md", "decisions/sub/x.md"]
+
+
+def case_b_md_edit_calls_model_once_with_rule_and_change():
+    for path in MD_PATHS:
+        if not need_module():
+            return
+        code, out, stub = run(edit(path))
+        name = "b: Edit " + path
+        check(name + ": one model call", len(stub.prompts) == 1, len(stub.prompts))
+        prompt = stub.prompts[0] if stub.prompts else ""
+        check(name + ": verbatim Edit rule text", EDIT_RULE in prompt)
+        check(name + ": old_string, new_string and path in the prompt",
+              OLD in prompt and NEW in prompt and path in prompt)
+        check(name + ": allow is empty stdout, exit 0", code == 0 and out == "", (code, out))
+
+
+def case_b_md_write_calls_model_once_with_rule_and_change():
+    for path in MD_PATHS:
+        if not need_module():
+            return
+        code, out, stub = run(write(path))
+        name = "b: Write " + path
+        check(name + ": one model call", len(stub.prompts) == 1, len(stub.prompts))
+        prompt = stub.prompts[0] if stub.prompts else ""
+        check(name + ": verbatim Write rule text", WRITE_RULE in prompt)
+        check(name + ": content and path in the prompt", BODY in prompt and path in prompt)
+        check(name + ": allow is empty stdout, exit 0", code == 0 and out == "", (code, out))
+
+
+def case_b_model_call_shape_and_timeout():
+    if not need_module():
+        return
+    _, _, stub = run(edit("decisions/a.md"))
+    kw = stub.kwargs[0] if stub.kwargs else {}
+    check("b: shape is the ok/not-ok verdict", kw.get("shape") == {"ok": (True, False)}, kw)
+    check("b: timeout is MODEL_TIMEOUT", isinstance(getattr(pj, "MODEL_TIMEOUT", None), int)
+          and kw.get("timeout") == pj.MODEL_TIMEOUT, kw)
+    try:
+        with open(SETTINGS, encoding="utf-8") as f:
+            rows = [h for e in json.load(f)["hooks"]["PreToolUse"] for h in e["hooks"]
+                    if "prose_judge.py" in h.get("command", "")]
+    except Exception:
+        rows = []
+    check("b: settings row timeout exceeds MODEL_TIMEOUT",
+          len(rows) == 1 and rows[0].get("timeout", 0) > pj.MODEL_TIMEOUT, rows)
+
+
+# (c) a decisions folder deeper in the path is judged too.
+def case_c_decisions_folder_is_judged():
+    for path in ("docs/decisions/x.md", "Decisions/x.md"):
+        for payload in (edit(path), write(path)):
+            if not need_module():
+                return
+            _, _, stub = run(payload)
+            check("c: %s %s: called once" % (payload["tool_name"], path), len(stub.prompts) == 1, len(stub.prompts))
+
+
+# (d) a model block answer blocks; a model failure fails open.
+def case_d_model_block_denies_with_the_reason():
+    for payload in (edit("decisions/a.md"), write("decisions/x.md")):
+        if not need_module():
+            return
+        code, out, _ = run(payload, ({"ok": False, "reason": REASON}, None))
+        obj = json_or_none(out)
+        hso = (obj or {}).get("hookSpecificOutput") or {}
+        name = "d: %s block" % payload["tool_name"]
+        check(name + ": exit 0", code == 0, code)
+        check(name + ": one PreToolUse deny object", hso.get("hookEventName") == "PreToolUse"
+              and hso.get("permissionDecision") == "deny", repr(out))
+        check(name + ": reason carries the model reason", REASON in hso.get("permissionDecisionReason", ""), repr(out))
+
+
+def case_d_model_error_fails_open():
+    for result in ((None, "model subprocess timed out"), (None, "model exited 1: x"), RuntimeError("boom")):
+        for payload in (edit("decisions/a.md"), write("decisions/a.md")):
+            if not need_module():
+                return
+            name = "d: %s fail-open on %r" % (payload["tool_name"], result)
+            try:
+                code, out, stub = run(payload, result)
+            except Exception as exc:
+                check(name, False, "main() raised %r" % exc)
+                continue
+            obj = json_or_none(out)
+            denies = bool(obj and "hookSpecificOutput" in obj)
+            check(name + ": exit 0", code == 0, code)
+            check(name + ": no deny", not denies, repr(out))
+            check(name + ": stdout empty or one systemMessage",
+                  out == "" or bool(obj and set(obj) == {"systemMessage"}), repr(out))
+
+
+def case_d_bad_input_allows():
+    for raw in ("not json", "{}", json.dumps({"tool_name": "Edit", "tool_input": {}})):
+        if not need_module():
+            return
+        code, out, stub = run(raw, ({"ok": False, "reason": REASON}, None))
+        check("d: bad input %r: no call, no deny, exit 0" % raw[:20],
+              stub.prompts == [] and "deny" not in out and code == 0, (code, out))
+
+
+def main():
+    for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
+                 case_b_md_edit_calls_model_once_with_rule_and_change,
+                 case_b_md_write_calls_model_once_with_rule_and_change,
+                 case_b_model_call_shape_and_timeout, case_c_decisions_folder_is_judged,
+                 case_d_model_block_denies_with_the_reason, case_d_model_error_fails_open,
+                 case_d_bad_input_allows):
+        try:
+            case()
+        except Exception as exc:
+            check(case.__name__, False, "raised %s: %s" % (type(exc).__name__, exc))
+    print("%s: %d failed" % ("FAIL" if FAILED else "OK", len(FAILED)))
+    return 1 if FAILED else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
