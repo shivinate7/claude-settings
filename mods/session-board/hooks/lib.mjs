@@ -224,7 +224,7 @@ export const isFresh = (entry, now) => !!entry && entry.at <= now + SKEW_MS && n
 
 // Update-ready: no running agents, waiting, no permission ask, no unpushed commits, clean tree.
 // true, false, or 'unknown' when a git count is missing or its reading (e.rt) is older than
-// 60 s or stamped ahead. Only true counts as ready. Without `now`, the reading time is not checked.
+// 330 s or stamped ahead. Only true counts as ready. Without `now`, the reading time is not checked.
 export function readiness(e, now) {
   if (!e || e.agents !== 0 || e.state !== 'waiting' || e.ask) return false
   if (e.dirty === null || e.unpushed === null) return 'unknown'
