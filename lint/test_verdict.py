@@ -68,46 +68,60 @@ class T(unittest.TestCase):
         self.assertIn("killed by signal 15", r.stdout)
 
     def test_heartbeat_while_slow(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import time\ntime.sleep(3.5)\nprint('done')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 3, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertTrue(b.endswith(f"log={log}"), b)
             self.assertTrue(r.stdout.splitlines()[-1].startswith("PASS "), r.stdout)
 
     def test_fast_command_prints_no_heartbeat(self):
-        r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "1"})
+        """A child shorter than the beat interval gets no beat; 30 s is wide enough that Python start cost cannot reach it."""
+        r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "30"})
         self.assertEqual(r.returncode, 0)
         self.assertEqual(heartbeats(r.stdout), [], r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
+    def test_no_heartbeat_after_the_child_exits(self):
+        """A beat after exit is a false alarm: the beat count cannot exceed the whole seconds the verdict line reports."""
+        r = run("import time\ntime.sleep(1.2)", None, {"VERDICT_HEARTBEAT": "1"})
+        lines = r.stdout.splitlines()
+        m = re.match(r"PASS .* \(([0-9.]+)s\)$", lines[-1])
+        self.assertTrue(m, r.stdout)
+        self.assertGreaterEqual(len(heartbeats(r.stdout)), 1, r.stdout)
+        self.assertLessEqual(len(heartbeats(r.stdout)), int(float(m.group(1))), r.stdout)
+        self.assertEqual(heartbeats(lines[-1]), [], r.stdout)
+
     def test_slow_fail_heartbeats_then_same_excerpt(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import sys, time\nprint('one')\ntime.sleep(2.5)\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 7)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 2, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             lines = r.stdout.splitlines()
-            self.assertEqual(lines[:2], beats, r.stdout)
-            first = lines[2]
+            self.assertEqual(lines[:len(beats)], beats, r.stdout)
+            first = lines[len(beats)]
             self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first and f"log={log}" in first, first)
-            body = lines[3:]
+            body = lines[len(beats) + 1:]
             self.assertIn("FAIL boom", body)
             self.assertNotIn("one", body)
             self.assertFalse(any("still running" in l for l in body), body)
 
     def test_heartbeat_never_carries_command_output(self):
+        """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             r = run("import time\nprint('SECRET-OUT-7731', flush=True)\ntime.sleep(2.5)\nprint('SECRET-OUT-7731 again')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
             beats = heartbeats(r.stdout)
-            self.assertEqual(len(beats), 2, r.stdout)
+            self.assertGreaterEqual(len(beats), 1, r.stdout)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertNotIn("SECRET-OUT-7731", b)
@@ -309,6 +323,117 @@ class T(unittest.TestCase):
             self.assertTrue(m and os.path.exists(m.group(1)), first)
             self.assertEqual(os.path.normcase(m.group(1)), os.path.normcase(log))
             self.assertIn("FAIL boom", open(log).read())
+
+DAY = 86400
+
+def tmp_env(d):
+    return {"TMPDIR": d, "TEMP": d, "TMP": d}
+
+def log_folder(extra):
+    """The folder bin/verdict puts its logs in: whatever tempfile resolves under the same env."""
+    env = dict(os.environ); env.update(extra)
+    return subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"], capture_output=True, text=True, env=env, check=True).stdout.strip()
+
+OWN_HEADER = "=== verdict run 2026-01-01 00:00:00: fx\n"  # the first line bin/verdict writes
+
+def plant(folder, name, age_days, header=True):
+    p = os.path.join(folder, name)
+    open(p, "w").write((OWN_HEADER if header else "") + "old")
+    t = time.time() - age_days * DAY
+    os.utime(p, (t, t))
+    return p
+
+class Prune(unittest.TestCase):
+    def setUp(self):
+        self.sb = tempfile.TemporaryDirectory()
+        self.extra = tmp_env(self.sb.name)
+        self.folder = log_folder(self.extra)
+        os.makedirs(self.folder, exist_ok=True)
+    def tearDown(self):
+        self.sb.cleanup()
+    def go(self, code="raise SystemExit(3)"):
+        return run(code, None, self.extra, timeout=60)
+
+    def test_old_log_gone_recent_and_own_stay(self):
+        old = plant(self.folder, "verdict-old.log", 8)
+        recent = plant(self.folder, "verdict-recent.log", 6)
+        r = self.go()
+        self.assertEqual(r.returncode, 3, r.stdout)
+        own = re.search(r"log=(.+)$", r.stdout.splitlines()[0]).group(1)
+        self.assertFalse(os.path.exists(old), "8-day-old verdict log must be pruned")
+        self.assertTrue(os.path.exists(recent), "6-day-old verdict log must stay")
+        self.assertTrue(os.path.exists(own), "the run's own log must stay")
+        self.assertEqual(os.path.dirname(os.path.normcase(own)), os.path.normcase(self.folder))
+
+    def test_old_log_in_callers_verdict_log_folder_stays(self):
+        with tempfile.TemporaryDirectory() as caller:
+            audit = plant(caller, "verdict-audit-q4.log", 19)
+            r = run("print('x')", os.path.join(caller, "mine.log"), self.extra, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertTrue(os.path.exists(audit), "a caller's VERDICT_LOG folder must never be pruned")
+
+    def test_old_log_without_own_header_stays(self):
+        foreign = plant(self.folder, "verdict-foreign-tool.log", 30, header=False)
+        old = plant(self.folder, "verdict-old.log", 30)
+        r = self.go("print('x')")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.exists(foreign), "a verdict-*.log without bin/verdict's header is not ours")
+        self.assertFalse(os.path.exists(old), "an old log with the header is still pruned")
+
+    def test_non_verdict_logs_never_deleted(self):
+        keep = [plant(self.folder, n, 30) for n in ("other.log", "verdict-old.txt", "xverdict-old.log", "verdict.log.bak")]
+        r = self.go("print('x')")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        for p in keep: self.assertTrue(os.path.exists(p), p)
+
+    def test_folder_named_like_a_log_is_kept(self):
+        d = os.path.join(self.folder, "verdict-x.log")
+        os.mkdir(d)
+        inner = plant(d, "inner.txt", 30)
+        t = time.time() - 30 * DAY
+        os.utime(d, (t, t))
+        self.go("print('x')")
+        self.assertTrue(os.path.isdir(d) and os.path.exists(inner))
+
+    def test_symlink_named_like_a_log_leaves_target(self):
+        with tempfile.TemporaryDirectory() as out:
+            target = plant(out, "target.txt", 30)
+            link = os.path.join(self.folder, "verdict-link.log")
+            try: os.symlink(target, link)
+            except (OSError, NotImplementedError) as e: self.skipTest(f"no symlink here: {e}")
+            self.go("print('x')")
+            self.assertTrue(os.path.exists(target), "a symlink must never delete what it points at")
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows only")
+    def test_junction_named_like_a_log_leaves_target(self):
+        with tempfile.TemporaryDirectory() as out:
+            target = plant(out, "target.txt", 30)
+            jn = os.path.join(self.folder, "verdict-junc.log")
+            m = subprocess.run(["cmd", "/c", "mklink", "/J", jn, out], capture_output=True, text=True)
+            if m.returncode: self.skipTest(f"no junction here: {m.stdout}{m.stderr}")
+            self.go("print('x')")
+            self.assertTrue(os.path.exists(target), "a junction must never delete what it points at")
+
+    @unittest.skipUnless(os.name == "nt", "a locked file cannot be deleted on Windows only; POSIX has no deletion failure to build")
+    def test_locked_old_log_does_not_change_verdict_or_rc(self):
+        old = plant(self.folder, "verdict-locked.log", 30)
+        with open(old, "rb"):
+            fail = self.go("print('FAIL boom')\nraise SystemExit(7)")
+            ok = self.go("print('fine')")
+        self.assertEqual(fail.returncode, 7, (fail.stdout, fail.stderr[-300:]))
+        self.assertTrue(fail.stdout.startswith("FAIL ") and " rc=7 " in fail.stdout.splitlines()[0], fail.stdout)
+        self.assertNotIn("Traceback", fail.stderr)
+        self.assertEqual(ok.returncode, 0, (ok.stdout, ok.stderr[-300:]))
+        self.assertTrue(ok.stdout.startswith("PASS "), ok.stdout)
+        self.assertNotIn("Traceback", ok.stderr)
+
+class MissingVerdictLine(unittest.TestCase):
+    """The verdict line is the contract: a run that dies in setup must still print FAIL."""
+    def test_unwritable_verdict_log_prints_fail_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = run("print('x')", os.path.join(d, "no-such-dir", "v.log"), timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(any(l.startswith("FAIL ") for l in r.stdout.splitlines()), (r.stdout, r.stderr[-300:]))
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,12 @@ try:
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
     def until_note(description) -> str:
         return ""
+try:
+    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
+except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
+    TASK_NOTIFICATION_TAG = None
+# The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
+NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 
 DEFAULT_QUIET = 300
 STALL_EXIT = 3
@@ -229,7 +235,7 @@ def scan_jobs(transcript):
     jobs, done, stops, notes, job_call = {}, set(), set(), {}, {}
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"task-notification", b"TaskStop", b"Successfully stopped", b"until:")):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:") + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
@@ -271,7 +277,9 @@ def scan_jobs(transcript):
 def closed_by_notice(text):
     """The ids of the <task-notification> blocks in text with a terminal status."""
     ids = []
-    for note in text.split("<task-notification>")[1:]:
+    if not TASK_NOTIFICATION_TAG:
+        return ids
+    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
         if tid and st and st.group(1).strip().lower() in TERMINAL:
             ids.append(tid.group(1).strip())
@@ -292,6 +300,8 @@ def stopped_ids(content):
 
 
 def stop():
+    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
+        return 0
     try:
         call = json.load(sys.stdin)
         if call.get("stop_hook_active") is True:

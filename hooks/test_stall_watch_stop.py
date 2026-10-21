@@ -890,8 +890,8 @@ def each_quiet_job_shows_its_own_note():
 
 @case
 def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
-    """N3. guard_stream cannot be imported (a scratch copy of stall_watch.py with no guard_stream
-    beside it): --stop exits 0 and lists the quiet job once, with no note. A control runs the real
+    """N3. guard_stream cannot be imported (a scratch copy of stall_watch.py and shared_names.py with no
+    guard_stream beside them): --stop exits 0 and lists the quiet job once, with no note. A control runs the real
     module on the same transcript and shows the note, so the missing note is not a broken fixture"""
     base = new_dir()
     output_file(base, "bnoimp600", 600)
@@ -899,6 +899,7 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     path = transcript(recs)
     lone = new_dir()
     shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
+    shutil.copy(os.path.join(HERE, "shared_names.py"), lone)
     rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
@@ -911,6 +912,50 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     problems += expect(rc == 0 and "round 1 bids are served" in control,
                        f"control: the real module does not print the note: rc {rc}, {out[:200]!r}")
     return problems
+
+
+def hooks_copy(shared):
+    """A scratch copy of hooks/*.py. shared None leaves out shared_names.py; "stale" writes one with no
+    TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the copy's stall_watch.py."""
+    lone = new_dir()
+    for name in os.listdir(HERE):
+        if name.endswith(".py") and not (name == "shared_names.py" and shared != "real"):
+            shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
+    if shared == "stale":
+        with open(os.path.join(lone, "shared_names.py"), "w", encoding="utf-8") as f:
+            f.write("PROJECT_FROZEN_FILES = ()\n")
+    return os.path.join(lone, os.path.basename(MODULE))
+
+
+def finished_job_is_silent_without_the_notice_tag(shared, label):
+    """A job its completed notice closed, idle 2 h: with shared_names `shared` the check prints nothing
+    and exits 0, since a false 'still running' alarm is worse than a missed stall. A control runs the
+    copy with the real shared_names on the same transcript (silent) and a still-running job (listed)."""
+    base = new_dir()
+    output_file(base, "bfin7200", 7200)
+    output_file(base, "brun7200", 7200)
+    done = transcript(flagged("bfin7200") + [notice("bfin7200")])
+    rc, out, err = run_stop(done, base, module=hooks_copy(shared))
+    problems = expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"{label}: a finished job prints an alarm: {out[:300]!r}")
+    real = hooks_copy("real")
+    rc, out, err = run_stop(done, base, module=real)
+    problems += expect(rc == 0 and out.strip() == "", f"control: real shared_names, finished job: rc {rc}, {out[:200]!r}")
+    rc, out, err = run_stop(transcript(flagged("brun7200")), base, module=real)
+    problems += expect(rc == 0 and "brun7200" in out, f"control: a running job is not listed: rc {rc}, {out[:200]!r}")
+    return problems
+
+
+@case
+def finished_job_is_silent_with_shared_names_missing():
+    """N4a. shared_names.py absent: a finished job idle 2 h prints nothing, exit 0"""
+    return finished_job_is_silent_without_the_notice_tag(None, "shared_names missing")
+
+
+@case
+def finished_job_is_silent_with_shared_names_stale():
+    """N4b. shared_names.py without TASK_NOTIFICATION_TAG: a finished job idle 2 h prints nothing, exit 0"""
+    return finished_job_is_silent_without_the_notice_tag("stale", "shared_names stale")
 
 
 # Row tables. Each row is one case body from above, and keeps its S-label.
