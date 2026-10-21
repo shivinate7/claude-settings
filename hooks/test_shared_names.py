@@ -21,6 +21,7 @@ import glob
 import importlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -173,11 +174,10 @@ def case_no_literal_machine_tags_elsewhere():
                 continue
             with open(path, encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
-            # A collection that lists a tag is a copy of the list. A lone string, such as the one
-            # stall_watch splits on, is a parser's own need and not a copy.
+            # Any string literal equal to a tag is a copy, whether alone or in a collection.
             found += ["%s/%s:%d" % (folder, name, n.lineno) for n in ast.walk(tree)
-                      if isinstance(n, (ast.Tuple, ast.List, ast.Set))
-                      and any(isinstance(e, ast.Constant) and e.value in MACHINE_TAGS for e in n.elts)]
+                      if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                      and n.value in MACHINE_TAGS]
     return not found, "literal copies of a machine tag: %s" % (found or "none")
 
 
@@ -213,6 +213,32 @@ def case_local_time_output_unchanged():
         outs == [TIME_LINE] * 4, saved == want_inbox, not s1, override == want_override)
 
 
+def case_local_time_fails_open_on_bad_shared_names():
+    """A missing or stale shared_names.py (no MACHINE_TAGS) must not stop the time line or an
+    override grant: the install can land local_time.py before its sibling."""
+    bad = []
+    for label in ("absent", "stale"):
+        with tempfile.TemporaryDirectory() as scratch:
+            hooks = os.path.join(scratch, "hooks")
+            shutil.copytree(HERE, hooks, ignore=shutil.ignore_patterns("__pycache__"))
+            target = os.path.join(hooks, "shared_names.py")
+            if label == "absent":
+                os.remove(target)
+            else:
+                with open(target, "w", encoding="utf-8") as handle:
+                    handle.write("PROJECT_FROZEN_FILES = ()\n")
+            cfg = os.path.join(scratch, "cfg")
+            os.mkdir(cfg)
+            env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, LOCAL_TIME_NOW=CLOCK)
+            done = subprocess.run([sys.executable, os.path.join(hooks, "local_time.py")],
+                                  input=json.dumps({"session_id": "s1", "prompt": "override"}),
+                                  capture_output=True, text=True, env=env)
+            if not (done.returncode == 0 and done.stdout.startswith(TIME_LINE)
+                    and "Override pass:" in done.stdout):
+                bad.append("%s: rc=%s stdout=%r" % (label, done.returncode, done.stdout[:60]))
+    return not bad, "bad states: %s" % (bad or "none")
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -224,12 +250,14 @@ CASES = [
      case_guard_modules_hold_no_literal_copy),
     ("(f) shared_names holds MACHINE_TAGS, and every importer uses that object",
      case_machine_tags_pinned_and_shared),
-    ("(g) no product file outside shared_names lists the machine tags",
+    ("(g) no product file outside shared_names holds a string equal to a machine tag",
      case_no_literal_machine_tags_elsewhere),
     ("(h) local_time's prompt path loads no guard-family module",
      case_local_time_loads_no_guard_module),
     ("(i) local_time's output is unchanged for a fixed clock and tag",
      case_local_time_output_unchanged),
+    ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
+     case_local_time_fails_open_on_bad_shared_names),
 ]
 
 
