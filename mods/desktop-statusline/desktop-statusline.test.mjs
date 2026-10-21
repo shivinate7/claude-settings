@@ -56,10 +56,12 @@ async function load() {
 
 async function start() {
   const { register, stub } = await load()
-  const h = { now: NOW, hooks: [], beats: [], timers: [], gitCalls: [], stub }
+  const h = { now: NOW, hooks: [], beats: [], timers: [], gitCalls: [], stub, status: '# branch.head main\n# branch.ab +0 -0\n', gitFail: null }
   const git = argv => {
     h.gitCalls.push(argv)
-    const out = argv.includes('status') ? '# branch.head main\n# branch.ab +0 -0\n' : '.git\n.git\n'
+    if (h.gitFail === 'throw') throw new Error('git timed out')
+    if (h.gitFail === 'exit') return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }
+    const out = argv.includes('status') ? h.status : '.git\n.git\n'
     return { exitCode: 0, stdout: out, stderr: '' }
   }
   h.$ = {
@@ -159,6 +161,64 @@ await T('idle: a session that stays idle reads git again after the back-off, and
   same(await readsAfter(90_000), 1, 'git status reads by 6 min')
   same(await readsAfter(210_000), 1, 'git status reads by 9.5 min')
   same(await readsAfter(150_000), 2, 'git status reads by 12 min')
+})
+
+// ---- a failed git read (exit code not 0, or a timeout) is not a reading: the last good reading stands and the next tick reads again
+
+const GOOD = '# branch.head main\n# branch.ab +2 -0\n1 .M x\n1 .M y\n1 .M z\n'
+const RECOVERED = '# branch.head feature\n# branch.ab +0 -0\n1 .M x\n'
+const FAILURES = ['exit', 'throw']
+const turnEnd = h => fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' })
+
+await T('failed read: the band keeps the last good branch and counts, not an empty reading', async () => {
+  for (const mode of FAILURES) {
+    const h = await start()
+    h.status = GOOD
+    await fire(h, 'session.start', {})
+    await advance(h, 100_000)
+    h.gitFail = mode
+    await turnEnd(h)
+    const snap = await snapshot(h)
+    same([snap.branch, snap.ahead, snap.changed], ['main', 2, 3], `branch, ahead and changed after a failed turn-end read (${mode})`)
+  }
+})
+
+await T('failed read: the next tick reads again, at the first start and at a turn end, and shows the recovered reading', async () => {
+  for (const mode of FAILURES) {
+    for (const failsAt of ['session start', 'turn end']) {
+      const h = await start()
+      h.gitFail = failsAt === 'session start' ? mode : null
+      await fire(h, 'session.start', {})
+      if (failsAt === 'turn end') {
+        await advance(h, 100_000)
+        h.gitFail = mode
+        await turnEnd(h)
+      }
+      h.gitFail = null
+      h.status = RECOVERED
+      const before = statusReads(h)
+      await advance(h, failsAt === 'session start' ? 60_000 : 20_000) // one timer tick
+      same(statusReads(h) - before, 1, `git status reads at the next tick after a failure (${mode}, at ${failsAt})`)
+      const snap = await snapshot(h)
+      same([snap.branch, snap.changed], ['feature', 1], `band after the recovered read (${mode}, at ${failsAt})`)
+    }
+  }
+})
+
+await T('failed read: a good read after a failure is cached for the back-off, as after any good read', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await advance(h, 100_000)
+  h.gitFail = 'exit'
+  await turnEnd(h)
+  h.gitFail = null
+  await advance(h, 10_000)
+  await fire(h, 'session.attach', { surface: 'desktop', clientId: 'desktop:default' }) // a good read at 110 s
+  const before = statusReads(h)
+  await advance(h, 270_000)
+  same(statusReads(h) - before, 0, 'git status reads in the 4.5 minutes after the good read')
+  await advance(h, 90_000)
+  same(statusReads(h) - before, 1, 'git status reads by 6 minutes after the good read')
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length
