@@ -283,7 +283,9 @@ def model(name, verdict):
         calls.append(name)
         return verdict, None
     return call
-if mode != "bare":
+if mode == "broken":
+    sys.modules["decision_watch"] = None  # `from decision_watch import ...` now raises ImportError
+elif mode != "bare":
     # a stand-in for the real home, so no case can start a real `claude` process
     home = types.ModuleType("decision_watch")
     home.invoke_model = model("home", {"ok": True})
@@ -346,6 +348,13 @@ def case_e_the_unreplaced_call_reaches_decision_watch():
           and result["calls"] == ["home"], result and result["calls"])
     check("e: unreplaced: its allow is empty stdout", out == "", repr(out))
 
+def case_e_a_failed_decision_watch_import_does_not_block():
+    if not need_module():
+        return
+    code, out, result = fresh_run(edit("decisions/x.md"), "broken")
+    check("e: failed import: the hook ends, it does not crash at load", result is not None, (code, out[-200:]))
+    check("e: failed import: not a block (exit 2 or a deny)", code != 2 and "deny" not in out, (code, out[-200:]))
+
 
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
@@ -355,7 +364,8 @@ def main():
                  case_d_model_block_denies_with_the_reason, case_d_model_error_fails_open,
                  case_d_bad_input_allows, case_e_a_skipped_input_loads_no_repo_module,
                  case_e_a_replaced_invoke_model_is_the_one_called,
-                 case_e_the_unreplaced_call_reaches_decision_watch):
+                 case_e_the_unreplaced_call_reaches_decision_watch,
+                 case_e_a_failed_decision_watch_import_does_not_block):
         try:
             case()
         except Exception as exc:
