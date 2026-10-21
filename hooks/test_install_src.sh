@@ -2412,6 +2412,31 @@ putfile_prose1() {
   rm -rf "$h"
 }
 
+# ---- installlog1: one install writes a start line and an end line that name the same id and pid ----
+# A reader pairs the end line to its start line by the id and the pid. An end line with another id
+# leaves the run looking unfinished and the id looking like a second run.
+installlog1() {
+  name="installlog1: one install writes one start line and one end line with the same id and pid, and the end line says exit=0"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/installlog1-bin"
+  clone="$work/installlog1-clone"
+  make_guard_clone "$clone" one
+  ev="$work/installlog1-ev"; : > "$ev"
+  run_cloud "$clone" "$cfg" "$ev" > "$work/installlog1-run" 2>&1; rc=$?
+  log="$cfg/claude-settings-install.log"
+  lines=$(wc -l < "$log" 2>/dev/null | tr -d ' ')
+  s=$(sed -n 's/^[^ ]* install\.sh: start id=\([0-9][0-9]*\) pid=\([0-9][0-9]*\)$/\1 \2/p' "$log" 2>/dev/null)
+  e=$(sed -n 's/^[^ ]* install\.sh: end exit=0 id=\([0-9][0-9]*\) pid=\([0-9][0-9]*\)$/\1 \2/p' "$log" 2>/dev/null)
+
+  if [ "$rc" -ne 0 ]; then bad "$name" "install exit $rc: $(tail -n 3 "$work/installlog1-run")"
+  elif [ "$lines" != 2 ]; then bad "$name" "the log holds [$lines] lines, want 2: $(cat "$log" 2>/dev/null)"
+  elif [ -z "$s" ]; then bad "$name" "no start line with a numeric id and pid: $(cat "$log")"
+  elif [ -z "$e" ]; then bad "$name" "no end line with exit=0 and a numeric id and pid: $(cat "$log")"
+  elif [ "$s" != "$e" ]; then bad "$name" "start names [$s], end names [$e] (id pid)"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
 # Decision merge-reinstalls-from-main: the path <clone>-live is not enough. A linked
 # worktree at that path is allowed only when it is detached at the clone's local main commit.
@@ -2644,6 +2669,7 @@ run swap1sh
 run lock1sh
 run putfile_nogap1
 run putfile_prose1
+run installlog1
 run pinlive1
 run pinlive2
 run guardset1
