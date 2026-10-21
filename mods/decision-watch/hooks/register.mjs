@@ -139,7 +139,8 @@ async function dwRun($, stop, extra, who) {
     try {
       r = await spawn(tried);
       // A non-zero exit from a file that is gone is a failed start too (the shell reports a missing file that way).
-      if (r.exitCode !== 0 && !(await Promise.resolve($.fs.exists(tried)).catch(() => true)) && foundPy === tried) foundPy = undefined;
+      // A failed exists check counts as gone. The async wrapper turns a synchronous throw into a rejection, so r is kept.
+      if (r.exitCode !== 0 && !(await (async () => $.fs.exists(tried))().catch(() => false)) && foundPy === tried) foundPy = undefined;
     } catch (err) {
       // A rejected run (failed start or timeout) drops the cached path, so the next run looks again. This run is
       // not repeated: a hung python would hold the slot twice as long. A python that exits non-zero resolves and keeps it.
