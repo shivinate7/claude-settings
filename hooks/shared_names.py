@@ -13,6 +13,9 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 TASK_NOTIFICATION_TAG = "<task-notification>"
 MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG)
 
+# The folder under the config dir that holds per-hook state files.
+STATE_DIR_NAME = "state"
+
 
 def config_dir() -> str:
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(

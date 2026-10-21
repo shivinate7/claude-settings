@@ -29,7 +29,6 @@ if HERE not in sys.path:
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
 SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
-STATE_DIR_NAME = "state"  # the same folder name as decision_watch.SEEN_DIR_NAME
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -61,7 +60,7 @@ def count_this_stop(session_id):
     n = 1
     try:
         if isinstance(session_id, str) and session_id:
-            from shared_names import config_dir  # stdlib only: a sampled-out Stop loads no guard
+            from shared_names import STATE_DIR_NAME, config_dir  # stdlib only: a sampled-out Stop loads no guard
             key = hashlib.sha256(session_id.encode("utf-8", "replace")).hexdigest()
             path = os.path.join(config_dir(), STATE_DIR_NAME, COUNT_SUB, key + ".count")
             with open(path, "r", encoding="ascii") as f:
