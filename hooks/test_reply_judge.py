@@ -720,19 +720,27 @@ IMPORT_PROBE = (
 )
 
 
-def probe_ignored_stop(payload):
-    """Return (the hook's stdout, the GUARD_FAMILY modules its process imported)."""
-    config = os.path.join(ROOT, "probe-config")
+def probe_ignored_stop(payload, config=None):
+    """Return (the hook's stdout, the GUARD_FAMILY modules its process imported, the model calls).
+    The model is the stub, so a Stop that is wrongly judged reaches no real claude. A shared
+    `config` carries the sampling counter from an earlier Stop."""
+    RUNS[0] += 1
+    base = os.path.join(ROOT, "probe-%03d" % RUNS[0])
+    config = config or os.path.join(base, "config")
+    os.makedirs(base, exist_ok=True)
     os.makedirs(config, exist_ok=True)
+    record = os.path.join(base, "calls.jsonl")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config, PYTHONPATH=STUB_DIR, RJ_SCENARIO="",
+               RJ_ANSWER=FINDING_ANSWER, RJ_RECORD=record, RJ_LOADED=os.path.join(base, "loaded"))
     proc = subprocess.run(
         [sys.executable, "-c", IMPORT_PROBE, MODULE_PATH],
         input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60, env=dict(os.environ, CLAUDE_CONFIG_DIR=config), cwd=ROOT,
+        timeout=60, env=env, cwd=base,
     )
     out, mark, tail = proc.stdout.rpartition("PROBE ")
     if not mark:
         raise RuntimeError("the probe did not finish: %s" % proc.stderr[-300:])
-    return out, json.loads(tail)
+    return out, json.loads(tail), os.path.exists(record)
 
 
 def case_ignored_stop_imports_no_guard_family_module():
@@ -744,10 +752,21 @@ def case_ignored_stop_imports_no_guard_family_module():
             payload["last_assistant_message"] = text
         rows.append(("reply %r" % ("(missing)" if text is ABSENT else text), payload))
     for label, payload in rows:
-        out, imported = probe_ignored_stop(payload)
-        check("ignored Stop (%s): nothing printed" % label, out.strip() == "", out)
+        out, imported, called = probe_ignored_stop(payload)
+        check("ignored Stop (%s): nothing printed, no model call" % label, out.strip() == "" and not called, out)
         check("ignored Stop (%s): no guard-family module imported" % label, imported == [],
               "imported before it had work to do: %s" % imported)
+
+
+def case_sampling_skipped_stop_imports_no_guard_family_module():
+    config = sample_config("skip-imports")
+    seed = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, judged
+    check("skip imports: Stop 1 is judged, so Stop 2 is sampled out", len(seed.calls) == 1, seed.calls)
+    payload = {"session_id": SESSION_ALPHA, "stop_hook_active": False, "last_assistant_message": MARK}
+    out, imported, called = probe_ignored_stop(payload, config=config)  # Stop 2, skipped
+    check("skip imports: Stop 2 prints nothing and calls no model", out.strip() == "" and not called, out)
+    check("skip imports: Stop 2 imports no guard-family module", imported == [],
+          "imported before it had work to do: %s" % imported)
 
 
 # Row tables. A row is one case body from above. A row that raises is red and names
@@ -778,6 +797,7 @@ def table_write_and_remove():
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
+    case_sampling_skipped_stop_imports_no_guard_family_module,
     case_model_ok_is_silent,
     case_model_is_haiku_at_xhigh,
     case_model_finding_emits_note_not_block,
