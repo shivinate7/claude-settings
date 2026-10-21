@@ -18,6 +18,7 @@
 
 let lastStop; // the last classic.Stop input this session, for /dw
 let busy = false; // true while a background judge runs
+let foundPy; // the python path pickPython found, kept for the module's life; cleared when a run with it is rejected
 
 // The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
 const UNKNOWN = "Decision watch: UNKNOWN, ";
@@ -124,14 +125,33 @@ const stateDir = (cfg, who) => `${cfg}/decision-watch-${who}`;
 
 async function dwRun($, stop, extra, who) {
   const cfg = await configDir($);
-  const py = await pickPython($);
   const t0 = Date.now();
-  // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
-  const r = await deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
-    stdin: asciiJson(stop),
-    env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
-    timeoutMs: PY_MS,
-  }), PY_MS + 1000);
+  const spawn = (py) =>
+    // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
+    deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
+      stdin: asciiJson(stop),
+      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
+      timeoutMs: PY_MS,
+    }), PY_MS + 1000);
+  let r;
+  if (foundPy) {
+    const tried = foundPy;
+    try {
+      r = await spawn(tried);
+      // A non-zero exit from a file that is gone is a failed start too (the shell reports a missing file that way).
+      // A failed exists check counts as gone. The async wrapper turns a synchronous throw into a rejection, so r is kept.
+      if (r.exitCode !== 0 && !(await (async () => $.fs.exists(tried))().catch(() => false)) && foundPy === tried) foundPy = undefined;
+    } catch (err) {
+      // A rejected run (failed start or timeout) drops the cached path, so the next run looks again. This run is
+      // not repeated: a hung python would hold the slot twice as long. A python that exits non-zero resolves and keeps it.
+      if (foundPy === tried) foundPy = undefined;
+      throw err;
+    }
+  } else {
+    const py = await pickPython($);
+    r = await spawn(py);
+    foundPy = py;
+  }
   return { ...r, ms: Date.now() - t0 };
 }
 
