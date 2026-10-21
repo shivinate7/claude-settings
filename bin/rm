@@ -7,6 +7,7 @@
 # whole when an operand is /, home, the cwd or a parent of the cwd (symlinks resolved), read by
 # _rm_target_bad in hooks/guard_rm_var.py. No usable python, or a helper that cannot load or run: warn once,
 # exec the real rm (decision rm-path-wrapper). install.ps1 does not land this file.
+# On MINGW, MSYS and CYGWIN the shim never refuses: it execs the real rm, and guard.py judges the command text instead.
 
 # Sets REAL to the first rm on PATH that is not a copy of this shim, else /bin/rm. No fork, no grep.
 find_real() {
@@ -41,7 +42,7 @@ case $(uname -s 2>/dev/null) in MINGW*|MSYS*|CYGWIN*) exec "$REAL" "$@" ;; esac
 PY=
 for _p in python3 python; do
   _c=$(command -v "$_p" 2>/dev/null) || continue
-  case $_c in */WindowsApps/*) continue ;; esac
+  case $_c in */[Ww]indows[Aa]pps/*) continue ;; esac
   PY=$_c
   break
 done
