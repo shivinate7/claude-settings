@@ -5940,6 +5940,76 @@ for _name, _command in (
 rm_parent("PowerShell allows a quoted Write-Host", "Write-Host 'Remove-Item -Recurse ..'", "allow",
           tool="PowerShell")
 
+# FALSE ALARMS. A delete named inside a double-quoted message, an echo or a search pattern is text.
+# Main allows each of these (no `-Force`, so no old pattern read them), and so must this rule. The
+# PowerShell verbs are read from raw text with no regard for quotes, so a quoted `Remove-Item
+# -Recurse .`, a quoted `ri -r .` or a quoted word `del` ahead of `-r .` looks like a call. The `rm`
+# form is read by tokens unless shlex cannot parse the segment, and a lone apostrophe in an earlier
+# step makes the rest of the line unparseable: its raw read must still skip a quoted message, and
+# still deny a bare `rm -rf .. it's` (cases above).
+for _tool in ("Bash", "PowerShell"):
+    for _name, _command in (
+        ("a commit message naming Remove-Item -Recurse .",
+         VCS + ' commit -m "Never run Remove-Item -Recurse . here"'),
+        ("an echo of Remove-Item -Recurse ~", 'echo "Remove-Item -Recurse ~"'),
+        ("a grep for del with -r over .", 'grep "del" -r .'),
+    ):
+        rm_parent("%s allows %s" % (_tool, _name), _command, "allow", tool=_tool)
+rm_parent("PowerShell allows a Write-Host of Remove-Item -Recurse .",
+          'Write-Host "Remove-Item -Recurse ."', "allow", tool="PowerShell")
+rm_parent("Bash allows an echo of ri -r .", 'echo "ri -r ."', "allow")
+for _name, _command in (
+    ("a commit message naming rm -rf .. behind a lone apostrophe",
+     "echo don't && " + VCS + ' commit -m "Never run rm -rf .. here"'),
+    ("a commit message naming rm -rf .. behind a lone apostrophe and a semicolon",
+     "echo don't; " + VCS + ' commit -m "Never run rm -rf .. here"'),
+    ("a commit message naming rm -r . behind a lone apostrophe",
+     "echo don't && " + VCS + ' commit -m "Never run rm -r . here"'),
+    ("a double-quoted echo of rm -rf .. behind a lone apostrophe",
+     "echo don't && echo \"rm -rf ..\""),
+    ("a single-quoted echo of rm -rf .. behind a lone apostrophe",
+     "echo don't && echo 'rm -rf ..'"),
+):
+    rm_parent("Bash allows " + _name, _command, "allow")
+
+# HOLES. A delete inside `( )`, `$( )` or backticks must deny like the bare one: the closing
+# parenthesis is no part of the target. `rm -rf /` inside a group is the same hole on a root.
+for _command in ("(rm -rf .)", "(rm -rf ..)", "x=$(rm -rf .)", "echo $(rm -rf .)",
+                 "echo `rm -rf .`", "(rm -rf /)", "(rm -rf ~)", "x=$(rm -rf /)",
+                 "(cd build && rm -rf .)"):
+    rm_parent("Bash inside a group or substitution: " + _command, _command)
+for _command in ("(Remove-Item -Recurse -Force .)", "(Remove-Item -Recurse .)",
+                 "(Remove-Item -Recurse ..)", "$(Remove-Item -Recurse -Force .)",
+                 "$x = (Remove-Item -Recurse -Force ..)", "(Remove-Item -Recurse -Force /)",
+                 "(Remove-Item -Recurse -Force ~)", "(ri -r .)"):
+    rm_parent("PowerShell inside a group or substitution: " + _command, _command,
+              tool="PowerShell")
+# A space inside the group already denied, and a group around a named folder deletes nothing wide.
+rm_parent("Bash inside a group with spaces: ( rm -rf . )", "( rm -rf . )")
+rm_parent("Bash allows a group around a named folder", "(rm -rf build)", "allow")
+rm_parent("Bash allows a substitution around a named folder", "x=$(rm -rf ./build)", "allow")
+rm_parent("PowerShell allows a group around a named folder", "(Remove-Item -Recurse build)", "allow",
+          tool="PowerShell")
+
+# A QUOTED TARGET. The quotes are no part of the name: `"."` is the working folder, and `'~'` is the
+# home folder to PowerShell. Bash reads `'~'` as a folder named `~`; the guard keeps the wider
+# reading, as it does for `'..'` above.
+for _target in ('"."', "'.'", '"~"', "'~'"):
+    rm_parent("Bash rm -rf " + _target, "rm -rf " + _target)
+    for _form in ("Remove-Item -Recurse %s", "Remove-Item -Recurse -Force %s",
+                  "Remove-Item -Path %s -Recurse"):
+        rm_parent("PowerShell " + _form % _target, _form % _target, tool="PowerShell")
+
+# A /c/ CWD. Measured on this machine: every recorded hook payload and every session transcript
+# carries a cwd as `C:\...`, never `/c/...`. Rule 0 still reads that form, so one case pins that
+# the spelling of the cwd does not decide whether the working folder is refused.
+if os.name == "nt":
+    sh("rm-parent: a /c/ cwd, rm -r of the working folder as C:/", 'rm -r "%s"' % slash(_CWD),
+       "deny", "destructive-delete", cwd="/" + slash(_CWD)[0].lower() + slash(_CWD)[2:])
+else:
+    skip_case("rm-parent: a /c/ cwd, rm -r of the working folder as C:/",
+              "`/c/` is a Git Bash spelling of a Windows drive, and means nothing on this platform")
+
 
 # =========================================================================== 3b. linked node_modules
 # q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
