@@ -382,6 +382,88 @@ await test('turn.complete trigger 5: a second turn while a judge runs starts no 
   same(emits(h).length, 2, 'phase 1 runs after the first judge ended: the slot never freed')
 })
 
+// A turn that cannot be judged leaves a SKIP line, never silence. skipLogged is registered before the turn that
+// writes the line, and answers true or false so a missing line fails with its own message.
+const skipLogged = (h, ms) => waitLog(h, /^\S+ SKIP /m, ms).then(() => true, () => false)
+// Only the transcript lookup hangs, so the log (which also asks $.fs.exists) still works.
+const slowLookup = h => {
+  const exists = h.$.fs.exists
+  h.$.fs.exists = p => (p === transcriptOf(h) ? new Promise(() => {}) : exists(p))
+}
+
+await test('turn.complete trigger 6: a transcript lookup slower than its 500 ms bound still writes a SKIP line and judges nothing', async () => {
+  const h = await load(host())
+  slowLookup(h)
+  const skipped = skipLogged(h, 2000)
+  await fire(h, 'turn.complete', turnEvent(), {})
+  assert.ok(await skipped, 'no SKIP line was written: the turn left no trace in the log')
+  await settle(60)
+  same(emits(h).length, 0, 'phase 1 runs for a turn whose transcript was never found')
+  same(h.modelReqs.length, 0, 'model calls')
+})
+
+// 100 ms, not the lookup's 500 ms bound (or two of them): the handler must not wait on the lookup. The fixed code
+// returns in a few ms, so the margin is large.
+await test('turn.complete trigger 7: with a slow transcript lookup, next(e) returns within 100 ms, not after the lookup bound', async () => {
+  const h = await load(host())
+  slowLookup(h)
+  const NEXT = { text: 'the answer' }
+  assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 100, 'turn.complete waited on the lookup bound'), NEXT)
+})
+
+// /clear gives the process a new session id with no session.start (SessionEndInput and the session.start note in the
+// host types). A kept id is then the OLD session's, whose transcript is still on disk, so a fallback to it would judge
+// the wrong session.
+await test('turn.complete trigger 8: after a /clear, a failed per-turn $.session.id() judges nothing (no fallback to the session.start id) and logs a SKIP line', async () => {
+  const h = await load(host())
+  await fire(h, 'session.start', {}, {}) // the id read here is SID
+  const OLD = TRANSCRIPT
+  h.files.set(OLD, '{}\n') // the old session's transcript stays on disk after /clear
+  h.sid = 'bbbbbbbb-1111-2222-3333-444444444444'
+  h.sessionThrow = true
+  const skipped = skipLogged(h, 1000)
+  await fire(h, 'turn.complete', turnEvent(), {})
+  const ok = await skipped
+  await settle(60)
+  same(emits(h).length, 0, "phase 1 runs: the old session's transcript was judged from the id kept at session.start")
+  same(h.modelReqs.length, 0, 'model calls')
+  assert.ok(ok, 'no SKIP line was written: the turn left no trace in the log')
+  // Control: with the id readable again, the new session judges, on its own transcript.
+  h.sessionThrow = false
+  await fire(h, 'turn.complete', turnEvent({ turnId: 't2' }), {})
+  await judged(h)
+  same(emits(h).length, 1, 'phase 1 runs for the new session')
+  const stdin = JSON.parse(emits(h)[0].opts.stdin)
+  same(stdin.session_id, h.sid, 'stdin session_id')
+  same(stdin.transcript_path, transcriptOf(h), 'stdin transcript_path')
+})
+
+// Owner default 2026-10-21 17:00 CDT: skip turns with no full answer. Each condition is set alone, so a handler that
+// reads only isAborted, or only the reason, fails the case for the one it ignores.
+for (const [label, extra] of [
+  ['isAborted true', { isAborted: true }],
+  ["reason 'aborted'", { reason: 'aborted' }],
+  ["reason 'error'", { reason: 'error' }],
+  ["reason 'refusal'", { reason: 'refusal' }],
+]) {
+  await test(`turn.complete skip: a turn with ${label} starts no judge and logs a SKIP line; a reason 'answer' turn after it judges`, async () => {
+    const h = await load(host())
+    const skipped = skipLogged(h, 1000)
+    const NEXT = { text: 'the answer' }
+    assert.equal(await within(fire(h, 'turn.complete', turnEvent(extra), NEXT), 1000, 'the turn'), NEXT)
+    const ok = await skipped
+    await settle(60)
+    same(emits(h).length, 0, 'phase 1 runs: a turn with no full answer was judged')
+    same(h.modelReqs.length, 0, 'model calls')
+    assert.ok(ok, 'no SKIP line was written: the turn left no trace in the log')
+    // Control: the skip did not hold the judge slot, and a reason 'answer' turn judges.
+    await fire(h, 'turn.complete', turnEvent({ turnId: 't2', reason: 'answer', isAborted: false }), {})
+    await judged(h)
+    same(emits(h).length, 1, 'phase 1 runs for the reason answer turn')
+    assert.doesNotMatch(allLog(h), /SKIP busy/, 'the skipped turn held the judge slot')
+  })
+}
+
 await test('turn: a FLAG never changes the turn.complete result', async () => {
   const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
   const e = turnEvent()
