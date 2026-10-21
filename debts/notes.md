@@ -525,3 +525,4 @@
 - drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-read-at-run-start: `confirm` reads the PR body once at run start, so an edit during the wait is not read. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-mixed-paragraph: a last paragraph that mixes prose and a Drops-lines line still excuses; see drops-mixed-paragraph-exempt. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- ci-wake-prefilter-unicode-escape: the ci_wake shell prefilter misses a "ready" written as a JSON unicode escape (ready), which python decodes; Claude Code never escapes ASCII letters (settings.json ci_wake row). Decision: none
