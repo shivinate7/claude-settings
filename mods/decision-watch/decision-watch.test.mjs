@@ -1099,6 +1099,116 @@ await test('dw-unread-dir round 2 (2): a space at a piece boundary survives the 
   same(pieces.join(''), SPACE_NOTICE, 'the joined pieces')
 })
 
+// ---- python is found once per module load (debt dw-where-exe-both-phases, where.exe on every Stop)
+// The scope is the module load. A /clear gives the process a new session id with no session.start and no reload
+// (SessionEndInput in the host types), and the module's variables survive it. A reload starts them over. The path
+// is a fact of the machine, so a new session id does not look again.
+// "Fails to start" is a rejected $.process.run. A python that starts and exits non-zero has started.
+
+const FINDER = /^(where(\.exe)?|which)$/
+const finds = h => h.procs.filter(p => FINDER.test(p.argv[0]))
+const endLines = h => (logNow(h).match(/^\S+ END /gm) || []).length
+const PY2 = '/opt/py312/python3'
+const SID2 = 'bbbbbbbb-1111-2222-3333-444444444444'
+
+// One Stop, then wait for its judge to log END and free the one-judge slot, so the next Stop judges too.
+async function stopJudged(h, e = stopEvent()) {
+  const want = endLines(h) + 1
+  await fire(h, 'classic.Stop', e, {})
+  const t0 = Date.now()
+  while (endLines(h) < want && Date.now() - t0 < 3000) await settle(5)
+  same(endLines(h), want, 'END lines after the Stop: the judge never finished')
+  await settle(10)
+  assert.ok(!/SKIP busy/.test(logNow(h)), 'a Stop was skipped as busy, so it never judged')
+}
+
+await test('python once: two Stops run the finder once, and the second Stop spawns the found path', async () => {
+  const h = await load(host())
+  await stopJudged(h)
+  const afterFirst = pyCalls(h).length
+  await stopJudged(h)
+  same(finds(h).length, 1, 'finder calls for two Stops')
+  assert.ok(pyCalls(h).length > afterFirst, 'the second Stop never reached python, so the finder count proves nothing')
+  same([...new Set(pyCalls(h).map(p => p.argv[0]))], [PY], 'paths python was spawned with')
+})
+
+await test('python once: a Stop and a /dw share the one finder call', async () => {
+  const h = await load(host())
+  await stopJudged(h)
+  const afterStop = pyCalls(h).length
+  await dwRun(h)
+  same(finds(h).length, 1, 'finder calls for a Stop and a /dw')
+  assert.ok(pyCalls(h).length > afterStop, '/dw never reached python, so the finder count proves nothing')
+  same([...new Set(pyCalls(h).map(p => p.argv[0]))], [PY], 'paths python was spawned with')
+})
+
+await test('python once: a cached path that fails to start is tried first, then the finder runs again and its new path is used', async () => {
+  const h = await load(host())
+  await stopJudged(h)
+  await stopJudged(h)
+  // The machine changes: the cached path is gone, and the finder now answers PY2.
+  const gone = argv => { if (argv[0] === PY) throw new Error(`spawn ${PY} ENOENT`) }
+  h.py1 = gone
+  h.py2 = gone
+  h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
+  const mark = h.procs.length
+  await stopJudged(h)
+  await stopJudged(h)
+  const after = h.procs.slice(mark)
+  same(after[0].argv[0], PY, 'the first call after the path broke: the cached path, not the finder')
+  same(after.filter(p => p.argv[0] === PY).length, 1, 'tries of the dead path')
+  same(finds(h).length, 2, 'finder calls: one at the start, one after the cached path failed')
+  same(pyCalls(h).at(-1).argv[0], PY2, 'path of the last python call')
+})
+
+await test('python once: a python that starts and exits non-zero does not send the next Stop to the finder', async () => {
+  const h = await load(host())
+  await stopJudged(h)
+  h.py1 = { exitCode: 1, stdout: '', stderr: 'script error' }
+  await stopJudged(h)
+  await stopJudged(h)
+  same(finds(h).length, 1, 'finder calls when python started and the script failed')
+})
+
+// A find that fails has no result to keep. A cached failure would hold until the app restarts.
+for (const [label, opts] of [
+  ['the finder throws', { finderThrow: true }],
+  ['only the WindowsApps stub is on PATH', { finder: { exitCode: 0, stdout: '/store/WindowsApps/python3.exe\r\n', stderr: '' } }],
+]) {
+  await test(`python once: a find that failed is not kept, so the next Stop looks again (${label})`, async () => {
+    const h = await load(host(opts))
+    await stopJudged(h)
+    same(pyCalls(h).length, 0, 'python calls while no python was found')
+    const before = finds(h).length
+    h.finderThrow = false
+    h.finder = null
+    await stopJudged(h)
+    assert.ok(finds(h).length > before, 'the next Stop never ran the finder again')
+    same(pyCalls(h).at(-1).argv[0], PY, 'path of the python call once one is found')
+  })
+}
+
+await test('python once: separate module loads each run the finder once', async () => {
+  const a = await load(host())
+  const b = await load(host())
+  await stopJudged(a)
+  await stopJudged(b)
+  await stopJudged(a)
+  await stopJudged(b)
+  same(finds(a).length, 1, 'finder calls, first load')
+  same(finds(b).length, 1, 'finder calls, second load')
+})
+
+await test('python once: a new session id in the same load (a /clear) reuses the path', async () => {
+  const h = await load(host())
+  await stopJudged(h)
+  const afterFirst = pyCalls(h).length
+  h.sid = SID2
+  await stopJudged(h, stopEvent({ session_id: SID2 }))
+  assert.ok(pyCalls(h).length > afterFirst, 'the new session never reached python, so the finder count proves nothing')
+  same(finds(h).length, 1, 'finder calls across a session id change')
+})
+
 // ---- the background judge never leaks an unhandled rejection
 
 await test('no unhandled rejection escaped a background judge', async () => {
