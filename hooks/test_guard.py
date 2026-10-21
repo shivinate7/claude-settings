@@ -5773,7 +5773,8 @@ for _name, _command in (
     sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
 
 # A RECURSIVE DELETE OF `.`, `..`, THE WORKING FOLDER OR A PARENT OF IT (decision rm-path-wrapper,
-# the rm shim on PATH, whose refusals the guard now holds on every platform and in both shells).
+# the rm shim on PATH refuses these calls; the guard must refuse the same ones on every platform
+# and in both shells).
 # Recursion alone is enough: no force flag is needed. A named folder, a sibling of the working folder
 # and a call that is not recursive stay allowed. Every name below carries `rm-parent`, so
 # MUTATE_ONLY=rm-parent runs this block and nothing else. The existing `delete:` cases pin the rest.
@@ -5984,7 +5985,8 @@ for _command in ("(Remove-Item -Recurse -Force .)", "(Remove-Item -Recurse .)",
                  "(Remove-Item -Recurse -Force ~)", "(ri -r .)"):
     rm_parent("PowerShell inside a group or substitution: " + _command, _command,
               tool="PowerShell")
-# A space inside the group already denied, and a group around a named folder deletes nothing wide.
+# A space inside the group changes nothing, so it denies like the bare form. A group around a named
+# folder deletes nothing wide, so it allows.
 rm_parent("Bash inside a group with spaces: ( rm -rf . )", "( rm -rf . )")
 rm_parent("Bash allows a group around a named folder", "(rm -rf build)", "allow")
 rm_parent("Bash allows a substitution around a named folder", "x=$(rm -rf ./build)", "allow")
@@ -5999,6 +6001,26 @@ for _target in ('"."', "'.'", '"~"', "'~'"):
     for _form in ("Remove-Item -Recurse %s", "Remove-Item -Recurse -Force %s",
                   "Remove-Item -Path %s -Recurse"):
         rm_parent("PowerShell " + _form % _target, _form % _target, tool="PowerShell")
+
+# AN ESCAPED QUOTE IS NO OPEN QUOTE. A backslash before a quote (`it\'s`, `a\"b`, `$'it\'s'`) makes
+# the quote plain text to the shell, so it must not hide a wide delete that follows it. Main denies
+# each of these.
+for _prefix in ("echo it\\'s", 'echo "a\\"b"', "echo $'it\\'s'"):
+    for _target in ("/", "~", ".", ".."):
+        rm_parent("an escaped quote ahead of rm -rf %s: %s" % (_target, _prefix),
+                  "%s && rm -rf %s" % (_prefix, _target))
+
+# A `git rm` IS NOT `rm`. It drops tracked files from the index, so `-r .` there names no wide
+# delete. Main allows each of these. A real `rm -rf .` after a `git` step is still refused.
+for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --cached .."):
+    rm_parent("allows " + _command, _command, "allow")
+rm_parent("a real rm -rf . after a git step", VCS + " status && rm -rf .")
+
+# KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
+# unread by both the token read and the raw read. These cases record today's verdict and are not a
+# ruling that it is right: when a fix makes one deny, re-point it here.
+for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
+    rm_parent("known open: " + _command, _command, "allow")
 
 
 # =========================================================================== 3b. linked node_modules
