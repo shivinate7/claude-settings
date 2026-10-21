@@ -240,7 +240,10 @@ class CiWake(Quiet):
                               ('gh "pr" ready', "Bash"),
                               ("gh pr 'ready'", "Bash"),
                               ("gh.EXE pr ready", "PowerShell"),
-                              ("GH pr ready 5", "PowerShell")):
+                              ("GH pr ready 5", "PowerShell"),
+                              # PowerShell joins a line with a backtick before the newline.
+                              ("gh `\npr ready 5", "PowerShell"),
+                              ("gh pr `\nready 5", "PowerShell")):
             with self.subTest(command=command, tool=tool):
                 self.assert_watch(command, tool)
                 payload = self.payload(command, tool)
