@@ -353,7 +353,13 @@ def decide_branch(where: str, base: str, branch: str, protected_prefixes, checke
         return {"name": branch, "action": "keep", "reason": "unreadable-subject"}
     if empty is False:
         return {"name": branch, "action": "keep", "reason": "only-copy"}
-    return {"name": branch, "action": "reap", "reason": _branch_reap_label(where, base, branch)}
+    label = _branch_reap_label(where, base, branch)
+    if label == "on-remote" and _fetch_throttled(where):
+        # A throttled run skipped the fetch, so the remote-tracking refs may be 10 minutes old and
+        # an on-remote read could name a head the remote has since lost. A branch merged into the
+        # base (ancestor, cherry-empty) needs no remote read and still goes.
+        return {"name": branch, "action": "keep", "reason": "unreadable-subject: fetch throttled"}
+    return {"name": branch, "action": "reap", "reason": label}
 
 
 def _branch_reap_label(where: str, base: str, branch: str) -> str:
@@ -2835,6 +2841,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         if (decision["action"] == "keep" and decision["reason"] == "unreadable-subject"
                 and _FETCH_FAILED is not None and root in _FETCH_FAILED):
             decision["reason"] += ": fetch failed"  # the likely cause of an unsettled read
+        elif (decision["action"] == "keep" and decision["reason"] == "unreadable-subject"
+                and _fetch_throttled(root)):
+            decision["reason"] += ": fetch throttled"  # no fetch and no ls-remote ran this window
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             if _past_deadline():
