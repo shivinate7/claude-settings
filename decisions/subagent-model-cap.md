@@ -57,8 +57,9 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and gate | no model; plain code | n/a |
 
-The Agent prompt judge blocks an Explore whose brief asks it to audit, review, judge, rate or compare
-meaning, unless the call sets model sonnet. A plain search passes on the Haiku default. The caller
+The Agent prompt judge blocks an audit Explore (a brief that asks it to audit, review, judge, rate or
+compare meaning) unless the call sets model sonnet or opus. Sonnet is the floor. Opus runs only on the
+owner's word, which only prose enforces. A plain search passes on the Haiku default. The caller
 spot-checks findings before it acts on an audit.
 
 `lint/check_skill_model_rows.py` fails CI when a skill under `skills/` has no row, or a row names a
