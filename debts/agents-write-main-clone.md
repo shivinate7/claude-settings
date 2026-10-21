@@ -1,0 +1,6 @@
+# A lane agent can write into the main clone from its own worktree
+
+- **What.** On 2026-10-20 at 16:53 CDT, two lane agents working in scratchpad worktrees wrote into the main clone `C:\Users\ShivamSemwal\Clones\claude-settings` through relative paths. One script truncated `decisions/haiku-prompt-hooks.md` there (restored from the lane's copy). Another created an empty `hooks/test_prose_judge.py`. Nothing blocked the write, because the main clone is a normal tree.
+- **Where.** The agent briefs, which now say "absolute paths only, never write in the main clone". And the guard rule `worktree-home` in `hooks/guard.py`, which does not stop a worktree agent's Write, Edit or Python-script write outside its worktree.
+- **Decision.** `an-agent-outside-its-home-tree-must-stop` (an agent outside its home tree must stop). It covers Bash `cwd` and Write or Edit targets under the primary checkout only for worktrees at the recorded home shape. It does not name a scratchpad worktree or a script's file write.
+- **Retire.** A check stops an agent with an assigned worktree from writing files in another checkout. A red case covers a Write, Edit and Python-script write from a scratchpad worktree into the main clone.
