@@ -249,11 +249,22 @@ def make_stubs(root):
     return alias_dir, real_dir
 
 
+# Git for Windows' bin/sh.exe puts /usr/bin (the real uname) ahead of PATH. A row that calls uname would
+# then see MINGW whatever stub is on PATH. This prefix sets PATH again, in POSIX form, before the row runs.
+PATH_FIRST = 'if command -v cygpath >/dev/null 2>&1; then PATH=$(cygpath -up "$STUB_PATH"); export PATH; fi; '
+
+
 def run_launcher(h, script, path_value):
-    """Run one wrapper with the script present, so the python loop is reached."""
+    """Run one wrapper with the script present, so the python loop is reached. Rows that exit before
+    python where their hook does nothing (xcrun missing, MINGW uname) get stubs that make it work."""
     with tempfile.TemporaryDirectory() as cfg:
         write_file(os.path.join(cfg, script))
-        return run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": path_value}, PAYLOAD)
+        tools = os.path.join(cfg, "tools")
+        for name, body in (("xcrun", "exit 0"), ("uname", "echo Linux")):
+            write_file(os.path.join(tools, name), "#!/bin/sh\n%s\n" % body)
+            os.chmod(os.path.join(tools, name), 0o755)
+        path = os.pathsep.join([path_value, tools])
+        return run_sh(PATH_FIRST + command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": path, "STUB_PATH": path}, PAYLOAD)
 
 
 def launcher_real_ok(r):
