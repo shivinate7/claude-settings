@@ -7,6 +7,11 @@ CLAUDECODE unset it does nothing. It reuses _rm_target_bad (guard_rm_var), the o
 critical-path reading. Decision rm-path-wrapper (an rm shim on PATH, active only in Claude sessions).
 The install.ps1 half is out of scope.
 
+On Git Bash, MSYS2 and Cygwin (uname -s starts MINGW, MSYS or CYGWIN) the shim execs the real rm before
+it looks for python: each python start there costs two more processes. Elsewhere it finds python like
+the hook launchers in settings.json: python3, then python, skipping a path under WindowsApps (the
+Microsoft Store alias). These cases stub uname and python on a PATH of their own, so any host runs them.
+
 Never runs a wide delete: HOME and the cwd are temp dirs, and the module refuses to run if the shim
 under test is the real rm. RM_SHIM_UNDER_TEST overrides the shim path (red proofs on a scratch shim).
 Tests live here, not in bin/: bin/ is landed on PATH.
@@ -19,6 +24,9 @@ REAL_RMS = ("/bin/rm", "/usr/bin/rm")
 # Fixed paths, not `which`: in a Claude session `which rm` is the shim itself.
 REAL_RM = next((p for p in REAL_RMS if os.path.exists(p)), REAL_RMS[0])
 REAL_SH = "/bin/sh"
+REAL_CAT = next((p for p in ("/bin/cat", "/usr/bin/cat") if os.path.exists(p)), "/bin/cat")
+WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
 
 
 def setUpModule():
@@ -37,6 +45,52 @@ def names_a_delete_of(text, target):
     cmd = r"""(?:/bin/rm|rm|rmdir|unlink)\s+(?:-\S+\s+)*["']?""" + re.escape(target) + r"""/*["']?(?=$|[\s`'")\;&|])"""
     cue = r"""^[ \t]*(?:[$>#][ \t]*)?|\b(?:run|try|use|instead|then|retry|with|bypass)\b[^\n]*?[\s`'"(:]"""
     return re.search("(?:" + cue + ")" + cmd, text, re.M | re.I) is not None
+
+
+def sh_code(text):
+    """The part of an sh script that the shell runs or expands: # comments, single-quoted text and quoted
+    here-document bodies are dropped. One pass over quotes, comments and here-documents, so a quote inside
+    a comment or a here-document opens no string, and a # inside a string opens no comment."""
+    out, q, doc = [], None, None  # q: the open quote; doc: (tag, body expands) inside a here-document
+    for line in text.splitlines(True):
+        if doc:
+            if line.strip() == doc[0]:
+                doc = None
+            elif doc[1]:
+                out.append(line)
+            continue
+        i = 0
+        while i < len(line):
+            c = line[i]
+            if c == "\\" and q != "'":
+                out.append(line[i:i + 2])
+                i += 2
+                continue
+            if q:
+                if c == q:
+                    q = None
+                elif q == '"':
+                    out.append(c)
+            elif c in "'\"":
+                q = c
+            elif c == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+                out.append("\n")
+                break
+            else:
+                m = HEREDOC.match(line, i) if line.startswith("<<", i) and line[i - 1:i] != "<" else None
+                if m:
+                    doc = (m.group(2), not m.group(1))
+                    out.append(line[i:m.end()])
+                    i = m.end()
+                    continue
+                out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def forks_cat(text):
+    """True when the sh script runs a command substitution of cat: $(cat ...) or `cat ...`."""
+    return re.search(r"\$\(\s*cat\b|`\s*cat\b", sh_code(text)) is not None
 
 
 @unittest.skipIf(os.name == "nt", "posix shim; the install.ps1 half is a separate brief")
@@ -96,6 +150,29 @@ class Shim(unittest.TestCase):
         for tool, target in tools.items():
             os.symlink(target, os.path.join(d, tool))
         return d
+
+    def exe(self, d, name, body):
+        """A stub d/name: an sh script that runs body. d is made when it is missing."""
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, name)
+        with open(p, "w") as f:
+            f.write("#!/bin/sh\n" + body + "\n")
+        os.chmod(p, 0o755)
+
+    def recorder(self, d, name, tail="exit 0"):
+        """A stub d/name that appends one line, its own path and its args, to calls.log in the parent of d,
+        and then runs tail."""
+        log = os.path.join(os.path.dirname(d), "calls.log")
+        self.exe(d, name, "printf '%%s' \"$0\" >> '%s'; printf ' [%%s]' \"$@\" >> '%s'; echo >> '%s'\n%s"
+                 % (log, log, log, tail))
+
+    def calls(self, root):
+        """The recorded calls under root, one string per call, oldest first."""
+        try:
+            with open(os.path.join(root, "calls.log")) as f:
+                return f.read().splitlines()
+        except FileNotFoundError:
+            return []
 
     def assertIntact(self):
         gone = [p for p in self.live + [self.link] if not os.path.lexists(p)]
@@ -252,6 +329,106 @@ class Shim(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.lexists(self.path("work", "proj", "-dash")))
         self.assertIntact()
+
+    # Windows: a recursive call under CLAUDECODE still reaches the real rm with no python.
+
+    def test_a_windows_uname_execs_the_real_rm_and_starts_no_python(self):
+        args = ["-rf", "--", "dir with space", "-weird"]
+        for n, uname in enumerate(WINDOWS_UNAMES):
+            with self.subTest(uname):
+                root = self.path("win%d" % n)
+                d = os.path.join(root, "stubs")
+                self.exe(d, "uname", "echo " + uname)
+                self.recorder(d, "rm", "exit 7")
+                self.recorder(d, "python3")
+                self.recorder(d, "python")
+                r = self.rm(*args, path=d)
+                started = [c.split(" ")[0] for c in self.calls(root) if "/python" in c.split(" ")[0]]
+                self.assertEqual(started, [], "python started under uname %s" % uname)
+                self.assertEqual(self.calls(root), ["%s [%s]" % (os.path.join(d, "rm"), "] [".join(args))])
+                self.assertEqual(r.returncode, 7, "the real rm's exit code is the call's: " + r.stderr)
+
+    # Elsewhere: python3, then python; a path under WindowsApps is the Store alias and is skipped.
+
+    def test_python_is_found_like_the_hook_launchers_find_it(self):
+        alias, wrap = "exit 9", 'exec "%s" "$@"' % sys.executable
+        # label, stubs under WindowsApps, stubs after it, the stub that must run (None: no python is usable)
+        cases = (
+            ("python3 is the Store alias, python is real", {"python3": alias}, {"python": wrap}, "python"),
+            ("no python3, python is real", {}, {"python": wrap}, "python"),
+            ("python3 and python are both real: python3 wins", {}, {"python3": wrap, "python": "exit 0"}, "python3"),
+            ("only the Store alias", {"python3": alias}, {}, None),
+        )
+        for n, (label, store_stubs, ok_stubs, want) in enumerate(cases):
+            with self.subTest(label):
+                root = self.path("py%d" % n)
+                os.mkdir(root)
+                store = self.bindir("py%d/WindowsApps" % n)
+                ok = self.bindir("py%d/ok" % n, rm=REAL_RM, cat=REAL_CAT)
+                self.exe(ok, "uname", "echo Linux")
+                for d, stubs in ((store, store_stubs), (ok, ok_stubs)):
+                    for tool, tail in stubs.items():
+                        self.recorder(d, tool, tail)
+                path = os.pathsep.join([store, ok])
+                r = self.rm("-rf", self.home if want else self.sub, path=path)
+                ran = [c.split(" ")[0] for c in self.calls(root)]
+                self.assertEqual(ran, [os.path.join(ok, want)] if want else [], "the python that ran")
+                if want:
+                    self.assertRefusal(r, ["-rf", self.home], [self.home])
+                else:
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertFalse(os.path.exists(self.sub), "no python: the real rm still runs")
+
+
+class ShimSource(unittest.TestCase):
+    def test_the_shim_runs_no_cat(self):
+        # A command substitution of cat forks a subshell and a cat on every judged call. The python
+        # program goes to python on stdin through a here-document instead.
+        with open(SHIM) as f:
+            text = f.read()
+        self.assertIn("exec", sh_code(text), "the scanner read no code from the shim")
+        self.assertFalse(forks_cat(text), "the shim runs a command substitution of cat")
+
+
+class ShScanner(unittest.TestCase):
+    """forks_cat reads code, not text: a comment opener in a string, a multi-line string, a lone quote."""
+    FOUND = (
+        ("plain", "x=$(cat f)\n"),
+        ("backticks", "x=`cat f`\n"),
+        ("a # in single quotes opens no comment", "echo '#'; x=$(cat f)\n"),
+        ("a # in double quotes opens no comment", 'echo "#" $(cat f)\n'),
+        ("$# is not a comment", "echo $# $(cat f)\n"),
+        ("// and /* are not comment openers in sh", 'echo "//" "/*"; x=$(cat f)\n'),
+        ("a double-quoted string expands it", 'echo "# $(cat f)"\n'),
+        ("a multi-line double-quoted string expands it", 'x="a\nb $(cat f)\nc"\n'),
+        ("a lone quote in a comment opens no string", "# don't\nx=$(cat f)\n"),
+        ("an escaped quote opens no string", "echo it\\'s; x=$(cat f)\n"),
+        ("code after a quoted here-document with a lone quote", "python3 - <<'E'\nprint(\"don't\")\nE\nx=$(cat f)\n"),
+        ("an unquoted here-document expands it", "cat <<E\n$(cat f)\nE\n"),
+        ("the substitution that opens a quoted here-document", "PY=$(cat <<'E'\nprint(1)\nE\n)\n"),
+        ("CRLF line ends", "x=1\r\ny=$(cat f)\r\n"),
+    )
+    NOT_FOUND = (
+        ("a comment", "# $(cat f)\n"),
+        ("a trailing comment", "x=1 # $(cat f)\n"),
+        ("a comment with a lone quote", "# don't $(cat f)\n"),
+        ("single quotes", "echo '$(cat f)'\n"),
+        ("a multi-line single-quoted string", "x='a\n$(cat f)\nc'\n"),
+        ("a quoted here-document body", "python3 - <<'E'\nprint(\"don't\")\n$(cat f)\nE\n"),
+        ("a quoted here-document, CRLF", "python3 - <<'E'\r\n$(cat f)\r\nE\r\n"),
+        ("another command", "x=$(category f)\n"),
+        ("a here-string", "python3 - <<<'$(cat f)'\n"),
+    )
+
+    def test_finds_a_command_substitution_of_cat_in_code(self):
+        for label, text in self.FOUND:
+            with self.subTest(label):
+                self.assertTrue(forks_cat(text), repr(text))
+
+    def test_ignores_the_same_words_in_inert_text(self):
+        for label, text in self.NOT_FOUND:
+            with self.subTest(label):
+                self.assertFalse(forks_cat(text), repr(text))
 
 
 if __name__ == "__main__":
