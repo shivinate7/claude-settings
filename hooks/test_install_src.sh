@@ -10,6 +10,11 @@
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
 # never touched. SESSION_START_SH lets a case point at a different copy of
 # the hook, the same way GUARD_UNDER_TEST works in hooks/test_guard.py.
+#
+# Linux and macOS only. Under a Windows uname install.sh exits at its top, so a full run on Windows
+# is red by design: hooks/test_install_src.sh runs there only for cases that never start install.sh
+# (caseF4, caseF6, through lint/check_unknown_reads_contract.py). Windows has its own test, under the
+# real Git Bash uname: hooks/test_install_windows.sh.
 
 set -u
 
@@ -87,15 +92,6 @@ make_uname_stub() {
   printf '#!/bin/sh\necho %s\n' "$2" > "$1/uname"
   chmod +x "$1/uname"
 }
-# install.sh stops at its top under MINGW, MSYS and CYGWIN, because install.ps1 is the Windows installer.
-# Every case here tests install.sh's Linux and macOS path, so a Windows runner (Git Bash) gets a stub that
-# answers Linux. PATH is set here, after this shell has started, so the startup reorder that puts /usr/bin's
-# uname first (see PATH_FIRST in hooks/test_wrappers.py) cannot undo it. The win_sh cases put their own stub first.
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    make_uname_stub "$work/uname-linux" Linux
-    PATH="$work/uname-linux:$PATH"; export PATH ;;
-esac
 
 # Build the tarball once, from this repo's own tracked files, so the curl stub serves
 # exactly what GitHub's archive/refs/heads/<ref>.tar.gz would serve: a top-level

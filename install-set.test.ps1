@@ -21,8 +21,8 @@
 #   lock2   install.ps1 given CLAUDE_SETTINGS_LOCK_TOKEN equal to line 1 of the lock file runs without
 #           waiting, logs its own start and end, and leaves the lock. Any other token waits, then exits
 #           1 with one lock line and writes nothing.
-#   log3    install.ps1, the post-merge hook and install.sh each log one start line and one end
-#           line, naming the install id and the process id.
+#   log3    install.ps1 and the post-merge hook each log one start line and one end line, naming
+#           the install id and the process id. install.sh does not run on Windows, so it has no leg here.
 #
 # Every case works under its own folder in a temp root. None touches the real ~/.claude. The
 # sampling loops are bounded by a deadline and read local files only; they measure, they do not wait
@@ -115,13 +115,12 @@ function Add-BuildLine([string]$Dir, [string]$Build) {
     }
 }
 
-# A clone folder: install.ps1 and install.sh, the repo's guard files each with a build line appended,
+# A clone folder: install.ps1, the repo's guard files each with a build line appended,
 # and a settings.json and CLAUDE.md. With -Skills N it also lands N skill folders after the hooks, so
 # an install runs long enough to overlap another. With -Git it is a git repository on main.
 function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Dir 'hooks') | Out-Null
     Copy-Item -LiteralPath (Join-Path $Here 'install.ps1') -Destination (Join-Path $Dir 'install.ps1')
-    Copy-Item -LiteralPath (Join-Path $Here 'install.sh') -Destination (Join-Path $Dir 'install.sh')
     [IO.File]::WriteAllText((Join-Path $Dir 'CLAUDE.md'), "# fixture $Build`n", $Utf8)
     [IO.File]::WriteAllText((Join-Path $Dir 'settings.json'), "{}`n", $Utf8)
     $lands = if ($Skills -gt 0) { "hooks`nskills`n" } else { "hooks`n" }
@@ -161,24 +160,16 @@ function Start-Install([string]$Clone, [string]$Cfg, [string]$Out, [hashtable]$E
     } finally { Restore-Env $saved }
 }
 
-# Writes a bash script that runs one post-merge hook, or install.sh, from a clone, and prints the pid
+# Writes a bash script that runs one post-merge hook from a clone, and prints the pid
 # of that child as bash sees it ($!). The child's own $$ is the same number.
-function Write-ShellRun([string]$Path, [string]$GitDir, [string]$Cfg, [string]$Command, [string]$Label, [switch]$LinuxUname) {
+function Write-ShellRun([string]$Path, [string]$GitDir, [string]$Cfg, [string]$Command, [string]$Label) {
     $g = $GitDir -replace '\\', '/'
     $c = $Cfg -replace '\\', '/'
-    # install.sh appends a PATH line to $HOME's rc file when its marker is missing, so HOME is a scratch folder.
+    # The shell run keeps HOME in a scratch folder, so nothing it starts can write to the real home.
     $h = (Join-Path $Root 'shhome') -replace '\\', '/'
     New-Item -ItemType Directory -Force -Path ($h -replace '/', '\') | Out-Null
-    $lines = @('#!/bin/sh', "cd `"$g`" || exit 9", "export HOME=`"$h`"", "export SHELL=/bin/bash", "export CLAUDE_CONFIG_DIR=`"$c`"")
-    # install.sh stops at its top under a MINGW uname, because install.ps1 is the Windows installer. This case
-    # tests install.sh's own log lines, so the script puts a stub uname that answers Linux ahead of PATH.
-    if ($LinuxUname) {
-        $stub = Join-Path $Root 'uname-linux'
-        New-Item -ItemType Directory -Force -Path $stub | Out-Null
-        [IO.File]::WriteAllText((Join-Path $stub 'uname'), "#!/bin/sh`necho Linux`n", $Utf8)
-        $lines += "PATH=`"`$(cygpath -u '$($stub -replace '\\', '/')'):`$PATH`"; export PATH"
-    }
-    $lines += @("$Command &", "p=`$!", "echo `"${Label}PID=`$p`"", "wait `$p", "echo `"${Label}EXIT=`$?`"")
+    $lines = @('#!/bin/sh', "cd `"$g`" || exit 9", "export HOME=`"$h`"", "export SHELL=/bin/bash", "export CLAUDE_CONFIG_DIR=`"$c`"",
+               "$Command &", "p=`$!", "echo `"${Label}PID=`$p`"", "wait `$p", "echo `"${Label}EXIT=`$?`"")
     [IO.File]::WriteAllText($Path, (($lines -join "`n") + "`n"), $Utf8)
 }
 
@@ -244,11 +235,6 @@ function Get-InstallLog([string]$Cfg) {
     $path = Join-Path $Cfg 'claude-settings-install.log'
     if (-not (Test-Path -LiteralPath $path)) { return @() }
     try { return @((Read-Shared $path) -split '\r?\n' | Where-Object { $_ -ne '' }) } catch { return @() }
-}
-
-# Numbers of 8 or more digits in a line. An install id is one of them.
-function Get-IdTokens([string]$Line) {
-    return @([regex]::Matches($Line, '\d{8,}') | ForEach-Object { $_.Value })
 }
 
 # Waits for a process, bounded. Wait-Process throws on a timeout; the caller then reads the exit code it has.
@@ -461,26 +447,6 @@ Check 'log3: the post-merge hook writes one start line naming its id and pid' ($
 Check 'log3: the post-merge hook writes one end line naming its id and pid' ($hookPid -gt 0 -and $he.Count -eq 1) "end lines naming id '$id4h' and pid ${hookPid}: $($he.Count)"
 $n4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the install's)" } else { Test-NamesInSet $Cfg4 $id4h }
 Check 'names1: the post-merge hook lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4h -eq '') $n4h
-# install.sh, from the same clone, run from bash so $! is its $$. Local mode stamps no id, so the start
-# and end lines must share one id-like number (8 or more digits) instead.
-$sh4 = Join-Path $C4 'sh4.sh'
-Write-ShellRun $sh4 (Join-Path $C4 'git') $Cfg4 'bash ./install.sh' 'SH' -LinuxUname
-$s4 = Start-Shell $sh4 (Join-Path $C4 'sh4-run')
-Wait-Bounded $s4 180
-$shText = Get-RunText (Join-Path $C4 'sh4-run')
-$shPid  = if ($shText -match 'SHPID=(\d+)') { [int]$Matches[1] } else { 0 }
-$shExit = if ($shText -match 'SHEXIT=(\d+)') { [int]$Matches[1] } else { -1 }
-$log4s  = Get-InstallLog $Cfg4
-$sStart = @($log4s | Where-Object { $_ -match '(?i)\bstart\b' -and $_ -match "(?<!\d)$shPid(?!\d)" })
-$sEnd   = @($log4s | Where-Object { $_ -match '(?i)\bend\b' -and $_ -match "(?<!\d)$shPid(?!\d)" })
-$sharedId = $false
-if ($sStart.Count -eq 1 -and $sEnd.Count -eq 1) {
-    $endIds = Get-IdTokens $sEnd[0]
-    $sharedId = (@(Get-IdTokens $sStart[0] | Where-Object { $endIds -contains $_ }).Count -ge 1)
-}
-Check 'log3: install.sh ran to its end (precondition)' ($shPid -gt 0 -and $shExit -eq 0) "install.sh pid $shPid, exit $shExit; output: $(($shText -split '\r?\n' | Select-Object -Last 3) -join ' | ')"
-Check 'log3: install.sh writes one start line naming its id and pid' ($shPid -gt 0 -and $sStart.Count -eq 1) "install.sh pid $shPid; start lines naming that pid: $($sStart.Count)"
-Check 'log3: install.sh writes one end line, with the same id as its start line' ($shPid -gt 0 -and $sEnd.Count -eq 1 -and $sharedId) "install.sh pid ${shPid}: end lines naming it: $($sEnd.Count); shared id: $sharedId"
 
 # ---- cleanup -------------------------------------------------------------------------------------
 try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($EnvSub, $false) } catch { }
