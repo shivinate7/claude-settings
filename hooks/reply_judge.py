@@ -51,7 +51,7 @@ def build_prompt(reply):
     return "%s\n\nReply:\n%s" % (INSTRUCTIONS, reply)
 
 
-def count_this_stop(decision_watch, session_id):
+def count_this_stop(session_id):
     """Return this Stop's number n in its session and store it. Never raises. A counter that is
     missing, corrupt, unreadable or unkeyed reads as none, so this Stop is n = 1 and is judged;
     after a good read, a failed write removes the counter file, so the next Stop is judged; if
@@ -60,9 +60,9 @@ def count_this_stop(decision_watch, session_id):
     n = 1
     try:
         if isinstance(session_id, str) and session_id:
+            from shared_names import STATE_DIR_NAME, config_dir  # stdlib only: a sampled-out Stop loads no guard
             key = hashlib.sha256(session_id.encode("utf-8", "replace")).hexdigest()
-            path = os.path.join(decision_watch.guard.config_dir(), decision_watch.SEEN_DIR_NAME,
-                                COUNT_SUB, key + ".count")
+            path = os.path.join(config_dir(), STATE_DIR_NAME, COUNT_SUB, key + ".count")
             with open(path, "r", encoding="ascii") as f:
                 n = int(f.read().strip()) + 1
             if n < 1:
@@ -87,15 +87,15 @@ def count_this_stop(decision_watch, session_id):
 
 def main():
     try:
-        import decision_watch
         hook = json.load(sys.stdin)
         if hook.get("stop_hook_active"):
             return 0
         reply = hook.get("last_assistant_message")
         if not isinstance(reply, str) or not reply.strip():
             return 0
-        if (count_this_stop(decision_watch, hook.get("session_id")) - 1) % SAMPLE_EVERY:
+        if (count_this_stop(hook.get("session_id")) - 1) % SAMPLE_EVERY:
             return 0
+        import decision_watch
         verdict, error = decision_watch.invoke_model(
             build_prompt(reply), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
     except Exception as exc:
