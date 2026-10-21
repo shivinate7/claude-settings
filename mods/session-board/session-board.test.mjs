@@ -1,6 +1,7 @@
 // session-board pins. Run: node mods/session-board/session-board.test.mjs  (stdlib only; exit 1 on any FAIL)
 // Pure helpers are tested against hooks/lib.mjs. Handlers are driven through hooks/register.mjs with a
-// fake host (store, clock, git, claude agents, python, ui, prompt). The clock is fixed at NOW.
+// fake host (store, clock, git, claude agents, python, ui, prompt). The clock is fixed at NOW, except in a host
+// started with `fake: true`: advance(h, ms) moves it and fires every() beats and after() timers in due order.
 // register.mjs keeps state at module level, so each host case loads a fresh copy of it.
 import assert from 'node:assert/strict'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -409,7 +410,7 @@ function host(opts) {
     agentListThrow: false, usageThrow: false, hang: false, submitFails: false,
     python: null, context: { window: 1000, percent: 42 }, env: {}, placed: true,
     hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], pythonOpts: [], agentCalls: [], writes: [], gitCalls: [], gitHang: false,
-    gitManual: false, gitPending: [], hangStore: false, hangId: false, holdStore: false, held: [], gitDelayMs: 0,
+    gitManual: false, gitPending: [], hangStore: false, hangId: false, holdStore: false, held: [], gitDelayMs: 0, timers: [], fake: false,
     ...opts,
   }
   h.store = new Map(opts.seed ?? [])
@@ -430,8 +431,13 @@ function host(opts) {
     },
     clock: {
       now: async () => h.now,
-      every: (ms, fn) => { const b = { fn, live: true }; h.beats.push(b); return { cancel() { b.live = false } } },
-      after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel() { clearTimeout(t) } } },
+      every: (ms, fn) => { const b = { fn, ms, next: h.now + ms, live: true }; h.beats.push(b); return { cancel() { b.live = false } } },
+      after: (ms, fn) => {
+        if (!h.fake) { const t = setTimeout(fn, ms); return { cancel() { clearTimeout(t) } } }
+        const t = { fn, at: h.now + ms, live: true }
+        h.timers.push(t)
+        return { cancel() { t.live = false } }
+      },
     },
     session: {
       id: async () => { if (h.hangId) return never(); return h.sid }, cwd: async () => h.cwd, repo: async () => ({ root: h.repoRoot }),
@@ -494,6 +500,19 @@ const safe = (h, args) => fire(h, 'command.run', { command: 'safe-stop', args })
 const NEW_ID = 'dddddddd-1111-2222-3333-444444444444'
 const settle = () => new Promise(r => setTimeout(r, 5))
 const tickBeat = async h => { for (const b of h.beats.filter(x => x.live)) b.fn(); await settle() } // one heartbeat, then let its async work finish
+// Fake clock, for a host started with `fake: true`: each due beat or timer fires at its own time, in order, and its async work settles first.
+async function advance(h, ms) {
+  const end = h.now + ms
+  for (;;) {
+    const next = Math.min(...h.beats.filter(b => b.live).map(b => b.next), ...h.timers.filter(t => t.live).map(t => t.at))
+    if (!(next <= end)) break
+    h.now = Math.max(h.now, next)
+    for (const b of h.beats) if (b.live && b.next <= h.now) { b.next += b.ms; b.fn() }
+    for (const t of h.timers) if (t.live && t.at <= h.now) { t.live = false; t.fn() }
+    await settle()
+  }
+  h.now = end
+}
 // A pane close, as the host raises it (ui.close, origin person). No hook for it means the close is ignored.
 const closePane = async h => {
   const hook = h.hooks.find(x => x.event === 'ui.close')
@@ -750,20 +769,23 @@ await test('git: a failed readiness read makes the reading unknown, so no update
 })
 
 // The boundary is pinned on readiness(); the host case uses a stuck reader.
-// An idle session re-reads git on each beat, so a working reader keeps the reading fresh.
-await test('git: a reading 59 s and 60 s old still counts; 60.001 s old is unknown (pure)', () => {
+// An idle session reads git again only after about 5 minutes, so a reading must count for the back-off plus one beat.
+await test('git: a reading at the max age still counts; 1 ms older is unknown; the max covers a 5 minute back-off and one beat (pure)', () => {
   const e = lib.readEntry(raw({ rt: NOW }))
-  same([lib.readiness(e, NOW + 59_000), lib.readiness(e, NOW + 60_000)], [true, true], 'reading 59 s and 60 s old')
-  same(lib.readiness(e, NOW + 60_001), 'unknown', 'reading 60.001 s old')
+  const max = lib.READ_MAX_AGE_MS
+  same([lib.readiness(e, NOW + max - 1_000), lib.readiness(e, NOW + max)], [true, true], 'reading 1 s under the max and at the max')
+  same(lib.readiness(e, NOW + max + 1), 'unknown', 'reading 1 ms over the max')
+  assert.ok(max >= 330_000, `max reading age is ${max} ms: an idle session that reads git every 5 minutes would read unknown, never update-ready`)
 })
 
-await test('git: a stuck reader leaves the reading to age out; at 61 s it is unknown, so no update-ready', async () => {
+await test('git: a stuck reader leaves the reading to age out; 1 s past the max age it is unknown, so no update-ready', async () => {
   const h = await start()
   await fire(h, 'session.start', {})
   h.gitHang = true
-  h.now = NOW + 61_000
-  await tickBeat(h)
-  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'reading 61 s old, reader stuck')
+  h.now = NOW + lib.READ_MAX_AGE_MS + 1_000
+  await tickBeat(h) // a beat that finds the back-off over starts the stuck read, and waits on it
+  await tickBeat(h) // the next beat skips the read in flight and writes the entry
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'reading past the max age, reader stuck')
 })
 
 await test('hooks: session start returns within 200 ms when git, agents and usage never answer', async () => {
@@ -927,13 +949,59 @@ await test('read cap: above 200, the pane gives the true count not shown and nev
 
 // ---- heartbeat git reads while idle
 
-await test('heartbeat: an idle session with a working git reader stays update-ready after 10 minutes of beats', async () => {
-  const h = await start()
+await test('heartbeat: an idle session with a working git reader stays update-ready on every beat of 10 minutes, with a few git reads', async () => {
+  const h = await start({ fake: true })
   await fire(h, 'session.start', {})
   const before = h.gitCalls.length
-  for (let i = 0; i < 20; i++) { h.now += 30_000; await tickBeat(h) }
-  same(h.gitCalls.length - before, 20, 'git reads over 20 idle beats')
-  same((await lines(h))[0], '0 working, 1 waiting, update-ready 1 of 1', 'band after 10 min')
+  for (let i = 1; i <= 20; i++) {
+    await advance(h, 30_000)
+    same((await lines(h))[0], '0 working, 1 waiting, update-ready 1 of 1', `band after ${i * 30} s idle`)
+  }
+  const reads = h.gitCalls.length - before
+  assert.ok(reads >= 1 && reads <= 3, `git reads over 20 idle beats: ${reads}, want 1 to 3`)
+})
+
+// An idle session reads git at a turn end and on attach. Otherwise it waits about 5 minutes between reads, and it
+// still writes its entry on every beat. The windows are literal: no read before 4.5 minutes, one by 6 minutes.
+await test('idle back-off: an idle session runs no git read for 4.5 minutes, and its entry stays fresh', async () => {
+  const h = await start({ fake: true })
+  await fire(h, 'session.start', {})
+  const before = h.gitCalls.length
+  await advance(h, 270_000)
+  same(h.gitCalls.length - before, 0, 'git reads over 4.5 idle minutes')
+  const e = h.store.get('sess:' + ID)
+  assert.ok(e && lib.isFresh(e, h.now), `entry stamped ${e && e.at}, not fresh at ${h.now}`)
+})
+
+await test('idle back-off: a turn end runs one git read', async () => {
+  const h = await start({ fake: true })
+  await fire(h, 'session.start', {})
+  await advance(h, 100_000)
+  const before = h.gitCalls.length
+  await fire(h, 'turn.start', { text: '', turnId: 't1' })
+  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' })
+  same(h.gitCalls.length - before, 1, 'git reads at one turn end')
+})
+
+await test('idle back-off: a client attaching runs one git read', async () => {
+  const h = await start({ fake: true })
+  await fire(h, 'session.start', {})
+  await advance(h, 100_000)
+  const before = h.gitCalls.length
+  await fire(h, 'session.attach', { surface: 'desktop', clientId: 'desktop:default' })
+  await settle()
+  same(h.gitCalls.length - before, 1, 'git reads at one attach')
+})
+
+await test('idle back-off: a session that stays idle reads git again after the back-off, and not before', async () => {
+  const h = await start({ fake: true })
+  await fire(h, 'session.start', {})
+  const before = h.gitCalls.length
+  const readsAfter = async ms => { await advance(h, ms); return h.gitCalls.length - before }
+  same(await readsAfter(270_000), 0, 'git reads by 4.5 min')
+  same(await readsAfter(90_000), 1, 'git reads by 6 min')
+  same(await readsAfter(210_000), 1, 'git reads by 9.5 min')
+  same(await readsAfter(150_000), 2, 'git reads by 12 min')
 })
 
 await test('heartbeat: a working session starts no git read on the beat', async () => {
@@ -949,6 +1017,7 @@ await test('heartbeat: one git read at a time; with a stuck reader, 3 beats star
   const h = await start()
   await fire(h, 'session.start', {})
   h.gitHang = true
+  h.now += 300_000 // past the idle back-off: the next beat reads
   const before = h.gitCalls.length
   for (let i = 0; i < 3; i++) { h.now += 30_000; await tickBeat(h) }
   same(h.gitCalls.length - before, 1, 'git reads started over 3 beats with one in flight')
@@ -959,7 +1028,7 @@ await test('heartbeat: a failing git read makes the reading unknown, so no updat
     const h = await start()
     await fire(h, 'session.start', {})
     h.gitFail = mode
-    h.now += 30_000
+    h.now += 330_000 // past the idle back-off: this beat reads
     await tickBeat(h)
     same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', `band after a ${mode} on the beat`)
   }
@@ -1011,8 +1080,8 @@ await test('git: a read started before the latest turn start is dropped when it 
   const h = await start()
   await fire(h, 'session.start', {})
   h.gitManual = true
-  h.now += 30_000
-  await tickBeat(h) // idle beat: a clean read starts and is held
+  h.now += 330_000
+  await tickBeat(h) // idle beat past the back-off: a clean read starts and is held
   const cleanRead = h.gitPending[0]
   await fire(h, 'turn.start', { text: '', turnId: 't1' })
   await fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' }, tool_use_id: 'e1' }, 'allow')
@@ -1029,7 +1098,7 @@ await test('session end: a read in flight when the session ends writes neither r
   const h = await start()
   await fire(h, 'session.start', {})
   h.gitManual = true
-  h.now += 30_000
+  h.now += 330_000
   await tickBeat(h) // beat read held
   await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' }) // turn-end read held
   await fire(h, 'session.end', { sessionId: ID, reason: 'other' })
@@ -1119,18 +1188,18 @@ await test('clear: a flush that holds the old id and lands after the clear does 
   same(h.store.has('sess:' + ID), false, 'old entry after the held flush landed')
 })
 
-await test('git back-off: a quick turn-end read resets the interval to 30 s; the next idle read is due 30 s later', async () => {
-  const h = await start()
+await test('git back-off: a turn-end read restarts the idle window; the next idle read comes 5 to 6 minutes after the turn end', async () => {
+  const h = await start({ fake: true })
   await fire(h, 'session.start', {})
-  h.gitDelayMs = 6000 // a slow idle read: the interval doubles
-  h.now += 30_000
-  await tickBeat(h)
-  h.gitDelayMs = 0
-  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' }) // a quick read resets it
-  h.now += 30_000
+  await advance(h, 240_000)
   const before = h.gitCalls.length
-  await tickBeat(h)
-  same(h.gitCalls.length - before, 1, 'idle git reads due 30 s after the quick turn-end read')
+  await fire(h, 'turn.start', { text: '', turnId: 't1' })
+  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' })
+  same(h.gitCalls.length - before, 1, 'git reads at the turn end')
+  await advance(h, 270_000)
+  same(h.gitCalls.length - before, 1, 'git reads 4.5 min after the turn end')
+  await advance(h, 90_000)
+  same(h.gitCalls.length - before, 2, 'git reads 6 min after the turn end')
 })
 
 // Config folder for safe-stop: CLAUDE_CONFIG_DIR, else USERPROFILE, else HOME on Windows.
