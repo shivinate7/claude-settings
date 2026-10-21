@@ -64,8 +64,10 @@ except ImportError:  # the Stop check is a recovery control: it runs without not
         return ""
 try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
-except ImportError:  # without the tag no notice closes a job: it stays open and the check still runs
+except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
+# The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
+NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 
 DEFAULT_QUIET = 300
 STALL_EXIT = 3
@@ -233,7 +235,7 @@ def scan_jobs(transcript):
     jobs, done, stops, notes, job_call = {}, set(), set(), {}, {}
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"task-notification", b"TaskStop", b"Successfully stopped", b"until:")):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:") + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
@@ -298,6 +300,8 @@ def stopped_ids(content):
 
 
 def stop():
+    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
+        return 0
     try:
         call = json.load(sys.stdin)
         if call.get("stop_hook_active") is True:
