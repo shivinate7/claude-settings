@@ -57,6 +57,25 @@ class ProseJudgeRow(unittest.TestCase):
         hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]]
         self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "Agent prompt judge missing")
 
+    def explore_rule(self):
+        hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]
+                 if h.get("type") == "prompt"]
+        self.assertEqual(len(hooks), 1)
+        text = " ".join(hooks[0]["prompt"].split())
+        found = re.search(r"For an Explore spawn,(.*?)Otherwise answer", text)
+        self.assertTrue(found, "the Explore rule is missing from the Agent judge")
+        return found.group(1).lower()
+
+    def test_explore_rule_passes_sonnet_and_opus(self):
+        # The floor is Sonnet; the owner's "use opus" must pass (subagent-model-cap, audit Explore row).
+        rule = self.explore_rule()
+        self.assertIn("sonnet", rule)
+        self.assertIn("opus", rule, "the judge blocks an audit Explore that names model opus")
+        self.assertNotIn("does not set model sonnet", rule)
+
+    def test_explore_rule_still_blocks_haiku_or_unset(self):
+        rule = self.explore_rule()
+        self.assertRegex(rule, r"haiku|unset|no model|not set|does not set")
 
 # A prompt or agent hook names its model. The evaluator rejects the bare alias "haiku" (stderr
 # unrecognized_model, query_source hook_prompt), so each judge would fail and let calls through.
