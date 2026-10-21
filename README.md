@@ -28,6 +28,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
 | `testing/` | A shared test helper, `skip-locally-fail-in-ci.mjs`. |
+| `tools/` | `mem-monitor.ps1`, a manual Windows memory monitor. No installer lands it, and no hook runs it. |
 | `decisions/`, `debts/`, `plans/` | The records: one file per ruling, known gap or deferred item, and plan. See `debts/README.md`. |
 | `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
 | `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
