@@ -96,6 +96,31 @@ def run_gate(gate, hook, raw_stdin=None, env=None):
     return run
 
 
+# A hook that has nothing to do for its input must not pay to import the modules that do the
+# work: the shell parser (guard), the model caller (decision_watch) and the linter (ste_lint).
+# This runs a hook file as __main__ in a fresh process, then reports which of them that process
+# imported. The hook's own output comes first, and the PROBE line last.
+GUARD_FAMILY = ("guard", "decision_watch", "ste_lint")
+IMPORT_PROBE = (
+    "import json, runpy, sys\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "print('PROBE ' + json.dumps([m for m in %r if m in sys.modules]))\n" % (GUARD_FAMILY,)
+)
+
+
+def run_import_probe(script, hook):
+    """Return (the hook's stdout, the GUARD_FAMILY modules its process imported)."""
+    run = subprocess.run([sys.executable, "-c", IMPORT_PROBE, script], input=json.dumps(hook),
+                         capture_output=True, text=True, timeout=15)
+    out, mark, tail = run.stdout.rpartition("PROBE ")
+    if not mark:
+        raise AssertionError("the probe did not finish: %s" % run.stderr[-300:])
+    return out, json.loads(tail)
+
+
 # The config report is a section of hooks/decision_watch.py.
 # This runs just that section, in a fresh process like the hook, so a case never reaches the git
 # status and model judgment `decision_watch.run` makes. It prints what `main` would print for it.
@@ -504,6 +529,26 @@ class ReportGateTests(unittest.TestCase):
             run = run_gate(REPORT_GATE, hook)
             self.assertEqual(run.returncode, 0, event)
             self.assertEqual(run.stdout.strip(), "", event)
+
+    def test_70_ignored_input_imports_no_guard_family_module(self):
+        idle = write_transcript([human("look"), tool_use_msg("Read", {"file_path": "x"}),
+                                 tool_result_msg(), assistant_text("done")], self.tmp.name)
+        rows = [
+            # Catches: a hook registered on another event imports the shell parser and the linter.
+            ("event other than Stop", {"hook_event_name": "PreToolUse", "transcript_path": idle}),
+            # Catches: a rewrite turn, which the gate never judges, imports them.
+            ("stop_hook_active", {"hook_event_name": "Stop", "transcript_path": idle,
+                                  "stop_hook_active": True}),
+            # Catches: a Stop with no transcript to read imports them.
+            ("no transcript", {"hook_event_name": "Stop"}),
+            # Catches: an idle turn with no shell tool use imports a shell parser it never calls.
+            ("idle turn", {"hook_event_name": "Stop", "transcript_path": idle}),
+        ]
+        for label, hook in rows:
+            with self.subTest(label):
+                out, imported = run_import_probe(REPORT_GATE, hook)
+                self.assertEqual(out.strip(), "", "the input was not ignored")
+                self.assertEqual(imported, [], "imported before it had work to do")
 
 
 class DoneFormatAndCiteTests(unittest.TestCase):

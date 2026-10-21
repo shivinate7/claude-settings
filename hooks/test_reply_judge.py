@@ -704,6 +704,52 @@ def case_good_write_path_judges_stops_1_6_11():
     check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
 
 
+# --------------------------------------------------------------------------- imports on an ignored Stop
+# A Stop the hook ignores must not import the shell parser (guard), the model caller
+# (decision_watch) or the linter (ste_lint). The probe runs the hook file as __main__ in a fresh
+# process, then reports which of them that process imported. The hook's output comes first.
+
+GUARD_FAMILY = ("guard", "decision_watch", "ste_lint")
+IMPORT_PROBE = (
+    "import json, runpy, sys\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "print('PROBE ' + json.dumps([m for m in %r if m in sys.modules]))\n" % (GUARD_FAMILY,)
+)
+
+
+def probe_ignored_stop(payload):
+    """Return (the hook's stdout, the GUARD_FAMILY modules its process imported)."""
+    config = os.path.join(ROOT, "probe-config")
+    os.makedirs(config, exist_ok=True)
+    proc = subprocess.run(
+        [sys.executable, "-c", IMPORT_PROBE, MODULE_PATH],
+        input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, env=dict(os.environ, CLAUDE_CONFIG_DIR=config), cwd=ROOT,
+    )
+    out, mark, tail = proc.stdout.rpartition("PROBE ")
+    if not mark:
+        raise RuntimeError("the probe did not finish: %s" % proc.stderr[-300:])
+    return out, json.loads(tail)
+
+
+def case_ignored_stop_imports_no_guard_family_module():
+    rows = [("stop_hook_active", {"session_id": REPLY_SESSION, "stop_hook_active": True,
+                                  "last_assistant_message": MARK})]
+    for text in EMPTY_REPLIES:
+        payload = {"session_id": REPLY_SESSION, "stop_hook_active": False}
+        if text is not ABSENT:
+            payload["last_assistant_message"] = text
+        rows.append(("reply %r" % ("(missing)" if text is ABSENT else text), payload))
+    for label, payload in rows:
+        out, imported = probe_ignored_stop(payload)
+        check("ignored Stop (%s): nothing printed" % label, out.strip() == "", out)
+        check("ignored Stop (%s): no guard-family module imported" % label, imported == [],
+              "imported before it had work to do: %s" % imported)
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -731,6 +777,7 @@ def table_write_and_remove():
 
 CASES = (
     case_stop_hook_active_never_calls_model,
+    case_ignored_stop_imports_no_guard_family_module,
     case_model_ok_is_silent,
     case_model_is_haiku_at_xhigh,
     case_model_finding_emits_note_not_block,
