@@ -21,7 +21,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from ste_gate import last_reply  # noqa: E402
 from _transcript import is_last_human, tool_uses  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -32,14 +31,22 @@ from _transcript import is_last_human, tool_uses  # noqa: E402
 # sibling holds in both places. A regex over
 # the raw command text cannot tell a quoted probe string, or a heredoc body, from an
 # actual git write. See decisions/predicate-is-the-act.md.
-sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-try:
-    import guard
-except ImportError:
-    # A gate that cannot read cannot accuse. Fail open, the same posture every other gate
-    # here takes on a missing or unreadable input: turn_landed() below reports no landing at
-    # all when guard did not load, so this Stop hook never demands a report it cannot judge.
-    guard = None
+# It loads only when the turn ran a shell or landing tool, so an event the gate ignores,
+# a rewrite turn and an idle turn never pay for it.
+guard = None
+
+
+def _load_guard():
+    global guard
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    try:
+        import guard as loaded
+    except ImportError:
+        # A gate that cannot read cannot accuse. Fail open, the same posture every other gate
+        # here takes on a missing or unreadable input: turn_landed() below reports no landing at
+        # all when guard did not load, so this Stop hook never demands a report it cannot judge.
+        return
+    guard = loaded
 
 GIT_LANDING_SUBCOMMANDS = {"commit", "push", "merge"}
 LANDING_TOOLS = {
@@ -84,6 +91,11 @@ def _segment_lands_a_git_write(segment):
 
 
 def turn_landed(records):
+    if not any(b.get("name") == "Bash" or b.get("name") in LANDING_TOOLS
+               for rec in records for b in tool_uses(rec)):
+        return False
+    if guard is None:
+        _load_guard()
     if guard is None:
         return False
     for rec in records:
@@ -310,6 +322,7 @@ def main():
     if not turn_landed(after):
         return
 
+    from ste_gate import last_reply
     text = last_reply(hook)
     shape_ok = report_shape_ok(text)
     reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]
