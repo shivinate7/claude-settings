@@ -160,14 +160,12 @@ class Shim(unittest.TestCase):
         os.chmod(p, 0o755)
 
     def recorder(self, d, name, tail="exit 0"):
-        """A stub d/name that appends one line, its own path and its args, to calls.log in the parent of d,
-        and then runs tail."""
+        """A stub d/name that appends its own path to calls.log in the parent of d, and then runs tail."""
         log = os.path.join(os.path.dirname(d), "calls.log")
-        self.exe(d, name, "printf '%%s' \"$0\" >> '%s'; printf ' [%%s]' \"$@\" >> '%s'; echo >> '%s'\n%s"
-                 % (log, log, log, tail))
+        self.exe(d, name, "echo \"$0\" >> '%s'\n%s" % (log, tail))
 
     def calls(self, root):
-        """The recorded calls under root, one string per call, oldest first."""
+        """The paths of the stubs that ran under root, oldest first."""
         try:
             with open(os.path.join(root, "calls.log")) as f:
                 return f.read().splitlines()
@@ -338,14 +336,17 @@ class Shim(unittest.TestCase):
             with self.subTest(uname):
                 root = self.path("win%d" % n)
                 d = os.path.join(root, "stubs")
+                seen = os.path.join(root, "rm.args")
                 self.exe(d, "uname", "echo " + uname)
-                self.recorder(d, "rm", "exit 7")
+                self.recorder(d, "rm", "printf '%%s\\n' \"$@\" > '%s'; exit 7" % seen)
                 self.recorder(d, "python3")
                 self.recorder(d, "python")
                 r = self.rm(*args, path=d)
-                started = [c.split(" ")[0] for c in self.calls(root) if "/python" in c.split(" ")[0]]
+                started = [c for c in self.calls(root) if "/python" in c]
                 self.assertEqual(started, [], "python started under uname %s" % uname)
-                self.assertEqual(self.calls(root), ["%s [%s]" % (os.path.join(d, "rm"), "] [".join(args))])
+                self.assertEqual(self.calls(root), [os.path.join(d, "rm")])
+                with open(seen) as f:
+                    self.assertEqual(f.read().splitlines(), args)
                 self.assertEqual(r.returncode, 7, "the real rm's exit code is the call's: " + r.stderr)
 
     # Elsewhere: python3, then python; a path under WindowsApps is the Store alias and is skipped.
@@ -371,8 +372,8 @@ class Shim(unittest.TestCase):
                         self.recorder(d, tool, tail)
                 path = os.pathsep.join([store, ok])
                 r = self.rm("-rf", self.home if want else self.sub, path=path)
-                ran = [c.split(" ")[0] for c in self.calls(root)]
-                self.assertEqual(ran, [os.path.join(ok, want)] if want else [], "the python that ran")
+                ran = self.calls(root)
+                self.assertEqual(ran,[os.path.join(ok, want)] if want else [], "the python that ran")
                 if want:
                     self.assertRefusal(r, ["-rf", self.home], [self.home])
                 else:
