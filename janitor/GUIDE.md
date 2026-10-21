@@ -123,8 +123,10 @@ nothing.
 The sweep keeps a worktree with a commit that is on no remote branch, and the
 reason is `unpushed`. This holds for every worktree, locked or not. A detached
 HEAD counts. A repository with no remote keeps every worktree. A failed fetch
-adds `: fetch failed` to the reason of a tree kept as `unreadable-subject`. It
-keeps no other tree. The sweep judges other trees on the refs as they stand.
+adds `: fetch failed` to the reason of a tree kept as `unreadable-subject`. A
+SessionEnd run that skipped the fetch inside its 10-minute window adds `: fetch
+throttled` instead, and keeps a branch that only a remote-tracking ref proves
+safe. It keeps no other tree. The sweep judges other trees on the refs as they stand.
 
 Every `--confirm` run adds two more keeps. A tree that is not merged is kept
 until it has been idle long enough, and the reason is `unmerged`. A tree with

@@ -514,7 +514,6 @@
 - sweep-fetch-eats-sessionend-budget: the fetch can take up to 10 s of the SessionEnd budget, so a slow remote gives more `not judged: deadline` keeps; unmeasured (janitor/sweep.py _fetch_prune). Decision: when-a-worktree-may-be-removed
 - test-sweep-origin-head-platform: janitor/test_sweep.py give_remote runs `init --bare` with no `-b`, so origin's HEAD is master on Linux and main on macOS (Apple git sets init.defaultBranch). A fixture that clones origin without `-b main` fails on Linux only. Decision: none
 - watch-flat-names-win: config_watch puts its own folder before the guard.d set on the import path, so a flat shared_names.py left stale by a failed install wins over the set copy (hooks/config_watch.py). Decision: config-watch-fast-exit
-- install-ps1-names-unpinned: no test goes red if shared_names.py drops out of install.ps1's post-merge land_guard_set (install.ps1). Decision: config-watch-fast-exit
 - watch-reads-guard-each-call: the watch reads guard.py for its INSTALL_ID on every call, even on the fast exit; small cost (hooks/config_watch.py _add_guard_set_dir). Decision: config-watch-fast-exit
 - watch-escaped-cap-key: a JSON-escaped cap key outside env is a lift to the guard but not to the fast path, so its expiry check is skipped; only an attacker writes it (hooks/config_watch.py lift_candidate). Decision: config-watch-fast-exit
 - watch-bad-json-mixed-cap: in unparseable JSON the last text cap assignment wins, so opus then sonnet reads as Sonnet; such a file loads no settings (hooks/config_watch.py). Decision: config-watch-fast-exit
@@ -525,5 +524,6 @@
 - drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-read-at-run-start: `confirm` reads the PR body once at run start, so an edit during the wait is not read. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-mixed-paragraph: a last paragraph that mixes prose and a Drops-lines line still excuses; see drops-mixed-paragraph-exempt. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- sweep-failed-fetch-stale-reap: when the SessionEnd fetch fails with time left, decide_branch still reaps on the stale on-remote read, as on main and as janitor/GUIDE.md documents (janitor/sweep.py _fetch_prune). Decision: when-a-worktree-may-be-removed
 - ci-wake-prefilter-unicode-escape: the ci_wake shell prefilter misses a "ready" written as a JSON unicode escape (ready), which python decodes; Claude Code never escapes ASCII letters (settings.json ci_wake row). Decision: none
 - verdict-prune-reused-temp-log: a caller that reuses a VERDICT_LOG named verdict-*.log inside the temp folder can lose it to another run's prune once it is 7 days idle (bin/verdict prune). Decision: none

@@ -550,6 +550,8 @@ function Test-LinksWork([string]$AnySrc) {
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
     $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
+    # shared_names.py, which the guard imports, rides in the set unstamped (it is no stamp target).
+    $names += @(Get-ChildItem -LiteralPath $SrcDir -File -Filter 'shared_names.py' -ErrorAction SilentlyContinue)
     $script:GuardSetMode = $true
     $entry = Join-Path $DestDir 'guard.py'
     if (Test-Path -LiteralPath $entry) {
