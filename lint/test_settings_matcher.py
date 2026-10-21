@@ -5,7 +5,7 @@ the guard's subagent-model-floor never sees those calls.
 """
 import json, os, re, unittest
 
-SETTINGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
+SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
 
 def guard_matchers():
@@ -23,65 +23,39 @@ class Matcher(unittest.TestCase):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
 
-# The decision-record judge: a prompt hook whose prompt holds this rule id.
-JUDGE_RULE = "speak-rewrite-superseded-in-place"
+# The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
+# model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
+# model on every .ts, .tsx and .json edit.
+def pre_tool_entries():
+    with open(SETTINGS, encoding="utf-8") as f:
+        return json.load(f)["hooks"]["PreToolUse"]
 
 
-def decision_judge(tool):
-    """The one PreToolUse prompt hook for `tool` that judges the decision-record rule."""
-    hits = [h for e in json.load(open(SETTINGS))["hooks"]["PreToolUse"] if e["matcher"] == tool
-            for h in e["hooks"] if h.get("type") == "prompt" and JUDGE_RULE in h.get("prompt", "")]
-    if len(hits) != 1:
-        raise AssertionError("want one decision judge for %s, found %d" % (tool, len(hits)))
-    return hits[0]
+def covers(entry, tool):
+    return re.fullmatch(entry.get("matcher", ""), tool) is not None
 
 
-def glob_to_regex(glob):
-    """Gitignore-style subset: **/ is any depth, trailing /** is everything under, * is one segment."""
-    out, i = [], 0
-    while i < len(glob):
-        if glob.startswith("**/", i):
-            out.append("(?:.*/)?")
-            i += 3
-        elif glob.startswith("/**", i) and i + 3 == len(glob):
-            out.append("(?:/.*)?")
-            i += 3
-        elif glob.startswith("**", i):
-            out.append(".*")
-            i += 2
-        elif glob[i] == "*":
-            out.append("[^/]*")
-            i += 1
-        else:
-            out.append(re.escape(glob[i]))
-            i += 1
-    return re.compile("^" + "".join(out) + "$")
-
-
-class DecisionJudgeMatch(unittest.TestCase):
-    # Docs (code.claude.com/docs/en/hooks): "To match a directory named src at any depth,
-    # write Edit(**/src/**)". The docs show Edit examples only; the Write form is pinned by intent.
-    def test_if_matches_decisions_folder_at_any_depth(self):
+class ProseJudgeRow(unittest.TestCase):
+    def test_no_prompt_or_agent_hook_on_edit_or_write(self):
         for tool in ("Edit", "Write"):
             with self.subTest(tool=tool):
-                cond = decision_judge(tool).get("if", "")
-                self.assertTrue(cond.startswith(tool + "(") and cond.endswith(")"), cond)
-                rx = glob_to_regex(cond[len(tool) + 1:-1])
-                for path in ("decisions/x.md", "docs/decisions/x.md", "a/b/decisions/c/d.md"):
-                    self.assertRegex(path, rx)
-                for path in ("docs/x.md", "docs/decisionsX/x.md"):
-                    self.assertNotRegex(path, rx)
+                bad = [h.get("type") for e in pre_tool_entries() if covers(e, tool)
+                       for h in e["hooks"] if h.get("type") in JUDGE_TYPES]
+                self.assertEqual(bad, [], "a model-judge hook still runs on every %s" % tool)
 
-    def test_owner_paths_still_fire_and_lookalike_folders_do_not(self):
-        # The glob matches a decisions folder at any depth, and no lookalike name.
+    def test_one_prose_judge_command_hook_covers_edit_and_write(self):
+        rows = [(e, h) for e in pre_tool_entries() for h in e["hooks"]
+                if h.get("type") == "command" and "prose_judge.py" in script_names(h.get("command", ""))]
+        self.assertEqual(len(rows), 1, "want one prose_judge.py command hook, found %d" % len(rows))
+        entry, hook = rows[0]
         for tool in ("Edit", "Write"):
-            with self.subTest(tool=tool):
-                cond = decision_judge(tool)["if"]
-                rx = glob_to_regex(cond[len(tool) + 1:-1])
-                for path in ("x/decisions/a.md", "decisions/sub/b.md", "decisions/subagent-model-cap.md"):
-                    self.assertRegex(path, rx)
-                for path in ("mydecisions/a.md", "decisions-old/a.md"):
-                    self.assertNotRegex(path, rx)
+            self.assertTrue(covers(entry, tool), "prose_judge.py does not run on %s" % tool)
+        self.assertFalse(covers(entry, "AskUserQuestion"))
+        self.assertGreater(hook.get("timeout", 0), 0)
+
+    def test_agent_judge_stays(self):
+        hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]]
+        self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "Agent prompt judge missing")
 
 
 # A prompt or agent hook names its model. The evaluator rejects the bare alias "haiku" (stderr
@@ -232,9 +206,8 @@ class JudgeModelRows(unittest.TestCase):
 
     def test_check_goes_red_when_the_sendmessage_row_is_missing(self):
         # Mutation: take SendMessage out of the judge row. The check must name it.
-        named = "AskUserQuestion, Agent, Edit, Write, SendMessage"
-        self.assertIn(named, self.text, "the judge row changed; update this mutation")
-        gaps = table_gaps(self.text.replace(named, "AskUserQuestion, Agent, Edit, Write"), list(judge_hooks()))
+        self.assertTrue(any("SendMessage" in r[0] for r in judge_rows(self.text)), "the judge row changed; update this mutation")
+        gaps = table_gaps(self.text.replace("SendMessage", ""), list(judge_hooks()))
         self.assertTrue(any(g.startswith("SendMessage:") for g in gaps), gaps)
 
 
