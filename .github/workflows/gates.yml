@@ -350,6 +350,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
+      - name: install.sh checkout-detection suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh hooks/test_install_src.sh
+
       # This step and the skill test step below come last, so a red test in them skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
       # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
