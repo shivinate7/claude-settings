@@ -10949,6 +10949,11 @@ add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
+# An Opus spawn on an owner-word role passes: floor_hit denies haiku only, and step-up fires
+# only on a "Round N of 3" or "Try N of 3" marker line.
+for _role in ("Explore", "claude", "builder", "reviewer", "test-author"):
+    add("floor: Agent %s with model opus is allowed (owner word)" % _role, "allow",
+        tool="Agent", prompt="do it", model="opus", subagent_type=_role)
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
 # near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
 for _tool in ("Agent",):
