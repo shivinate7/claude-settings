@@ -53,7 +53,9 @@ tree entirely.
 import argparse
 import calendar
 import concurrent.futures
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -456,6 +458,8 @@ def _live_remote_heads(path: str):
     key = _common_dir_key(path)
     if key is None:
         return None
+    if _LIVE_HEADS is not None and _LIVE_HEADS.get((key, "throttled")):
+        return None  # a fetch within the window: no ls-remote either; every tree then reads unsettled and is kept
     if _LIVE_HEADS is not None and key in _LIVE_HEADS:
         return _LIVE_HEADS[key]
     shas = set()
@@ -2661,12 +2665,58 @@ def _oldest_idle_first(entries):
     return sorted((dict(e, idle=idle[e["path"]]) for e in entries), key=lambda e: (idle[e["path"]] is None, -(idle[e["path"]] or 0)))
 
 
+FETCH_THROTTLE_SECONDS = 600  # one fetch and one ls-remote per repository per 10 minutes
+
+
+def _fetch_record_path(key: str) -> str:
+    return os.path.join(guard.config_dir(), "state", "sweep-fetch",
+                        hashlib.sha256(key.encode("utf-8")).hexdigest()[:32])
+
+
+def _fetch_throttled(root: str) -> bool:
+    """True when the SessionEnd run (the only one with a deadline) fetched this clone less than
+    FETCH_THROTTLE_SECONDS ago. The record is one file per clone, keyed by its common git dir,
+    holding wall-clock Unix seconds. A missing, corrupt, non-finite or future record reads as
+    "fetch now". The scheduled job and a person's run are never throttled. Decided once per
+    clone per run, so `_live_remote_heads` agrees with `_fetch_prune`."""
+    if _DEADLINE is None or _LIVE_HEADS is None:
+        return False
+    key = _common_dir_key(root)
+    if key is None:
+        return False
+    if (key, "throttled") not in _LIVE_HEADS:
+        try:
+            with open(_fetch_record_path(key), encoding="utf-8") as handle:
+                age = time.time() - float(handle.read().strip())
+            _LIVE_HEADS[(key, "throttled")] = math.isfinite(age) and 0 <= age < FETCH_THROTTLE_SECONDS
+        except (OSError, ValueError):
+            _LIVE_HEADS[(key, "throttled")] = False
+    return _LIVE_HEADS[(key, "throttled")]
+
+
+def _record_fetch(root: str) -> None:
+    """Keep the time of a fetch that succeeded; a failed fetch is retried next run. An
+    unwritable state folder only loses the throttle."""
+    key = _common_dir_key(root)
+    if key is None:
+        return
+    try:
+        path = _fetch_record_path(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(repr(time.time()))
+    except OSError:
+        pass
+
+
 def _fetch_prune(root: str) -> bool:
     """`git fetch --prune --no-tags` in ROOT, so the pushed and merged reads see the remote as it
     is now: its current default branch, and no tracking ref for a head deleted there. It moves
     only remote-tracking refs, so a preview runs it too. True when it succeeded. A failed fetch
     does not stop the run: the reads that follow keep each tree they cannot settle. The timeout is
     10 s, or the time left to the run's deadline when that is less."""
+    if _fetch_throttled(root):
+        return True  # fetched within the window: the remote-tracking refs are fresh enough
     left = 10 if _DEADLINE is None else min(10, _DEADLINE - _now())
     if left <= 0:
         return False
@@ -2676,6 +2726,8 @@ def _fetch_prune(root: str) -> bool:
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
     except Exception:
         return False
+    if done.returncode == 0:
+        _record_fetch(root)
     return done.returncode == 0
 
 
