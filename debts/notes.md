@@ -46,7 +46,6 @@
 - dw-notice-lead-space-lost: the decision-watch log folds whitespace, losing leading whitespace of a notice; no notice starts with whitespace today (mods/decision-watch)
 - dw-slash-cache-hit-reads-clean: a repeat /dw after a FLAG prints 'nothing to say' like a clean turn; Stops seen is capped at 500 (mods/decision-watch)
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
-- dw-stop-row-unproven: unproven live that classic.Stop reaches a mod in the desktop app; the Stop row drop awaits STOP seen log lines (settings.json, mods/decision-watch)
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a hole with no pinning case (hooks/guard_env.py)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
@@ -408,7 +407,6 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- dw-mod-stop-reach-unproven: Unverified whether classic.Stop reaches a mod in the desktop app, or how long $ lives after it returns on a void shadow call. the watch may never judge. Decision: decision-watch-mod-limits
 - ste-comment-gt-mask-early: A > inside a comment such as <!-- a > b --> ends the mask early, so the rest of the comment is read as text (lint/ste_gate.py). Decision: ste-gate-fixes-not-nags
 - prompt-hooks-fail-open: Prompt hooks (Agent, AskUserQuestion, decisions/ Edit and Write, SendMessage) can deny but have no documented onFailure, so a failed prompt hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
