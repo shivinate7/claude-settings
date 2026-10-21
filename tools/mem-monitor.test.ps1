@@ -1,7 +1,9 @@
 # Static checks for tools/mem-monitor.ps1, the manual Windows memory monitor. A person runs it by
 # hand in its own PowerShell window. No hook may start it and no installer may copy it.
 #
-#   pwsh -NoProfile -File .\tools\mem-monitor.test.ps1      (PowerShell 5.1 and 7, any OS)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\mem-monitor.test.ps1
+#
+# This is the command the owner and CI run: Windows PowerShell 5.1. PowerShell 7 runs it too.
 #
 # Every check but the last group reads text only. The loop has no end, so a run starts the monitor
 # only with -Log set to a file in a temp folder, and kills it when its answer is in.
@@ -18,7 +20,11 @@
 #           a log whose header is not the $Columns, in order: the script stops with a message and the
 #           file is byte for byte unchanged (two cases: one column short, and the last two swapped);
 #           a log with the right header: the script appends rows;
-#           no log yet: the script creates one with the right header.
+#           no log yet: the script creates one with the right header;
+#           a zero-byte log is a fresh log: the header line, then rows (two are awaited), and no
+#           other line.
+#           No wait is longer than $WaitSec. A run that ends by itself takes about 2.5 s on a
+#           fast PC (measured, 5.1); the limit is met only when a check is about to fail.
 $ErrorActionPreference = 'Stop'
 
 # The CSV header, in order. Change this list only together with the script's row.
@@ -229,7 +235,8 @@ if ($env:OS -ne 'Windows_NT') {
     Check 'tools/mem-monitor.ps1: header checks' $false 'no script to run'
 } else {
     $PsHost = (Get-Process -Id $PID).Path
-    $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('mem-monitor-test-' + [guid]::NewGuid().ToString('N'))
+    $WaitSec = 10   # about four times the slowest run measured (2.6 s with five runs at once)
+    $Tmp =Join-Path ([IO.Path]::GetTempPath()) ('mem-monitor-test-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
     $started = @()
     try {
@@ -251,11 +258,13 @@ if ($env:OS -ne 'Windows_NT') {
         $badSwap  = New-Log 'swap.csv' ($Swap + "`r`n" + $Row12 + "`r`n")
         $goodText = $Quoted + "`r`n"
         $good     = New-Log 'good.csv' $goodText
+        $zero     = New-Log 'zero.csv' ''
         $fresh    = Join-Path $Tmp 'fresh.csv'
         $before   = @{ short = (Read-Shared $badShort); swap = (Read-Shared $badSwap) }
+        Check 'the zero-byte log starts at zero bytes' ((Get-Item -LiteralPath $zero).Length -eq 0) 'the fixture file is not empty'
 
-        $deadline = (Get-Date).AddSeconds(30)
-        $runs = @{ short = Start-Monitor $badShort; swap = Start-Monitor $badSwap; good = Start-Monitor $good; fresh = Start-Monitor $fresh }
+        $deadline = (Get-Date).AddSeconds($WaitSec)
+        $runs = @{ short = Start-Monitor $badShort; swap = Start-Monitor $badSwap; good = Start-Monitor $good; fresh = Start-Monitor $fresh; zero = Start-Monitor $zero }
 
         foreach ($k in 'short', 'swap') {
             $m = $runs[$k]
@@ -265,19 +274,26 @@ if ($env:OS -ne 'Windows_NT') {
             $out = (Read-Shared $m.Out) + (Read-Shared $m.Err)
             $out = $out.Substring(0, [Math]::Min(120, $out.Length))
             $label = @{ short = 'a log with one column short'; swap = 'a log with the last two columns swapped' }[$k]
-            Check "${label}: the script stops on its own" $ended 'still running after 30 s, so it kept writing; killed'
+            Check "${label}: the script stops on its own" $ended "still running after $WaitSec s, so it kept writing; killed"
             Check "${label}: it stops with a message" ($ended -and ($m.Proc.ExitCode -ne 0 -or $out -match '(?i)header|column')) "exit $($m.Proc.ExitCode), output '$out'"
             Check "${label}: the file is unchanged" ((Read-Shared $m.Log) -ceq $before[$k]) 'the script wrote to it'
         }
 
-        foreach ($k in 'good', 'fresh') {
+        foreach ($k in 'good', 'fresh', 'zero') {
             $m = $runs[$k]
-            while ((Get-Date) -lt $deadline -and @(Read-Shared $m.Log | ConvertFrom-Csv).Count -lt 1 -and -not $m.Proc.HasExited) { Start-Sleep -Milliseconds 300 }
+            $need = if ($k -eq 'zero') { 2 } else { 1 }
+            while ((Get-Date) -lt $deadline -and @(Read-Shared $m.Log | ConvertFrom-Csv).Count -lt $need -and -not $m.Proc.HasExited) { Start-Sleep -Milliseconds 100 }
             $text = Read-Shared $m.Log
             $rows = @($text | ConvertFrom-Csv)
             $names = if ($rows.Count -gt 0) { $rows[0].PSObject.Properties.Name -join ',' } else { '' }
-            $label = @{ good = 'a log with the right header'; fresh = 'no log yet' }[$k]
-            Check "${label}: the script appends a row under the right header" ($rows.Count -ge 1 -and $names -ceq ($Columns -join ',')) "rows $($rows.Count), header '$names', exit $(if ($m.Proc.HasExited) { $m.Proc.ExitCode } else { 'none, still running' })"
+            $label = @{ good = 'a log with the right header'; fresh = 'no log yet'; zero = 'a zero-byte log' }[$k]
+            Check "${label}: the script appends a row under the right header" ($rows.Count -ge $need -and $names -ceq ($Columns -join ',')) "rows $($rows.Count), want $need, header '$names', exit $(if ($m.Proc.HasExited) { $m.Proc.ExitCode } else { 'none, still running' })"
+            if ($k -eq 'zero') {
+                # One trailing newline is cut. Any other line that is not the header, then 12-field rows, fails.
+                $lines = @(($text -replace "`r?`n$", '') -split "`r?`n")
+                $stray = @($lines | Select-Object -Skip 1 | Where-Object { $_ -notmatch '^"\d\d:\d\d:\d\d"(,"[^"]*"){11}$' })
+                Check "${label}: the file is the header line, then rows, and nothing else" ($lines.Count -ge ($need + 1) -and $lines[0] -ceq $Quoted -and $stray.Count -eq 0) "lines $($lines.Count), first '$($lines[0])', other lines '$($stray -join ' | ')'"
+            }
         }
         Check 'a log with the right header: the old text is kept' ((Read-Shared $good).StartsWith($goodText)) 'the old text changed'
     } finally {
