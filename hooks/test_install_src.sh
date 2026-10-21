@@ -12,9 +12,9 @@
 # the hook, the same way GUARD_UNDER_TEST works in hooks/test_guard.py.
 #
 # Linux and macOS only. Under a Windows uname install.sh exits at its top, so a full run on Windows
-# is red by design: hooks/test_install_src.sh runs there only for cases that never start install.sh
-# (caseF4, caseF6, through lint/check_unknown_reads_contract.py). Windows has its own test, under the
-# real Git Bash uname: hooks/test_install_windows.sh.
+# is red by design. On Windows CI it runs only cases that never start install.sh: caseF1 and caseG1
+# (their own capped step), and caseF4 and caseF6 (through lint/check_unknown_reads_contract.py).
+# Windows has its own test, under the real Git Bash uname: hooks/test_install_windows.sh.
 
 set -u
 
