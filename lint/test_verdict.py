@@ -320,9 +320,11 @@ def log_folder(extra):
     env = dict(os.environ); env.update(extra)
     return subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
-def plant(folder, name, age_days):
+OWN_HEADER = "=== verdict run 2026-01-01 00:00:00: fx\n"  # the first line bin/verdict writes
+
+def plant(folder, name, age_days, header=True):
     p = os.path.join(folder, name)
-    open(p, "w").write("old")
+    open(p, "w").write((OWN_HEADER if header else "") + "old")
     t = time.time() - age_days * DAY
     os.utime(p, (t, t))
     return p
@@ -348,6 +350,21 @@ class Prune(unittest.TestCase):
         self.assertTrue(os.path.exists(recent), "6-day-old verdict log must stay")
         self.assertTrue(os.path.exists(own), "the run's own log must stay")
         self.assertEqual(os.path.dirname(os.path.normcase(own)), os.path.normcase(self.folder))
+
+    def test_old_log_in_callers_verdict_log_folder_stays(self):
+        with tempfile.TemporaryDirectory() as caller:
+            audit = plant(caller, "verdict-audit-q4.log", 19)
+            r = run("print('x')", os.path.join(caller, "mine.log"), self.extra, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertTrue(os.path.exists(audit), "a caller's VERDICT_LOG folder must never be pruned")
+
+    def test_old_log_without_own_header_stays(self):
+        foreign = plant(self.folder, "verdict-foreign-tool.log", 30, header=False)
+        old = plant(self.folder, "verdict-old.log", 30)
+        r = self.go("print('x')")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.exists(foreign), "a verdict-*.log without bin/verdict's header is not ours")
+        self.assertFalse(os.path.exists(old), "an old log with the header is still pruned")
 
     def test_non_verdict_logs_never_deleted(self):
         keep = [plant(self.folder, n, 30) for n in ("other.log", "verdict-old.txt", "xverdict-old.log", "verdict.log.bak")]
