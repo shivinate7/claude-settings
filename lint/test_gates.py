@@ -2571,10 +2571,13 @@ class SteGateUIScopeTests(unittest.TestCase):
         # result is unknown, for .md and for UI files, never pass in silence.
         d = os.path.join(self.tmp.name, "gate")
         os.makedirs(d)
-        for src in glob.glob(os.path.join(HERE, "*.py")):  # every module the gate may import
-            if not os.path.basename(src).startswith("test_"):
-                shutil.copy(src, d)
-        with open(os.path.join(d, "ste_lint.py"), "w", encoding="utf-8") as f:  # then the fake linter
+        # Only these two files and the fake linter: no ui_suffixes.py. An install that has pulled
+        # a new ste_gate.py has no link to a new module until install runs again.
+        for name in ("ste_gate.py", "_transcript.py"):
+            with open(os.path.join(HERE, name), encoding="utf-8") as src, \
+                    open(os.path.join(d, name), "w", encoding="utf-8") as dst:
+                dst.write(src.read())
+        with open(os.path.join(d, "ste_lint.py"), "w", encoding="utf-8") as f:
             f.write("UI_SUFFIXES = {'.tsx'}\nif __name__ == '__main__':\n    print('not json')\n")
         for name in ("n.md", "n.tsx"):
             run = run_gate(os.path.join(d, "ste_gate.py"), {
@@ -2609,7 +2612,7 @@ class SteGateLazyLintTests(unittest.TestCase):
                                    "old_string": "a", "new_string": "b"}}
             printed, modules = self.run_gate_modules(hook)
         self.assertEqual(printed.strip(), "")
-        # Catches: ste_lint (2,290 lines) imported before the suffix check, for a file the gate ignores.
+        # Catches: the large ste_lint module imported before the suffix check, for a file the gate ignores.
         self.assertEqual(modules & self.LINTER_FAMILY, set())
 
     def test_ui_suffixes_has_one_home(self):
@@ -2631,6 +2634,30 @@ class SteGateLazyLintTests(unittest.TestCase):
         run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=15)
         # Catches: the gate and the linter read two copies of the list.
         self.assertEqual(run.stdout.strip(), "True", run.stderr)
+
+    def test_linked_install_without_new_module_link_still_denies_ui_copy(self):
+        # An install links each lint file one by one into the live clone. A pull brings in a new
+        # ste_gate.py and ste_lint.py, and no link to a module added with them until install runs again.
+        # PYTHONSAFEPATH stops Python adding the resolved script folder (it does so on macOS and
+        # Linux, not on Windows): the real folder is then reachable by the links alone.
+        # Runs on every runner whose OS can make a symlink: ubuntu, macos, and windows (gates.yml).
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("ste_gate.py", "ste_lint.py", "_transcript.py"):  # the files an install already links
+                try:
+                    os.symlink(os.path.join(HERE, name), os.path.join(tmp, name))
+                except (OSError, NotImplementedError):
+                    self.skipTest("this OS cannot create symlinks here")
+            hook = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                    "tool_input": {"file_path": os.path.join(tmp, "B.tsx"),
+                                   "content": "export const B = () => "
+                                              "<button>Save all of the open files right now please</button>;\n"}}
+            run = run_gate(os.path.join(tmp, "ste_gate.py"), hook, env=dict(os.environ, PYTHONSAFEPATH="1"))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        # Catches: no UI suffix list beside the gate, so a UI file passes unchecked where main denies it.
+        self.assertNotEqual(run.stdout.strip(), "", "the gate printed nothing: the UI file passed unchecked")
+        out = json.loads(run.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("STE020", out["permissionDecisionReason"])
 
     def test_markdown_write_is_still_linted(self):
         with tempfile.TemporaryDirectory() as tmp:
