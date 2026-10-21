@@ -23,6 +23,8 @@ shim reads the path at run time.
   the real `rm`. The shim sits in front of every `rm` a Claude session runs, so a broken helper that refused would stop all deletes. The
   rule and the hook are the first stops. A missing last stop is a smaller harm than a session that cannot delete a file.
 
+- **Line endings.** `.gitattributes` forces LF on checkout for `bin/`, `githooks/`, every `*.sh` and the impeccable script, and CRLF for `*.cmd`. A Windows CI test (PR #558) fails on any CR in a shell script. Python and Node files stay unruled because they ignore a CR.
+
 Kind: build
 Plan: decisions/rm-path-wrapper.md#the-ruling (macos)
 Plan: decisions/rm-path-wrapper.md#the-ruling (linux)
