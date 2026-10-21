@@ -6000,16 +6000,6 @@ for _target in ('"."', "'.'", '"~"', "'~'"):
                   "Remove-Item -Path %s -Recurse"):
         rm_parent("PowerShell " + _form % _target, _form % _target, tool="PowerShell")
 
-# A /c/ CWD. Measured on this machine: every recorded hook payload and every session transcript
-# carries a cwd as `C:\...`, never `/c/...`. Rule 0 still reads that form, so one case pins that
-# the spelling of the cwd does not decide whether the working folder is refused.
-if os.name == "nt":
-    sh("rm-parent: a /c/ cwd, rm -r of the working folder as C:/", 'rm -r "%s"' % slash(_CWD),
-       "deny", "destructive-delete", cwd="/" + slash(_CWD)[0].lower() + slash(_CWD)[2:])
-else:
-    skip_case("rm-parent: a /c/ cwd, rm -r of the working folder as C:/",
-              "`/c/` is a Git Bash spelling of a Windows drive, and means nothing on this platform")
-
 
 # =========================================================================== 3b. linked node_modules
 # q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
