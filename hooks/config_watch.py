@@ -71,6 +71,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -78,26 +79,62 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-# GUARD_UNDER_TEST points the suite at another copy of the guard, the same contract
-# `hooks/test_guard.py` holds, so a mutation test needs no second copy of this file.
-_GUARD_PATH = os.environ.get("GUARD_UNDER_TEST")
-if _GUARD_PATH:
-    import importlib.util
-    _spec = importlib.util.spec_from_file_location("guard_under_test", _GUARD_PATH)
-    guard = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(guard)
-else:
-    import guard
+
+
+def _add_guard_set_dir() -> None:
+    """Put the installed guard set, guard.d/<id>/, on the path after this folder.
+
+    The id is the INSTALL_ID stamped in the guard.py beside this file, the same key guard.py
+    loads its set by, so the watch finds the set's shared_names.py when no flat copy is there.
+    A repo copy has no stamp and no set.
+    """
+    try:
+        with open(os.path.join(HERE, "guard.py"), encoding="utf-8") as handle:
+            found = re.search(r'^INSTALL_ID = "([^"]*)"', handle.read(), re.MULTILINE)
+    except Exception:
+        return
+    if found:
+        set_dir = os.path.join(HERE, "guard.d", found.group(1))
+        if os.path.isdir(set_dir) and set_dir not in sys.path:
+            sys.path.insert(sys.path.index(HERE) + 1, set_dir)
+
+
+_add_guard_set_dir()
+
+from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
+
+# The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
+# stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
+# the same contract `hooks/test_guard.py` holds, so a mutation test needs no second copy of this
+# file.
+guard = None
+
+
+def _load_guard() -> None:
+    """Import the guard once and bind it, with the names derived from it."""
+    global guard
+    if guard is not None:
+        return
+    path = os.environ.get("GUARD_UNDER_TEST")
+    if path:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("guard_under_test", path)
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+    else:
+        import guard as loaded
+    guard = loaded
 
 
 # ------------------------------------------------------------------ the watched set
 #
-# The project's own settings files, the pair `guard.PROJECT_FROZEN_FILES` already names. The
+# The project's own settings files, the pair `shared_names.PROJECT_FROZEN_FILES` names. The
 # config directory is NOT watched here. Rule 7 denies a write there, and `~/.claude/settings.json`
 # is a symlink onto the clone of claude-settings, which is deliberately unfrozen so that the
 # repository can edit its own source. A hash watch that followed that symlink would revert the
 # repository's own work.
-WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)
+# `shared_names` is stdlib only, so the fast exit reads the names before the guard loads.
+WATCHED_NAMES = tuple(name.lstrip("/") for name in PROJECT_FROZEN_FILES)
 
 STORE_DIR_NAME = "state"
 STORE_SUB = "config-watch"
@@ -160,7 +197,7 @@ def safe(text: str, limit: int) -> str:
 
 
 def store_dir() -> str:
-    return os.path.join(guard.config_dir(), STORE_DIR_NAME, STORE_SUB)
+    return os.path.join(config_dir(), STORE_DIR_NAME, STORE_SUB)
 
 
 def store_key(path: str) -> str:
@@ -328,6 +365,21 @@ def reading_text(reading) -> str:
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = "_subagentCapUntil"
 EXPIRY_MAX_AHEAD_HOURS = 24
+
+
+# A `_FORCE` key is an on/off flag (decision `subagent-model-cap`), so these values set no model.
+_FORCE_FLAGS = ("0", "1", "true", "false")
+
+
+def first_sight_silent(reading) -> bool:
+    """True when a first-sight reading may pass in silence: every cap key reads Sonnet, or a
+    `_FORCE` key holds a plain flag. Any other value, a model name on a `_FORCE` key too, is
+    reported unknown."""
+    for key, value in reading.items():
+        text = str(value or "").strip().lower()
+        if text != "sonnet" and not (key.endswith("_FORCE") and text in _FORCE_FLAGS):
+            return False
+    return True
 
 
 def cap_lift_value(reading) -> bool:
@@ -515,9 +567,9 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
 
     Five answers, in order:
 
-      no baseline  : record it. Report UNKNOWN when the file already sets the cap, because a first
-                     sight cannot tell a lift from a starting state, and silence there would read
-                     as clear.
+      no baseline  : record it. Report UNKNOWN when the file already sets the cap above Sonnet,
+                     because a first sight cannot tell a lift from a starting state, and silence
+                     there would read as clear. A cap at Sonnet is no lift, so it stays silent.
       unchanged    : fall through to the expiry check below, unchanged or not.
       cap unchanged: Decision 7. Re-baseline, carry `prior` forward, and say nothing yet.
       cap changed,
@@ -538,7 +590,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
     if baseline is None:
         save_baseline(path, current)
         reading = cap_reading(current)
-        if reading:
+        if not first_sight_silent(reading):
             return UNKNOWN_MESSAGE.format(
                 where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
         return ""
@@ -591,8 +643,50 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
         kept=safe(kept or "(not kept)", guard.CAP_MAX_PATH))
 
 
+def lift_candidate(content) -> bool:
+    """True when a file's cap might be lifted, or cannot be read with the stdlib alone.
+
+    Any doubt reads as True, so the guard's own reading decides.
+    """
+    try:
+        text = content.decode("utf-8")
+        parsed = json.loads(text)
+    except Exception:
+        return True
+    if not isinstance(parsed, dict):
+        return True
+    env = parsed.get("env")
+    env = env if isinstance(env, dict) else {}
+    named = re.findall(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?", text)
+    if len(named) != sum(1 for key in env if key in named):
+        return True  # a cap name outside the env block: the guard's text scan reads it
+    return any(not isinstance(env.get(key), str) or env[key].strip().lower() != "sonnet"
+               for key in _MODEL_KEYS if key in env)
+
+
+def unchanged(payload, clock=None) -> bool:
+    """True when this call needs no guard: every watched file matches its stored baseline.
+
+    The hash is the only test of "unchanged", never mtime or size. A missing or unreadable
+    record, or a recorded lift whose deadline is not valid now, reads as False, because an
+    expiry is a clock event that no write marks.
+    """
+    cwd = payload.get("cwd", "") or os.getcwd() or ""
+    if not isinstance(cwd, str):
+        return False
+    for path in watched_paths(cwd):
+        baseline = load_baseline(path)
+        if baseline is None or baseline["digest"] != digest(read_file(path)):
+            return False
+        content = baseline["content"]
+        if content is not None and lift_candidate(content) and expiry_problem(content, clock):
+            return False
+    return True
+
+
 def sweep(payload, clock=None):
     """Judge every watched path for this payload. Return the messages, in path order."""
+    _load_guard()
     tool = payload.get("tool_name", "") or ""
     try:
         guard.set_log_session(payload.get("session_id"))  # the last column of a revert's log line
@@ -639,7 +733,6 @@ def _test_clock():
 
 
 def main() -> None:
-    guard._force_utf8_streams()
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -647,6 +740,14 @@ def main() -> None:
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
     try:
+        fast_exit = unchanged(payload, _test_clock())
+    except Exception:
+        fast_exit = False  # a fault in the fast check runs the full check, never a silent exit
+    if fast_exit:
+        sys.exit(0)
+    try:
+        _load_guard()
+        guard._force_utf8_streams()
         messages = sweep(payload, _test_clock())
     except Exception:
         sys.exit(0)  # fail open on a watch defect
@@ -654,6 +755,11 @@ def main() -> None:
         print(json.dumps({"systemMessage": " ".join(messages)}))
     sys.exit(0)
 
+
+# An importer, such as a test calling `sweep`, finds the guard bound at once. Only the hook run
+# keeps it lazy.
+if __name__ != "__main__":
+    _load_guard()
 
 if __name__ == "__main__":
     main()
