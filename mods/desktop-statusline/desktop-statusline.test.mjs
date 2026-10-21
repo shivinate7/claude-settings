@@ -221,6 +221,17 @@ await T('failed read: a good read after a failure is cached for the back-off, as
   same(statusReads(h) - before, 1, 'git status reads by 6 minutes after the good read')
 })
 
+// A folder that is not a repo fails every read: the retry backs off to the idle interval, and does not read on every tick.
+await T('failed read: when git fails from the start, 10 idle minutes run at most 3 reads', async () => {
+  for (const mode of FAILURES) {
+    const h = await start()
+    h.gitFail = mode
+    await fire(h, 'session.start', {})
+    await advance(h, 600_000)
+    assert.ok(statusReads(h) <= 3, `git status reads over the start and 10 idle minutes (${mode}): ${statusReads(h)}, want 3 or fewer`)
+  }
+})
+
 const fails = results.filter(r => r.startsWith('FAIL')).length
 console.log(results.join('\n'))
 console.log(`desktop-statusline pins: ${results.length - fails} pass, ${fails} fail of ${results.length}`)
