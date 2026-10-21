@@ -5,7 +5,7 @@ Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file. E
 block. Advisory findings (warnings) never block: the gate shows the ones in the changed
 blocks as a note. Prints JSON when there is something to say. Always exits 0.
 
-PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ste_lint.UI_SUFFIXES:
+PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ui_suffixes.UI_SUFFIXES:
 .tsx, .jsx, .html, .vue): deny the write when the new text has STE errors, and hand the
 findings back so the writer fixes them first. For a UI file ste_lint reads only the copy a
 user sees, never the code.
@@ -38,6 +38,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a linked install: the real folder holds files no link names yet
 from _transcript import paragraph_blocks, format_finding, advisory_lines  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
@@ -51,8 +52,11 @@ except Exception:  # an older _transcript.py beside this script: the gate runs, 
         return lambda *line: None
 try:
     from ui_suffixes import UI_SUFFIXES  # noqa: E402
-except Exception:
-    UI_SUFFIXES = set()  # no list next to this file: main() returns before it lints a UI file
+except ImportError:  # an install with no copy of ui_suffixes.py yet: read the list from the linter
+    try:
+        from ste_lint import UI_SUFFIXES  # noqa: E402
+    except Exception:
+        UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
 ste_lint = None  # main() loads the big linter only for a file it lints
 
 MD_SUFFIXES = (".md", ".markdown")
@@ -441,7 +445,7 @@ def main():
         except Exception:
             ste_lint = None
             if suffix in UI_SUFFIXES:
-                return  # no linter to read a UI file: pass it, as before the lazy load
+                return  # no linter to read a UI file
 
         try:
             with open(path, "r", encoding="utf-8") as f:

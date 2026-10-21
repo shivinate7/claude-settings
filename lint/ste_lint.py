@@ -34,6 +34,7 @@ from html.parser import HTMLParser
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a linked install: the real folder holds ui_suffixes.py
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  (one home: lint/ste_gate.py reads it without loading this file)
 
 __version__ = "1.0.0"
