@@ -22,7 +22,7 @@ shim reads the path at run time.
 - **Fail-open.** If `python3` is missing, or `guard_rm_var` cannot load, or the judgment raises, the shim prints one warning line and runs
   the real `rm`. The shim sits in front of every `rm` a Claude session runs, so a broken helper that refused would stop all deletes. The
   rule and the hook are the first stops. A missing last stop is a smaller harm than a session that cannot delete a file.
-- **Line endings.** `.gitattributes` forces LF on checkout for `bin/`, `githooks/`, every `*.sh` and the impeccable script, and CRLF for `*.cmd`. A Windows CI test (PR #558) fails on any CR in a shell script. Python and Node files stay unruled because they ignore a CR.
+- **Line endings.** See decision shell-scripts-check-out-lf (shell scripts check out with LF).
 
 ## The guard holds the line on every platform
 
