@@ -6,6 +6,7 @@ gate as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_gates.py -v
 """
+import ast
 import errno
 import glob
 import importlib.util
@@ -2570,17 +2571,78 @@ class SteGateUIScopeTests(unittest.TestCase):
         # result is unknown, for .md and for UI files, never pass in silence.
         d = os.path.join(self.tmp.name, "gate")
         os.makedirs(d)
-        for name in ("ste_gate.py", "_transcript.py"):
-            with open(os.path.join(HERE, name), encoding="utf-8") as src, \
-                    open(os.path.join(d, name), "w", encoding="utf-8") as dst:
-                dst.write(src.read())
-        with open(os.path.join(d, "ste_lint.py"), "w", encoding="utf-8") as f:
+        for src in glob.glob(os.path.join(HERE, "*.py")):  # every module the gate may import
+            if not os.path.basename(src).startswith("test_"):
+                shutil.copy(src, d)
+        with open(os.path.join(d, "ste_lint.py"), "w", encoding="utf-8") as f:  # then the fake linter
             f.write("UI_SUFFIXES = {'.tsx'}\nif __name__ == '__main__':\n    print('not json')\n")
         for name in ("n.md", "n.tsx"):
             run = run_gate(os.path.join(d, "ste_gate.py"), {
                 "hook_event_name": "PreToolUse", "tool_name": "Write",
                 "tool_input": {"file_path": os.path.join(self.tmp.name, name), "content": "x\n"}})
             self.assertIn("unknown", json.loads(run.stdout)["systemMessage"], name)
+
+
+class SteGateLazyLintTests(unittest.TestCase):
+    """lint/ste_gate.py loads the big ste_lint.py only for a file it lints. The list of UI
+    suffixes lives in one small module, and ste_lint imports the name from it."""
+
+    # Exact module names. A substring match would hit unrelated modules such as pywin32_system32.
+    LINTER_FAMILY = {"ste_lint", "guard_core", "guard", "shared_names"}
+
+    def run_gate_modules(self, hook):
+        """Run the gate as a script in a fresh process and return (stdout the gate printed,
+        names left in sys.modules)."""
+        code = ("import json, runpy, sys\n"
+                "runpy.run_path(%r, run_name='__main__')\n"
+                "print('MODULES ' + json.dumps(sorted(sys.modules)))\n" % STE_GATE)
+        run = subprocess.run([sys.executable, "-c", code], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=15)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        printed, _, modules = run.stdout.rpartition("MODULES ")
+        return printed, set(json.loads(modules))
+
+    def test_ignored_ts_edit_loads_no_linter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hook = {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                    "tool_input": {"file_path": os.path.join(tmp, "app.ts"),
+                                   "old_string": "a", "new_string": "b"}}
+            printed, modules = self.run_gate_modules(hook)
+        self.assertEqual(printed.strip(), "")
+        # Catches: ste_lint (2,290 lines) imported before the suffix check, for a file the gate ignores.
+        self.assertEqual(modules & self.LINTER_FAMILY, set())
+
+    def test_ui_suffixes_has_one_home(self):
+        with open(os.path.join(HERE, "ste_lint.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        defined = [n.lineno for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))
+                   and "UI_SUFFIXES" in [t.id for t in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                                         if isinstance(t, ast.Name)]]
+        imported = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                    and any((a.asname or a.name) == "UI_SUFFIXES" for a in n.names)]
+        # Catches: ste_lint defines its own copy of the list, so the gate cannot read it without loading ste_lint.
+        self.assertEqual(defined, [], "ste_lint.py defines UI_SUFFIXES at line(s) %s: import it from the small module" % defined)
+        self.assertEqual(len(imported), 1, "ste_lint.py must import UI_SUFFIXES exactly once")
+        code = ("import importlib, sys\n"
+                "sys.path.insert(0, %r)\n"
+                "import ste_gate, ste_lint\n"
+                "home = importlib.import_module(%r)\n"
+                "print(ste_gate.UI_SUFFIXES is ste_lint.UI_SUFFIXES is home.UI_SUFFIXES)\n" % (HERE, imported[0].module))
+        run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=15)
+        # Catches: the gate and the linter read two copies of the list.
+        self.assertEqual(run.stdout.strip(), "True", run.stderr)
+
+    def test_markdown_write_is_still_linted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hook = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                    "tool_input": {"file_path": os.path.join(tmp, "notes.md"),
+                                   "content": "This sentence is not unclean, and that trips the STE013 rule.\n"}}
+            run = run_gate(STE_GATE, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        # Catches: the lazy import never fires for a file the gate lints, so the gate passes it in silence.
+        out = json.loads(run.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("STE013", out["permissionDecisionReason"])
 
 
 class TurnEndEarlyExitTests(unittest.TestCase):
