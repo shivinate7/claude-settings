@@ -2197,14 +2197,20 @@ make_guard_clone() {
 # shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
 # logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds, once: install.sh retries a failed mv,
 # and the retry must not pause again. It runs the real mv. After the landing it logs
-# "landed <epoch seconds> <build>". Every other mv passes straight through.
+# "landed <epoch seconds> <build>". Before put_file's rename (its source ends in .cs-new) it logs
+# "premv <dest> <present|absent> <bytes of the new file>" to $SWAP_EVENTS, whatever the dest. Every other
+# mv passes straight through.
 make_swap_bin() {
   mkdir -p "$1"
   real_mv=$(command -v mv)
   cat > "$1/mv" <<EOF
 #!/bin/sh
-dest=""
-for a in "\$@"; do dest="\$a"; done
+dest=""; src=""
+for a in "\$@"; do src="\$dest"; dest="\$a"; done
+case "\$src" in
+  *.cs-new)
+    printf 'premv %s %s %s\n' "\$dest" "\$([ -f "\$dest" ] && echo present || echo absent)" "\$(wc -c < "\$src" | tr -d ' ')" >> "\$SWAP_EVENTS" ;;
+esac
 case "\$dest" in
   */hooks/guard*.py)
     if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ] && ! grep -q '^paused' "\$SWAP_EVENTS"; then
@@ -2325,6 +2331,83 @@ lock1sh() {
     if [ "$builds" = 1 ]; then ok "$name"
     else bad "$name" "after both installs the guard files carry $builds builds, want one whole set"
     fi
+  fi
+  rm -rf "$h"
+}
+
+# ---- putfile_nogap1: put_file replaces a landed file by one rename over it, never by a delete -----
+# A gate hook reads a hook file at any moment, and a missing one fails closed. Install 2 replaces every file
+# install 1 landed in hooks/. The mv shim logs "premv <dest> <present|absent> <bytes>" just before each
+# put_file rename. Each file needs a premv line that found the old file present. That fails a delete before the
+# rename, and a rewrite in place, which has no rename at all. The new file's size at that moment must be the
+# landed file's size, so the file is whole before it takes the name. The guard files, shared_names.py and a
+# plain hook go through put_file.
+putfile_nogap1() {
+  name="putfile_nogap1: a copy-mode install replaces each landed hook file by one rename over the old file, never by a delete or a rewrite in place"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_nogap1-bin"
+  make_swap_bin "$swap_bin"
+  one="$work/putfile_nogap1-one"; two="$work/putfile_nogap1-two"
+  make_guard_clone "$one" one
+  make_guard_clone "$two" two
+  printf '# plain hook one\n' > "$one/hooks/notify.sh"
+  printf '# plain hook two, longer\n' > "$two/hooks/notify.sh"
+  ev1="$work/putfile_nogap1-ev1"; ev2="$work/putfile_nogap1-ev2"; : > "$ev1"; : > "$ev2"
+  run_cloud "$one" "$cfg" "$ev1" > "$work/putfile_nogap1-run1" 2>&1; rc1=$?
+  names=$(ls "$two/hooks")
+  missing1=""; for f in $names; do [ -f "$cfg/hooks/$f" ] || missing1="$missing1 $f"; done
+  run_cloud "$two" "$cfg" "$ev2" > "$work/putfile_nogap1-run2" 2>&1; rc2=$?
+  why=""
+  for f in $names; do
+    d="$cfg/hooks/$f"
+    seen=$(awk -v d="$d" '$1 == "premv" && $2 == d { print $3 " " $4 }' "$ev2" | tail -n 1)
+    size=$(wc -c < "$d" 2>/dev/null | tr -d ' ')
+    case "$seen" in
+      "present $size") ;;
+      "") why="$why $f: no rename over it, so it was written in place;" ;;
+      absent*) why="$why $f: absent just before the rename;" ;;
+      *) why="$why $f: [$seen] before the rename, but the landed file is $size bytes;" ;;
+    esac
+  done
+  left=$(find "$cfg" -name '*.cs-new' | head -n 1)
+  new_notify=$(cat "$cfg/hooks/notify.sh" 2>/dev/null)
+
+  if [ "$rc1" -ne 0 ] || [ -n "$missing1" ] || [ -z "$names" ]; then
+    bad "$name" "setup: install 1 exit $rc1, not landed:$missing1"
+  elif [ "$rc2" -ne 0 ]; then bad "$name" "install 2 exit $rc2: $(tail -n 3 "$work/putfile_nogap1-run2")"
+  elif [ -n "$why" ]; then bad "$name" "$why"
+  elif [ -n "$left" ]; then bad "$name" "a temp file is left behind: $left"
+  elif [ "$new_notify" != "# plain hook two, longer" ]; then bad "$name" "install 2 did not land the new notify.sh, found [$new_notify]"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- putfile_prose1: only the exact placeholder line is stamped; a prose comment is copied unchanged ----
+# A comment that starts INSTALL_ID = " but says something else is not the placeholder. put_file must leave
+# it as it is, so each landed copy is the source, and still parses as Python. The exact line
+# # INSTALL_ID = "uninstalled" is stamped with a real id. A guard file lands twice: in guard.d/<id>/ and flat.
+putfile_prose1() {
+  name="putfile_prose1: a copy-mode install stamps only the exact INSTALL_ID placeholder line and copies a prose comment unchanged"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_prose1-bin"
+  clone="$work/putfile_prose1-clone"
+  make_guard_clone "$clone" one
+  printf '%s\nX = 1\n' '# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.' > "$clone/hooks/guard_prose.py"
+  printf '# INSTALL_ID = "uninstalled"\nY = 2\n' > "$clone/hooks/guard_stamp.py"
+  ev="$work/putfile_prose1-ev"; : > "$ev"
+  run_cloud "$clone" "$cfg" "$ev" > "$work/putfile_prose1-run" 2>&1; rc=$?
+  why=""
+  for p in "$cfg/hooks/guard_prose.py" "$cfg"/hooks/guard.d/*/guard_prose.py; do
+    cmp -s "$clone/hooks/guard_prose.py" "$p" 2>/dev/null || why="$why prose comment changed or missing in $p;"
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$p" 2>/dev/null || why="$why $p does not parse as Python;"
+  done
+  for p in "$cfg/hooks/guard_stamp.py" "$cfg"/hooks/guard.d/*/guard_stamp.py; do
+    grep -q '^INSTALL_ID = "[^"][^"]*"' "$p" 2>/dev/null && ! grep -q uninstalled "$p" || why="$why placeholder not stamped in $p;"
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$p" 2>/dev/null || why="$why $p does not parse as Python;"
+  done
+
+  if [ "$rc" -ne 0 ]; then bad "$name" "install exit $rc: $(tail -n 3 "$work/putfile_prose1-run")"
+  elif [ -n "$why" ]; then bad "$name" "$why"
+  else ok "$name"
   fi
   rm -rf "$h"
 }
@@ -2559,6 +2642,8 @@ run pinoff2
 run pinoff3
 run swap1sh
 run lock1sh
+run putfile_nogap1
+run putfile_prose1
 run pinlive1
 run pinlive2
 run guardset1
