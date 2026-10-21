@@ -33,6 +33,9 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Dict, List, Optional, Sequence, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ui_suffixes import UI_SUFFIXES  # noqa: E402  (one home: lint/ste_gate.py reads it without loading this file)
+
 __version__ = "1.0.0"
 
 # --------------------------------------------------------------------------
@@ -1176,7 +1179,6 @@ def source_prose_paragraphs(path: str, text: str) -> Optional[List[Paragraph]]:
 # read. `.html` and `.vue` go through `html.parser`. JSX gets `_jsx_copy`.
 # --------------------------------------------------------------------------
 
-UI_SUFFIXES = {".tsx", ".jsx", ".html", ".vue"}
 UI_ATTRS = {"aria-label", "title", "placeholder", "alt", "label"}
 # A button, label or aria-label is capped at 4 words (plain-prose-lint). A repo can
 # name other tags under the config key "label_tags" (see DEFAULT_CONFIG).

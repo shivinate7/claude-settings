@@ -50,11 +50,10 @@ except Exception:  # an older _transcript.py beside this script: the gate runs, 
     def guard_logger(hook):
         return lambda *line: None
 try:
-    import ste_lint  # noqa: E402
-    from ste_lint import UI_SUFFIXES  # noqa: E402
+    from ui_suffixes import UI_SUFFIXES  # noqa: E402
 except Exception:
-    ste_lint = None
-    UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
+    UI_SUFFIXES = set()  # no list next to this file: main() returns before it lints a UI file
+ste_lint = None  # main() loads the big linter only for a file it lints
 
 MD_SUFFIXES = (".md", ".markdown")
 MAX_SHOWN = 5
@@ -311,6 +310,8 @@ def run_autofix(tool, ti, old_text, scope):
 
 def autofix_child():
     """Entry of the child process: read the request on stdin, print the autofix result."""
+    global ste_lint
+    import ste_lint  # noqa: E402  (a failed import ends the child: the caller lints the plain text)
     req = json.loads(sys.stdin.buffer.read().decode("ascii"))
     result = autofix(req["tool"], req["ti"], req["old_text"],
                      None if req["scope"] is None else set(req["scope"]))
@@ -434,6 +435,13 @@ def main():
         suffix = os.path.splitext(path)[1].lower()
         if not path.lower().endswith(MD_SUFFIXES) and suffix not in UI_SUFFIXES:
             return
+        global ste_lint
+        try:
+            import ste_lint  # noqa: E402
+        except Exception:
+            ste_lint = None
+            if suffix in UI_SUFFIXES:
+                return  # no linter to read a UI file: pass it, as before the lazy load
 
         try:
             with open(path, "r", encoding="utf-8") as f:
