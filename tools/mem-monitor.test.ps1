@@ -3,7 +3,7 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\mem-monitor.test.ps1
 #
-# This is the command the owner and CI run: Windows PowerShell 5.1. PowerShell 7 runs it too.
+# This is the owner's command: Windows PowerShell 5.1. The checks are verified on 5.1 only.
 #
 # Every check but the last group reads text only. The loop has no end, so a run starts the monitor
 # only with -Log set to a file in a temp folder, and kills it when its answer is in.
