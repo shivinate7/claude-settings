@@ -1,14 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelUsage, ProcessRunResult, Register } from 'claude-code'
 
-import type { Limit, Snapshot } from '../types'
+import type { GitRead, Limit, Snapshot } from '../types'
 
 const snapshot = atom({ plugin: 'desktop-statusline', key: 'snap' } as const, null)
 const warned = atom({ plugin: 'desktop-statusline', key: 'warned' } as const, [])
 const lastTurn = atom({ plugin: 'desktop-statusline', key: 'lastTurn' } as const, null)
 const compactions = atom({ plugin: 'desktop-statusline', key: 'compactions' } as const, null)
 
-const REFRESH_MS = 60_000
+const gitRead = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
+
+const REFRESH_MS = 60_000 // the band's own snapshot (idle time, limit countdowns); it reads no git
+const GIT_IDLE_MS = 300_000 // an idle session reads git this often at most; a turn end and an attach read too
 const WARN_AT = [95, 80]
 const LABELS: Record<string, string> = { five_hour: '5-hour', seven_day: 'Weekly' }
 const LABEL_CELLS = 8
@@ -99,7 +102,8 @@ const warn = async ($: EngineInterface, limits: Limit[], now: number) => {
   if (fresh.length > 0) await update($, warned, s => [...s, ...fresh].slice(-50))
 }
 
-const refresh = async ($: EngineInterface) => {
+// Reads git when asked to, or when the last read is GIT_IDLE_MS old; otherwise the last read stands.
+const refresh = async ($: EngineInterface, isGitDue = false) => {
   if (!(await isOnDesktop($))) return
 
   const [usage, cwd, now, agents, prompts] = await Promise.all([
@@ -109,15 +113,27 @@ const refresh = async ($: EngineInterface) => {
     $.agent.list(),
     $.session.turns(),
   ])
-  const [status, dirs] = await Promise.all([
-    output($.process.run(['git', 'status', '--porcelain=v2', '--branch'], { cwd, timeoutMs: 5000 })),
-    output($.process.run(['git', 'rev-parse', '--git-dir', '--git-common-dir'], { cwd, timeoutMs: 5000 })),
-  ])
-
-  const lines = status?.split('\n') ?? []
-  const head = lines.find(l => l.startsWith('# branch.head '))?.slice(14)
-  const ab = lines.find(l => l.startsWith('# branch.ab '))?.match(/\+(\d+) -(\d+)/)
-  const [gitDir, commonDir] = dirs?.split('\n') ?? []
+  let git = await read($, gitRead)
+  if (isGitDue || git === null || now - git.at >= GIT_IDLE_MS) {
+    const [status, dirs] = await Promise.all([
+      output($.process.run(['git', 'status', '--porcelain=v2', '--branch'], { cwd, timeoutMs: 5000 })),
+      output($.process.run(['git', 'rev-parse', '--git-dir', '--git-common-dir'], { cwd, timeoutMs: 5000 })),
+    ])
+    const lines = status?.split('\n') ?? []
+    const head = lines.find(l => l.startsWith('# branch.head '))?.slice(14)
+    const ab = lines.find(l => l.startsWith('# branch.ab '))?.match(/\+(\d+) -(\d+)/)
+    const [gitDir, commonDir] = dirs?.split('\n') ?? []
+    const fresh: GitRead = {
+      at: now,
+      branch: head && head !== '(detached)' ? head : null,
+      isWorktree: gitDir !== commonDir,
+      ahead: Number(ab?.[1] ?? 0),
+      behind: Number(ab?.[2] ?? 0),
+      changed: lines.filter(l => l && !l.startsWith('#')).length,
+    }
+    git = fresh
+    await update($, gitRead, () => fresh)
+  }
   const limits = usage.rateLimits.map(r => ({
     kind: r.kind,
     percent: r.percentUsed,
@@ -128,11 +144,11 @@ const refresh = async ($: EngineInterface) => {
     startedAt: usage.startedAt,
     prompts,
     dir: cwd.split('/').pop() || cwd,
-    branch: head && head !== '(detached)' ? head : null,
-    isWorktree: gitDir !== commonDir,
-    ahead: Number(ab?.[1] ?? 0),
-    behind: Number(ab?.[2] ?? 0),
-    changed: lines.filter(l => l && !l.startsWith('#')).length,
+    branch: git.branch,
+    isWorktree: git.isWorktree,
+    ahead: git.ahead,
+    behind: git.behind,
+    changed: git.changed,
     costUsd: usage.cost?.usd ?? null,
     limits,
     agents: agents
@@ -151,7 +167,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await refresh($)
+    await refresh($, true)
     $.clock.every(REFRESH_MS, () => void refresh($))
 
     return started
@@ -159,7 +175,7 @@ export const register: Register = (on, options) => {
 
   on('session.attach', { surface: 'desktop' }, async ($, e, next) => {
     const attached = await next(e)
-    await refresh($)
+    await refresh($, true)
 
     return attached
   })
@@ -182,7 +198,7 @@ export const register: Register = (on, options) => {
         cacheHit: e.usage ? cacheHit(e.usage) : null,
       }))
     }
-    await refresh($)
+    await refresh($, true) // the one git read of this turn end: the session.measure after it reads none
 
     return completed
   })

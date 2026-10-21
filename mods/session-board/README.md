@@ -24,11 +24,11 @@ One session: agents with status, the last 5 tool calls, files touched, context p
 A session is update-ready when all five hold: no running agents, state is waiting, no permission ask, no unpushed commits, and a clean tree.
 
 - Running servers and background tasks are not part of it. A session with a dev server can read "ready".
-- The git counts come from a reading at turn end. While the session waits, the heartbeat reads git again every 30 s, one read at a time. An idle session keeps a fresh reading.
-- A git read that needs 5 s or more makes the idle read back off. The wait doubles, up to 5 minutes. A quick read resets it to 30 s.
+- The git counts come from a reading at turn end and on attach. While the session waits, the heartbeat reads git again 5 minutes after the last read, one read at a time. A session at work reads git only at turn end.
+- A failed or hung git read waits the same 5 minutes before the next one.
 - A read that began before the latest turn start is dropped when it lands.
-- A reading older than 60 s is "unknown". A failed or slow git call is "unknown". A branch with no upstream is "unknown". Unknown is never ready.
-- The 60 s rule guards against a stuck reader, not against idleness.
+- A reading older than 330 s is "unknown". A failed or slow git call is "unknown". A branch with no upstream is "unknown". Unknown is never ready.
+- The 330 s rule (5 minutes plus one beat) guards against a stuck reader, not against idleness.
 
 ## Where the data comes from
 
@@ -38,7 +38,7 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - A heartbeat refreshes the entry every 30 s. The board hides an entry older than 2 minutes, or stamped more than 30 s ahead of now. The session removes both records at session end. A killed session leaves them. The 2-minute rule hides them. An entry older than one day is deleted at the next session start or `/board`, unless `claude agents` lists that session as live. If the list is not available, nothing is deleted.
 - The board reads the 200 newest entries. It says how many more exist.
 - After `/clear` or a resume, the mod writes nothing for the old id and reads the id again on each beat. It writes under the new id when that binds. After session end it writes nothing.
-- The git call runs once per turn end and once per idle heartbeat: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout.
+- The git call runs once per turn end, once per attach and once per 5 idle minutes: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout.
 - These steps each wait at most 100 ms for their git, agent, context, and store work: session start, turn start, turn end, a permission ask, and the end of a tool call. The work then finishes on its own.
 - The 100 ms wait does not cover everything. At session start, `$.session.repo()` and `$.command.register()` are not bounded by it. At session end, the store deletes are not bounded by it. On `/clear` or a resume, `$.session.repo()` is not bounded either.
 - A permission ask with no tool id writes nothing.
@@ -92,7 +92,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - A denied permission clears when the tool call returns, the same as an approved one. Turn end also clears it.
 - Named hole, the sweep: it deletes day-old records only when `claude agents --json` gives a valid JSON list. A banner line, an object, or no output deletes nothing. A valid empty list `[]` counts as real, so day-old records of sessions with no live row go.
 - Named hole, the clear race: after `/clear` or a resume, a store write already held at the host can land late. The mod removes it again after it lands. The old entry can show for a short moment.
-- Named hole, the idle git read: a quick read from a turn end or a beat puts the idle read back to every 30 s. A slow turn-end read does not change the interval. Only a slow idle read doubles it.
+- Named hole, the idle git read: the tree can change between reads, so a clean tree can read as clean for up to 5 minutes after an edit made outside the session. A turn end reads again.
 - Named hole, the config folder: under Git Bash, `HOME` is a path like `/c/Users/x`. `/safe-stop` uses `USERPROFILE` first when it starts with a drive letter. Another setup can pick the wrong folder. Set `CLAUDE_CONFIG_DIR` to be sure.
 - A mod error is not shown in the session. It goes to the debug log (`claude --debug`), one line starting "session-board:".
 
