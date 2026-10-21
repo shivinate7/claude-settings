@@ -8,8 +8,11 @@ must exit 0, silent, with no python start. Where it works, the row must reach py
 - stall_watch --hook: does nothing off posix (hook() returns at once). --stop has no posix gate, so
   its row must still reach python on Windows.
 - sim_boot_record (Pre and Post rows): does nothing without xcrun.
-- ci_wake: does nothing unless the payload holds "ready" (any case). The row reads the payload
-  first, so it must hand the same bytes and the exit code through.
+- ci_wake: does nothing unless the COMMAND holds "ready" (any case; ci_wake.py main()). The row reads
+  the payload first, so it must hand the same bytes and the exit code through, and must not start
+  python for a "ready" that sits only in tool_response. Empty stdin still reaches python, which
+  reports "CI unknown".
+- stall_watch: only a MINGW uname exits early. Cygwin and MSYS pythons report os.name "posix".
 Override the settings file with HOOK_PLATFORM_EXIT_SETTINGS.
 """
 import json
@@ -26,7 +29,7 @@ SH = shutil.which("sh")
 # finds the host's python, xcrun or uname.
 PASS_THROUGH = ("cat", "grep", "sed", "tr", "head", "cut", "awk", "wc", "tee", "dirname", "basename")
 
-STUB_PYTHON = '#!/bin/sh\necho "$0 $*" >> "$STUB_LOG"\nread -r line; printf %s "$line" > "$STUB_LOG.stdin"\nexit "${STUB_RC:-0}"\n'
+STUB_PYTHON = '#!/bin/sh\necho "$0 $*" >> "$STUB_LOG"\ncat > "$STUB_LOG.stdin"\nexit "${STUB_RC:-0}"\n'
 
 
 def rows(script):
@@ -38,8 +41,9 @@ def rows(script):
             for h in e["hooks"] if needle in h.get("command", "")]
 
 
-def run_row(command, script, payload="{}", platform="posix", xcrun=True, rc=0):
-    """-> (CompletedProcess, [python starts], python's stdin or None)."""
+def run_row(command, script, payload="{}", platform="posix", xcrun=True, rc=0, uname=None):
+    """-> (CompletedProcess, [python starts], python's stdin bytes or None). Bytes in and out, so no
+    newline translation hides a change."""
     if SH is None:
         raise RuntimeError("no sh on PATH; these tests need Git Bash on Windows")
     with tempfile.TemporaryDirectory() as root:
@@ -65,13 +69,13 @@ def run_row(command, script, payload="{}", platform="posix", xcrun=True, rc=0):
                 put(name, '#!/bin/sh\nexec "%s" "$@"\n' % real.replace("\\", "/"))
         log = os.path.join(root, "calls.log")
         env = {"PATH": stubs, "CLAUDE_CONFIG_DIR": cfg, "STUB_LOG": log, "STUB_RC": str(rc),
-               "FAKE_UNAME": "Linux"}
+               "FAKE_UNAME": uname or "Linux"}
         if platform == "nt":
-            env.update(FAKE_UNAME="MINGW64_NT-10.0-26200", OS="Windows_NT", OSTYPE="msys")
-        done = subprocess.run([SH, "-c", command], env=env, input=payload, capture_output=True,
-                              text=True, timeout=60)
+            env.update(FAKE_UNAME=uname or "MINGW64_NT-10.0-26200", OS="Windows_NT", OSTYPE="msys")
+        done = subprocess.run([SH, "-c", command], env=env, input=payload.encode("utf-8"),
+                              capture_output=True, timeout=60)
         calls = open(log).read().splitlines() if os.path.exists(log) else []
-        seen = open(log + ".stdin").read() if os.path.exists(log + ".stdin") else None
+        seen = open(log + ".stdin", "rb").read() if os.path.exists(log + ".stdin") else None
         return done, calls, seen
 
 
@@ -79,7 +83,7 @@ class Quiet(unittest.TestCase):
     def assert_does_nothing(self, result):
         done, calls, _ = result
         self.assertEqual(calls, [], "python started")
-        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "", ""))
+        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, b"", b""))
 
     def assert_reaches_python(self, result, script, flag=None):
         done, calls, _ = result
@@ -102,6 +106,13 @@ class StallWatch(Quiet):
 
     def test_hook_row_reaches_python_on_posix(self):
         self.assert_reaches_python(run_row(self.row("--hook"), self.script), self.script, "--hook")
+
+    def test_hook_row_reaches_python_on_cygwin_and_msys_uname(self):
+        for uname in ("CYGWIN_NT-10.0-26200", "MSYS_NT-10.0-26200"):
+            with self.subTest(uname=uname):
+                self.assert_reaches_python(
+                    run_row(self.row("--hook"), self.script, platform="nt", uname=uname),
+                    self.script, "--hook")
 
     def test_stop_row_still_reaches_python_off_posix(self):
         self.assert_reaches_python(run_row(self.row("--stop"), self.script, platform="nt"),
@@ -142,28 +153,57 @@ class CiWake(Quiet):
         return found[0][1]
 
     @staticmethod
-    def payload(command, tool="Bash"):
-        return json.dumps({"tool_name": tool, "tool_input": {"command": command}, "cwd": "/x"})
+    def payload(command, tool="Bash", response="", response_first=False, indent=None):
+        """A PostToolUse payload as the harness sends it, tool_response included."""
+        parts = [("session_id", "abc"), ("transcript_path", "/t.jsonl"), ("cwd", "/x"),
+                 ("hook_event_name", "PostToolUse"), ("tool_name", tool)]
+        call = ("tool_input", {"command": command, "description": "d"})
+        reply = ("tool_response", {"stdout": response, "stderr": "", "interrupted": False})
+        parts += [reply, call] if response_first else [call, reply]
+        return json.dumps(dict(parts + [("tool_use_id", "toolu_1")]), indent=indent)
 
-    def test_payload_without_ready_starts_no_python(self):
+    def test_command_without_ready_starts_no_python(self):
         for command in ("ls -la", "gh pr view 12", "git push origin HEAD:x"):
             with self.subTest(command=command):
                 self.assert_does_nothing(run_row(self.command(), self.script, self.payload(command)))
 
-    def test_payload_with_ready_reaches_python_with_same_stdin(self):
-        for command, tool in (("gh pr ready 12", "Bash"), ("GH PR READY 12", "Bash"),
-                              ("gh pr ready 7", "PowerShell")):
-            with self.subTest(command=command, tool=tool):
-                payload = self.payload(command, tool)
-                result = run_row(self.command(), self.script, payload)
-                self.assert_reaches_python(result, self.script)
-                self.assertEqual(result[2], payload)
+    def test_ready_only_in_tool_response_starts_no_python(self):
+        for first in (False, True):
+            for out in ("Already up to date.", "Ready to merge", "READY"):
+                with self.subTest(response_first=first, out=out):
+                    payload = self.payload("git pull", response=out, response_first=first)
+                    self.assert_does_nothing(run_row(self.command(), self.script, payload))
+
+    def test_command_with_ready_reaches_python_with_same_bytes(self):
+        # python's test is `"ready" in command.lower()`: a substring, any case.
+        for command, tool, out in (("gh pr ready 12", "Bash", "ok"), ("GH PR READY 12", "Bash", ""),
+                                   ("gh pr Ready 7", "PowerShell", "Already up to date."),
+                                   ("echo already", "Bash", "x"),
+                                   ('echo "a\\b" && gh pr ready 3\nls', "Bash", "line1\nline2\\n")):
+            for first in (False, True):
+                with self.subTest(command=command, tool=tool, response_first=first):
+                    payload = self.payload(command, tool, out, first)
+                    result = run_row(self.command(), self.script, payload)
+                    self.assert_reaches_python(result, self.script)
+                    self.assertEqual(result[2], payload.encode("utf-8"))
+
+    def test_multi_line_payload_reaches_python_unchanged(self):
+        # `i=$(cat)` drops trailing newlines only; every other byte must arrive.
+        payload = self.payload("gh pr ready 12\n\techo \u00e9 \\n", response="a\r\nb", indent=2)
+        result = run_row(self.command(), self.script, payload + "\n")
+        self.assert_reaches_python(result, self.script)
+        self.assertEqual(result[2], payload.encode("utf-8"))
+
+    def test_empty_stdin_reaches_python(self):
+        # Python, not the row, reports "CI unknown" on unreadable input.
+        result = run_row(self.command(), self.script, "")
+        self.assert_reaches_python(result, self.script)
+        self.assertEqual(result[2], b"")
 
     def test_python_exit_code_reaches_the_harness(self):
         # Exit 2 is the wake. A prefilter that swallowed it would never wake the session.
         done, _, _ = run_row(self.command(), self.script, self.payload("gh pr ready 12"), rc=2)
         self.assertEqual(done.returncode, 2)
-
 
 if __name__ == "__main__":
     unittest.main()
