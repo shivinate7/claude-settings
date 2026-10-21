@@ -62,6 +62,10 @@ try:
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
     def until_note(description) -> str:
         return ""
+try:
+    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
+except ImportError:  # without the tag no notice closes a job: it stays open and the check still runs
+    TASK_NOTIFICATION_TAG = None
 
 DEFAULT_QUIET = 300
 STALL_EXIT = 3
@@ -271,7 +275,9 @@ def scan_jobs(transcript):
 def closed_by_notice(text):
     """The ids of the <task-notification> blocks in text with a terminal status."""
     ids = []
-    for note in text.split("<task-notification>")[1:]:
+    if not TASK_NOTIFICATION_TAG:
+        return ids
+    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
         if tid and st and st.group(1).strip().lower() in TERMINAL:
             ids.append(tid.group(1).strip())

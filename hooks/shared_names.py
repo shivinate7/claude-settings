@@ -10,7 +10,8 @@ import os
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
-MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
+TASK_NOTIFICATION_TAG = "<task-notification>"
+MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG)
 
 
 def config_dir() -> str:

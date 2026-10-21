@@ -48,7 +48,6 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
-from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
 
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture
@@ -135,7 +134,11 @@ def capture(raw, stamp, at=None):
         return
     inbox, marker = paths
     said = prompt.strip()
-    if said.startswith(MACHINE_TAGS):
+    try:
+        from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
+    except ImportError:  # missing or stale helper: only the notice check degrades; capture and the grant run on
+        MACHINE_TAGS = ()
+    if MACHINE_TAGS and said.startswith(MACHINE_TAGS):
         return  # a notice is not an owner message: never captured, judged or closing
     at = at or clock()
     opened = is_open(marker, at)
