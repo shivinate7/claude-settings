@@ -890,8 +890,8 @@ def each_quiet_job_shows_its_own_note():
 
 @case
 def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
-    """N3. guard_stream cannot be imported (a scratch copy of stall_watch.py with no guard_stream
-    beside it): --stop exits 0 and lists the quiet job once, with no note. A control runs the real
+    """N3. guard_stream cannot be imported (a scratch copy of stall_watch.py and shared_names.py with no
+    guard_stream beside them): --stop exits 0 and lists the quiet job once, with no note. A control runs the real
     module on the same transcript and shows the note, so the missing note is not a broken fixture"""
     base = new_dir()
     output_file(base, "bnoimp600", 600)
@@ -899,6 +899,7 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     path = transcript(recs)
     lone = new_dir()
     shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
+    shutil.copy(os.path.join(HERE, "shared_names.py"), lone)
     rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
