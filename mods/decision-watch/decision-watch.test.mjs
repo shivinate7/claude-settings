@@ -1183,6 +1183,36 @@ await test('python once: a non-zero exit from a cached path whose file is gone s
   same(pyCalls(h).at(-1).argv[0], PY2, 'path of the last python call')
 })
 
+// A failed $.fs.exists leaves the file unknown, and an unknown file reads as gone: a kept dead path would stick.
+// The run's own result still reaches the judge, whichever way the check fails.
+for (const [label, broken] of [
+  ['rejects', p => Promise.reject(new Error('exists rejected for ' + p))],
+  ['throws synchronously', p => { throw new Error('exists threw for ' + p) }],
+]) {
+  await test(`python once: a non-zero exit from a cached path when $.fs.exists ${label} keeps that run's result and sends the next Stop to the finder`, async () => {
+    const h = await load(host())
+    h.files.set(PY, '')
+    await stopJudged(h)
+    const exists = h.$.fs.exists
+    h.$.fs.exists = p => (p === PY ? broken(p) : exists(p))
+    const gone = argv => (argv[0] === PY ? { exitCode: 127, stdout: '', stderr: 'cannot start ' + PY } : undefined)
+    h.py1 = gone
+    h.py2 = gone
+    h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
+    const mark = h.procs.length
+    await stopJudged(h)
+    const endLine = logNow(h).split('\n').filter(l => /^\S+ END /.test(l)).at(-1)
+    assert.match(endLine, /decision_watch exited 127/, `the run's exit 127 never reached the judge: ${endLine}`)
+    assert.doesNotMatch(endLine, /MOD ERROR/, 'the failed check discarded the run result')
+    await stopJudged(h)
+    const after = h.procs.slice(mark)
+    same(after[0].argv[0], PY, 'the first call after the break: the cached path, not the finder')
+    same(finds(h).length, 2, 'finder calls: one at the start, one after the check failed')
+    same(after.filter(p => p.argv[0] === PY).length, 1, 'tries of the cached path')
+    same(pyCalls(h).at(-1).argv[0], PY2, 'path of the last python call')
+  })
+}
+
 await test('python once: a python that exits non-zero from a file that exists keeps the path, so the next Stop does not run the finder', async () => {
   const h = await load(host())
   h.files.set(PY, '')
