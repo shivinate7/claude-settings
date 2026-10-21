@@ -9,9 +9,10 @@ import stat
 
 import guard_core
 from guard_core import (
-    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
+    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
+    _segment_git_c_target, shell_abs,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    resolve_command, segment_tokens, split_segments,
+    is_powershell, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -219,14 +220,19 @@ WIDE_TARGET = (
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
 # parse, so an unmatched quote elsewhere in the line does not hide a delete.
 RM_RAW = re.compile(
-    r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+['\"]?"
-    + WIDE_TARGET + r"['\"]?(?:\s|$)"
+    r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
 )
 DESTRUCTIVE_DELETE = (
     re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
+        r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
+    ),
+    # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here.
+    re.compile(
+        r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
+        r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|$)"
     ),
 )
@@ -237,9 +243,9 @@ RM_WIDE_TARGET = re.compile(WIDE_TARGET)
 
 
 def _rm_args_wide(args) -> str:
-    """The first wide target of `rm`'s arguments when they hold a recursive AND a force flag, else
-    ''. Long flags count, `--` ends the flags, and one letter cluster may hold R, r and f."""
-    recursive = force = after_dashes = False
+    """The first wide target of `rm`'s arguments when they hold a recursive flag, else ''. Long
+    flags count, `--` ends the flags, and one letter cluster may hold R or r. Force is no part of it."""
+    recursive = after_dashes = False
     targets = []
     for arg in args:
         if after_dashes or not arg.startswith("-") or arg == "-":
@@ -248,37 +254,37 @@ def _rm_args_wide(args) -> str:
             after_dashes = True
         elif arg.startswith("--"):
             recursive = recursive or arg == "--recursive"
-            force = force or arg == "--force"
         else:
             recursive = recursive or "r" in arg or "R" in arg
-            force = force or "f" in arg
-    if recursive and force:
+    if recursive:
         return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t)), "")
     return ""
 
 
-def _command_hit(segment: str, names, judge, raw=None) -> str:
+def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
     subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
-    A segment shlex cannot parse is read as raw text with the pattern `raw`, when there is one."""
+    A segment shlex cannot parse is read as raw text with the pattern `raw`, when there is one.
+    With `by_word`, `judge` also gets the command word it judges."""
     tokens = segment_tokens(segment)
     if tokens is None:
         found = raw.search(segment) if raw else None
         return found.group(0) if found else ""
     for start in command_indexes(tokens):
         if basename(tokens[start]) in names:
-            found = judge(tokens[start + 1:])
+            found = judge(tokens[start + 1:], basename(tokens[start])) if by_word else judge(tokens[start + 1:])
             if found:
                 return found
     words, bare = bare_words(segment)
     for at in sorted(bare):
-        found = basename(words[at]) in names and judge(words[at + 1:])
+        found = basename(words[at]) in names and (
+            judge(words[at + 1:], basename(words[at])) if by_word else judge(words[at + 1:]))
         if found:
             return found
     for script in inner_commands(tokens):
         for inner in split_segments(script):
-            found = _command_hit(inner, names, judge, raw)
+            found = _command_hit(inner, names, judge, raw, by_word)
             if found:
                 return found
     return ""
@@ -293,6 +299,102 @@ def rm_delete_hit(segment: str) -> str:
     """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
     directory or a glob, else ''. A segment shlex cannot parse is read as raw text."""
     return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW)
+
+
+# ------------------------------------------------------------ `.`, a parent, the working folder
+#
+# A recursive delete, forced or not, of `.`, a relative parent, the working folder or a folder above
+# it (decision rm-path-wrapper). The rm shim holds the same line on Mac and Linux, at run time; on
+# Windows this reader is the only one, and it reads the command text. One reader serves `rm`, the
+# PowerShell delete verbs and the cmd.exe verbs, in either shell. `.`, `..` and a relative parent
+# deny by their text, so a folder change ahead of them needs no tracking. Any other relative name is
+# resolved against the shell's own folder only when no folder change comes first.
+REL_PARENT = re.compile(r"(?:\.{1,2}/)*\.{1,2}(?:/\*?)?")
+CMD_FLAG = re.compile(r"/[A-Za-z?]")
+RM_PARENT_RAW = re.compile(
+    r"\brm\s+(?:-\S+\s+)*?-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\s+(?:-\S+\s+)*['\"]?"
+    + REL_PARENT.pattern + r"['\"]?(?:\s|$)"
+)
+
+
+def _parent_target(target: str, cwd: str, moved: bool) -> bool:
+    """True when `target` is `.`, a relative parent, or the working folder or a folder above it,
+    or a glob of one."""
+    if REL_PARENT.fullmatch(target):
+        return True
+    if not cwd or not target or RM_WIDE_TARGET.fullmatch(target):
+        return False   # a root, a home or a drive root is the wide readers' to judge, not this one's
+    path = shell_abs(target[:-2] if target.endswith("/*") else target, None if moved else cwd)
+    if not path:
+        return False
+    try:
+        here, there = (os.path.normcase(os.path.realpath(p)) for p in (cwd, path))
+    except (OSError, ValueError):
+        return False
+    return here == there or here.startswith(there.rstrip(os.sep) + os.sep)
+
+
+def _parent_delete_text(args, word: str, cwd: str, moved: bool) -> str:
+    """`word -r <target>` for the first target of a recursive delete that is `.`, a parent or the
+    working folder, else ''. Recursion is `/s` for the cmd.exe verbs, a prefix of `-Recurse` for the
+    PowerShell verbs, and `-r`, `-R` or `--recursive` for `rm`."""
+    cmd_verb = word in CMD_EXE_DELETE_WORDS
+    recursive = after_dashes = False
+    targets = []
+    for arg in args:
+        low = arg.lower()
+        if cmd_verb and not after_dashes and CMD_FLAG.fullmatch(arg):
+            recursive = recursive or low == "/s"
+        elif after_dashes or not arg.startswith("-") or arg == "-":
+            targets.append(arg)
+        elif arg == "--":
+            after_dashes = True
+        elif arg.startswith("--"):
+            recursive = recursive or "recursive".startswith(low[2:])
+        else:
+            body = low[1:]
+            recursive = recursive or "recurse".startswith(body) or (
+                word == "rm" and "r" in body and not "force".startswith(body))
+    if not recursive:
+        return ""
+    for target in targets:
+        if _parent_target(target, cwd, moved):
+            return "%s %s %s" % (word, "/s" if cmd_verb else "-r", target)
+    return ""
+
+
+PARENT_DELETE_REASON = (
+    "Rule (shared trees): this deletes the working folder, a folder above it, or everything in one "
+    "of them. The loss reaches files that no session here can see. "
+    "Remedy: name the one directory you mean, below the working folder, such as build."
+)
+PARENT_MOVED_REASON = (
+    "Rule (shared trees): this deletes `.` or a parent of it after a folder change, and this hook "
+    "does not follow the folder change, so it cannot tell which folder that is. "
+    "Remedy: %s"
+)
+PARENT_MOVED_REMEDY = {
+    False: "`rm -rf ./build/*` empties a folder, and `rm -rf build` deletes it by name.",
+    True: "`Remove-Item -Recurse build` deletes a folder by name.",
+}
+
+
+def parent_delete_hit(segments, number: int, cwd: str):
+    """(matched text, reason) when `segments[number]` runs a recursive delete of `.`, a relative
+    parent, the working folder or a folder above it, else ('', ''). Any folder-change command in an
+    earlier segment makes the reason name the rewrite that passes."""
+    moved = any(
+        tokens and _segment_cd_move(tokens) is not None
+        for tokens in map(segment_tokens, segments[:number]))
+    segment = segments[number]
+    matched = _command_hit(
+        segment, DELETE_WORDS, lambda args, word: _parent_delete_text(args, word, cwd, moved),
+        RM_PARENT_RAW, by_word=True)
+    if not matched:
+        return "", ""
+    if moved and REL_PARENT.fullmatch(matched.split()[-1].strip("'\"")):
+        return matched, PARENT_MOVED_REASON % PARENT_MOVED_REMEDY[is_powershell(segment)]
+    return matched, PARENT_DELETE_REASON
 
 
 # ------------------------------------------------------------------ a link to another install
