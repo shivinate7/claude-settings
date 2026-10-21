@@ -6,7 +6,7 @@ Owner, 2026-10-21. The `if` field of a Claude Code hook filters only `config_wat
 
 Reopen the suffix filters only when both are true:
 
-- The Windows churn fixes (roadmap c22) have landed.
+- The Windows process-churn fixes have landed.
 - The memory monitor runs again, and the shell starts on Edit and Write still look significant.
 
 The lane that applies this ruling is [PR #551](https://github.com/shivinate7/claude-settings/pull/551), a draft.
