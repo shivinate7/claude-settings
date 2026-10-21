@@ -1202,6 +1202,27 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
 
+def case_wait_for_lists_back_off_like_the_status_reads():
+    """A head with only a skipped draft run is listed until the deadline. The lists follow the schedule of
+    the status reads (30 s apart to 240 s, then growing to 120 s at most) and are at most half as many
+    as a flat 30 s gap makes. The one list made at the deadline is the only extra."""
+    label = "wait_for, only a skipped draft run, 55 min budget"
+    _, _, _, baseline, _ = never_ending_run()
+    raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_DONE], WATCH_BUDGET)
+    rel = [round(t - T0, 6) for t in list_times(calls)]
+    before = [t for t in rel if t < WATCH_BUDGET]
+    gaps = [b - a for a, b in zip(before, before[1:])]
+    detail = wait_detail(raised, clock, calls, deadline)[:300] + " distinct gaps %r" % sorted({round(g, 1) for g in gaps})
+    check("%s: ends at the deadline, with no list after it" % label,
+          abs(clock.now - deadline) < 1e-6 and all(t <= WATCH_BUDGET for t in rel), detail)
+    check("%s: at most %d lists (half of %d at a flat 30 s)" % (label, FLAT_READS // 2, FLAT_READS),
+          len(rel) <= FLAT_READS // 2, "lists=%d" % len(rel))
+    check("%s: the lists come at the times of the status reads" % label,
+          before == baseline[:len(before)] and len(before) >= 9, detail)
+    check("%s: the gaps grow to 90 s or more, never past %d s" % (label, BACKOFF_CAP),
+          gaps != [] and 90 <= max(gaps) <= BACKOFF_CAP + 1e-6, detail)
+
+
 # The watch names the PR's repo on every gh call and gives that repo's verdict. The rows put the PR in
 # one repo and the session folder in another. A run read that drops -R searches the folder's repo, finds
 # no run, and the hook says "no run yet" for a PR whose CI passed.
@@ -1540,6 +1561,7 @@ def main():
     case_draft_run_ending_skipped_is_no_run_yet()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
+    case_wait_for_lists_back_off_like_the_status_reads()
 
     # The repo flag, the no-CI repo, the real alert, and a failed workflow read.
     case_wrong_repo_every_gh_call_names_the_pr_repo()

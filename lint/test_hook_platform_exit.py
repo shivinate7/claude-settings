@@ -9,11 +9,12 @@ must exit 0, silent, with no python start. Where it works, the row must reach py
   its row must still reach python on Windows.
 - sim_boot_record (Pre and Post rows): does nothing without xcrun.
 - ci_wake: watches only a `gh pr ready` call in the COMMAND (ci_wake.triggers). The row reads the
-  payload first. It starts python for `gh pr ready` and `gh.exe pr ready`, with runs of spaces or
-  tabs between the words, and for `gh pr ready --undo` (python then watches nothing: the row is no
-  parser). It starts none for another "ready" (`npm run ready`, a title, a description), none for
-  the phrase in tool_response only, and none for another case of the phrase: python reads lowercase
-  only. It hands the same bytes and the exit code through. Empty stdin still reaches python, which
+  payload first. It starts python for `gh pr ready`, with runs of spaces or tabs between the words,
+  for a gh in any case, with `.exe`, quoted or with a full path, for a quoted `pr` or `ready`, and
+  for `gh pr ready --undo` (python then watches nothing: the row is no parser). It starts none for
+  another "ready" (`npm run ready`, a title, a description), none for the phrase in tool_response
+  only, and none for `pr ready` in another case: python reads those lowercase only. It hands the
+  same bytes and the exit code through. Empty stdin still reaches python, which
   reports "CI unknown". Each case asks ci_wake.triggers too, so no row hides a call python watches.
 - stall_watch: only a MINGW uname exits early. Cygwin and MSYS pythons report os.name "posix".
 Override the settings file with HOOK_PLATFORM_EXIT_SETTINGS.
@@ -230,7 +231,16 @@ class CiWake(Quiet):
                               ("GH_REPO=o/r gh pr ready 5", "Bash"),
                               ("gh pr ready 5 -R o/r", "Bash"),
                               ("gh.exe pr ready 5", "PowerShell"),
-                              ("& gh pr ready 5", "PowerShell")):
+                              ("& gh pr ready 5", "PowerShell"),
+                              # A quoted or full-path gh, a quoted word, another case of the gh word.
+                              ('& "C:\\Program Files\\GitHub CLI\\gh.exe" pr ready 5', "PowerShell"),
+                              ('"/c/Program Files/GitHub CLI/gh.exe" pr ready 5', "Bash"),
+                              ('& "$env:LOCALAPPDATA\\Programs\\gh\\bin\\gh.exe" pr ready 5', "PowerShell"),
+                              ('"gh" pr ready', "Bash"),
+                              ('gh "pr" ready', "Bash"),
+                              ("gh pr 'ready'", "Bash"),
+                              ("gh.EXE pr ready", "PowerShell"),
+                              ("GH pr ready 5", "PowerShell")):
             with self.subTest(command=command, tool=tool):
                 self.assert_watch(command, tool)
                 payload = self.payload(command, tool)
