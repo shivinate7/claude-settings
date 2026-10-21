@@ -3,8 +3,8 @@
 #
 #   pwsh -NoProfile -File .\tools\mem-monitor.test.ps1      (PowerShell 5.1 and 7, any OS)
 #
-# The checks read text only. They never start the monitor: its loop has no end, and a run
-# appends rows to a log file on this machine.
+# Every check but the last group reads text only. The loop has no end, so a run starts the monitor
+# only with -Log set to a file in a temp folder, and kills it when its answer is in.
 #
 #   cols    The script's [pscustomobject] row has exactly the property names in $Columns, in that
 #           order. PowerShell's own parser finds the names, so a name inside a comment, a string
@@ -12,6 +12,13 @@
 #   landed  landed-dirs.txt has no tools entry. install.sh and install.ps1 name no tools path
 #           and no mem-monitor.
 #   hooks   No tracked settings or hooks file mentions mem-monitor.
+#   name    The script's param block, run alone, gives a default -Log of
+#           <USERPROFILE>\claude-mem-log-yyyyMMdd-HHmmss.csv, stamped with the time of the run. Any OS.
+#   header  Windows only (the monitor reads WMI). The monitor runs against temp logs:
+#           a log whose header is not the $Columns, in order: the script stops with a message and the
+#           file is byte for byte unchanged (two cases: one column short, and the last two swapped);
+#           a log with the right header: the script appends rows;
+#           no log yet: the script creates one with the right header.
 $ErrorActionPreference = 'Stop'
 
 # The CSV header, in order. Change this list only together with the script's row.
@@ -140,6 +147,144 @@ Check 'git lists settings.json and at least one hooks.json' ($LASTEXITCODE -eq 0
 foreach ($f in $json) {
     $m = [regex]::Match([IO.File]::ReadAllText((Join-Path $Root $f)), 'mem[-_]?monitor', 'IgnoreCase')
     Check "${f}: no mem-monitor entry" (-not $m.Success) "found '$($m.Value)'"
+}
+
+# ---- name: the default -Log is a new, time-stamped file each run ---------------------------------
+
+# '' when the script's own param block gives a default -Log of <USERPROFILE>\claude-mem-log-<stamp>.csv
+# with the stamp within five minutes of now (local or UTC), else the reason. The param block runs
+# alone, with USERPROFILE set to a fake folder, so nothing else in the script runs. The root
+# ParamBlock is the script's own: a param block in a function or in a comment never counts.
+$FakeProfile = Join-Path ([IO.Path]::GetTempPath()) 'mem-monitor-profile'
+function Test-DefaultLog([string]$Text) {
+    $errs = $null
+    $tree = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$errs)
+    if ($errs -and $errs.Count -gt 0) { return "parse error: $($errs[0].Message)" }
+    if (-not $tree.ParamBlock) { return 'no param block' }
+    $saved = $env:USERPROFILE
+    $env:USERPROFILE = $FakeProfile
+    try { $got = [string](& ([scriptblock]::Create($tree.ParamBlock.Extent.Text + "`n" + '$Log'))) }
+    finally { $env:USERPROFILE = $saved }
+    $m = [regex]::Match($got, '^' + [regex]::Escape($FakeProfile) + '[\\/]claude-mem-log-(\d{8}-\d{6})\.csv$')
+    if (-not $m.Success) { return "default Log is '$got', want <USERPROFILE>\claude-mem-log-yyyyMMdd-HHmmss.csv" }
+    try { $stamp = [datetime]::ParseExact($m.Groups[1].Value, 'yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture) }
+    catch { return "the stamp '$($m.Groups[1].Value)' is not a date and time" }
+    $slack = [TimeSpan]::FromMinutes(5)
+    if (([datetime]::Now - $stamp).Duration() -lt $slack -or ([datetime]::UtcNow - $stamp).Duration() -lt $slack) { return '' }
+    return "the stamp '$($m.Groups[1].Value)' is not the time of this run"
+}
+
+function Param-Of([string]$LogDefault) { 'param([string]$Log = ' + $LogDefault + ', [int]$Seconds = 5, [int]$Minutes = 0)' }
+$stampNow = '"$env:USERPROFILE\claude-mem-log-$(Get-Date -Format ''yyyyMMdd-HHmmss'').csv"'
+$why = Test-DefaultLog (Param-Of $stampNow)
+Check 'fixture: a time-stamped default passes' ($why -eq '') $why
+Check 'fixture: a UTC stamp passes' ((Test-DefaultLog (Param-Of '"$env:USERPROFILE\claude-mem-log-$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd-HHmmss'')).csv"')) -eq '') 'a UTC stamp failed'
+Check 'fixture: the fixed name fails' ((Test-DefaultLog (Param-Of '"$env:USERPROFILE\claude-mem-log.csv"')) -like 'default Log is*') 'a fixed name passed'
+Check 'fixture: a frozen stamp fails' ((Test-DefaultLog (Param-Of '"$env:USERPROFILE\claude-mem-log-20200101-000000.csv"')) -like '*not the time of this run') 'a frozen stamp passed'
+Check 'fixture: another folder fails' ((Test-DefaultLog (Param-Of '"C:\other\claude-mem-log-$(Get-Date -Format ''yyyyMMdd-HHmmss'').csv"')) -like 'default Log is*') 'another folder passed'
+Check 'fixture: no param block fails' ((Test-DefaultLog '$Log = 1') -eq 'no param block') 'a script with no param block passed'
+Check 'fixture: a param block with no Log fails' ((Test-DefaultLog 'param([int]$Seconds = 5)') -like 'default Log is*') 'no Log parameter passed'
+
+# Decoy param blocks in comments, a function and a here-string, and a `)` and a lone quote in text.
+# The real default is the stamped one, so only the script's own param block gives ''.
+$paramTrap = @'
+# param([string]$Log = 'decoy') ) don't
+<# param($Log = 'block decoy')
+it's text #>
+param(
+    [string]$Log = "$env:USERPROFILE\claude-mem-log-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv",   # a ) and a lone ' here
+    [int]$Seconds = 5
+)
+function f { param($Log = 'nested decoy') }
+$h = @"
+param($Log = 'here-string decoy')
+"@
+'@
+$why = Test-DefaultLog $paramTrap
+Check 'fixture: decoy param blocks in comments, a function and a here-string are ignored' ($why -eq '') $why
+
+if (Test-Path -LiteralPath $Script -PathType Leaf) {
+    $why = Test-DefaultLog ([IO.File]::ReadAllText($Script))
+    Check 'tools/mem-monitor.ps1: the default -Log is a new time-stamped file' ($why -eq '') $why
+}
+
+# ---- header: a log whose header differs is never written to (Windows only) --------------------------
+
+function Read-Shared([string]$Path) {
+    try {
+        $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
+        $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+        try { return (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Close() }
+    } catch { return '' }
+}
+
+$Quoted = '"' + ($Columns -join '","') + '"'
+$Short  = '"' + (($Columns | Where-Object { $_ -ne 'Python' }) -join '","') + '"'
+$Swap   = '"' + (($swapped) -join '","') + '"'
+$Row11  = '"10:48:06","29","1.2","1.63","25.3","383","41592","0","0","0","0"'
+$Row12  = '"10:48:06","29","1.2","1.63","25.3","383","41592","0","0","0","0","0"'
+if ($env:OS -ne 'Windows_NT') {
+    Write-Host 'SKIP: header checks run the monitor, which reads WMI (Windows only)'
+} elseif (-not (Test-Path -LiteralPath $Script -PathType Leaf)) {
+    Check 'tools/mem-monitor.ps1: header checks' $false 'no script to run'
+} else {
+    $PsHost = (Get-Process -Id $PID).Path
+    $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('mem-monitor-test-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+    $started = @()
+    try {
+        # One run, -Minutes 1 so it would end by itself; the checks below kill it first or watch it stop.
+        function Start-Monitor([string]$Log) {
+            $o = Join-Path $Tmp ([guid]::NewGuid().ToString('N'))
+            $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $Script + '"'), '-Log', ('"' + $Log + '"'), '-Seconds', '1', '-Minutes', '1')
+            $p = Start-Process -FilePath $PsHost -ArgumentList $argv -PassThru -NoNewWindow -RedirectStandardOutput "$o.out" -RedirectStandardError "$o.err"
+            $null = $p.Handle
+            $script:started += $p
+            return @{ Proc = $p; Out = "$o.out"; Err = "$o.err"; Log = $Log }
+        }
+        function New-Log([string]$Name, [string]$Text) {
+            $p = Join-Path $Tmp $Name
+            [IO.File]::WriteAllText($p, $Text, (New-Object Text.UTF8Encoding($false)))
+            return $p
+        }
+        $badShort = New-Log 'short.csv' ($Short + "`r`n" + $Row11 + "`r`n")
+        $badSwap  = New-Log 'swap.csv' ($Swap + "`r`n" + $Row12 + "`r`n")
+        $goodText = $Quoted + "`r`n"
+        $good     = New-Log 'good.csv' $goodText
+        $fresh    = Join-Path $Tmp 'fresh.csv'
+        $before   = @{ short = (Read-Shared $badShort); swap = (Read-Shared $badSwap) }
+
+        $deadline = (Get-Date).AddSeconds(30)
+        $runs = @{ short = Start-Monitor $badShort; swap = Start-Monitor $badSwap; good = Start-Monitor $good; fresh = Start-Monitor $fresh }
+
+        foreach ($k in 'short', 'swap') {
+            $m = $runs[$k]
+            $left = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+            $ended = $m.Proc.WaitForExit($left)
+            if (-not $ended) { try { $m.Proc.Kill() } catch { }; $null = $m.Proc.WaitForExit(5000) }
+            $out = (Read-Shared $m.Out) + (Read-Shared $m.Err)
+            $out = $out.Substring(0, [Math]::Min(120, $out.Length))
+            $label = @{ short = 'a log with one column short'; swap = 'a log with the last two columns swapped' }[$k]
+            Check "${label}: the script stops on its own" $ended 'still running after 30 s, so it kept writing; killed'
+            Check "${label}: it stops with a message" ($ended -and ($m.Proc.ExitCode -ne 0 -or $out -match '(?i)header|column')) "exit $($m.Proc.ExitCode), output '$out'"
+            Check "${label}: the file is unchanged" ((Read-Shared $m.Log) -ceq $before[$k]) 'the script wrote to it'
+        }
+
+        foreach ($k in 'good', 'fresh') {
+            $m = $runs[$k]
+            while ((Get-Date) -lt $deadline -and @(Read-Shared $m.Log | ConvertFrom-Csv).Count -lt 1 -and -not $m.Proc.HasExited) { Start-Sleep -Milliseconds 300 }
+            $text = Read-Shared $m.Log
+            $rows = @($text | ConvertFrom-Csv)
+            $names = if ($rows.Count -gt 0) { $rows[0].PSObject.Properties.Name -join ',' } else { '' }
+            $label = @{ good = 'a log with the right header'; fresh = 'no log yet' }[$k]
+            Check "${label}: the script appends a row under the right header" ($rows.Count -ge 1 -and $names -ceq ($Columns -join ',')) "rows $($rows.Count), header '$names', exit $(if ($m.Proc.HasExited) { $m.Proc.ExitCode } else { 'none, still running' })"
+        }
+        Check 'a log with the right header: the old text is kept' ((Read-Shared $good).StartsWith($goodText)) 'the old text changed'
+    } finally {
+        foreach ($p in $started) { if (-not $p.HasExited) { try { $p.Kill() } catch { } } }
+        Start-Sleep -Milliseconds 500
+        Remove-Item -Recurse -Force -LiteralPath $Tmp -ErrorAction SilentlyContinue
+    }
 }
 
 if ($Failed -gt 0) { Write-Host "$Failed FAIL"; exit 1 }
