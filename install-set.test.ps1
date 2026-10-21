@@ -422,6 +422,20 @@ $ps4e = Find-LogLines $log4 'end' $id4 $p4.Id
 Check 'log3: install.ps1 writes one start line naming its id and pid' ($ps4s.Count -eq 1) "start lines naming id '$id4' and pid $($p4.Id): $($ps4s.Count); log has $($log4.Count) line(s), last: '$($log4 | Select-Object -Last 1)'"
 Check 'log3: install.ps1 writes one end line naming its id and pid' ($ps4e.Count -eq 1) "end lines naming id '$id4' and pid $($p4.Id): $($ps4e.Count)"
 
+# names1: the set holds shared_names.py, which the guard imports, byte-equal to the flat copy. Without it
+# the set's guard cannot load. Same check for the set the post-merge hook lands (id from the hook run).
+function Test-NamesInSet([string]$Cfg, [string]$Id) {
+    $set  = Join-Path $Cfg "hooks\guard.d\$Id\shared_names.py"
+    $flat = Join-Path $Cfg 'hooks\shared_names.py'
+    if (-not $Id) { return 'no loaded id (precondition)' }
+    if (-not (Test-Path -LiteralPath $set)) { return "missing: $set" }
+    if (-not (Test-Path -LiteralPath $flat)) { return "flat copy missing: $flat" }
+    if ([IO.File]::ReadAllText($set) -cne [IO.File]::ReadAllText($flat)) { return 'differs from the flat copy' }
+    return ''
+}
+$n4 = Test-NamesInSet $Cfg4 $id4
+Check 'names1: install.ps1 lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4 -eq '') $n4
+
 # The post-merge hook, run from bash so $! is the pid the hook's own $$ reports.
 $hook4 = Join-Path $C4 'hook4.sh'
 Write-ShellRun $hook4 (Join-Path $C4 'git') $Cfg4 'sh .git/hooks/post-merge' 'HOOK'
@@ -437,7 +451,8 @@ $he = Find-LogLines $log4h 'end' $id4h $hookPid
 Check 'log3: the post-merge hook ran to its end (precondition)' ($hookPid -gt 0 -and $hookExit -ge 0) "hook pid $hookPid, exit $hookExit; output: $(($hookText -split '\r?\n' | Select-Object -Last 3) -join ' | ')"
 Check 'log3: the post-merge hook writes one start line naming its id and pid' ($hookPid -gt 0 -and $hs.Count -eq 1) "hook pid $hookPid; start lines naming id '$id4h' and that pid: $($hs.Count)"
 Check 'log3: the post-merge hook writes one end line naming its id and pid' ($hookPid -gt 0 -and $he.Count -eq 1) "end lines naming id '$id4h' and pid ${hookPid}: $($he.Count)"
-
+$n4h = Test-NamesInSet $Cfg4 $id4h
+Check 'names1: the post-merge hook lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4h -eq '') $n4h
 # install.sh, from the same clone, run from bash so $! is its $$. Local mode stamps no id, so the start
 # and end lines must share one id-like number (8 or more digits) instead.
 $sh4 = Join-Path $C4 'sh4.sh'
