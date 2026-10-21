@@ -190,6 +190,139 @@ class Red(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
+class PrBodyEscape(unittest.TestCase):
+    """A `Drops-lines: <path> -- <reason>` line in the PR body excuses its path, as a commit trailer does.
+    A line with no reason, or one for another path, excuses nothing. Each use prints ALLOWED."""
+
+    def setUp(self):
+        r = self.r = base_repo()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("tidy other", other_txt="other v2\n")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+
+    def test_a_pr_body_line_excuses_its_path(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD",
+                             pr_body="Drops-lines: other.txt -- not this file\nDrops-lines: app.txt -- the owner wants Card back\n")
+        self.assertEqual(got, [])
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_pr_body_line_without_a_reason_excuses_nothing(self):
+        for body in ("Drops-lines: app.txt\n", "Drops-lines: app.txt --\n", "Drops-lines: app.txt -- \n"):
+            with self.subTest(body=body):
+                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+                self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_pr_body_line_for_another_path_does_not_excuse(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body="Drops-lines: other.txt -- wrong file\n")
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+        self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_commit_trailer_still_excuses_with_no_pr_body(self):  # control
+        r = self.r
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt -- the owner wants Card back")
+        got, notes = C.check(r.dir, "origin/main", "HEAD")
+        self.assertEqual(got, [])
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    # Trailer rule for the body: drop fenced blocks and <!-- --> comments first, then only the last paragraph counts.
+    LINE = "Drops-lines: app.txt -- the owner wants Card back"
+
+    def excused(self, body):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        return got == [] and notes == ["ALLOWED app.txt: the owner wants Card back"], (got, notes)
+
+    def assert_nothing_excused(self, bodies):
+        for body in bodies:
+            with self.subTest(body=body):
+                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+                self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_line_inside_a_fenced_block_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "```\n%s\n```\n" % L,
+            "Example of the trailer:\n\n```\n%s\n```\n" % L,
+            "```text\n%s\n```\n\nDone.\n" % L,
+            "~~~\n%s\n~~~\n" % L,
+        ])
+
+    def test_a_line_inside_an_html_comment_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "<!--\n%s\n-->\n" % L,
+            "<!-- template\n%s -->\n" % L,
+            "Summary.\n\n<!--\nold note\n\n%s\n-->\n" % L,
+            "<!-- %s -->\n" % L,  # not at column 0: a guard that must stay green
+        ])
+
+    def test_a_line_in_an_earlier_paragraph_excuses_nothing(self):
+        L = self.LINE
+        self.assert_nothing_excused([
+            "%s\n\nSome closing prose.\n" % L,
+            "Summary.\n\n%s\n\nTest plan: ran it.\n" % L,
+        ])
+
+    def test_a_line_in_the_last_paragraph_excuses_its_path(self):  # control
+        L = self.LINE
+        for body in ("Summary.\n\n%s\n" % L,
+                     "Summary.\n\nCo-Authored-By: x <x@x>\n%s\n" % L,
+                     "%s\n" % L):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_trailing_blank_lines_a_fence_or_a_comment_do_not_hide_the_last_paragraph(self):  # control
+        # Pick: drop fences and comments first, then take the last paragraph. A PR template often ends with a
+        # checklist fence or a comment; the trailer above it is still the last prose paragraph.
+        L = self.LINE
+        for body in ("Summary.\n\n%s\n\n\n" % L,
+                     "Summary.\n\n%s\n\n```\nlog output\n\nmore\n```\n" % L,
+                     "Summary.\n\n%s\n\n<!--\nreviewer note\n-->\n" % L,
+                     "Summary.\n\n%s\n\n```\nx\n```\n\n<!-- y -->\n\n" % L):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    # Claude Code ends every PR body with one attribution paragraph. A trailer just above it must still count.
+    ATTR = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+
+    def test_a_trailer_above_the_attribution_paragraph_excuses_its_path(self):
+        L, A = self.LINE, self.ATTR
+        for body in ("Summary.\n\n%s\n\n%s\n" % (L, A),
+                     "Summary.\n\n%s\n\n  %s  \n\n\n" % (L, A),
+                     "Summary.\n\n%s\n\n%s\n" % (L, A.split(" ", 1)[1])):  # without the emoji
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_paragraph_excuses_its_path_with_crlf(self):
+        L, A = self.LINE, self.ATTR
+        ok, why = self.excused("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A))
+        self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_and_more_prose_excuses_nothing(self):  # control
+        L, A = self.LINE, self.ATTR
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nClosing prose.\n" % (L, A)])
+
+    def test_a_trailer_in_the_same_paragraph_as_the_attribution_still_excuses(self):  # control, current behaviour
+        L, A = self.LINE, self.ATTR
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, A))
+        self.assertTrue(ok, why)
+
+    def test_a_paragraph_with_other_text_and_the_attribution_is_not_skipped(self):  # control
+        L, A = self.LINE, self.ATTR
+        self.assert_nothing_excused(["Summary.\n\n%s\n\nSee notes. %s\n" % (L, A),
+                                     "Summary.\n\n%s\n\n%s extra\n" % (L, A),
+                                     "Summary.\n\n%s\n\nNotes:\n%s\n" % (L, A)])
+
+
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 

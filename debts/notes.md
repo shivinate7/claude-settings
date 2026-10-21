@@ -520,3 +520,8 @@
 - watch-bad-json-mixed-cap: in unparseable JSON the last text cap assignment wins, so opus then sonnet reads as Sonnet; such a file loads no settings (hooks/config_watch.py). Decision: config-watch-fast-exit
 - watch-sonnet-1m-reported: a first-sight cap of sonnet[1m] reads as unknown, a false alarm in the safe direction (hooks/config_watch.py). Decision: config-watch-fast-exit
 - config-dir-copies: config_dir logic is copied in daily_note, override_pass, precompact_handoff, question_outcome and sim_boot_record; shared_names is its home (hooks/shared_names.py). Decision: config-watch-fast-exit
+- drops-body-nested-fence: a 4-backtick fence that holds a 3-backtick fence closes on the 3 backticks, so lines after it read as body text. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- drops-body-fence-in-comment: a fence opener inside an `<!-- -->` comment drops a real trailer after it (false alarm). Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- drops-body-read-at-run-start: `confirm` reads the PR body once at run start, so an edit during the wait is not read. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
+- drops-body-mixed-paragraph: a last paragraph that mixes prose and a Drops-lines line still excuses; see drops-mixed-paragraph-exempt. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
