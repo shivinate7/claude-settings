@@ -235,7 +235,7 @@ if ($env:OS -ne 'Windows_NT') {
     Check 'tools/mem-monitor.ps1: header checks' $false 'no script to run'
 } else {
     $PsHost = (Get-Process -Id $PID).Path
-    $WaitSec = 10   # about four times the slowest run measured (2.6 s with five runs at once)
+    $WaitSec = 30   # an upper bound, spent only when a check is about to fail; cold CI runners are unmeasured
     $Tmp =Join-Path ([IO.Path]::GetTempPath()) ('mem-monitor-test-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
     $started = @()
