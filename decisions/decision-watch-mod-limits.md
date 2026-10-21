@@ -30,8 +30,7 @@ Owner ruling 2026-10-21 16:28 CDT. The mod listens on `turn.complete`. It does n
 - A turn with `agentId` set is a subagent turn. The mod skips it, as the session-board mod does.
 - `turn.complete` has no transcript path. The mod finds the transcript from the session id and cwd, the way `/dw` does.
 - One judge runs at a time. A turn that finds one running logs "SKIP busy".
-- The handler returns `next(e)` at once. It never blocks the turn. The `stop_hook_active` skip is gone.
-- The move bumps the mod's version.
+- The handler returns `next(e)` at once. It never blocks the turn. It has no `stop_hook_active` skip.
 
 Protected by `mods/decision-watch/decision-watch.test.mjs`, with one test for each of these:
 
@@ -43,7 +42,8 @@ Protected by `mods/decision-watch/decision-watch.test.mjs`, with one test for ea
 
 ## Unverified
 
-- Live: no "seen" line has been read in `shadow.log` after a real Windows turn. It is pending until the move lands.
+- Live: no "seen" line has been read in `shadow.log` after a real Windows turn. It is pending until the move lands. If no
+  "seen" line shows, the owner chooses one: restore the Stop row, or accept the limit here.
 - Whether the installed app's sec-default matches the marketplace copy.
 - How long `$` lives after the handler returns, for a background judge that nothing awaits.
 
