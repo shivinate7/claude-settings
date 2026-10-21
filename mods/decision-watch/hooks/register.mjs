@@ -3,8 +3,10 @@
 // with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
 // as a notice (decision decision-watch-mod-limits). It never blocks and never changes the Stop result.
 //
-// classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
-//               stop_hook_active is set.
+// turn.complete returns next(e) at once. The judging runs in the background, one judge at a time, and is
+//               skipped on a subagent turn (agentId set). The app's sec-default mod reroutes every classic.*
+//               event past user mods, so a classic.Stop handler never ran; turn.* events pass. The event
+//               carries no transcript path, so the judge finds it the way /dw does (deriveStop).
 // /dw           runs the same judgment on the latest turn and shows the result.
 //
 // The python script has two phases: --emit-prompt prints the prompt when a model call is due,
@@ -16,7 +18,8 @@
 //
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally.
 
-let lastStop; // the last classic.Stop input this session, for /dw
+let lastStop; // the last Stop-shaped input built from a main-loop turn, for /dw
+let keptId; // the session id read at session.start, the fallback when $.session.id() fails later
 let busy = false; // true while a background judge runs
 let foundPy; // the python path pickPython found, kept for the module's life; cleared when a run with it is rejected
 
@@ -31,6 +34,11 @@ const textOf = (r) => (typeof r === "string" ? r : String((r && r.text) ?? ""));
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
+    try {
+      keptId = await $.session.id();
+    } catch {
+      // deriveStop asks again on each turn
+    }
     await $.command.register({
       name: "dw",
       description: "Run the decision watch on the latest turn with this session's own model login",
@@ -41,7 +49,12 @@ export function register(on) {
   on("command.run", { command: "dw" }, async ($, e) => {
     const lines = [];
     try {
-      const stop = lastStop ?? (await deriveStop($));
+      let stop = lastStop;
+      if (!stop) {
+        const d = await deriveStop($);
+        if (!d.found) throw new Error("no turn seen yet and no transcript found for this session");
+        stop = d.stop;
+      }
       lines.push(`stop input: session ${stop.session_id}`);
       const out = await judge($, stop, "dw");
       lines.push(...out.trace, `RESULT: ${out.result}`, ...out.notices.map((n) => `NOTICE: ${n}`));
@@ -52,38 +65,35 @@ export function register(on) {
     return { text: lines.join("\n") };
   });
 
-  // Background judge. Waits at most STOP_WAIT_MS for one "STOP seen" line, then returns next(e).
-  // The judging is fire-and-forget, one judge at a time. A Stop that finds one running logs "SKIP busy".
-  on("classic.Stop", async ($, e, next) => {
-    lastStop = stopOf(e);
-    const note = e.stop_hook_active ? " (stop_hook_active, no judge)" : "";
-    try {
-      await within(log($, `STOP seen ${e.session_id}${note}`), STOP_WAIT_MS);
-    } catch {
-      // the log never holds a Stop
-    }
-    if (!e.stop_hook_active) {
-      if (busy) {
-        void log($, `SKIP busy ${e.session_id}`);
-      } else {
-        busy = true;
-        void shadow($, lastStop).finally(() => {
-          busy = false;
-        });
+  // Background judge. Waits at most STOP_WAIT_MS for the lookup and again for one "STOP seen" line, then
+  // returns next(e). The judging is fire-and-forget, one judge at a time. A turn that finds one running
+  // logs "SKIP busy". A turn with no transcript logs a SKIP line and judges nothing.
+  on("turn.complete", async ($, e, next) => {
+    if (!e.agentId) {
+      try {
+        const d = await within(deriveStop($), STOP_WAIT_MS);
+        if (d) {
+          await within(log($, `STOP seen ${d.stop.session_id}`), STOP_WAIT_MS);
+          if (!d.found) {
+            void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
+          } else {
+            lastStop = d.stop;
+            if (busy) {
+              void log($, `SKIP busy ${d.stop.session_id}`);
+            } else {
+              busy = true;
+              void shadow($, d.stop).finally(() => {
+                busy = false;
+              });
+            }
+          }
+        }
+      } catch (err) {
+        void log($, `SKIP no session | ${msg(err)}`);
       }
     }
     return next(e);
   });
-}
-
-function stopOf(e) {
-  return {
-    session_id: e.session_id,
-    transcript_path: e.transcript_path,
-    cwd: e.cwd,
-    hook_event_name: "Stop",
-    stop_hook_active: false,
-  };
 }
 
 async function configDir($) {
@@ -93,13 +103,22 @@ async function configDir($) {
   return `${home}/.claude`;
 }
 
-// No Stop seen yet: rebuild transcript_path from the session id and cwd the way the app names it.
+// The one lookup for a turn's transcript, used by turn.complete and /dw: rebuild transcript_path from the
+// session id and cwd the way the app names it. found says whether the file is there.
 async function deriveStop($) {
-  const id = await $.session.id();
+  let id;
+  try {
+    id = await $.session.id();
+  } catch (err) {
+    if (!keptId) throw err;
+    id = keptId;
+  }
   const cwd = await $.session.cwd();
   const path = `${await configDir($)}/projects/${cwd.replace(/[^A-Za-z0-9]/g, "-")}/${id}.jsonl`;
-  if (!(await $.fs.exists(path))) throw new Error("no Stop seen yet and no transcript found for this session");
-  return { session_id: id, transcript_path: path, cwd, hook_event_name: "Stop", stop_hook_active: false };
+  return {
+    stop: { session_id: id, transcript_path: path, cwd, hook_event_name: "Stop", stop_hook_active: false },
+    found: await $.fs.exists(path),
+  };
 }
 
 // First python on PATH that is not the WindowsApps Store stub (settings.json's launcher does the same).
