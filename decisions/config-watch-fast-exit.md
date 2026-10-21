@@ -8,7 +8,7 @@ Why: the cost is the import, not the hash. There is no mtime or size stamp. A sa
 
 - **Check now.** A missing or corrupt record means check now. A recorded lift past its deadline means check now, because a deadline passes with no write of its own (`opus-grant-expires`, an Opus grant expires within 24 hours). Any exception in the fast check falls through to the full check.
 - **One shared module.** `hooks/shared_names.py` holds `PROJECT_FROZEN_FILES` and `config_dir`. It uses the standard library only, so the fast exit can read it before the guard loads. There is no second copy. It lands in the guard set (`guard.d/<id>/`) with the guard files. Lane `local-time-light-import` adds `MACHINE_TAGS` there later.
-- **First sight.** On first sight of a file, a cap at Sonnet stays silent. A `_FORCE` flag set to `0`, `1`, `true` or `false` beside a Sonnet cap also stays silent, because it only pins Sonnet (owner ruling 2026-10-20). Any other reading, such as a model key above Sonnet or a `_FORCE` key that names a model, is reported as unknown.
+- **First sight.** On first sight of a file, a cap at Sonnet stays silent. A `_FORCE` flag set to `0`, `1`, `true` or `false` also stays silent, because it names no model (owner ruling 2026-10-20, for the flag beside a Sonnet cap; alone, it sets no model either). Any other reading, such as a model key above Sonnet or a `_FORCE` key that names a model, is reported as unknown.
 
 ## Note, not a debt
 
