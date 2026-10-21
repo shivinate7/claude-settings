@@ -289,7 +289,7 @@ MAIN_SESSION_REFRESH = (
     '[ -n "$CLAUDE_CODE_REMOTE" ] && exit 0; d=$(sed -n "s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p" "${CLAUDE_CONFIG_DI'
     'R:-$HOME/.claude}/CLAUDE.md" | head -n1); case "$d" in "~"/*) d="$HOME${d#\\~}";; esac; [ -n "$d" ] &'
     '& [ -d "$d/.git" ] && git -C "$d" pull -q --ff-only >/dev/null 2>&1; [ -f "$d/install.sh" ] && comma'
-    'nd -v bash >/dev/null 2>&1 && bash "$d/install.sh" >/dev/null 2>&1; exit 0'
+    'nd -v bash >/dev/null 2>&1 && case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) bash "$d/install.sh" >/dev/null 2>&1;; esac; exit 0'
 )
 
 

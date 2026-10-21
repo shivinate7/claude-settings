@@ -33,6 +33,8 @@ Contract, from decision gate-hooks-fail-closed:
 - The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
   line equal to the placeholder that install.sh and install.ps1 stamp. A line that drifted would install
   unstamped, and the guard would then deny every call.
+- The SessionStart clone refresh runs install.sh on Linux and Darwin, and never under a MINGW, MSYS or
+  CYGWIN uname: install.ps1 is the Windows installer.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
@@ -526,6 +528,42 @@ def stamp_lines_case():
     return True, "%d guard files each hold one placeholder line" % len(files)
 
 
+WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
+OTHER_UNAMES = ("Linux", "Darwin")
+
+
+def refresh_entry(settings):
+    """The one SessionStart entry that runs install.sh (the clone refresh), or None."""
+    hits = [h for ev, h in hook_entries(settings) if ev == "SessionStart" and "install.sh" in command_of(h)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def refresh_case(uname_value, runs):
+    """install.sh is the Mac/Linux installer, install.ps1 the Windows one. The refresh hook runs install.sh
+    on Linux and Darwin and never under MINGW, MSYS or CYGWIN, where it ran for 80 to 90 s at each start.
+    A stub uname answers for the row. The clone is a stub too: its install.sh writes a marker file."""
+    def check():
+        h = refresh_entry(load())
+        if h is None:
+            return False, "no single SessionStart entry runs install.sh"
+        with tempfile.TemporaryDirectory() as root:
+            clone, cfg, tools = (os.path.join(root, n) for n in ("clone", "cfg", "tools"))
+            os.makedirs(os.path.join(clone, ".git"))
+            write_file(os.path.join(clone, "install.sh"), 'printf ran > "$(dirname "$0")/ran.txt"\n')
+            write_file(os.path.join(cfg, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone.replace("\\", "/"))
+            # git is a stub so the hook's pull never reaches a real repository.
+            for name, body in (("uname", "echo %s" % uname_value), ("git", "exit 0")):
+                write_file(os.path.join(tools, name), "#!/bin/sh\n%s\n" % body)
+                os.chmod(os.path.join(tools, name), 0o755)
+            path = os.pathsep.join([tools, os.environ.get("PATH", "")])
+            r = run_sh(PATH_FIRST + command_of(h),
+                       {"CLAUDE_CONFIG_DIR": cfg, "HOME": root, "PATH": path, "STUB_PATH": path})
+            ran = os.path.exists(os.path.join(clone, "ran.txt"))
+        note = "exit %d; install.sh ran: %s; stderr %s" % (r.returncode, ran, r.stderr.strip()[:120])
+        return r.returncode == 0 and ran == runs, note
+    return check
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -572,6 +610,10 @@ def build_cases():
                   guard_sentinel_case))
     cases.append(("install stamp: each hooks/guard*.py holds exactly one placeholder line, as the stampers write it",
                   stamp_lines_case))
+    for u in WINDOWS_UNAMES:
+        cases.append(("refresh hook: uname %s does not run install.sh" % u, refresh_case(u, False)))
+    for u in OTHER_UNAMES:
+        cases.append(("refresh hook: uname %s runs install.sh" % u, refresh_case(u, True)))
     return cases
 
 

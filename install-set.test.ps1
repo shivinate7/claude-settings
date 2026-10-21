@@ -163,14 +163,22 @@ function Start-Install([string]$Clone, [string]$Cfg, [string]$Out, [hashtable]$E
 
 # Writes a bash script that runs one post-merge hook, or install.sh, from a clone, and prints the pid
 # of that child as bash sees it ($!). The child's own $$ is the same number.
-function Write-ShellRun([string]$Path, [string]$GitDir, [string]$Cfg, [string]$Command, [string]$Label) {
+function Write-ShellRun([string]$Path, [string]$GitDir, [string]$Cfg, [string]$Command, [string]$Label, [switch]$LinuxUname) {
     $g = $GitDir -replace '\\', '/'
     $c = $Cfg -replace '\\', '/'
     # install.sh appends a PATH line to $HOME's rc file when its marker is missing, so HOME is a scratch folder.
     $h = (Join-Path $Root 'shhome') -replace '\\', '/'
     New-Item -ItemType Directory -Force -Path ($h -replace '/', '\') | Out-Null
-    $lines = @('#!/bin/sh', "cd `"$g`" || exit 9", "export HOME=`"$h`"", "export SHELL=/bin/bash", "export CLAUDE_CONFIG_DIR=`"$c`"",
-               "$Command &", "p=`$!", "echo `"${Label}PID=`$p`"", "wait `$p", "echo `"${Label}EXIT=`$?`"")
+    $lines = @('#!/bin/sh', "cd `"$g`" || exit 9", "export HOME=`"$h`"", "export SHELL=/bin/bash", "export CLAUDE_CONFIG_DIR=`"$c`"")
+    # install.sh stops at its top under a MINGW uname, because install.ps1 is the Windows installer. This case
+    # tests install.sh's own log lines, so the script puts a stub uname that answers Linux ahead of PATH.
+    if ($LinuxUname) {
+        $stub = Join-Path $Root 'uname-linux'
+        New-Item -ItemType Directory -Force -Path $stub | Out-Null
+        [IO.File]::WriteAllText((Join-Path $stub 'uname'), "#!/bin/sh`necho Linux`n", $Utf8)
+        $lines += "PATH=`"`$(cygpath -u '$($stub -replace '\\', '/')'):`$PATH`"; export PATH"
+    }
+    $lines += @("$Command &", "p=`$!", "echo `"${Label}PID=`$p`"", "wait `$p", "echo `"${Label}EXIT=`$?`"")
     [IO.File]::WriteAllText($Path, (($lines -join "`n") + "`n"), $Utf8)
 }
 
@@ -456,7 +464,7 @@ Check 'names1: the post-merge hook lands shared_names.py in guard.d\<id>\, equal
 # install.sh, from the same clone, run from bash so $! is its $$. Local mode stamps no id, so the start
 # and end lines must share one id-like number (8 or more digits) instead.
 $sh4 = Join-Path $C4 'sh4.sh'
-Write-ShellRun $sh4 (Join-Path $C4 'git') $Cfg4 'bash ./install.sh' 'SH'
+Write-ShellRun $sh4 (Join-Path $C4 'git') $Cfg4 'bash ./install.sh' 'SH' -LinuxUname
 $s4 = Start-Shell $sh4 (Join-Path $C4 'sh4-run')
 Wait-Bounded $s4 180
 $shText = Get-RunText (Join-Path $C4 'sh4-run')

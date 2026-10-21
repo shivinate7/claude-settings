@@ -81,6 +81,22 @@ work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
+# A stub uname for one answer: its dir goes first on PATH for the run that needs it.
+make_uname_stub() {
+  mkdir -p "$1"
+  printf '#!/bin/sh\necho %s\n' "$2" > "$1/uname"
+  chmod +x "$1/uname"
+}
+# install.sh stops at its top under MINGW, MSYS and CYGWIN, because install.ps1 is the Windows installer.
+# Every case here tests install.sh's Linux and macOS path, so a Windows runner (Git Bash) gets a stub that
+# answers Linux. PATH is set here, after this shell has started, so the startup reorder that puts /usr/bin's
+# uname first (see PATH_FIRST in hooks/test_wrappers.py) cannot undo it. The win_sh cases put their own stub first.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    make_uname_stub "$work/uname-linux" Linux
+    PATH="$work/uname-linux:$PATH"; export PATH ;;
+esac
+
 # Build the tarball once, from this repo's own tracked files, so the curl stub serves
 # exactly what GitHub's archive/refs/heads/<ref>.tar.gz would serve: a top-level
 # "claude-settings-main" directory holding every tracked file.
@@ -2438,6 +2454,43 @@ guardset2() {
   rm -rf "$h"
 }
 
+# ---- win_sh1, win_sh2, win_sh3: install.sh does nothing under a Windows uname ---------------------------
+# install.ps1 is the Windows installer. Run by hand under MINGW, MSYS or CYGWIN, install.sh stops at its top:
+# exit 0, one line naming install.ps1, nothing written (no config dir, no log, no lock, no rc-file line, no
+# pinned checkout).
+win_sh_case() {
+  name="$1: install.sh under uname $2 exits 0 at once, names install.ps1, and writes nothing"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
+  make_checkout "$co" "# repo CLAUDE.md $1"
+  git -C "$co" branch -q -M main
+  cp "$INSTALL_SH" "$co/install.sh"
+  make_uname_stub "$work/$1-bin" "$2"
+
+  out=$(cd "$co" && env -i PATH="$work/$1-bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh 2>&1)
+  rc=$?
+  left=$(find "$h" -mindepth 1 2>/dev/null | head -n 1)
+  lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc, want 0: $out"
+  elif ! printf '%s' "$out" | grep -q 'install\.ps1'; then
+    bad "$name" "output does not name install.ps1: $out"
+  elif [ "$lines" -ne 1 ]; then
+    bad "$name" "output is $lines lines, want one: $out"
+  elif [ -n "$left" ]; then
+    bad "$name" "wrote under HOME: $left"
+  elif [ -e "$co-live" ]; then
+    bad "$name" "made the pinned checkout $co-live"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+win_sh1() { win_sh_case win_sh1 MINGW64_NT-10.0-26200; }
+win_sh2() { win_sh_case win_sh2 MSYS_NT-10.0-26200; }
+win_sh3() { win_sh_case win_sh3 CYGWIN_NT-10.0-26200; }
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2514,6 +2567,9 @@ run pinlive1
 run pinlive2
 run guardset1
 run guardset2
+run win_sh1
+run win_sh2
+run win_sh3
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
