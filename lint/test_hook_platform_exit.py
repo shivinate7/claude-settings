@@ -29,6 +29,11 @@ SH = shutil.which("sh")
 # finds the host's python, xcrun or uname.
 PASS_THROUGH = ("cat", "grep", "sed", "tr", "head", "cut", "awk", "wc", "tee", "dirname", "basename")
 
+# Git for Windows' bin/sh.exe puts /usr/bin (the real uname) ahead of PATH, so a stub uname would never
+# run. This prefix sets PATH again, in POSIX form, before the row runs. (Same line as in
+# hooks/test_wrappers.py: the two suites are standalone scripts.)
+PATH_FIRST = 'if command -v cygpath >/dev/null 2>&1; then PATH=$(cygpath -up "$STUB_PATH"); export PATH; fi; '
+
 STUB_PYTHON = '#!/bin/sh\necho "$0 $*" >> "$STUB_LOG"\ncat > "$STUB_LOG.stdin"\nexit "${STUB_RC:-0}"\n'
 
 
@@ -68,11 +73,11 @@ def run_row(command, script, payload="{}", platform="posix", xcrun=True, rc=0, u
             if real:
                 put(name, '#!/bin/sh\nexec "%s" "$@"\n' % real.replace("\\", "/"))
         log = os.path.join(root, "calls.log")
-        env = {"PATH": stubs, "CLAUDE_CONFIG_DIR": cfg, "STUB_LOG": log, "STUB_RC": str(rc),
+        env = {"PATH": stubs, "STUB_PATH": stubs, "CLAUDE_CONFIG_DIR": cfg, "STUB_LOG": log, "STUB_RC": str(rc),
                "FAKE_UNAME": uname or "Linux"}
         if platform == "nt":
             env.update(FAKE_UNAME=uname or "MINGW64_NT-10.0-26200", OS="Windows_NT", OSTYPE="msys")
-        done = subprocess.run([SH, "-c", command], env=env, input=payload.encode("utf-8"),
+        done = subprocess.run([SH, "-c", PATH_FIRST + command], env=env, input=payload.encode("utf-8"),
                               capture_output=True, timeout=60)
         calls = open(log).read().splitlines() if os.path.exists(log) else []
         seen = open(log + ".stdin", "rb").read() if os.path.exists(log + ".stdin") else None
