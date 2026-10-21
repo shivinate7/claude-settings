@@ -8,19 +8,21 @@
 //   --model-error TEXT   UNKNOWN, or "verdict lost" on a cache hit
 // hooks/test_decision_watch.py pins the python side. This file pins what the mod does with it.
 // Guessed contract points: /dw registers in a session.start handler; a judgment ends with a shadow-log
-// write holding END; each Stop writes a "STOP seen" line; /dw's last output line is "Stops seen: N";
+// write holding END; each main-loop turn.complete writes a "STOP seen" line; /dw's last output line is "Stops seen: N";
 // the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder;
 // a config notice is its own toast and contains the word "notice" (any case), and the verdict toast holds the
 // verdict text exactly; a judge slot held by a python call that never returns frees within 60 s.
-// The two-phase model-call fields (timeoutMs is pinned on its own) and the stop_hook_active case
-// (a STOP seen write is allowed).
+// The two-phase model-call fields (timeoutMs is pinned on its own).
+// The trigger is turn.complete, never classic.Stop: the app's sec-default mod reroutes every classic.* event past
+// user-tier mods, so a classic.Stop handler never runs. turn.complete carries no session id, cwd or transcript path,
+// so the judge derives them the way /dw does: $.session.id(), $.session.cwd() and the config folder's projects layout.
 // Guessed contract point, HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
 // passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mock } from 'node:test'
 // The scanners are shared: lint/test_scanner_traps.mjs runs their self-tests. Two source checks below use them.
@@ -32,7 +34,8 @@ const SCRIPT = REAL_CFG + '/hooks/decision_watch.py'
 const PY = '/usr/bin/python3'
 const SID = 'aaaaaaaa-1111-2222-3333-444444444444'
 const CWD = '/work/repo'
-const TRANSCRIPT = REAL_CFG + '/projects/repo/' + SID + '.jsonl'
+// The transcript the app names for CWD: every non-alphanumeric character of the cwd becomes "-".
+const TRANSCRIPT = REAL_CFG + '/projects/-work-repo/' + SID + '.jsonl'
 const SENTINEL = 'PROMPT-SENTINEL-ALPHA-7'
 const PROMPT = 'Judge this turn. ' + SENTINEL
 const ALLOW_REPLY = '{"verdict": "ALLOW"}'
@@ -94,7 +97,7 @@ await test('source: no machine path anywhere in hooks/register.mjs, comments inc
 await test('source: the host reads $.model.complete( and the event names as literal spellings', () => {
   const text = readFileSync(REGISTER, 'utf8')
   assert.ok(text.includes('$.model.complete('), 'missing the $.model.complete( literal')
-  assert.ok(text.includes('"classic.Stop"'), 'missing the "classic.Stop" literal')
+  assert.ok(text.includes('"turn.complete"'), 'missing the "turn.complete" literal')
   assert.ok(text.includes('"command.run"'), 'missing the "command.run" literal')
 })
 
@@ -162,6 +165,14 @@ function defaultPython(h, argv, o) {
 
 let loads = 0
 
+// Where the app keeps this host's session transcript: the config folder, then projects/<cwd with every
+// non-alphanumeric character as "-">/<session id>.jsonl. The fake fs.exists answers true for it, so a turn.complete
+// that carries no transcript path can find its transcript. Read at call time, so a case may change h.cwd, h.sid or h.env.
+const transcriptOf = h => {
+  const cfg = h.env.CLAUDE_CONFIG_DIR || `${h.env.USERPROFILE || h.env.HOME}/.claude`
+  return `${cfg}/projects/${h.cwd.replace(/[^A-Za-z0-9]/g, '-')}/${h.sid}.jsonl`
+}
+
 function host(opts = {}) {
   const h = {
     sid: SID, cwd: CWD, env: { CLAUDE_CONFIG_DIR: REAL_CFG, HOME: '/home/u' },
@@ -191,7 +202,7 @@ function host(opts = {}) {
       complete: async req => { h.modelReqs.push(clone(req)); return h.model(req) },
     },
     fs: {
-      exists: async p => h.files.has(p),
+      exists: async p => h.files.has(p) || p === transcriptOf(h),
       read: async p => {
         const t = h.files.get(p)
         if (t !== undefined && t.length > FOUR_MIB) throw new Error('file is over the 4 MiB read limit')
@@ -237,10 +248,15 @@ const stopEvent = (extra = {}) => ({
   session_id: SID, transcript_path: TRANSCRIPT, cwd: CWD, hook_event_name: 'Stop', stop_hook_active: false, ...extra,
 })
 
+// A turn.complete as the host raises it (TurnCompleteInput): no session id, cwd or transcript path. agentId is set
+// on a subagent's turn and absent on the main loop.
+const turnEvent = (extra = {}) => ({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer', ...extra })
+
 async function fire(h, event, e = {}, nextValue) {
   const hook = h.hooks.find(x => x.event === event && Object.entries(x.matcher).every(([k, v]) => e[k] === v))
   if (!hook) throw new Error(`no handler for ${event}`)
-  return hook.fn(h.$, e, () => nextValue)
+  // A handler that waits on its judge would hang every later case, so it fails here instead, fast and named.
+  return within(Promise.resolve(hook.fn(h.$, e, () => nextValue)), 3000, `the ${event} handler did not return`)
 }
 
 const judged = h => within(h.endLogged, 3000, 'the shadow log END line')
@@ -260,25 +276,82 @@ const logPath = h => (h.writes.find(w => /STOP seen|START|END/.test(w.data)) || 
 
 // One Stop, judged in the background, so /dw has a latest turn. Clears the calls it made.
 async function primed(h) {
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   h.procs.length = 0
   h.modelReqs.length = 0
 }
 
-// ---- Stop: shadow only
+// ---- the trigger: turn.complete, shadow only
+// The app's sec-default mod reroutes every classic.* event past user-tier mods, so the old classic.Stop trigger never
+// ran. turn.* events pass. The five "trigger" cases below pin the move; every other case drives its judge through
+// turn.complete too.
 
-await test('stop: returns next(e) at once while the model call hangs, and the Stop event is untouched', async () => {
+const emits = h => pyCalls(h).filter(p => p.argv.includes('--emit-prompt'))
+
+await test('turn.complete trigger 1: a main-loop turn (no agentId) starts one judge, on the transcript /dw derives', async () => {
+  const h = await load(host())
+  await fire(h, 'turn.complete', turnEvent(), {})
+  await judged(h)
+  same(emits(h).length, 1, 'phase 1 runs')
+  same(h.modelReqs.length, 1, 'model calls')
+  const stdin = JSON.parse(emits(h)[0].opts.stdin)
+  same(stdin.session_id, SID, 'stdin session_id, from $.session.id()')
+  same(stdin.cwd, CWD, 'stdin cwd, from $.session.cwd()')
+  same(stdin.transcript_path, TRANSCRIPT, 'stdin transcript_path, the one /dw derives')
+})
+
+await test('turn.complete trigger 2: a subagent turn (agentId set) starts no judge and returns next(e); the main turn after it judges', async () => {
+  const h = await load(host())
+  const NEXT = { text: 'sub answer' }
+  assert.equal(await within(fire(h, 'turn.complete', turnEvent({ agentId: 'agent-7' }), NEXT), 1000, 'the subagent turn'), NEXT)
+  await settle(60)
+  same(h.procs.length, 0, 'process calls')
+  same(h.modelReqs.length, 0, 'model calls')
+  same(h.writes.filter(w => /START|END/.test(w.data)).length, 0, 'START or END log writes')
+  // Same host, same transcript. The main turn does judge, so the skip came from agentId, and the slot was left free.
+  await fire(h, 'turn.complete', turnEvent(), {})
+  await judged(h)
+  same(emits(h).length, 1, 'phase 1 runs for the main turn')
+  assert.doesNotMatch(allLog(h), /SKIP busy/, 'the subagent turn held the judge slot')
+})
+
+// A mod with no classic.Stop handler passes. A mod that keeps one must still return next(e) and judge nothing.
+// The control turn.complete at the end shows the host is live, so a pass is not an empty host.
+await test('turn.complete trigger 3: classic.Stop starts no judge, with stop_hook_active false or true', async () => {
+  const NEXT = { decision: 'pass' }
+  for (const active of [false, true]) {
+    const h = await load(host())
+    const stop = h.hooks.find(x => x.event === 'classic.Stop')
+    if (stop) assert.equal(await within(stop.fn(h.$, stopEvent({ stop_hook_active: active }), () => NEXT), 1000, 'classic.Stop'), NEXT)
+    await settle(60)
+    same(h.procs.length, 0, `process calls after classic.Stop (stop_hook_active ${active})`)
+    same(h.modelReqs.length, 0, `model calls after classic.Stop (stop_hook_active ${active})`)
+    same(h.writes.filter(w => /START|END/.test(w.data)).length, 0, `START or END log writes after classic.Stop (stop_hook_active ${active})`)
+    await fire(h, 'turn.complete', turnEvent(), {})
+    await judged(h)
+    same(emits(h).length, 1, 'phase 1 runs for the turn.complete control')
+  }
+})
+
+await test('turn.complete trigger 4: passes next(e) through and returns while the judge is still running', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
   // The mod's model deadline is a timer. Fake it, so the hung call cannot hold the run open for 50 s.
   mock.timers.enable({ apis: ['setTimeout'] })
   try {
-    const e = stopEvent()
+    const hook = h.hooks.find(x => x.event === 'turn.complete')
+    assert.ok(hook, 'no turn.complete handler')
+    const e = turnEvent()
     const before = clone(e)
-    const NEXT = { decision: 'pass' }
-    const got = await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop waited for the judge')
-    assert.equal(got, NEXT, 'Stop returns the object next() returned')
-    same(e, before, 'Stop event')
+    const NEXT = { text: 'the answer' }
+    const nexts = []
+    const got = await within(hook.fn(h.$, e, async (...a) => { nexts.push(a); return NEXT }), 1000, 'turn.complete waited for the judge')
+    assert.equal(got, NEXT, 'the handler returns the object next() resolved to')
+    same(nexts.length, 1, 'next calls')
+    assert.equal(nexts[0][0], e, 'next was given the event')
+    same(e, before, 'turn.complete event')
+    await flush()
+    same(h.modelReqs.length, 1, 'model calls in flight: the judge was not running when the handler returned, so the case proves nothing')
   } finally {
     // Drain the background judge first: a deadline made after the reset would be a real 50 s timer.
     await flush()
@@ -286,46 +359,58 @@ await test('stop: returns next(e) at once while the model call hangs, and the St
   }
 })
 
-await test('stop: a FLAG never changes the Stop result', async () => {
-  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
-  const e = stopEvent()
-  const before = clone(e)
-  const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop'), NEXT)
+await test('turn.complete trigger 5: a second turn while a judge runs starts no second judge; the slot frees when the judge ends', async () => {
+  let release
+  const gate = new Promise(r => { release = r })
+  const h = await load(host({ model: () => gate.then(() => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} })) }))
+  try {
+    await fire(h, 'turn.complete', turnEvent({ turnId: 't1' }), {})
+    await settle(20)
+    same(emits(h).length, 1, 'phase 1 runs for the first turn')
+    const NEXT = { text: 'second answer' }
+    assert.equal(await within(fire(h, 'turn.complete', turnEvent({ turnId: 't2' }), NEXT), 1000, 'the second turn waited for the running judge'), NEXT)
+    await settle(60)
+    same(emits(h).length, 1, 'phase 1 runs: the second turn started a second judge')
+    same(h.modelReqs.length, 1, 'model calls in flight')
+  } finally {
+    release()
+  }
   await judged(h)
-  same(e, before, 'Stop event')
-  same(NEXT, { decision: 'pass' }, 'next result')
+  await settle(60)
+  await fire(h, 'turn.complete', turnEvent({ turnId: 't3' }), {})
+  await settle(60)
+  same(emits(h).length, 2, 'phase 1 runs after the first judge ended: the slot never freed')
 })
 
-await test('stop: never throws when every host call throws, and still returns next(e)', async () => {
+await test('turn: a FLAG never changes the turn.complete result', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
+  const e = turnEvent()
+  const before = clone(e)
+  const NEXT = { text: 'the answer' }
+  assert.equal(await within(fire(h, 'turn.complete', e, NEXT), 1000, 'turn.complete'), NEXT)
+  await judged(h)
+  same(e, before, 'turn.complete event')
+  same(NEXT, { text: 'the answer' }, 'next result')
+})
+
+await test('turn: never throws when every host call throws, and still returns next(e)', async () => {
   const boom = () => { throw new Error('host down') }
   const h = await load(host({ finderThrow: true, sessionThrow: true, model: boom, py1: boom, py2: boom }))
   h.$.fs.exists = async () => { throw new Error('fs down') }
   h.$.fs.write = async () => { throw new Error('fs down') }
   h.$.env.get = async () => { throw new Error('env down') }
   const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1000, 'Stop'), NEXT)
+  assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 1000, 'Stop'), NEXT)
   await settle()
 })
 
-// A STOP seen line is allowed; no judge may start.
-await test('stop: stop_hook_active skips the judge: no process call, no model call, no START or END line', async () => {
-  const h = await load(host())
-  const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', stopEvent({ stop_hook_active: true }), NEXT), 1000, 'Stop'), NEXT)
-  await settle()
-  same(h.procs.length, 0, 'process calls')
-  same(h.modelReqs.length, 0, 'model calls')
-  same(h.writes.filter(w => !/STOP seen/.test(w.data)).length, 0, 'log writes other than STOP seen')
-})
-
-// Item 7. The STOP seen line is written before Stop returns, so a viewer can tell the mod ran.
-await test('stop: a STOP seen line is written before Stop returns next(e)', async () => {
+// Item 7. The STOP seen line is written before the turn.complete handler returns, so a viewer can tell the mod ran.
+await test('turn: a STOP seen line is written before turn.complete returns next(e)', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
   mock.timers.enable({ apis: ['setTimeout'] }) // the model deadline is a timer: fake it, as in the case above
   try {
     const NEXT = { decision: 'pass' }
-    assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop'), NEXT)
+    assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 1500, 'Stop'), NEXT)
     assert.ok(h.writes.some(w => /STOP seen/.test(w.data)), 'no STOP seen line was written before Stop returned')
   } finally {
     await flush() // as in the case above: the background judge's deadline must be made while the mock is on
@@ -333,19 +418,19 @@ await test('stop: a STOP seen line is written before Stop returns next(e)', asyn
   }
 })
 
-// A write that never returns cannot hold Stop.
-await test('stop: a STOP seen write that never returns cannot hold Stop past 1.5 s', async () => {
+// A write that never returns cannot hold the turn.
+await test('turn: a STOP seen write that never returns cannot hold turn.complete past 1.5 s', async () => {
   const h = await load(host())
   h.$.fs.write = () => new Promise(() => {})
   const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop held by a hung write'), NEXT)
+  assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 1500, 'Stop held by a hung write'), NEXT)
 })
 
 // ---- the two phases and the model call
 
 await test('two-phase: phase 1 emits the prompt; the model call takes it with maxTokens 512 and phase 1 model; phase 2 gets the reply', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   const py = pyCalls(h)
   same(py.length, 2, 'python calls: phase 1 and phase 2')
@@ -363,7 +448,7 @@ await test('two-phase: phase 1 emits the prompt; the model call takes it with ma
 
 await test('model error: phase 2 gets --model-error with the message, and no --model-text', async () => {
   const h = await load(host({ model: () => { throw new Error('model down') } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   const argv = pyCalls(h)[1].argv
   assert.ok(argv.includes('--model-error'), 'phase 2 has --model-error')
@@ -373,7 +458,7 @@ await test('model error: phase 2 gets --model-error with the message, and no --m
 
 await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () => {
   const h = await load(host({ model: () => { throw new Error('model down') } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
@@ -383,7 +468,7 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
 // as --model-error (a reason is not a verdict reply), and the error and the log name the reason.
 await test('model error: an aborted reply with a reason and no text goes as --model-error, and the log names the reason', async () => {
   const h = await load(host({ model: () => ({ isAnswered: false, reason: 'aborted by user', usage: {} }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   const argv = pyCalls(h)[1].argv
   assert.ok(argv.includes('--model-error'), 'phase 2 has --model-error')
@@ -404,7 +489,7 @@ await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a sil
       return { isAnswered: true, text: ALLOW_REPLY, usage: {} }
     },
   }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict on evidence that moved')
   assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
@@ -412,7 +497,7 @@ await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a sil
 
 await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the reply', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   const p2 = pyCalls(h)[1].argv
   assert.ok(p2.includes('--key'), `phase 2 has no --key: ${JSON.stringify(p2)}`)
@@ -422,7 +507,7 @@ await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the
 // A phase 1 with no key (an old decision_watch.py) cannot be tied to the evidence, so it reads UNKNOWN.
 await test('HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () => {
   const h = await load(host({ py1: () => out({ needs_model: true, prompt: PROMPT, model: 'haiku' }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict that cannot be tied to the evidence')
   assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
@@ -433,7 +518,7 @@ await test('HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () =>
 
 await test('shown: a FLAG shows the Stop hook text exactly, once', async () => {
   const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts, [FLAG], 'toasts')
@@ -445,7 +530,7 @@ await test('shown: the FLAG wording is the one hooks/decision_watch.py prints to
 
 await test('shown: an UNKNOWN from the judge shows its exact text, once', async () => {
   const h = await load(host({ model: () => { throw new Error('model down') } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts, [UNKNOWN + 'the model judgment could not be completed (model call: model down).'], 'toasts')
@@ -454,7 +539,7 @@ await test('shown: an UNKNOWN from the judge shows its exact text, once', async 
 await test('shown: a message from the cheap path shows its exact text, with no prefix added', async () => {
   const CHEAP = UNKNOWN + 'the transcript could not be read (no such file).'
   const h = await load(host({ py1: () => out({ systemMessage: CHEAP }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts, [CHEAP], 'toasts')
@@ -463,7 +548,7 @@ await test('shown: a message from the cheap path shows its exact text, with no p
 // Guard: an ALLOW stays silent in the session. A toast on every Stop would teach the reader to skip it.
 await test('shown: an ALLOW shows nothing', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts, [], 'toasts')
@@ -499,7 +584,7 @@ const ALLOW_NOTICE_ROWS = [
 for (const [label, opts] of ALLOW_NOTICE_ROWS) {
   await test(`config notice: an ALLOW turn shows the notice as its own toast (${label})`, async () => {
     const h = await load(host(opts))
-    await fire(h, 'classic.Stop', stopEvent(), {})
+    await fire(h, 'turn.complete', turnEvent(), {})
     await judged(h)
     await settle(60)
     same(h.toasts.length, 1, 'toast count')
@@ -510,7 +595,7 @@ for (const [label, opts] of ALLOW_NOTICE_ROWS) {
 // Case 2: a FLAG that carries a notice: two toasts, the FLAG text exactly and the notice, kept apart.
 await test('config notice: a FLAG with a config notice shows two toasts, the FLAG and the notice', async () => {
   const h = await load(host({ py2: splitOut(FLAG, [CONFIG_NOTICE]) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts.length, 2, 'toast count')
@@ -522,7 +607,7 @@ await test('config notice: a FLAG with a config notice shows two toasts, the FLA
 await test('config notice: an UNKNOWN with a config notice shows two toasts, the UNKNOWN and the notice', async () => {
   const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
   const h = await load(host({ py2: splitOut(TEXT, [CONFIG_NOTICE]) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   same(h.toasts.length, 2, 'toast count')
@@ -536,7 +621,7 @@ await test('toast failure: a FLAG whose toast throws is logged, and a log line n
   h.$.ui.toast = async () => { throw new Error('toast host down') }
   const logged = waitLog(h, /toast/i)
   logged.catch(() => {})
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   assert.match(await logged, /toast/i, 'no log line names the toast failure')
 })
@@ -559,7 +644,7 @@ await test('ping: a model object reply reaches python as its .text, and a string
   ]
   for (const [label, reply] of replies) {
     const h = await load(host({ model: () => reply }))
-    await fire(h, 'classic.Stop', stopEvent(), {})
+    await fire(h, 'turn.complete', turnEvent(), {})
     await judged(h)
     same(pyCalls(h)[1].argv[4], FLAG_REPLY, `${label}: reply text sent to python`)
     assert.ok(!h.procs.some(p => p.argv.some(a => String(a).includes('[object Object]'))), `${label}: [object Object] reached python`)
@@ -568,7 +653,7 @@ await test('ping: a model object reply reaches python as its .text, and a string
 
 await test('ping: a model object with no text never sends [object Object], and reads as UNKNOWN', async () => {
   const h = await load(host({ model: () => ({ isAnswered: false, usage: {} }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.ok(!h.procs.some(p => p.argv.some(a => String(a).includes('[object Object]'))), '[object Object] reached python')
   assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
@@ -579,7 +664,7 @@ await test('ping: a model object with no text never sends [object Object], and r
 
 await test('python: the first python on PATH that is not under WindowsApps', async () => {
   const h = await load(host({ finder: { exitCode: 0, stdout: '/store/WindowsApps/python3.exe\r\n' + PY + '\r\n', stderr: '' } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   const first = pyCalls(h)[0].argv[0]
   assert.ok(!/WindowsApps/i.test(first), `spawned the store stub: ${first}`)
@@ -588,14 +673,14 @@ await test('python: the first python on PATH that is not under WindowsApps', asy
 
 await test('script path: CLAUDE_CONFIG_DIR/hooks/decision_watch.py', async () => {
   const h = await load(host({ env: { CLAUDE_CONFIG_DIR: 'D:/cfg/alt', HOME: '/home/u' } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   same(norm(pyCalls(h)[0].argv[2]), 'D:/cfg/alt/hooks/decision_watch.py', 'script path')
 })
 
 await test('script path: with no CLAUDE_CONFIG_DIR, HOME/.claude/hooks/decision_watch.py', async () => {
   const h = await load(host({ env: { HOME: '/home/u' } }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   same(norm(pyCalls(h)[0].argv[2]), '/home/u/.claude/hooks/decision_watch.py', 'script path')
 })
@@ -604,7 +689,7 @@ await test('script path: with no CLAUDE_CONFIG_DIR, HOME/.claude/hooks/decision_
 
 await test('state folder: the child runs with its own CLAUDE_CONFIG_DIR, never the real one, and the log lives under it', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   const [p1, p2] = pyCalls(h)
   const state = norm(p1.opts.env && p1.opts.env.CLAUDE_CONFIG_DIR)
@@ -628,10 +713,10 @@ await test('/dw after a shadow FLAG on the same turn still shows the FLAG, not n
 // The cache stays. A second Stop on an unchanged turn makes no second model call.
 await test('cache kept: a second shadow Stop on an unchanged turn makes no second model call', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await settle(60)
   same(h.modelReqs.length, 1, 'model calls for one unchanged turn')
 })
@@ -649,7 +734,7 @@ await test('lost verdict: a model FLAG whose phase 2 finds the verdict already r
       return { isAnswered: true, text: FLAG_REPLY, usage: {} }
     },
   }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.match(endData, /UNKNOWN/, 'no UNKNOWN')
   assert.match(endData, /verdict lost/, 'no verdict lost')
@@ -659,7 +744,7 @@ await test('lost verdict: a model FLAG whose phase 2 finds the verdict already r
 // Green guard: a valid ALLOW with a silent phase 2 is still ALLOW. A "silent means lost" rule would break this.
 await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, never verdict lost', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.match(endData, /ALLOW \(silent\)/, 'ALLOW lost')
   assert.doesNotMatch(endData, /verdict lost/, 'a valid ALLOW read as lost')
@@ -669,10 +754,11 @@ await test('ALLOW guard: a model ALLOW with a silent phase 2 still reads ALLOW, 
 
 await test('stdin: the JSON sent to python is ASCII-only, and a non-ASCII path round-trips', async () => {
   const cwd = '/work/café/repo'
-  // U+FFFF is the top of the escaped range: it must escape, and round-trip.
-  const transcript = REAL_CFG + '/projects/café\uFFFF/' + SID + '.jsonl'
-  const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent({ cwd, transcript_path: transcript }), {})
+  // U+FFFF is the top of the escaped range: it must escape, and round-trip. The app names the transcript folder from the
+  // cwd with every non-alphanumeric character as "-", so the non-ASCII path comes from the config folder.
+  const h = await load(host({ cwd, env: { CLAUDE_CONFIG_DIR: '/cfg/café\uFFFF', HOME: '/home/u' } }))
+  const transcript = transcriptOf(h)
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   assert.ok(pyCalls(h).length > 0, 'no python call')
   for (const p of pyCalls(h)) {
@@ -689,12 +775,12 @@ await test('busy: one shadow judge at a time; a Stop during a judge logs SKIP bu
   const gate = new Promise(r => { release = r })
   const h = await load(host({ model: () => gate.then(() => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} })) }))
   try {
-    await fire(h, 'classic.Stop', stopEvent(), {})
+    await fire(h, 'turn.complete', turnEvent(), {})
     await settle(20)
     const skipped = waitLog(h, /SKIP busy/)
     skipped.catch(() => {})
     const NEXT = { decision: 'pass' }
-    assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1000, 'the second Stop waited for the busy judge'), NEXT)
+    assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 1000, 'the second Stop waited for the busy judge'), NEXT)
     await skipped
     same(pyCalls(h).filter(p => p.argv.includes('--emit-prompt')).length, 1, 'phase 1 runs for the busy judge only')
     same(h.modelReqs.length, 1, 'model calls in flight')
@@ -713,10 +799,10 @@ await test('busy guard: a failed judge frees the slot, so the next Stop judges a
       return { isAnswered: true, text: ALLOW_REPLY, usage: {} }
     },
   }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await settle(60)
   same(calls, 2, 'model calls after a failed judge')
   assert.ok(!/SKIP busy/.test(allLog(h)), 'the slot was never freed')
@@ -733,14 +819,14 @@ await test('busy: a model call that never resolves frees the slot at the mod lim
   const h = await load(host({ model: () => new Promise(() => {}) }))
   mock.timers.enable({ apis: ['setTimeout'] })
   try {
-    await fire(h, 'classic.Stop', stopEvent(), {})
+    await fire(h, 'turn.complete', turnEvent(), {})
     await flush()
     assert.match(logNow(h), /START /, 'the first judge did not start')
     mock.timers.tick(MODEL_CEILING_MS)
     await flush()
     assert.match(logNow(h), /UNKNOWN/, 'no UNKNOWN after the limit: the slot is held by the hung model call')
     h.model = () => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} })
-    await fire(h, 'classic.Stop', stopEvent(), {})
+    await fire(h, 'turn.complete', turnEvent(), {})
     await flush()
     assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
     same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
@@ -763,7 +849,7 @@ for (const [label, opts] of HUNG_ROWS) {
     const h = await load(host(opts))
     mock.timers.enable({ apis: ['setTimeout'] })
     try {
-      await fire(h, 'classic.Stop', stopEvent(), {})
+      await fire(h, 'turn.complete', turnEvent(), {})
       await flush()
       assert.match(logNow(h), /START /, 'the first judge did not start')
       for (let i = 0; i < MODEL_CEILING_MS / 5000; i++) {
@@ -774,7 +860,7 @@ for (const [label, opts] of HUNG_ROWS) {
       h.finder = null
       h.py1 = undefined
       h.py2 = undefined
-      await fire(h, 'classic.Stop', stopEvent(), {})
+      await fire(h, 'turn.complete', turnEvent(), {})
       await flush()
       assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
       same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
@@ -790,12 +876,12 @@ const logLine = i => `2020-01-01T00:00:00.000Z old line ${i}`
 
 await test('log: over 500 lines, the file keeps the newest 500 and ends with the new END line', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(20)
   const path = logPath(h)
   h.files.set(path, Array.from({ length: 600 }, (_, i) => logLine(i) + '\n').join(''))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await settle(60)
   const lines = (h.files.get(path) || '').split('\n').filter(Boolean)
   assert.ok(lines.length <= 500, `log holds ${lines.length} lines`)
@@ -805,12 +891,12 @@ await test('log: over 500 lines, the file keeps the newest 500 and ends with the
 
 await test('log: past the 4 MiB read limit, the new END line is still written and the file stays bounded', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(20)
   const path = logPath(h)
   h.files.set(path, Array.from({ length: 500 }, (_, i) => 'x'.repeat(10000) + ' big ' + i + '\n').join(''))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await settle(60)
   const text = h.files.get(path) || ''
   assert.ok(text.length <= FOUR_MIB, `log is ${text.length} characters`)
@@ -823,10 +909,10 @@ await test('log: past the 4 MiB read limit, the new END line is still written an
 
 await test('/dw ends with "Stops seen: N", where N counts the STOP seen lines in the log', async () => {
   const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(20)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await settle(60)
   const r = await dwRun(h)
   const text = String(r && r.text !== undefined ? r.text : r).trim()
@@ -890,7 +976,7 @@ await test('/dw: shows a FLAG', async () => {
 
 await test('log: holds the verdict line and timings, never the prompt text', async () => {
   const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
   assert.ok(!allLog(h).includes(SENTINEL), 'the prompt text reached the log')
   assert.match(endData, /\d+ ms/, 'timings missing')
@@ -934,7 +1020,9 @@ function unreadFixture() {
   mkdirSync(repo)
   spawnSync('git', ['init', '-q'], { cwd: repo })
   spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'base'], { cwd: repo })
-  const transcript = join(root, 'session.jsonl')
+  // At the path the mod derives for this session: <config folder>/projects/<cwd, non-alphanumerics as "-">/<session id>.jsonl
+  const transcript = join(cfg, 'projects', repo.replace(/[^A-Za-z0-9]/g, '-'), SID + '.jsonl')
+  mkdirSync(dirname(transcript), { recursive: true })
   const records = [
     { type: 'user', timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'check the record folders' } },
     { type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
@@ -967,7 +1055,7 @@ await test('HOLE 12: under the mod env, a real python run shows the unread subje
   assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
   const fx = unreadFixture()
   const h = await realStop(fx)
-  await fire(h, 'classic.Stop', stopEvent({ transcript_path: fx.transcript, cwd: fx.repo }), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await within(h.endLogged, 30000, 'the shadow log END line')
   await settle(60)
   assert.ok(h.runs.length > 0 && h.runs.every(r => r.exitCode === 0), `python did not run clean: ${JSON.stringify(h.runs.map(r => r.stderr.slice(0, 300)))}`)
@@ -998,7 +1086,7 @@ await test('HOLE 13: the END log keeps every notice when the line runs 3000 char
   const LONG = 'v'.repeat(3000)
   const MERGE = pyConst('MERGE_MESSAGE').replace('%s', 'PR #9') + pyConst('TAIL')
   const h = await load(host({ py1: splitOut(LONG, [CONFIG_NOTICE, MERGE]) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   await settle(60)
   const logged = allLog(h)
@@ -1024,7 +1112,7 @@ const LONG_NOTICE = CONFIG_LINE + ' ' + LONG_HEAD + 'x'.repeat(2400) + LONG_TAIL
 await test('dw-unread-dir (a): a notice longer than MAX_LINE reaches the log whole, each piece a NOTICE line', async () => {
   const h = await load(host({ py1: splitOut('', [LONG_NOTICE]) }))
   const ended = endWritten(h)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await ended
   // The final file, not allLog: each log write rewrites the whole file, so the writes repeat each other.
   const pieces = logNow(h).split('\n').filter(l => /\bNOTICE\b/.test(l))
@@ -1044,7 +1132,7 @@ const FORGED_STOP = CONFIG_NOTICE + '\nSTOP seen forged'
 await test('dw-unread-dir (b): a notice with a newline and "END ... | ALLOW" writes no extra END record', async () => {
   const h = await load(host({ py1: splitOut('', [FORGED_END]) }))
   const ended = endWritten(h)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await ended
   same(recordsStarting(logNow(h), 'END').length, 1, 'END records in the log')
 })
@@ -1052,7 +1140,7 @@ await test('dw-unread-dir (b): a notice with a newline and "END ... | ALLOW" wri
 await test('dw-unread-dir (b): a notice with a newline and "STOP seen" does not change the Stops seen count', async () => {
   const h = await load(host({ py1: splitOut('', [FORGED_STOP]) }))
   const ended = endWritten(h)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await ended
   const r = await dwRun(h)
   const text = String(r && r.text !== undefined ? r.text : r).trim()
@@ -1077,7 +1165,7 @@ const EMOJI_NOTICE = 'x'.repeat(1920) + '😀' + 'TAIL'
 await test('dw-unread-dir round 2 (1): a split long notice cuts no surrogate pair, and the pieces join back to the notice', async () => {
   const h = await load(host({ py1: splitOut('', [EMOJI_NOTICE]) }))
   const ended = endWritten(h)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await ended
   const pieces = noticePieces(h)
   assert.ok(pieces.length > 0, 'no NOTICE line in the log')
@@ -1092,7 +1180,7 @@ const SPACE_NOTICE = 'x'.repeat(1921) + ' next ' + 'y'.repeat(50)
 await test('dw-unread-dir round 2 (2): a space at a piece boundary survives the whitespace fold, so the pieces join back', async () => {
   const h = await load(host({ py1: splitOut('', [SPACE_NOTICE]) }))
   const ended = endWritten(h)
-  await fire(h, 'classic.Stop', stopEvent(), {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   await ended
   const pieces = noticePieces(h)
   assert.ok(pieces.length > 0, 'no NOTICE line in the log')
@@ -1114,9 +1202,9 @@ const PY2 = '/opt/py312/python3'
 const SID2 = 'bbbbbbbb-1111-2222-3333-444444444444'
 
 // One Stop, then wait for its judge to log END and free the one-judge slot, so the next Stop judges too.
-async function stopJudged(h, e = stopEvent()) {
+async function turnJudged(h) {
   const want = endLines(h) + 1
-  await fire(h, 'classic.Stop', e, {})
+  await fire(h, 'turn.complete', turnEvent(), {})
   const t0 = Date.now()
   while (endLines(h) < want && Date.now() - t0 < 3000) await settle(5)
   same(endLines(h), want, 'END lines after the Stop: the judge never finished')
@@ -1126,9 +1214,9 @@ async function stopJudged(h, e = stopEvent()) {
 
 await test('python once: two Stops run the finder once, and the second Stop spawns the found path', async () => {
   const h = await load(host())
-  await stopJudged(h)
+  await turnJudged(h)
   const afterFirst = pyCalls(h).length
-  await stopJudged(h)
+  await turnJudged(h)
   same(finds(h).length, 1, 'finder calls for two Stops')
   assert.ok(pyCalls(h).length > afterFirst, 'the second Stop never reached python, so the finder count proves nothing')
   same([...new Set(pyCalls(h).map(p => p.argv[0]))], [PY], 'paths python was spawned with')
@@ -1136,7 +1224,7 @@ await test('python once: two Stops run the finder once, and the second Stop spaw
 
 await test('python once: a Stop and a /dw share the one finder call', async () => {
   const h = await load(host())
-  await stopJudged(h)
+  await turnJudged(h)
   const afterStop = pyCalls(h).length
   await dwRun(h)
   same(finds(h).length, 1, 'finder calls for a Stop and a /dw')
@@ -1146,16 +1234,16 @@ await test('python once: a Stop and a /dw share the one finder call', async () =
 
 await test('python once: a cached path that fails to start is tried first, then the finder runs again and its new path is used', async () => {
   const h = await load(host())
-  await stopJudged(h)
-  await stopJudged(h)
+  await turnJudged(h)
+  await turnJudged(h)
   // The machine changes: the cached path is gone, and the finder now answers PY2.
   const gone = argv => { if (argv[0] === PY) throw new Error(`spawn ${PY} ENOENT`) }
   h.py1 = gone
   h.py2 = gone
   h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
   const mark = h.procs.length
-  await stopJudged(h)
-  await stopJudged(h)
+  await turnJudged(h)
+  await turnJudged(h)
   const after = h.procs.slice(mark)
   same(after[0].argv[0], PY, 'the first call after the path broke: the cached path, not the finder')
   same(after.filter(p => p.argv[0] === PY).length, 1, 'tries of the dead path')
@@ -1167,15 +1255,15 @@ await test('python once: a cached path that fails to start is tried first, then 
 await test('python once: a non-zero exit from a cached path whose file is gone sends the next Stop to the finder, and its new path is used', async () => {
   const h = await load(host())
   h.files.set(PY, '')
-  await stopJudged(h)
+  await turnJudged(h)
   h.files.delete(PY)
   const gone = argv => (argv[0] === PY ? { exitCode: 127, stdout: '', stderr: 'cannot start ' + PY } : undefined)
   h.py1 = gone
   h.py2 = gone
   h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
   const mark = h.procs.length
-  await stopJudged(h)
-  await stopJudged(h)
+  await turnJudged(h)
+  await turnJudged(h)
   const after = h.procs.slice(mark)
   same(after[0].argv[0], PY, 'the first call after the file was deleted: the cached path, not the finder')
   same(finds(h).length, 2, 'finder calls: one at the start, one after the cached file was deleted')
@@ -1192,7 +1280,7 @@ for (const [label, broken] of [
   await test(`python once: a non-zero exit from a cached path when $.fs.exists ${label} keeps that run's result and sends the next Stop to the finder`, async () => {
     const h = await load(host())
     h.files.set(PY, '')
-    await stopJudged(h)
+    await turnJudged(h)
     const exists = h.$.fs.exists
     h.$.fs.exists = p => (p === PY ? broken(p) : exists(p))
     const gone = argv => (argv[0] === PY ? { exitCode: 127, stdout: '', stderr: 'cannot start ' + PY } : undefined)
@@ -1200,11 +1288,11 @@ for (const [label, broken] of [
     h.py2 = gone
     h.finder = { exitCode: 0, stdout: PY2 + '\r\n', stderr: '' }
     const mark = h.procs.length
-    await stopJudged(h)
+    await turnJudged(h)
     const endLine = logNow(h).split('\n').filter(l => /^\S+ END /.test(l)).at(-1)
     assert.match(endLine, /decision_watch exited 127/, `the run's exit 127 never reached the judge: ${endLine}`)
     assert.doesNotMatch(endLine, /MOD ERROR/, 'the failed check discarded the run result')
-    await stopJudged(h)
+    await turnJudged(h)
     const after = h.procs.slice(mark)
     same(after[0].argv[0], PY, 'the first call after the break: the cached path, not the finder')
     same(finds(h).length, 2, 'finder calls: one at the start, one after the check failed')
@@ -1216,10 +1304,10 @@ for (const [label, broken] of [
 await test('python once: a python that exits non-zero from a file that exists keeps the path, so the next Stop does not run the finder', async () => {
   const h = await load(host())
   h.files.set(PY, '')
-  await stopJudged(h)
+  await turnJudged(h)
   h.py1 = { exitCode: 1, stdout: '', stderr: 'script error' }
-  await stopJudged(h)
-  await stopJudged(h)
+  await turnJudged(h)
+  await turnJudged(h)
   same(finds(h).length, 1, 'finder calls when python started and the script failed')
 })
 
@@ -1230,12 +1318,12 @@ for (const [label, opts] of [
 ]) {
   await test(`python once: a find that failed is not kept, so the next Stop looks again (${label})`, async () => {
     const h = await load(host(opts))
-    await stopJudged(h)
+    await turnJudged(h)
     same(pyCalls(h).length, 0, 'python calls while no python was found')
     const before = finds(h).length
     h.finderThrow = false
     h.finder = null
-    await stopJudged(h)
+    await turnJudged(h)
     assert.ok(finds(h).length > before, 'the next Stop never ran the finder again')
     same(pyCalls(h).at(-1).argv[0], PY, 'path of the python call once one is found')
   })
@@ -1244,20 +1332,20 @@ for (const [label, opts] of [
 await test('python once: separate module loads each run the finder once', async () => {
   const a = await load(host())
   const b = await load(host())
-  await stopJudged(a)
-  await stopJudged(b)
-  await stopJudged(a)
-  await stopJudged(b)
+  await turnJudged(a)
+  await turnJudged(b)
+  await turnJudged(a)
+  await turnJudged(b)
   same(finds(a).length, 1, 'finder calls, first load')
   same(finds(b).length, 1, 'finder calls, second load')
 })
 
 await test('python once: a new session id in the same load (a /clear) reuses the path', async () => {
   const h = await load(host())
-  await stopJudged(h)
+  await turnJudged(h)
   const afterFirst = pyCalls(h).length
   h.sid = SID2
-  await stopJudged(h, stopEvent({ session_id: SID2 }))
+  await turnJudged(h)
   assert.ok(pyCalls(h).length > afterFirst, 'the new session never reached python, so the finder count proves nothing')
   same(finds(h).length, 1, 'finder calls across a session id change')
 })
