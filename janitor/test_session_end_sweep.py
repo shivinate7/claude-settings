@@ -15,8 +15,11 @@ Every fixture repository is a REAL git repository built with real git calls, the
 janitor/test_sweep.py's own fixtures are: a fake or mocked git would prove nothing about
 `guard.primary_checkout`, which shells out to git twice.
 """
+import contextlib
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -528,6 +531,251 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 value = deadline_value(calls[0])
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
+
+
+from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home
+
+
+def make_repo_with_remote(where):
+    """A repo with an `origin` it has pushed to, so `ls-remote` has a remote to list."""
+    make_repo(where)
+    remote = where + "_remote.git"
+    require(run_vcs(ROOT, "init", "-q", "--bare", remote).returncode == 0, "bare %r" % remote)
+    require(run_vcs(where, "remote", "add", "origin", remote).returncode == 0, "remote add")
+    require(run_vcs(where, "push", "-q", "-u", "origin", "main").returncode == 0, "push")
+    run_vcs(where, "remote", "set-head", "origin", "main")
+
+
+class SessionEndFetchThrottle(unittest.TestCase):
+    """The SessionEnd sweep fetches and ls-remotes a repository at most once per 10 minutes.
+
+    The tests fix this CONTRACT for the builder: the last fetch of each repository is one file in
+    `<config dir>/state/sweep-fetch/`, named by the repository's common git dir, holding the
+    decimal Unix time (seconds, wall clock) of that fetch. The common git dir is the key because
+    every worktree of one clone shares its remote. The tests never read a file name; they list
+    the folder, and rewrite or delete what they find.
+
+    The hook is driven through `session_end_sweep.handle`, as a SessionEnd does. Its sweep child
+    runs in-process (`sweep.main` on the hook's own argv), and `_nowindow.run`, the one home of
+    every child start, is wrapped to count each `git fetch` and `git ls-remote` before running the
+    real git."""
+
+    RECORD_DIR = ("state", "sweep-fetch")
+
+    def setUp(self):
+        import _nowindow
+        import session_end_sweep
+        import sweep
+        self.hook, self.sweep, self.nowindow = session_end_sweep, sweep, _nowindow
+        self.cfg = tempfile.mkdtemp(prefix="throttle_cfg_", dir=ROOT)
+        self.calls = []  # (kind, realpath of the -C folder)
+        self.real_run = _nowindow.run
+        self.saved_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
+        _nowindow.run = self._counting_run
+        # A slow machine must not end a pass at "not judged: deadline" and fake a keep.
+        self.saved_budget = sweep.JUDGE_BUDGET_SECONDS
+        sweep.JUDGE_BUDGET_SECONDS = 600
+        self.saved_timeout = session_end_sweep.SWEEP_TIMEOUT_SECONDS
+        session_end_sweep.SWEEP_TIMEOUT_SECONDS = 600  # the budget is then the ceiling less its tails
+
+    def tearDown(self):
+        self.sweep.JUDGE_BUDGET_SECONDS = self.saved_budget
+        self.hook.SWEEP_TIMEOUT_SECONDS = self.saved_timeout
+        self.nowindow.run = self.real_run
+        if self.saved_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = self.saved_cfg
+
+    def _counting_run(self, argv, *args, **kwargs):
+        if isinstance(argv, list) and self.hook.SWEEP_PATH in argv:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = self.sweep.main(argv[2:])
+            return subprocess.CompletedProcess(argv, code or 0, "", "")
+        if isinstance(argv, list) and "-C" in argv:
+            at = argv.index("-C")
+            sub = argv[at + 2:at + 3]
+            if sub and sub[0] in ("fetch", "ls-remote"):
+                self.calls.append((sub[0], os.path.normcase(os.path.realpath(argv[at + 1]))))
+        return self.real_run(argv, *args, **kwargs)
+
+    def session_end(self, cwd):
+        self.hook.handle({"hook_event_name": "SessionEnd", "cwd": cwd}, elapsed_seconds=0.0)
+
+    def counts(self, repo):
+        where = os.path.normcase(os.path.realpath(repo))
+        mine = [kind for kind, path in self.calls if path == where]
+        return mine.count("fetch"), mine.count("ls-remote")
+
+    def records(self):
+        folder = os.path.join(self.cfg, *self.RECORD_DIR)
+        if not os.path.isdir(folder):
+            return []
+        return [os.path.join(folder, n) for n in sorted(os.listdir(folder))]
+
+    def set_records(self, text):
+        for path in self.records():
+            write(path, text)
+
+    def repo(self, name):
+        where = os.path.join(ROOT, name)
+        make_repo_with_remote(where)
+        return where
+
+    def test_first_session_end_fetches_and_records_the_time(self):
+        repo = self.repo("throttle_first")
+        before = time.time()
+        self.session_end(repo)
+        fetches, listings = self.counts(repo)
+        self.assertEqual(fetches, 1, "the first SessionEnd must fetch once")
+        self.assertGreaterEqual(listings, 1, "the first SessionEnd must run ls-remote (counter check)")
+        self.assertEqual(len(self.records()), 1, "one record per repository in the state folder")
+        with open(self.records()[0], encoding="utf-8") as handle:
+            self.assertGreaterEqual(float(handle.read().strip()), before - 1)
+
+    def test_second_session_end_within_10_minutes_runs_no_fetch_and_no_ls_remote(self):
+        repo = self.repo("throttle_second")
+        self.session_end(repo)
+        first = self.counts(repo)
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo), first,
+                         "the second SessionEnd inside 10 minutes ran git fetch or ls-remote")
+
+    def test_a_record_just_inside_the_window_still_throttles(self):
+        repo = self.repo("throttle_inside")
+        self.session_end(repo)
+        first = self.counts(repo)
+        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS - 60)))
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo), first)
+
+    def test_after_10_minutes_it_fetches_again(self):
+        repo = self.repo("throttle_after")
+        self.session_end(repo)
+        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
+        self.session_end(repo)
+        fetches, listings = self.counts(repo)
+        self.assertEqual(fetches, 2, "a record older than 10 minutes must allow a new fetch")
+        self.assertGreaterEqual(listings, 2)
+
+    def test_the_fetch_after_the_window_renews_the_record(self):
+        repo = self.repo("throttle_renew")
+        self.session_end(repo)
+        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
+        self.session_end(repo)
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo)[0], 2, "the renewed record must throttle the third call")
+
+    def test_two_repositories_each_get_their_own_fetch(self):
+        repo_a, repo_b = self.repo("throttle_a"), self.repo("throttle_b")
+        self.session_end(repo_a)
+        self.session_end(repo_b)
+        self.assertEqual(self.counts(repo_a)[0], 1)
+        self.assertEqual(self.counts(repo_b)[0], 1, "repo B must not borrow repo A's record")
+        self.assertEqual(len(self.records()), 2, "one record per repository")
+        self.session_end(repo_a)
+        self.session_end(repo_b)
+        self.assertEqual(self.counts(repo_a)[0], 1)
+        self.assertEqual(self.counts(repo_b)[0], 1)
+
+    def test_a_missing_corrupt_or_future_record_means_fetch_now(self):
+        # Each row damages the record after a first fetch; the next SessionEnd must fetch again.
+        rows = (
+            ("missing", None),
+            ("empty", ""),
+            ("garbage", "not a time"),
+            ("nan", "nan"),
+            ("inf", "inf"),
+            ("future", repr(time.time() + 3600)),
+        )
+        for label, text in rows:
+            with self.subTest(record=label):
+                repo = self.repo("throttle_damaged_" + label)
+                self.session_end(repo)
+                self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
+                if text is None:
+                    for path in self.records():
+                        os.remove(path)
+                else:
+                    self.set_records(text)
+                before = self.counts(repo)[0]
+                self.session_end(repo)
+                self.assertEqual(self.counts(repo)[0], before + 1,
+                                 "a %s record must fail toward fetching" % label)
+                for path in self.records():
+                    os.remove(path)
+
+    def test_an_unwritable_record_folder_still_fetches_and_still_exits(self):
+        repo = self.repo("throttle_unwritable")
+        write(os.path.join(self.cfg, "state"), "a file where the state folder should be\n")
+        self.session_end(repo)
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo)[0], 2,
+                         "with no record that can be kept, every SessionEnd fetches")
+
+    def test_two_worktrees_of_one_clone_share_one_record(self):
+        repo = self.repo("throttle_wt_primary")
+        linked = os.path.join(ROOT, "throttle_wt_linked")
+        require(run_vcs(repo, "worktree", "add", "-q", "-b", "wt-throttle", linked).returncode == 0,
+                "worktree add")
+        self.session_end(repo)
+        self.session_end(linked)
+        self.assertEqual(self.counts(repo)[0], 1, "the linked worktree's SessionEnd must not fetch again")
+        self.assertEqual(len(self.records()), 1, "the clone's common git dir is the one key")
+
+    def test_the_rest_of_the_sweep_still_runs_on_a_throttled_call(self):
+        repo = self.repo("throttle_rest")
+        self.session_end(repo)
+        first = self.counts(repo)
+        add_reapable_branch(repo, "reap-me-throttled")
+        gone = os.path.join(ROOT, "throttle_rest_gone")
+        require(run_vcs(repo, "worktree", "add", "-q", "-b", "gone-branch", gone).returncode == 0,
+                "worktree add")
+        shutil.rmtree(gone)  # a stale registration: `git worktree prune` is the sweep's own work
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+        self.assertNotIn("reap-me-throttled", local_branches(repo),
+                         "a throttled call must still reap a merged branch")
+        listed = run_vcs(repo, "worktree", "list", "--porcelain").stdout
+        self.assertNotIn(os.path.basename(gone), listed,
+                         "a throttled call must still prune a stale worktree registration")
+
+
+    def pushed_branch(self, repo, name):
+        """A branch with one commit no other branch holds, pushed to origin, `main` checked out."""
+        require(run_vcs(repo, "checkout", "-q", "-b", name).returncode == 0, "checkout %s" % name)
+        write(os.path.join(repo, name + ".txt"), name + chr(10))
+        require(run_vcs(repo, "add", "-A").returncode == 0, "add %s" % name)
+        require(run_vcs(repo, *IDENT, "commit", "-q", "-m", name).returncode == 0, "commit %s" % name)
+        require(run_vcs(repo, "push", "-q", "origin", name).returncode == 0, "push %s" % name)
+        require(run_vcs(repo, "checkout", "-q", "main").returncode == 0, "back to main")
+
+    def test_a_throttled_call_reaps_no_branch_on_a_stale_on_remote_read(self):
+        # The remote lost `gone-upstream` after our last fetch, so the local remote-tracking ref
+        # is stale and the branch holds the only copy of its commit. A throttled run must keep
+        # it, as a fetching run on the same state does. `still-pushed` is on the remote now, but
+        # a throttled run cannot know that from a ref up to 10 minutes old: it is kept too.
+        repo = self.repo("throttle_stale_remote")
+        remote = repo + "_remote.git"
+        self.session_end(repo)  # fetches, records the time
+        self.pushed_branch(repo, "gone-upstream")
+        self.pushed_branch(repo, "still-pushed")
+        require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
+        first = self.counts(repo)
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+        self.assertIn("gone-upstream", local_branches(repo),
+                      "a throttled call reaped a branch holding the only copy, on a stale ref")
+        self.assertIn("still-pushed", local_branches(repo),
+                      "a throttled call reaped a branch on the strength of an on-remote read")
+        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
+        self.session_end(repo)
+        self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
+        self.assertIn("gone-upstream", local_branches(repo),
+                      "a fetching run must keep the only copy once the stale ref is pruned")
+        self.assertNotIn("still-pushed", local_branches(repo),
+                         "a fetching run must still reap a branch the fresh remote holds")
 
 
 if __name__ == "__main__":
