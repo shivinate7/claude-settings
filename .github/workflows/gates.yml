@@ -408,10 +408,10 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
-      - name: Memory monitor test, pwsh
+      - name: Memory monitor test, Windows PowerShell 5.1
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: powershell
-        run: pwsh -NoProfile -File tools/mem-monitor.test.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/mem-monitor.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either. gates-macos
