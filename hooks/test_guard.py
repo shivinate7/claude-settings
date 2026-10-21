@@ -5772,6 +5772,171 @@ for _name, _command in (
 ):
     sh("delete: scanner: " + _name + " is no wide delete", _command, "allow", cwd=NOGIT)
 
+# A RECURSIVE DELETE OF `.`, `..`, THE WORKING FOLDER OR A PARENT OF IT (decision rm-path-wrapper,
+# the rm shim on PATH, whose refusals the guard now holds on every platform and in both shells).
+# Recursion alone is enough: no force flag is needed. A named folder, a sibling of the working folder
+# and a call that is not recursive stay allowed. Every name below carries `rm-parent`, so
+# MUTATE_ONLY=rm-parent runs this block and nothing else. The existing `delete:` cases pin the rest.
+# Where a folder change comes first (`cd`, `pushd`, `Set-Location`, `sl`, `chdir`) the reason must
+# also say how to write the delete so it passes.
+RM_PARENT_HINT = (("rm -rf ./build", "rm -rf build", "Remove-Item -Recurse build",
+                   "Remove-Item -Recurse ./build"),)
+
+
+def rm_parent(name, command, expected="deny", **kw):
+    """One case of the block: a deny names destructive-delete, an allow names nothing."""
+    sh("rm-parent: " + name.replace("\n", " ; "), command, expected,
+       "destructive-delete" if expected == "deny" else None, cwd=NOGIT, **kw)
+
+
+# The flag spellings, on `.` and `..`: one cluster, split flags, a capital R, a verbose letter, the
+# long names, recursion with no force flag at all, and the flags ended by `--`.
+for _flags in ("-rf", "-r -f", "-fr", "-Rf", "-rfv", "-r", "-R", "--recursive",
+               "--recursive --force", "-rf --"):
+    for _target in (".", ".."):
+        rm_parent("rm %s %s" % (_flags, _target), "rm %s %s" % (_flags, _target))
+# The target spellings, on a recursive call with no force flag.
+for _target in ("./", "../", "../..", "./..", "../../..", ".\\", "..\\", "..\\..", '"."', '".."',
+                "'..'", '"../.."'):
+    rm_parent("rm -r " + _target, "rm -r " + _target)
+# A segment shlex cannot parse (one lone quote) is read as raw text: the same act must still deny.
+for _command in ("rm -rf .. it's", "rm -rf ../ it's", "rm -r .. it's", "rm -r ./ it's"):
+    rm_parent("a lone apostrophe: " + _command, _command)
+
+# PowerShell: the verbs and their abbreviated flags, with and without -Force, positional.
+for _verb in ("Remove-Item -Recurse", "Remove-Item -r", "Remove-Item -Rec", "ri -Recurse",
+              "del -Recurse", "Remove-Item -Recurse -Force"):
+    for _target in (".", "..", ".\\", "..\\", "'..'"):
+        rm_parent("PowerShell %s %s" % (_verb, _target), "%s %s" % (_verb, _target),
+                  tool="PowerShell")
+# PowerShell: the target named by -Path or -LiteralPath, ahead of the flag or after it.
+for _form in ("Remove-Item -Path %s -Recurse", "Remove-Item -LiteralPath %s -Recurse",
+              "Remove-Item %s -Recurse", "Remove-Item -Recurse -Path %s",
+              "Remove-Item -Recurse -LiteralPath %s -Force", "ri -Path %s -r",
+              "del -LiteralPath %s -Recurse"):
+    for _target in (".", ".."):
+        rm_parent("PowerShell " + _form % _target, _form % _target, tool="PowerShell")
+
+# cmd.exe: `rd`, `rmdir`, `del` and `erase` read `/s` as the recursive flag, bare or after `cmd /c`.
+for _tool in ("Bash", "PowerShell"):
+    for _command in ("rmdir /s .", "rmdir /s /q ..", "rd /s /q ..", "rd /s ..\\..", "RD /S /Q ..",
+                     "cmd /c rd /s /q ..", "cmd.exe /c rmdir /s /q ."):
+        rm_parent("%s %s" % (_tool, _command), _command, tool=_tool)
+
+# A folder change earlier in the same command is not tracked: `.` and a relative parent are refused
+# after it, and the reason carries a rewrite hint.
+for _tool, _command in (
+    ("Bash", "cd .. && rm -rf ."),
+    ("Bash", "cd build && rm -rf ."),
+    ("Bash", "cd build && rm -r ."),
+    ("Bash", "cd build && rm --recursive .."),
+    ("Bash", "cd build; rm -rf ../.."),
+    ("Bash", "pushd build && rm -rf ."),
+    ("Bash", "cd build\nrm -r ."),
+    ("PowerShell", "cd build; Remove-Item -Recurse ."),
+    ("PowerShell", "Set-Location build; Remove-Item -Recurse ."),
+    ("PowerShell", "sl build; Remove-Item -Recurse .."),
+    ("PowerShell", "chdir build; Remove-Item -Recurse ."),
+    ("PowerShell", "pushd build; Remove-Item -Recurse -Force ."),
+    ("PowerShell", "Set-Location build\nri -r .."),
+):
+    rm_parent("a folder change ahead of it: " + _command, _command, tool=_tool,
+              carries=RM_PARENT_HINT)
+# Scanner pins (building-scanner-respects-strings) for the same reads: a comment opener inside
+# quotes, a multi-line quote and a lone apostrophe ahead of the delete must hide nothing.
+for _name, _command in (
+    ("a # inside quotes ahead of it", 'echo "a # b"; rm -r ..'),
+    ("a // inside quotes ahead of it", 'echo "a // b"; rm -r ..'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nrm -r ..'),
+    ("a lone apostrophe ahead of it", "echo don't && rm -r .."),
+    ("a lone apostrophe in a trailing comment", "rm -r .. # don't"),
+):
+    rm_parent("the delete behind " + _name, _command)
+for _name, _command in (
+    ("a # inside quotes", 'echo "a # b"; cd build && rm -r .'),
+    ("a // inside quotes", 'echo "a // b"; cd build && rm -r .'),
+    ("a multi-line quote", 'echo "first line\nsecond line"\ncd build\nrm -r .'),
+):
+    rm_parent("the folder change behind " + _name, _command, carries=RM_PARENT_HINT)
+
+# The working folder and its parents by ABSOLUTE path, in every spelling Windows reads: `C:/x`,
+# `C:\x` and Git Bash `/c/x`. NOGIT is the working folder of each case, and ROOT is its parent.
+_CWD = os.path.join(os.path.realpath(ROOT), "nogit")
+_PARENT = os.path.realpath(ROOT)
+_GRAND = os.path.dirname(_PARENT)
+
+
+def _spellings(path):
+    """The (kind, text) spellings of one folder that this platform reads."""
+    if os.name != "nt":
+        return [("posix", path)]
+    forward = path.replace("\\", "/")
+    return [("C:/", forward), ("C:\\", path), ("/c/", "/" + forward[0].lower() + forward[2:])]
+
+
+for _label, _folder in (("the working folder", _CWD), ("its parent", _PARENT)):
+    for _kind, _text in _spellings(_folder):
+        rm_parent("Bash rm -r %s as %s" % (_label, _kind), 'rm -r "%s"' % _text)
+        if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
+            rm_parent("PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind),
+                      'Remove-Item -Recurse "%s"' % _text, tool="PowerShell")
+for _kind, _text in _spellings(_GRAND):
+    rm_parent("Bash rm -rf its grandparent as " + _kind, 'rm -rf "%s"' % _text)
+for _kind, _text in _spellings(_PARENT)[:1]:
+    rm_parent("Bash rm -r its parent with a trailing slash as " + _kind, 'rm -r "%s/"' % _text)
+rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
+if os.name != "nt":
+    skip_case("rm-parent: the C:/, C:\\ and /c/ spellings of the working folder and its parents",
+              "a drive-letter spelling names no folder on this platform, so only the plain path runs")
+
+# ALLOWED: a named folder, a sibling that is not a parent, a folder whose name merely starts with a
+# dot or the working folder's name, a call that is not recursive, and a delete that follows a folder
+# change but names a folder.
+for _name, _command in (
+    ("a dot-slash folder, recursive with no force flag", "rm -r ./build"),
+    ("a sibling folder", "rm -rf ../sibling"),
+    ("a sibling folder, recursive with no force flag", "rm -r ../sibling"),
+    ("a folder whose name starts with two dots", "rm -rf ..cache"),
+    ("a folder whose name starts with a dot", "rm -rf .cache"),
+    ("rm of the working folder, not recursive", "rm ."),
+    ("rm of the parent, not recursive", "rm .."),
+    ("rm -f of the working folder, not recursive", "rm -f ."),
+    ("rd of the parent, no /s", "rd .."),
+    ("rmdir /q of the parent, no /s", "rmdir /q .."),
+    ("rd /s /q of a sibling", "rd /s /q ..\\sibling"),
+    ("a folder named after a folder change", "cd build && rm -rf ./out"),
+    ("a folder named after pushd", "pushd build && rm -r out"),
+    ("a folder named after a change to the parent", "cd .. && rm -rf ./build"),
+    ("a child of the working folder by absolute path", 'rm -rf "%s/build"' % _CWD),
+    ("a sibling whose name starts with the working folder's name", 'rm -rf "%s2"' % _CWD),
+    ("a sibling of the working folder by absolute path", 'rm -rf "%s/sibling"' % _PARENT),
+):
+    rm_parent(_name, _command, "allow")
+for _name, _command in (
+    ("Remove-Item -Recurse of a dot-slash folder", "Remove-Item -Recurse ./build"),
+    ("Remove-Item -Recurse of a sibling folder", "Remove-Item -Recurse ..\\sibling"),
+    ("Remove-Item of the working folder, not recursive", "Remove-Item ."),
+    ("Remove-Item -Force of the parent, not recursive", "Remove-Item -Force .."),
+    ("a folder named after Set-Location", "Set-Location build; Remove-Item -Recurse out"),
+    ("a folder named after sl", "sl build; Remove-Item -Recurse -Force ./out"),
+    ("a child of the working folder by absolute path",
+     'Remove-Item -Recurse "%s\\build"' % _CWD),
+):
+    rm_parent("PowerShell " + _name, _command, "allow", tool="PowerShell")
+# Text that only names a delete calls nothing.
+for _name, _command in (
+    ("a single-quoted echo", "echo 'rm -r ..'"),
+    ("a # inside quotes", 'echo "# rm -r .."'),
+    ("a multi-line quote", 'echo "first line\nrm -r ..\nlast line"'),
+    ("a folder change named in a quoted echo", 'echo "cd .. && rm -r ." && rm -rf ./build'),
+    ("a grep pattern", 'grep "rm -rf .." notes.md'),
+    ("a commit message", VCS + " commit -m 'never run rm -r . here'"),
+    ("a lone apostrophe in a trailing comment", "rm -r build # don't"),
+):
+    rm_parent("allows " + _name, _command, "allow")
+rm_parent("PowerShell allows a quoted Write-Host", "Write-Host 'Remove-Item -Recurse ..'", "allow",
+          tool="PowerShell")
+
 
 # =========================================================================== 3b. linked node_modules
 # q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
