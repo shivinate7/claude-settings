@@ -15,6 +15,7 @@ extension-less-plus-`.cmd`-shim trick `put_shim` uses in merge/test_merge.py, ne
 Windows `shutil.which` never matches an extension-less script). The fake only records that
 it ran -- this spec never calls it, so any record at all is the defect.
 """
+import importlib.util
 import json
 import os
 import re
@@ -694,6 +695,210 @@ def case_handoffs_dir_keeps_other_sessions():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- premises
+# Spec to build: a handoff holds a `## Working premises` section, one line per premise:
+#   - P<n> [<kind>] <claim> Source: <where>. Checked <date or never>.
+# The kinds are ruling, measured, read, notes and assumed. After a compaction the reorient
+# message lists every premise id except a `ruling`. After /clear or a fork it lists every id.
+
+PREMISE_KIND_NAMES = {"ruling", "measured", "read", "notes", "assumed"}
+HANDOFF_WITH_PREMISES = (
+    "# Handoff\n\n## Goal\nFix the handoff. Source: owner 2026-10-21.\n\n"
+    "## Working premises\n"
+    "- P1 [ruling] An audit Explore may run Opus. Source: owner 2026-10-21, "
+    "decisions/subagent-model-cap.md. Checked 2026-10-21.\n"
+    "- P2 [read] The guard denies only a Haiku model below the floor. Source: "
+    "hooks/guard.py:1577 at 73ed71a7. Checked 2026-10-21.\n"
+    "- P3 [measured] test_handoff_wave2 passes on this branch. Source: verdict run "
+    "2026-10-21 14:02 CDT, at 9f1c2ab. Checked 2026-10-21.\n"
+    "- P4 [notes] Lane A of c13 merged the config_watch fast exit. Source: roadmap c13 "
+    "note. Checked never.\n"
+    "- P5 [assumed] Agent hooks accept a full model id. Source: none. Checked never.\n\n"
+    "## Next steps\n- Go on.\n")
+NO_SECTION_MESSAGE = "no working premises section"
+NOTES_SENTENCE = "facts in the compaction summary are notes until checked"
+
+
+def ids_in(text):
+    return set(re.findall(r"\bP\d+\b", text or ""))
+
+
+def squash(text):
+    return " ".join((text or "").lower().split())
+
+
+def step_body(prompt_text, number):
+    """The text of one numbered step of the prompt file, heading excluded; None when absent."""
+    m = re.search(r"^## %d\.[^\n]*\n(.*?)(?=^## \d+\.|\Z)" % number, prompt_text, re.M | re.S)
+    return m.group(1) if m else None
+
+
+def case_prompt_lists_working_premises():
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    step4 = step_body(text, 4) or ""
+    low = step4.lower()
+    check("prompt: step 4 still exists", bool(step4.strip()), "no '## 4.' step")
+    pos = {k: low.find(k) for k in ("no home yet", "goal", "working premises", "where things stand")}
+    check("prompt: step 4 names Goal and Working premises",
+          pos["goal"] >= 0 and pos["working premises"] >= 0, "positions: %r" % pos)
+    check("prompt: Goal and Working premises come second, after NO HOME YET and before "
+          "Where things stand",
+          0 <= pos["no home yet"] < pos["goal"] < pos["working premises"]
+          < pos["where things stand"], "positions: %r" % pos)
+    heads = re.findall(r"^## \d+\.[^\n]*check premises[^\n]*\n(.*?)(?=^## |\Z)", text,
+                       re.M | re.S | re.I)
+    check("prompt: a numbered step 'Check premises' exists", len(heads) == 1,
+          "found %d" % len(heads))
+    body = heads[0].lower() if heads else ""
+    check("prompt: Check premises says a premise is a claim, weak or stale ones are "
+          "checked first, then the line is rewritten",
+          "claim" in body and ("weak" in body or "stale" in body) and "rewrite" in body,
+          "body: %r" % body[:200])
+
+
+def write_compaction(c):
+    tp = os.path.join(c.root, "transcript.jsonl")
+    write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+    c.run_precompact(tp)
+
+
+def case_reorient_lists_weak_premises():
+    for tag, with_digest in (("digest ok", True), ("digest missing", False)):
+        c = Case("weak_" + tag.split()[1])
+        try:
+            if with_digest:
+                write_compaction(c)
+            put(c.handoff_path(), HANDOFF_WITH_PREMISES)
+            proc = c.run_reorient()
+            out = proc.stdout or ""
+            ids = ids_in(out)
+            check("weak premises (%s): exits 0" % tag, proc.returncode == 0,
+                  "rc=%r err=%r" % (proc.returncode, proc.stderr[-200:]))
+            check("weak premises (%s): lists P2 read, P3 measured, P4 notes, P5 assumed" % tag,
+                  {"P2", "P3", "P4", "P5"} <= ids, "listed: %r" % sorted(ids))
+            check("weak premises (%s): does not list the ruling P1" % tag, "P1" not in ids,
+                  "listed: %r" % sorted(ids))
+            check("weak premises (%s): says summary facts are notes until checked" % tag,
+                  NOTES_SENTENCE in squash(out), "stdout: %r" % out[-300:])
+            check("weak premises (%s): calls no model" % tag, not c.claude_was_called())
+        finally:
+            c.cleanup()
+
+
+def case_reorient_premise_lines_survive_odd_text():
+    """The parser reads text, not code, but a premise line holds comment openers, a lone quote
+    and a wrapped backtick span. The line after it must still be listed."""
+    odd = ("## Working premises\n"
+           "- P6 [notes] Docs say: don't use // or /* here (see # note), a lone \" quote, and "
+           "a `span\n  that wraps` over two lines. Source: https://example.com/a//b. "
+           "Checked never.\n"
+           "- P7 [assumed] After the odd line. Source: none. Checked never.\n")
+    c = Case("odd")
+    try:
+        put(c.handoff_path(), odd)
+        out = c.run_reorient().stdout or ""
+        check("odd text: lists P6 and the P7 that follows it", {"P6", "P7"} <= ids_in(out),
+              "listed: %r" % sorted(ids_in(out)))
+    finally:
+        c.cleanup()
+
+
+def case_reorient_flags_missing_premises():
+    cases = (
+        ("no section", "# Handoff\n\n## Next steps\n- Go on.\n", True),
+        ("section with no premise line", "## Working premises\nNothing here yet.\n", True),
+        ("section with premises (twin)", HANDOFF_WITH_PREMISES, False),
+    )
+    for i, (tag, text, want_warning) in enumerate(cases):
+        for with_digest in (True, False):
+            c = Case("miss%d%d" % (i, with_digest))
+            label = "%s, %s" % (tag, "digest ok" if with_digest else "digest missing")
+            try:
+                if with_digest:
+                    write_compaction(c)
+                put(c.handoff_path(), text)
+                proc = c.run_reorient()
+                low = squash(proc.stdout)
+                check("missing premises (%s): exits 0" % label, proc.returncode == 0,
+                      "rc=%r err=%r" % (proc.returncode, proc.stderr[-200:]))
+                if want_warning:
+                    check("missing premises (%s): says the handoff has no Working premises "
+                          "section and to add it per step 4" % label,
+                          NO_SECTION_MESSAGE in low and "step 4" in low,
+                          "stdout: %r" % low[-300:])
+                else:
+                    check("missing premises (%s): no warning" % label,
+                          NO_SECTION_MESSAGE not in low, "stdout: %r" % low[-300:])
+                check("missing premises (%s): says summary facts are notes until checked" % label,
+                      NOTES_SENTENCE in low, "stdout: %r" % low[-300:])
+            finally:
+                c.cleanup()
+
+
+def case_nudge_points_at_step4():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    c = Case("nudge4")
+    try:
+        p = nudge(c, 260000)
+        check("nudge step 4: still blocks, naming the handoff and the prompt file",
+              is_block(c, p), "out=%r" % p.stdout)
+        try:
+            reason = json.loads(p.stdout).get("reason", "")
+        except Exception:
+            reason = ""
+        low = squash(reason)
+        check("nudge step 4: the reason names step 4", "step 4" in low, "reason: %r" % reason)
+        copied = [s for s in ("no home yet", "where things stand", "rulings with their homes",
+                              "work in flight", "files and commands") if s in low]
+        check("nudge step 4: the reason copies no part of the section list (step 4 is its "
+              "one home)", not copied, "copied: %r" % copied)
+    finally:
+        c.cleanup()
+
+
+KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
+
+
+def case_premise_kinds_one_home():
+    """The kinds the parser accepts are the kinds the record lists: one home, no copy.
+    Parser seam: precompact_handoff.PREMISE_KINDS (any iterable of the kind names).
+    Record: decisions/premise-format.md, one table row per kind, the kind in backticks in
+    the first cell. Exactly one decision may carry that table."""
+    homes = {}
+    ddir = os.path.join(REPO_ROOT, "decisions")
+    for name in sorted(os.listdir(ddir)):
+        if name.endswith(".md"):
+            with open(os.path.join(ddir, name), "r", encoding="utf-8") as f:
+                kinds = KIND_ROW.findall(f.read())
+            if "assumed" in kinds:
+                homes[name] = set(kinds)
+    check("kinds home: decisions/premise-format.md lists the kinds, and no other decision does",
+          list(homes) == ["premise-format.md"], "decisions with a kinds table: %r" % list(homes))
+    record = homes.get("premise-format.md", set())
+    check("kinds home: the record lists at least ruling, measured, read, notes, assumed",
+          PREMISE_KIND_NAMES <= record, "record kinds: %r" % sorted(record))
+    code = None
+    try:
+        spec = importlib.util.spec_from_file_location("precompact_handoff_under_test", MODULE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        code = set(getattr(mod, "PREMISE_KINDS"))
+    except Exception as e:
+        print("kinds home: no usable PREMISE_KINDS in the module: %r" % e)
+    check("kinds home: the parser's PREMISE_KINDS exists and is not empty", bool(code),
+          "got %r" % code)
+    check("kinds home: PREMISE_KINDS equals the record's kinds", bool(code) and code == record,
+          "code %r, record %r" % (sorted(code or []), sorted(record)))
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        prompt = f.read()
+    shown = {k for k in PREMISE_KIND_NAMES
+             if re.search(r"\[[^\]\n]*\b%s\b[^\]\n]*\]" % k, prompt)}
+    check("kinds home: the prompt shows each kind in brackets, so a session writes a kind the "
+          "parser accepts", shown == PREMISE_KIND_NAMES, "shown: %r" % sorted(shown))
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -715,6 +920,12 @@ def main() -> int:
     case_handoff_path_not_frozen()
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
+    case_prompt_lists_working_premises()
+    case_reorient_lists_weak_premises()
+    case_reorient_premise_lines_survive_odd_text()
+    case_reorient_flags_missing_premises()
+    case_nudge_points_at_step4()
+    case_premise_kinds_one_home()
 
     if FAILED:
         print()
