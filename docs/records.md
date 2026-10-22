@@ -200,8 +200,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hook-catalog-page` | `docs/catalog.md` lists every hook, judge, mod and skill. | [`decisions/hook-catalog-page.md`](../decisions/hook-catalog-page.md) |
 | `install-refuses-linked-tree` | The installer refuses a linked worktree. | [`decisions/install-refuses-linked-tree.md`](../decisions/install-refuses-linked-tree.md) |
 | `install-sh-stays-off-windows` | `install.sh` does nothing on Windows. | [`decisions/install-sh-stays-off-windows.md`](../decisions/install-sh-stays-off-windows.md) |
+| `machine-load-brake` | Owner, 2026-10-21 (spec) and 2026-10-22 (rulings): a lane-start call reads the machine's load, and a busy or full machine refuses new lanes. | [`decisions/machine-load-brake.md`](../decisions/machine-load-brake.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
-| `owner-override-pass` | The owner types `override` as a whole prompt. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
+| `owner-override-pass` | The owner starts a prompt with the word `override`. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `post-merge-hook-is-a-fallback` | Owner, 2026-10-22: `install.ps1` writes its git post-merge hook only when it installs a copy, not a link. | [`decisions/post-merge-hook-is-a-fallback.md`](../decisions/post-merge-hook-is-a-fallback.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
@@ -225,6 +226,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `gitignore-skips-map-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`debts/gitignore-skips-map-tests.md`](../debts/gitignore-skips-map-tests.md) |
+| `guard-cull-held-two` | `gh-api-method` and `ln-over-directory` have zero guard.log lines on this Windows machine (20,685 lines since 2026-09-16), yet they stay. | [`debts/guard-cull-held-two.md`](../debts/guard-cull-held-two.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`debts/hooks-to-mods-judges.md`](../debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
@@ -250,6 +252,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `push-head-mismatch-trap` | `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. | [`debts/push-head-mismatch-trap.md`](../debts/push-head-mismatch-trap.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
 | `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`debts/refusal-route-around-guard.md`](../debts/refusal-route-around-guard.md) |
+| `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`debts/ruling-kind-vacuous-local-pass.md`](../debts/ruling-kind-vacuous-local-pass.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`debts/sharables-adopts-the-stamp.md`](../debts/sharables-adopts-the-stamp.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`debts/skill-copy-no-typescript.md`](../debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`debts/squash-lane-branch-kept.md`](../debts/squash-lane-branch-kept.md) |
