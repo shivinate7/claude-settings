@@ -17,8 +17,9 @@ Contract the builder codes against:
     whatever stdin holds. As a UserPromptSubmit hook it also captures owner prompts; those cases
     are in test_feedback_inbox.py. With --subagent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
-    As a UserPromptSubmit hook it also grants the owner override pass when the whole prompt is
-    `override`, `override <n>[m|h]` or `override off`; the cases for that are the override_* ones.
+    As a UserPromptSubmit hook it also grants the owner override pass when the prompt starts with the
+    word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
+    `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
 
@@ -291,9 +292,12 @@ def case_cli_no_tz_database():
 # OWNER OVERRIDE PASS. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
 # word `override` becomes a pass. It calls override_pass.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
-# The keyword counts only as the whole prompt: a pass spent on a word inside a longer message, a
-# notice, or text another agent wrote would be a pass the owner never gave. These cases drive the
-# hook as a child, as Claude Code does, with the clock and the config directory in its environment.
+# The keyword counts only as the FIRST word of the prompt, in any case, after leading whitespace: a pass
+# spent on a word inside a sentence, a notice, or text another agent wrote would be a pass the owner
+# never gave. A prompt that starts with the word is a one-act pass and the rest is the reason, written
+# to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
+# cases drive the hook as a child, as Claude Code does, with the clock and the config directory in its
+# environment.
 OV_NOW = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)  # 13:00 in US Central (CDT)
 OV_SESSION = "ov-session-0001"
 
@@ -347,6 +351,16 @@ def ov_pass_files(cfg):
     return [f for f in ov_files(cfg) if f.startswith(os.path.join("state", "override") + os.sep)]
 
 
+def ov_log(cfg):
+    """The lines of guard.log in the config directory, or [] when there is none. Splits on \\n only:
+    a reason that holds a newline must not make a second line."""
+    try:
+        with open(os.path.join(cfg, "guard.log"), encoding="utf-8", newline="") as handle:
+            return [l for l in handle.read().split("\n") if l]
+    except OSError:
+        return []
+
+
 # (name, prompt, kind, how long the pass lasts)
 OV_GRANTS = [
     ("`override` is a one-act pass that ends after 10 minutes", "override", "once", timedelta(minutes=10)),
@@ -356,6 +370,7 @@ OV_GRANTS = [
     ("`override 72h`: the owner picks the length, there is no cap", "override 72h", "timed",
      timedelta(hours=72)),
     ("`OVERRIDE 2H`: keyword and unit ignore case", "OVERRIDE 2H", "timed", timedelta(hours=2)),
+    ("`override 2h` is a 2-hour pass", "override 2h", "timed", timedelta(hours=2)),
 ]
 
 
@@ -373,7 +388,8 @@ def case_override_grants():
 
 def case_override_context_line():
     # The session learns the pass exists and when it ends: the owner's word reached the guard.
-    for prompt, ends in (("override", "13:10"), ("override 3h", "16:00")):
+    for prompt, ends in (("override", "13:10"), ("override 3h", "16:00"),
+                         ("override: use opus for that one review agent", "13:10")):
         proc = ov_type(ov_cfg(), prompt)
         lines = proc.stdout.splitlines() if proc else []
         named = [l for l in lines if "override" in l.lower()]
@@ -403,28 +419,67 @@ def case_override_off():
           and not ov_pass_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_pass_files(cfg)))
 
 
-# Each of these holds the word `override`, and none of them is the whole prompt. The notice forms are
-# the tags question_outcome.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
+# A prompt that starts with the word `override` is a one-act pass, and the rest is the reason. The
+# reason goes to guard.log on ONE line: the log is one record per line, tab-separated, so a newline
+# or a tab in the owner's text is folded to a space. The log line may be built any way; the cases only
+# look for the reason's text. (name, prompt, the reason as it must read in the log line)
+OV_WORDS = [
+    ("the owner's example, a colon and then the reason", "override: use opus for that one review agent",
+     "use opus for that one review agent"),
+    ("no colon: the rest is still the reason", "override use opus for that one review agent",
+     "use opus for that one review agent"),
+    ("a reason that starts with `the`", "override the guard for me", "the guard for me"),
+    ("leading whitespace and a capital letter", "   Override: use opus for that one review agent\n",
+     "use opus for that one review agent"),
+    ("upper case keyword: the reason keeps its own case", "OVERRIDE: Use Opus for that ONE agent",
+     "Use Opus for that ONE agent"),
+    ("the word on one line and the reason on the next", "override\nrun the tests", "run the tests"),
+    ("a newline and a tab in the reason fold to one log line",
+     "override: use opus\nfor the review agent\twith a tab", "use opus for the review agent with a tab"),
+    ("a lone quote in the reason", "override: don't ask twice", "don't ask twice"),
+]
+
+
+def case_override_takes_words():
+    for name, prompt, reason in OV_WORDS:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        got = ov_pass(cfg)
+        hits = [l for l in ov_log(cfg) if reason in l]
+        ok = (proc is not None and proc.returncode == 0 and got is not None and got[0] == "once"
+              and abs((got[1] - (OV_NOW + timedelta(minutes=10))).total_seconds()) <= 1
+              and len(hits) == 1)
+        check("override: takes words, %s" % name, ok,
+              "pass %r; log lines holding the reason %d of %r; files %r; stderr %r" % (
+                  got, len(hits), ov_log(cfg), ov_files(cfg), proc.stderr.strip()[-120:] if proc else "timed out"))
+
+
+# None of these starts with the word `override`, so none grants a pass and none writes a log line.
+# The word as a plural, a past participle or an -ing form is a different word. The notice forms are the
+# tags question_outcome.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
 OV_NO_GRANT = [
     ("a word at the end of a message", "please override"),
-    ("a message that starts with the word", "override the guard for me"),
-    ("a length followed by more words", "override 15m please"),
-    ("the word on a line of a longer prompt", "override\nrun the tests"),
+    ("the word inside a sentence", "please don't override this"),
     ("the word at the end of a longer prompt", "run the tests, then override"),
     ("a plural", "overrides"),
+    ("a plural and then a reason", "overrides: use opus"),
+    ("a past participle", "overridden by me"),
+    ("an -ing form", "overriding the guard"),
     ("a length with no space", "override15m"),
+    ("the word at the start of a later line", "run the tests\noverride: use opus"),
     ("a system-reminder notice", "<system-reminder>\noverride\n</system-reminder>"),
+    ("a system-reminder notice that holds a reason", "<system-reminder>\noverride: use opus\n</system-reminder>"),
     ("a task-notification notice", "<task-notification>override</task-notification>"),
 ]
 
 
-def case_override_not_whole_prompt():
+def case_override_not_the_first_word():
     for name, prompt in OV_NO_GRANT:
         cfg = ov_cfg()
         proc = ov_type(cfg, prompt)
         check("override: grants nothing for " + name,
-              proc is not None and proc.returncode == 0 and not ov_pass_files(cfg),
-              "files %r" % (ov_pass_files(cfg),))
+              proc is not None and proc.returncode == 0 and not ov_pass_files(cfg) and not ov_log(cfg),
+              "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
 
 
 def case_override_corrupt_file_replaced():
@@ -487,7 +542,8 @@ def main():
         case_override_grants()
         case_override_context_line()
         case_override_off()
-        case_override_not_whole_prompt()
+        case_override_takes_words()
+        case_override_not_the_first_word()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
