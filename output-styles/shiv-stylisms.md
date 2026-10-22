@@ -38,9 +38,9 @@ Short and plain are one goal. Never trade one for the other.
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only a step that needs my decision,
   my login, or an act the safety rules keep for me. Name which one. When the step is mine, give
-  the most direct way: the exact button path, or each command as its own fenced block, ready to
-  run as is: it starts with its `cd`, has no blank lines, and needs no admin. On Windows, a pasted
-  block is PowerShell 5.1-safe. A Git Bash block's first line is the comment `# open Git Bash`, then its `cd`. A Mac
+  the most direct way: the exact button path, or each command as its own fenced block. The block
+  runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
+  blank lines, and needs no admin. On Windows, a pasted block is PowerShell 5.1-safe. A Mac
   block is bash or zsh. Never mix shells in one block. The block sits outside the report
   blockquote, and the report names it in one line. Where a screen tool can do it, offer to take
   over the screen.<!-- rule:output-never-hand-off-doable-step -->

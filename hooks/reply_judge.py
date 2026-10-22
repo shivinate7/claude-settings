@@ -40,7 +40,7 @@ INSTRUCTIONS = (
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
     "output-never-hand-off-doable-step: a command left to the owner needs its own fenced code block, "
     "ready to run as is, with one shell in the block. "
-    "A button path, or a step that needs the owner's decision or login, needs no block. "
+    "A button path needs no block; a command needs one, even a login command such as gh auth login. "
     "The block sits outside the report blockquote. "
     "A command the reply already ran is not a step left to the owner. "
     "A command named in a report line as done work, a line that says what ran, is not a step left to the owner. "
