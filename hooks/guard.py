@@ -1622,6 +1622,120 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# use and disk free on the home drive are shares of this machine's capacity; CPU is a second signal. Busy
+# (memory over 85%, disk free under 15%, CPU over 85%) refuses a background lane. Full (memory over 95%, disk
+# free under 5%) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
+LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU = 85.0, 15.0, 85.0
+LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
+LOAD_BUSY_REASON = ("the machine is busy (%s). Run this lane in the foreground, one at a time: an Agent call "
+                    "with run_in_background false. A background lane or a Workflow waits until the load drops.")
+LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
+
+
+def _read_memory():
+    """Percent of physical memory in use, from the OS's own counter, or None on another platform."""
+    import ctypes
+    if sys.platform == "win32":
+        from ctypes import wintypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = MemoryStatus()
+        status.dwLength = ctypes.sizeof(status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
+    if sys.platform == "darwin":
+        # kern.memorystatus_level is the free share that `memory_pressure` prints.
+        level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
+        if ctypes.CDLL(None).sysctlbyname(b"kern.memorystatus_level", ctypes.byref(level),
+                                          ctypes.byref(size), None, 0) != 0:
+            return None
+        return 100.0 - level.value
+    return None
+
+
+def _read_disk():
+    import shutil
+    usage = shutil.disk_usage(os.path.expanduser("~"))
+    return 100.0 * usage.free / usage.total
+
+
+def _read_cpu():
+    """Percent of CPU busy: two Windows system-time reads 200 ms apart, else the 1-minute load average per core."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        def ticks():
+            idle, kernel, user = (wintypes.FILETIME() for _ in range(3))
+            if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel),
+                                                         ctypes.byref(user)):
+                raise OSError("GetSystemTimes failed")
+            return [(t.dwHighDateTime << 32) | t.dwLowDateTime for t in (idle, kernel, user)]
+
+        idle_a, kernel_a, user_a = ticks()
+        time.sleep(0.2)
+        idle_b, kernel_b, user_b = ticks()
+        total = (kernel_b - kernel_a) + (user_b - user_a)   # the kernel time holds the idle time
+        return 100.0 * (total - (idle_b - idle_a)) / total if total > 0 else None
+    if hasattr(os, "getloadavg"):
+        return 100.0 * os.getloadavg()[0] / (os.cpu_count() or 1)
+    return None
+
+
+def read_load() -> dict:
+    """The three readings as percents (memory_pct and cpu_pct busy, disk_free_pct free). No child process
+    and no file. A reading that fails or cannot be read is None, and one failure hides no other."""
+    out = {}
+    for key, read in (("memory_pct", _read_memory), ("disk_free_pct", _read_disk), ("cpu_pct", _read_cpu)):
+        try:
+            value = read()
+            out[key] = None if value is None else min(100.0, max(0.0, float(value)))
+        except Exception:
+            out[key] = None
+    return out
+
+
+def load_hit(tool: str, tool_input) -> tuple:
+    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    read of the call: a failed read or an unread value counts as normal."""
+    if tool not in LANE_TOOLS:
+        return "", ""
+    try:
+        reading = read_load()
+    except Exception:
+        return "", ""
+    if not isinstance(reading, dict):
+        return "", ""
+
+    def value(key):
+        v = reading.get(key)
+        return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
+
+    memory, disk, cpu = value("memory_pct"), value("disk_free_pct"), value("cpu_pct")
+    full = [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
+                        disk is not None and disk < LOAD_FULL_DISK and "disk %.1f%% free" % disk) if t]
+    if full:
+        return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
+    # Only an Agent or Task lane has a foreground form. A session start has none, and no ruling covers it at busy.
+    if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and tool_input.get("run_in_background") is False):
+        return "", ""
+    busy = [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
+                        disk is not None and disk < LOAD_BUSY_DISK and "disk %.1f%% free" % disk,
+                        cpu is not None and cpu > LOAD_BUSY_CPU and "CPU %.1f%% busy" % cpu) if t]
+    if busy:
+        return LOAD_BUSY_REASON % ", ".join(busy), ", ".join(busy)
+    return "", ""
+
+
 # ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
 # `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
@@ -2308,6 +2422,11 @@ def judge(payload) -> None:
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
+
+    # 9c. The machine-load brake: one read on a lane-start call, none on any other call.
+    load_reason, load_matched = load_hit(tool, tool_input)
+    if load_reason:
+        refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
     # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:
