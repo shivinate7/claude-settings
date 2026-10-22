@@ -14323,8 +14323,7 @@ FAMILY = "load-brake"
 # the guard reads the machine's load once: memory in use and disk free on the home drive, each a share of
 # this machine's capacity, and CPU as a second signal. It counts no claude process and no running lane.
 # The levels (placeholders, owner to tune):
-#   busy  memory over 85%, disk free under 15%, or (CPU over 85% AND memory over 75%). CPU alone is not busy
-#         (owner ruling 2026-10-22).
+#   busy  memory over 85%, disk free under 15%, or (CPU over 85% AND memory over 75%).
 #         One lane at a time: the guard refuses a lane that runs in the background and allows one that makes
 #         the caller wait. An Agent or Task call runs in the background only when run_in_background is true.
 #         run_in_background false, or left out, is foreground, and it is allowed at busy. Any Workflow is
@@ -14449,7 +14448,7 @@ LB_LANE_INPUT = {
 LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0}
 LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0}
 # The tools that take run_in_background, and the three ways a call can say it: true, false, or left out.
-# Only true is background (owner ruling 2026-10-22): false and left out both make the caller wait.
+# Only true is background: false and left out both make the caller wait.
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
          (False, "run_in_background false"))
@@ -14718,8 +14717,8 @@ LB_MEM90 = lb_names("memory", "90.0", "90")
 LB_MEM80 = lb_names("memory", "80.0", "80")
 LB_CPU94 = lb_names("cpu", "94.0", "94")
 
-# Agent and Task: every way a call says run_in_background, at normal, busy and full. Busy refuses only an
-# explicit true (owner ruling 2026-10-22): false and left out are foreground lanes, and they are allowed.
+# Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only an
+# explicit true is refused. False and left out are allowed.
 for _short, _tool in LB_SPAWNS:
     for _bg, _say in LB_BG:
         lb_add("%s, normal reading, %s: allowed" % (_short, _say),
@@ -14765,8 +14764,8 @@ lb_add("Agent, CPU 93.4%, run_in_background false: allowed",
 lb_add("Agent, CPU 99%, run_in_background false: CPU never fills the machine, allowed",
        lb_decision_check("Agent", lb_reading(cpu_pct=99.0), "allow", background=False))
 
-# Owner ruling 2026-10-22: CPU alone is not busy. Busy is memory over 85%, disk free under 15%, or CPU over 85%
-# with memory over 75%. A left-out run_in_background is a foreground lane, and it is allowed at busy.
+# CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
+# memory 80% is refused.
 for _short, _tool in LB_SPAWNS:
     lb_add("%s, memory 90%%, run_in_background left out: busy, a foreground lane is allowed" % _short,
            lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow"))
