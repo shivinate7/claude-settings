@@ -14213,7 +14213,7 @@ for _label, _check in (
 
 # =========================================================================== the machine-load brake
 FAMILY = "load-brake"
-# Batch 4, c14. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# Batch 4, c14 (the machine-load brake). On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory, disk free on the home drive, CPU, and on Windows
 # the count of claude processes. The levels (placeholders, owner to tune):
 #   busy  memory over 85%, disk free under 15%, CPU over 85%, or over about 8 claude processes.
