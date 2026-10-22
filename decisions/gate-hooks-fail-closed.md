@@ -14,7 +14,7 @@ Owner, 2026-10-12: a gate whose script or python is missing refuses the call. A 
 
 Why: wrappers that ended `; exit 0` let the call through on a missing script, so the guard's refusals vanished exactly when the guard was broken.
 
-Cost: a machine with `settings.json` but no hooks refuses Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill, AskUserQuestion and two MCP tools. This lasts until the hooks are installed. The refusal names the remedy.
+Cost: a machine with `settings.json` but no hooks refuses Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill and two MCP tools. This lasts until the hooks are installed. The refusal names the remedy.
 
 Protected by `hooks/test_wrappers.py`: each gate wrapper exits 2 with the remedy line on a missing script and a missing python. With a script present it execs it, passes stdin through, and returns its exit code. Advisory entries exit 0. The suite is red on a `settings.json` where a gate carries `onFailure`.
 
