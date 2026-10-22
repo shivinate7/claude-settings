@@ -81,11 +81,14 @@ SOURCES.update({
     os.path.splitext(os.path.basename(path))[0]: path
     for path in mutate_shared.guard_files(os.path.dirname(GUARD)) if path != GUARD
 })
+# hooks/git_reads.py holds the reads sweep.py and session_end_sweep.py call, so it is a target too.
+GIT_READS = os.path.join(REPO_ROOT, "hooks", "git_reads.py")
+SOURCES["git_reads"] = GIT_READS
 
 
 def is_guard_key(name: str) -> bool:
-    """True for "guard" and each "guard_<name>" sibling key."""
-    return name == "guard" or name.startswith("guard_")
+    """True for "guard", each "guard_<name>" sibling key, and "git_reads"."""
+    return name == "guard" or name.startswith("guard_") or name == "git_reads"
 
 
 # Which suite proves a mutation of a given target. Every "sweep"/"guard" mutant is proven against
@@ -262,7 +265,7 @@ MUTATIONS = [
      '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
      '        if stale_agent_lock is not True:\n'
      '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
-     '    live = guard.worktree_live_session(path)\n'
+     '    live = git_reads.worktree_live_session(path)\n'
      '    if live is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
@@ -283,7 +286,7 @@ MUTATIONS = [
      '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
      '        if stale_agent_lock is not True:\n'
      '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
-     '    live = guard.worktree_live_session(path)\n'
+     '    live = git_reads.worktree_live_session(path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
@@ -296,7 +299,7 @@ MUTATIONS = [
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
-     "guard_core",
+     "git_reads",
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
      '        return None\n'
@@ -311,7 +314,7 @@ MUTATIONS = [
      '    return False',
      "test_ancestor_reaps"),
     ("keep rule: the git-cherry patch test never proves a branch empty",
-     "guard_core",
+     "git_reads",
      '    answer = _git(where, "cherry", base, branch)\n'
      '    if answer is None or answer.returncode != 0:\n'
      '        return None\n'
@@ -324,7 +327,7 @@ MUTATIONS = [
 
     # ---- the only-copy rule (plan, "Phase 2") ----
     ("only-copy: stop asking whether a remote carries the branch",
-     "guard_core",
+     "git_reads",
      '    answer = _git(\n'
      '        where, "for-each-ref", "--contains", branch, "--format=%(refname)", "refs/remotes"\n'
      '    )\n'
@@ -341,7 +344,7 @@ MUTATIONS = [
 
     # ---- the liveness test (plan, "Phase 2") ----
     ("liveness: match the process id alone, ignore the recorded start time",
-     "guard_core",
+     "git_reads",
      '    if not isinstance(record, dict):\n'
      '        return False\n'
      '    pid = record.get("pid")\n'
@@ -370,35 +373,35 @@ MUTATIONS = [
      'def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):\n'
      '    """Write the tombstone, log it, THEN delete. In that order: a delete that ran before its\n'
      '    tombstone landed could lose the branch\'s only pointer to work the log has not recorded yet."""\n'
-     '    tip = guard._git(root, "rev-parse", "refs/heads/" + branch)\n'
+     '    tip = git_reads._git(root, "rev-parse", "refs/heads/" + branch)\n'
      '    if tip is None or tip.returncode != 0:\n'
      '        decision["error"] = "could not resolve the branch tip; branch left alone"\n'
      '        return\n'
      '    commit = tip.stdout.strip()\n'
-     '    tomb = guard._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)\n'
+     '    tomb = git_reads._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)\n'
      '    if tomb is None or tomb.returncode != 0:\n'
      '        decision["error"] = "tombstone write failed; branch NOT deleted"\n'
      '        return\n'
      '    append_restore_log(restore_log_path, root, branch, commit)\n'
-     '    delete = guard._git(root, "branch", "-D", branch)\n'
+     '    delete = git_reads._git(root, "branch", "-D", branch)\n'
      '    if delete is None or delete.returncode != 0:\n'
      '        decision["error"] = "delete failed after the tombstone landed: %s" % (\n'
      '            delete.stderr.strip() if delete is not None else "git gave no answer"\n'
      '        )',
      'def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):\n'
      '    """MUTATED: delete first, tombstone after -- the ordering this mutant breaks."""\n'
-     '    tip = guard._git(root, "rev-parse", "refs/heads/" + branch)\n'
+     '    tip = git_reads._git(root, "rev-parse", "refs/heads/" + branch)\n'
      '    if tip is None or tip.returncode != 0:\n'
      '        decision["error"] = "could not resolve the branch tip; branch left alone"\n'
      '        return\n'
      '    commit = tip.stdout.strip()\n'
-     '    delete = guard._git(root, "branch", "-D", branch)\n'
+     '    delete = git_reads._git(root, "branch", "-D", branch)\n'
      '    if delete is None or delete.returncode != 0:\n'
      '        decision["error"] = "delete failed after the tombstone landed: %s" % (\n'
      '            delete.stderr.strip() if delete is not None else "git gave no answer"\n'
      '        )\n'
      '        return\n'
-     '    tomb = guard._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)\n'
+     '    tomb = git_reads._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)\n'
      '    if tomb is None or tomb.returncode != 0:\n'
      '        decision["error"] = "tombstone write failed; branch NOT deleted"\n'
      '        return\n'
@@ -439,8 +442,8 @@ MUTATIONS = [
      '                if held.returncode == 0:\n'
      '                    decision["reason"] += "; ref kept: it holds a younger restore point"\n'
      '                continue\n'
-     '            dropped = guard._git(repo, "update-ref", "-d", ref, commit)',
-     '            dropped = guard._git(repo, "update-ref", "-d", ref)',
+     '            dropped = git_reads._git(repo, "update-ref", "-d", ref, commit)',
+     '            dropped = git_reads._git(repo, "update-ref", "-d", ref)',
      "test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit"),
     ("purge: an unexpired entry for the same commit no longer keeps the ref",
      "sweep",
@@ -683,8 +686,8 @@ MUTATIONS = [
 
     ("prune: a preview prunes the stale registration for real",
      "sweep",
-     '    if confirm and names:\n        done = guard._git(root, "worktree", "prune")',
-     '    if names:\n        done = guard._git(root, "worktree", "prune")',
+     '    if confirm and names:\n        done = git_reads._git(root, "worktree", "prune")',
+     '    if names:\n        done = git_reads._git(root, "worktree", "prune")',
      "test_preview_names_the_stale_registration_and_prunes_nothing"),
 
     ("prune: an unreadable preview is read as an empty list and prunes on",
@@ -887,17 +890,17 @@ MUTATIONS = [
      "test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable"),
     ("stale lock: a running agent's lock no longer keeps",
      "sweep",
-     '    return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS',
+     '    return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS',
      '    return True',
      "test_running_agent_lock_keeps"),
     ("stale lock: an unreadable lock start counts as stale",
      "sweep",
      '        except Exception:\n'
      '            return None\n'
-     '    actual = guard._process_start_ms(pid)',
+     '    actual = git_reads._process_start_ms(pid)',
      '        except Exception:\n'
      '            return True\n'
-     '    actual = guard._process_start_ms(pid)',
+     '    actual = git_reads._process_start_ms(pid)',
      "test_unreadable_lock_start_keeps"),
     ("stale lock: a lock with no start time counts as stale, even when its host runs",
      "sweep",
@@ -908,8 +911,8 @@ MUTATIONS = [
      "test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
-     '        unlocked = guard._git(root, "worktree", "unlock", path)',
-     '        unlocked = guard._git(root, "worktree", "list", path)',
+     '        unlocked = git_reads._git(root, "worktree", "unlock", path)',
+     '        unlocked = git_reads._git(root, "worktree", "list", path)',
      "test_remove_unlocks_then_removes_without_force"),
     ("pushed check: an unpushed commit no longer keeps an unlocked worktree",
      "sweep",
@@ -977,13 +980,13 @@ MUTATIONS = [
      "test_strict_removes_a_pushed_unmerged_tree_idle_25_hours"),
     ("strict: merged is tested by ancestry alone, not by patch",
      "sweep",
-     '        merged = guard.branch_cherry_empty(path, base, "HEAD")',
+     '        merged = git_reads.branch_cherry_empty(path, base, "HEAD")',
      '        merged = False',
      "test_strict_removes_a_tree_merged_by_patch_idle_2_hours"),
     ("strict: merged is read in the root checkout, not the worktree",
      "sweep",
-     '    merged = guard.branch_is_ancestor(path, base, "HEAD")',
-     '    merged = guard.branch_is_ancestor(where, base, "HEAD")',
+     '    merged = git_reads.branch_is_ancestor(path, base, "HEAD")',
+     '    merged = git_reads.branch_is_ancestor(where, base, "HEAD")',
      "test_strict_keeps_a_pushed_but_unmerged_tree"),
     ("strict: a recently active tree no longer keeps",
      "sweep",
@@ -1013,8 +1016,8 @@ MUTATIONS = [
     ("strict: idle is read after git status has touched the index",
      "sweep",
      '    idle = worktree_idle_seconds(entry["path"]) if not attended else None\n'
-     '    path = entry["path"]\n    dirty = guard.porcelain(path)\n',
-     '    path = entry["path"]\n    dirty = guard.porcelain(path)\n'
+     '    path = entry["path"]\n    dirty = git_reads.porcelain(path)\n',
+     '    path = entry["path"]\n    dirty = git_reads.porcelain(path)\n'
      '    idle = worktree_idle_seconds(path) if not attended else None\n',
      "test_strict_removes_a_merged_tree_idle_2_hours"),
     ("strict: sweep_repo drops the flag before it judges a worktree",
@@ -1030,8 +1033,8 @@ MUTATIONS = [
 
     ("stale lock: a failed remove leaves the worktree unlocked",
      "sweep",
-     '            relock = guard._git(root, "worktree", "lock", "--reason",',
-     '            relock = guard._git(root, "worktree", "list", "--reason",',
+     '            relock = git_reads._git(root, "worktree", "lock", "--reason",',
+     '            relock = git_reads._git(root, "worktree", "list", "--reason",',
      "test_failed_remove_restores_the_lock"),
     # only_on="posix": the case needs time.tzset, which Windows lacks.
     ("stale lock: the lock date is read as local time, not UTC",
@@ -1048,7 +1051,7 @@ MUTATIONS = [
      '    live = _live_remote_heads(path)\n'
      '    if live is None:\n'
      '        return None\n'
-     '    answer = guard._git(path, "rev-list", "-n", "1", "HEAD", "--not", "--remotes")\n'
+     '    answer = git_reads._git(path, "rev-list", "-n", "1", "HEAD", "--not", "--remotes")\n'
      '    return not answer.stdout.strip()\n',
      "test_a_branch_deleted_on_the_remote_is_not_pushed_so_its_tree_is_kept"),
     ("pushed check: an unreadable pushed read reaps instead of keeping",
@@ -1060,9 +1063,9 @@ MUTATIONS = [
      "test_unreadable_pushed_check_keeps"),
     ("stale lock: an unreadable process start counts as stale",
      "sweep",
-     '    if actual is guard.PROCESS_START_UNREADABLE:\n'
+     '    if actual is git_reads.PROCESS_START_UNREADABLE:\n'
      '        return None',
-     '    if actual is guard.PROCESS_START_UNREADABLE:\n'
+     '    if actual is git_reads.PROCESS_START_UNREADABLE:\n'
      '        return True',
      "test_unreadable_process_start_is_unknown_not_stale"),
     ("stale lock: a lock reason of another form counts as stale",
@@ -1091,7 +1094,7 @@ MUTATIONS = [
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("preview cache: the guard reads stay wrapped after the run",
      "sweep",
-     '        guard_core._git, guard_core.session_records = real_git, real_records',
+     '        git_reads._git, git_reads.session_records = real_git, real_records',
      '        pass',
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("preview cache: a read is never stored",
@@ -1101,8 +1104,8 @@ MUTATIONS = [
      "test_cwd_table_is_read_once_per_preview_and_never_outside_one"),
     ("preview cache: the cache is not cleared after the run",
      "sweep",
-     '        _RUN = None\n        guard_core._git, guard_core.session_records = real_git, real_records',
-     '        pass\n        guard_core._git, guard_core.session_records = real_git, real_records',
+     '        _RUN = None\n        git_reads._git, git_reads.session_records = real_git, real_records',
+     '        pass\n        git_reads._git, git_reads.session_records = real_git, real_records',
      "test_cwd_table_is_read_once_per_preview_and_never_outside_one"),
     ("preview cache: every git read is cached, not only the worktree list",
      "sweep",
@@ -1116,8 +1119,8 @@ MUTATIONS = [
      "test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached"),
     ("preview cache: the session records are read every time",
      "sweep",
-     '    guard_core.session_records = lambda: _memo("sessions", real_records)',
-     '    guard_core.session_records = real_records',
+     '    git_reads.session_records = lambda: _memo("sessions", real_records)',
+     '    git_reads.session_records = real_records',
      "test_session_records_are_read_once_per_preview"),
     ("preview cache: a failed ps table reads as an empty table",
      "sweep",
@@ -1374,6 +1377,9 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
+    # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds
+    # the target's own text for it (the mutated one, or the real one).
+    shutil.copy(GIT_READS, hooks_dir)
 
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
     session_end_text = (

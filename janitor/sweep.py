@@ -6,9 +6,9 @@ and removes git worktrees that no session still uses, across every repository th
 pointed at, or discovers. Removal limits: when-a-worktree-may-be-removed. The orphan stop:
 unattended-sweep-stops-proven-orphans.
 
-Every keep-or-reap boolean comes from hooks/guard.py's own primitives (`branch_delete_subject`,
-`worktree_remove_subject`, `resolve_default_base`, `session_is_live`, the `branch_*` tests,
-`worktree_locked`, `porcelain`): dirty, locked, live, ancestor, cherry, remote-contains. Never
+Every keep-or-reap boolean comes from hooks/git_reads.py's own primitives (`resolve_default_base`,
+`session_is_live`, the `branch_*` tests, `worktree_locked`, `porcelain`): dirty, locked, live,
+ancestor, cherry, remote-contains. Never
 re-derive one here; a second copy of that logic is the outcome to avoid. This module keeps only
 orchestration: which repositories, which branches, which order, the preview report, the
 tombstone, and the 90-day purge.
@@ -16,7 +16,7 @@ tombstone, and the 90-day purge.
 Preview is the default. The run fetches and prunes remote-tracking refs; no branch or worktree is
 deleted until `--confirm` is passed. The sweep never pushes to a remote. The one program it can
 stop is an orphaned TCP listener inside a repository this sweep already covers, once every read on it is a confirmed "yes, reap": it is orphaned (a per-OS read);
-no live Claude session has a cwd in the same checkout (guard.py's own oracle); the current user
+no live Claude session has a cwd in the same checkout (git_reads.py's own oracle); the current user
 owns it. An unreadable answer to any one of the three means KEEP. `--confirm` signals a reapable
 pid by NUMBER alone, never by a name or a command-line pattern, and never escalates past that
 one signal.
@@ -71,8 +71,7 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
-import guard  # noqa: E402
-import guard_core  # noqa: E402  (the preview cache patches the guard reads where they live)
+import git_reads  # noqa: E402  (the preview cache patches the reads where they live; no guard module loads)
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
@@ -276,7 +275,7 @@ def read_optout(root: str):
 
 def list_local_branches(where: str):
     """Return every local branch's short name, or None when the read failed."""
-    answer = guard._git(where, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    answer = git_reads._git(where, "for-each-ref", "--format=%(refname:short)", "refs/heads")
     if answer is None or answer.returncode != 0:
         return None
     return [line.strip() for line in answer.stdout.splitlines() if line.strip()]
@@ -288,7 +287,7 @@ def merged_batch(where: str, base: str):
     the batch exactly when `merge-base --is-ancestor <branch> BASE` would say yes. It proves "in
     main" for every branch and every worktree HEAD at once. What it does not hold is asked of the
     repository one by one (`cherry`), and a read that fails keeps."""
-    answer = guard._git(where, "for-each-ref", "--merged=" + base,
+    answer = git_reads._git(where, "for-each-ref", "--merged=" + base,
                         "--format=%(objectname) %(refname:short)", "refs/heads")
     if answer is None or answer.returncode != 0:
         return None
@@ -309,12 +308,12 @@ def _short_branch_ref(ref: str) -> str:
 def parse_worktree_list(where: str):
     """Return every registered worktree of `where`'s clone as a dict, or None when unreadable.
 
-    Same block shape guard.worktree_locked already parses (`--porcelain`, blocks separated by a
+    Same block shape git_reads.worktree_locked already parses (`--porcelain`, blocks separated by a
     blank line); this reads the whole listing instead of one target, because the sweep needs the
     full set: which branch each worktree holds (for the checked-out refusal) and which path to
     decide on next.
     """
-    answer = guard._git(where, "worktree", "list", "--porcelain")
+    answer = git_reads._git(where, "worktree", "list", "--porcelain")
     if answer is None or answer.returncode != 0:
         return None
     entries = []
@@ -350,8 +349,8 @@ def parse_worktree_list(where: str):
 
 # ------------------------------------------------------------------ the branch keep rule
 #
-# The REAP-OR-KEEP answer is guard.branch_proof(where, base, branch) alone, the same three tests
-# guard.branch_is_empty runs: ancestor, then cherry-empty, then remote-contains, any one passing
+# The REAP-OR-KEEP answer is git_reads.branch_proof(where, base, branch) alone, the same three tests
+# git_reads.branch_is_empty runs: ancestor, then cherry-empty, then remote-contains, any one passing
 # proves the work survives the branch, None (any test could not be read) means keep. Its answer
 # is also the label of the test that passed. The refusals ahead of it (default branch, protected
 # prefix, checked out) are the only things added here, and they can only turn a reap into a keep.
@@ -368,7 +367,7 @@ def decide_branch(where: str, base: str, branch: str, protected_prefixes, checke
             return {"name": branch, "action": "keep", "reason": "protected-prefix:" + prefix}
     if branch in checked_out_branches:
         return {"name": branch, "action": "keep", "reason": "checked-out"}
-    label = guard.branch_proof(where, base, branch,
+    label = git_reads.branch_proof(where, base, branch,
                                None if batch is None else branch in batch["names"])
     if label is None:
         return {"name": branch, "action": "keep", "reason": "unreadable-subject"}
@@ -384,9 +383,9 @@ def decide_branch(where: str, base: str, branch: str, protected_prefixes, checke
 
 # ------------------------------------------------------------------ the worktree keep rule
 #
-# Every boolean (dirty, locked, live) is guard's own primitive (guard.porcelain,
-# guard.worktree_locked, guard.worktree_live_session), read in the order
-# guard.worktree_remove_subject uses. This function adds only the "which one refused" label.
+# Every boolean (dirty, locked, live) is git_reads' own primitive (git_reads.porcelain,
+# git_reads.worktree_locked, git_reads.worktree_live_session), read in the order
+# guard_core.worktree_remove_subject uses. This function adds only the "which one refused" label.
 # The "never touch the primary checkout" exclusion is decided in `sweep_repo`, before
 # `decide_worktree` is called, by `_is_primary_checkout` below.
 
@@ -404,9 +403,9 @@ def _is_primary_checkout(entry_path: str):
     Every worktree of one clone shares one git directory (`--git-common-dir`). The primary
     checkout is the one worktree whose OWN git directory (`--git-dir`) equals it. A linked
     worktree's own git directory is `<common>/worktrees/<name>`, so the two never match. This is
-    the read `hooks/guard.py.is_worktree` makes, run here per entry.
+    the read `hooks/git_reads.py.is_worktree` makes, run here per entry.
     """
-    answer = guard._git(entry_path, "rev-parse", "--git-dir", "--git-common-dir")
+    answer = git_reads._git(entry_path, "rev-parse", "--git-dir", "--git-common-dir")
     if answer is None or answer.returncode != 0:
         return None
     lines = answer.stdout.splitlines()
@@ -442,14 +441,14 @@ def stale_agent_lock_verdict(reason: str):
             locked_ms = calendar.timegm(time.strptime(start, "%a %b %d %H:%M:%S %Y")) * 1000
         except Exception:
             return None
-    actual = guard._process_start_ms(pid)
-    if actual is guard.PROCESS_START_UNREADABLE:
+    actual = git_reads._process_start_ms(pid)
+    if actual is git_reads.PROCESS_START_UNREADABLE:
         return None
     if actual is None:
         return True
     if locked_ms is None:
         return False
-    return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
+    return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS
 
 
 _FETCH_FAILED = None  # a set of roots while `main` runs: those whose `fetch --prune` failed
@@ -457,7 +456,7 @@ _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per rep
 
 
 def _common_dir_key(path: str):
-    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common = git_reads._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common is None or common.returncode != 0 or not common.stdout.strip():
         return None
     return os.path.normcase(common.stdout.strip())
@@ -477,7 +476,7 @@ def _live_remote_heads(path: str):
     if _LIVE_HEADS is not None and key in _LIVE_HEADS:
         return _LIVE_HEADS[key]
     shas = set()
-    remotes = guard._git(path, "remote")
+    remotes = git_reads._git(path, "remote")
     if remotes is None or remotes.returncode != 0:
         shas = None
     else:
@@ -565,7 +564,7 @@ def fully_pushed(path: str):
     live = _live_remote_heads(path)
     if live is None:
         return None
-    head = guard._git(path, "rev-parse", "HEAD")
+    head = git_reads._git(path, "rev-parse", "HEAD")
     if head is None or head.returncode != 0 or not head.stdout.strip():
         return None
     head = head.stdout.strip()
@@ -590,7 +589,7 @@ def worktree_idle_seconds(path: str, now=None):
     """Seconds since the newest git activity in worktree PATH, or None when it cannot be read.
     Activity is the newest mtime of the worktree's own admin files: index, HEAD, logs/HEAD under
     `.git/worktrees/<name>`. HEAD must exist; a missing index or log is skipped."""
-    answer = guard._git(path, "rev-parse", "--absolute-git-dir")
+    answer = git_reads._git(path, "rev-parse", "--absolute-git-dir")
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
     admin = answer.stdout.strip()
@@ -614,19 +613,19 @@ def _merged_read(where: str, path: str, batch=None):
     are in the default branch: a HEAD in it is merged with no further read. Any other HEAD is
     asked of git as before (ancestry, then patch), and the default branch is read once."""
     if batch is not None:
-        head = guard._git(path, "rev-parse", "HEAD")
+        head = git_reads._git(path, "rev-parse", "HEAD")
         if head is None or head.returncode != 0 or not head.stdout.strip():
             return None
         if head.stdout.strip() in batch["tips"]:
             return True
         base = batch["base"]
     else:
-        base = guard.resolve_default_base(where)
+        base = git_reads.resolve_default_base(where)
     if base is None:
         return None
-    merged = guard.branch_is_ancestor(path, base, "HEAD")
+    merged = git_reads.branch_is_ancestor(path, base, "HEAD")
     if merged is False:
-        merged = guard.branch_cherry_empty(path, base, "HEAD")
+        merged = git_reads.branch_cherry_empty(path, base, "HEAD")
     return merged
 
 
@@ -688,7 +687,7 @@ def _agent_rule_keep(kept: dict, idle):
 def _remote_tracking_keep(path: str):
     """A keep decision unless HEAD of PATH is on a remote-tracking ref (`git branch -r --contains`),
     else None. A failed read keeps. One home: the agent rule and the agent-end rule both ask it."""
-    contains = guard._git(path, "branch", "-r", "--contains", "HEAD")
+    contains = git_reads._git(path, "branch", "-r", "--contains", "HEAD")
     if contains is None or contains.returncode != 0:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not contains.stdout.strip():
@@ -702,7 +701,7 @@ def _idle_then_dirty(entry: dict, attended: bool):
     make every tree look active."""
     idle = worktree_idle_seconds(entry["path"]) if not attended else None
     path = entry["path"]
-    dirty = guard.porcelain(path)
+    dirty = git_reads.porcelain(path)
     return idle, path, dirty
 
 
@@ -718,7 +717,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     unless attended), and with no BATCH nothing is proven, so it stays."""
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
         idle, path = (None if attended else entry["idle"]), entry["path"]
-        dirty = guard.porcelain(path)
+        dirty = git_reads.porcelain(path)
     else:
         idle, path, dirty = _idle_then_dirty(entry, attended)
     if dirty is None:
@@ -734,7 +733,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         stale_agent_lock = stale_agent_lock_verdict(holder)
         if stale_agent_lock is not True:
             return {"path": path, "action": "keep", "reason": "locked: %s" % holder}
-    live = guard.worktree_live_session(path)
+    live = git_reads.worktree_live_session(path)
     if live is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if live:
@@ -746,7 +745,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         # Unpushed is only a loss when the default branch lacks the work. A squash merge leaves
         # a lane's own commit on no remote branch, though its patch is on main. Only when the
         # repository has a remote: with none, nothing is pushed, so every worktree is kept.
-        remotes = guard._git(where, "remote")
+        remotes = git_reads._git(where, "remote")
         has_remote = remotes is not None and remotes.returncode == 0 and remotes.stdout.strip()
         merged = _merged_read(where, path, batch) if has_remote else False
         if merged is None:
@@ -1244,8 +1243,8 @@ def _ppid_is_init(text: str):
 
 
 def _is_orphan_windows(pid: int):
-    """`OpenProcess` success alone (guard's own oracle, built for a different question) cannot
-    tell "parent is dead" from "parent is running" here. `guard._process_start_ms_windows`
+    """`OpenProcess` success alone (git_reads' own oracle, built for a different question) cannot
+    tell "parent is dead" from "parent is running" here. `git_reads._process_start_ms_windows`
     answers a real creation time for a pid that has ALREADY EXITED while anything still holds a
     handle open to it (a `subprocess.Popen` not yet garbage-collected is enough), because
     Windows keeps the process object alive as a zombie until every handle closes.
@@ -1262,11 +1261,11 @@ def _is_orphan_windows(pid: int):
     # The parent IS genuinely running -- but it could be an UNRELATED process that received
     # this same pid after the real parent exited and was fully reaped (Windows never blocks
     # pid reuse the way a zombie blocks it). Creation-time order is what tells the two apart.
-    child_start = guard._process_start_ms_windows(pid)
-    if child_start is None or child_start is guard.PROCESS_START_UNREADABLE:
+    child_start = git_reads._process_start_ms_windows(pid)
+    if child_start is None or child_start is git_reads.PROCESS_START_UNREADABLE:
         return None  # can't confirm the child's OWN start either, so no comparison is possible
-    parent_start = guard._process_start_ms_windows(parent_pid)
-    if parent_start is None or parent_start is guard.PROCESS_START_UNREADABLE:
+    parent_start = git_reads._process_start_ms_windows(parent_pid)
+    if parent_start is None or parent_start is git_reads.PROCESS_START_UNREADABLE:
         return None  # already confirmed running, above -- an unreadable start here is a race
     return parent_start > child_start  # parent created AFTER this pid: a recycled, unrelated pid
 
@@ -1525,7 +1524,7 @@ def _token_user_sid_windows(pid):
 def _cwd_under_checkout(cwd: str, checkout_path: str) -> bool:
     """True when CWD sits at or under CHECKOUT_PATH, matched as a normalised path PREFIX.
 
-    `os.path.realpath` first, never `guard._path_identity`'s `os.stat`-based fallback: a worktree
+    `os.path.realpath` first, never `git_reads._path_identity`'s `os.stat`-based fallback: a worktree
     that has ALREADY been removed has nothing left to `os.stat`, and `realpath` degrades to a
     plain normalised string for the part that is gone. `normpath` alone is not enough while the
     checkout DOES exist: on Windows a path can arrive through a SHORT (8.3) component
@@ -1593,7 +1592,7 @@ def decide_listener(entry: dict):
     matched to a checkout this sweep covers.
 
     Reapable only when ALL three of these answer a confirmed yes, in this order: orphaned; no
-    live Claude session has a cwd in the same checkout (guard.py's own tested oracle, reused
+    live Claude session has a cwd in the same checkout (git_reads.py's own tested oracle, reused
     verbatim, never re-derived here); owned by the current user. Any `None` along the way
     means keep, reported as `unreadable-subject`."""
     pid = entry["pid"]
@@ -1605,7 +1604,7 @@ def decide_listener(entry: dict):
     if not orphan:
         return {**base, "action": "keep", "reason": "not-orphaned"}
 
-    live = guard.worktree_live_session(entry["checkout"])
+    live = git_reads.worktree_live_session(entry["checkout"])
     if live is None:
         return {**base, "action": "keep", "reason": "unreadable-subject"}
     if live:
@@ -1818,7 +1817,7 @@ def sim_tier(confirm, record_path=None):
     that failed keeps. [] when there is no xcrun or the platform is Windows."""
     if not sim_available():
         return []
-    record_path = record_path or os.path.join(guard.config_dir(), "state", "sim-boots.jsonl")
+    record_path = record_path or os.path.join(git_reads.config_dir(), "state", "sim-boots.jsonl")
     boots = sim_read_boots(record_path)
     if not boots:
         return []
@@ -1985,22 +1984,22 @@ def _ps_row(pid: int):
 
 
 def _begin_preview_cache():
-    """Start the per-run cache and wrap the two guard reads that repeat per worktree. Returns the
+    """Start the per-run cache and wrap the two reads that repeat per worktree. Returns the
     undo function."""
     global _RUN, _POOL, _ROOT_POOL
     _RUN = {}
     if PREVIEW_THREADS:
         _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_WORKERS)
         _ROOT_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_ROOT_WORKERS)
-    real_git, real_records = guard._git, guard.session_records
+    real_git, real_records = git_reads._git, git_reads.session_records
 
     def run_git(where, *args):
         if args == _WORKTREE_LIST_ARGS:
             return _memo(("git", where), lambda: real_git(where, *args))
         return real_git(where, *args)
 
-    guard_core._git = run_git
-    guard_core.session_records = lambda: _memo("sessions", real_records)
+    git_reads._git = run_git
+    git_reads.session_records = lambda: _memo("sessions", real_records)
 
     def undo():
         global _RUN, _POOL, _ROOT_POOL
@@ -2009,7 +2008,7 @@ def _begin_preview_cache():
                 pool.shutdown()
         _POOL = _ROOT_POOL = None
         _RUN = None
-        guard_core._git, guard_core.session_records = real_git, real_records
+        git_reads._git, git_reads.session_records = real_git, real_records
     return undo
 
 
@@ -2151,12 +2150,12 @@ LISTENER_GRACE_PERIOD_SECONDS = 3  # ponytail: fixed, not a flag. Add --grace-pe
 
 
 def default_restore_log_path() -> str:
-    return os.path.join(guard.config_dir(), "janitor", "restore-log.jsonl")
+    return os.path.join(git_reads.config_dir(), "janitor", "restore-log.jsonl")
 
 
 def default_run_log_path() -> str:
     return os.environ.get("JANITOR_RUN_LOG") or os.path.join(
-        guard.config_dir(), "state", "janitor-runs.jsonl")
+        git_reads.config_dir(), "state", "janitor-runs.jsonl")
 
 
 def _removed_count(decisions):
@@ -2199,17 +2198,17 @@ def append_restore_log(path: str, repo: str, branch: str, commit: str):
 def reap_branch(root: str, branch: str, decision: dict, restore_log_path: str):
     """Write the tombstone, log it, THEN delete. In that order: a delete that ran before its
     tombstone landed could lose the branch's only pointer to work the log has not recorded yet."""
-    tip = guard._git(root, "rev-parse", "refs/heads/" + branch)
+    tip = git_reads._git(root, "rev-parse", "refs/heads/" + branch)
     if tip is None or tip.returncode != 0:
         decision["error"] = "could not resolve the branch tip; branch left alone"
         return
     commit = tip.stdout.strip()
-    tomb = guard._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)
+    tomb = git_reads._git(root, "update-ref", TOMBSTONE_REF_PREFIX + branch, commit)
     if tomb is None or tomb.returncode != 0:
         decision["error"] = "tombstone write failed; branch NOT deleted"
         return
     append_restore_log(restore_log_path, root, branch, commit)
-    delete = guard._git(root, "branch", "-D", branch)
+    delete = git_reads._git(root, "branch", "-D", branch)
     if delete is None or delete.returncode != 0:
         decision["error"] = "delete failed after the tombstone landed: %s" % (
             delete.stderr.strip() if delete is not None else "git gave no answer"
@@ -2222,14 +2221,14 @@ REMOVAL_MARKER = "claude-removal-started"  # in the tree's admin dir; a finished
 def _admin_dir(path: str):
     """The absolute git admin dir of worktree PATH (`.git/worktrees/<name>`), or None. The same read
     as `worktree_idle_seconds`, kept apart so the sweep-fast lane's edits there do not collide."""
-    answer = guard._git(path, "rev-parse", "--absolute-git-dir")
+    answer = git_reads._git(path, "rev-parse", "--absolute-git-dir")
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
     return answer.stdout.strip()
 
 
 def _restore_cut_short(where: str, entry: dict):
-    """`guard._git` stops `git worktree remove` at 10 s, which
+    """`git_reads._git` stops `git worktree remove` at 10 s, which
     can leave a tree half deleted. `remove_worktree` writes REMOVAL_MARKER before each remove. When
     the marker is there and every dirty line is a deleted tracked file, this writes the missing
     files back from the index (`checkout-index` without -f never overwrites a file that exists), so
@@ -2243,18 +2242,18 @@ def _restore_cut_short(where: str, entry: dict):
     admin = _admin_dir(path)
     if not admin or not os.path.isfile(os.path.join(admin, REMOVAL_MARKER)):
         return
-    dirty = guard.porcelain(path)
+    dirty = git_reads.porcelain(path)
     if not dirty or not all(line.startswith(" D ") for line in dirty):
         return
-    locked = guard.worktree_locked(where, path)
+    locked = git_reads.worktree_locked(where, path)
     if locked is None or (locked and stale_agent_lock_verdict(entry.get("locked_reason") or "") is not True):
         return
-    if guard.worktree_live_session(path) is not False:
+    if git_reads.worktree_live_session(path) is not False:
         return
     inside, _unreadable = processes_in(path)
     if inside != []:
         return
-    guard._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
+    git_reads._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
 
 
 _LOCK_UNREADABLE = object()
@@ -2288,7 +2287,7 @@ def remove_worktree(root: str, path: str, decision: dict):
     if decision.get("unlock") and not _lock_unlockable(root, path, decision):
         return
     if decision.get("unlock"):  # a stale agent lock; never --force
-        unlocked = guard._git(root, "worktree", "unlock", path)
+        unlocked = git_reads._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
             decision["error"] = "unlock failed: %s" % (
                 unlocked.stderr.strip() if unlocked is not None else "git gave no answer")
@@ -2300,7 +2299,7 @@ def remove_worktree(root: str, path: str, decision: dict):
                 handle.write("%d\n" % int(time.time()))
         except OSError:
             pass  # no marker: a cut-short remove is kept as dirty, as before
-    answer = guard._git(root, "worktree", "remove", path)
+    answer = git_reads._git(root, "worktree", "remove", path)
     if answer is None or answer.returncode != 0:
         decision["error"] = "remove failed: %s" % (
             answer.stderr.strip() if answer is not None else
@@ -2310,7 +2309,7 @@ def remove_worktree(root: str, path: str, decision: dict):
         if decision.get("unlock"):
             # The lock came off for this removal only. Put it back, so the worktree is no
             # less guarded than before, and say which way it went.
-            relock = guard._git(root, "worktree", "lock", "--reason",
+            relock = git_reads._git(root, "worktree", "lock", "--reason",
                                 decision.get("lock_reason") or "locked", path)
             decision["error"] += "; lock %s" % (
                 "restored" if relock is not None and relock.returncode == 0 else "NOT restored")
@@ -2385,7 +2384,7 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
             if row_key(entry) in unexpired:
                 decision["reason"] += "; ref kept: an unexpired entry names the same commit"
                 continue
-            held = guard._git(repo, "rev-parse", "-q", "--verify", ref)
+            held = git_reads._git(repo, "rev-parse", "-q", "--verify", ref)
             if held is None or held.returncode not in (0, 1) or (
                     held.returncode == 1 and held.stderr.strip()):
                 # Exit 1 with empty stderr means the ref is gone. Any other failure, exit 1 with a
@@ -2397,7 +2396,7 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
                 if held.returncode == 0:
                     decision["reason"] += "; ref kept: it holds a younger restore point"
                 continue
-            dropped = guard._git(repo, "update-ref", "-d", ref, commit)
+            dropped = git_reads._git(repo, "update-ref", "-d", ref, commit)
             if dropped is None or dropped.returncode != 0:
                 decision["error"] = "drop failed: %s" % (
                     dropped.stderr.strip() if dropped is not None else "git gave no answer"
@@ -2412,14 +2411,14 @@ def prune_registrations(root: str, confirm: bool):
     """Stale worktree registrations, named by `git worktree prune -n -v`. Under `confirm`, runs
     `git worktree prune` and nothing else. Returns {"names": [...], "error": str|None}; `names`
     is None when git could not answer, and then nothing is pruned."""
-    preview = guard._git(root, "worktree", "prune", "-n", "-v")
+    preview = git_reads._git(root, "worktree", "prune", "-n", "-v")
     if preview is None or preview.returncode != 0:
         return {"names": None, "error": "git worktree prune -n gave no answer"}
     names = [line.strip() for line in (preview.stdout + preview.stderr).splitlines()
              if line.strip()]
     result = {"names": names, "error": None}
     if confirm and names:
-        done = guard._git(root, "worktree", "prune")
+        done = git_reads._git(root, "worktree", "prune")
         if done is None or done.returncode != 0:
             result["error"] = "prune failed: %s" % (
                 done.stderr.strip() if done is not None else "git gave no answer")
@@ -2463,7 +2462,7 @@ def husk_verdict(root: str, path: str, entries, names):
         return keep
     if not contents or not set(contents) <= set(names):
         return None
-    live = guard.worktree_live_session(path)
+    live = git_reads.worktree_live_session(path)
     inside, _ = processes_in(path)
     if live is None or inside is None:
         return keep
@@ -2580,7 +2579,7 @@ def trash_verdict(path: str):
     read that cannot tell."""
     if is_link(path) or not os.path.isdir(path):
         return False, "not a real folder"
-    live = guard.worktree_live_session(path)
+    live = git_reads.worktree_live_session(path)
     inside, _ = processes_in(path)
     if live is None or inside is None:
         return False, "unreadable-subject"
@@ -2621,7 +2620,7 @@ def reap_trash(decision: dict):
 
 def _is_toplevel(path: str) -> bool:
     """True when the VCS says PATH is its own repository's top level."""
-    answer = guard._git(path, "rev-parse", "--show-toplevel")
+    answer = git_reads._git(path, "rev-parse", "--show-toplevel")
     return (answer is not None and answer.returncode == 0 and os.path.normcase(
         os.path.realpath(answer.stdout.strip())) == os.path.normcase(os.path.realpath(path)))
 
@@ -2706,7 +2705,7 @@ FETCH_THROTTLE_SECONDS = 600  # one fetch and one ls-remote per repository per 1
 
 
 def _fetch_record_path(key: str) -> str:
-    return os.path.join(guard.config_dir(), "state", "sweep-fetch",
+    return os.path.join(git_reads.config_dir(), "state", "sweep-fetch",
                         hashlib.sha256(key.encode("utf-8")).hexdigest()[:32])
 
 
@@ -2793,7 +2792,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode not in ("tier1", "fast") and not _past_deadline():
         if not _fetch_prune(root) and _FETCH_FAILED is not None:
             _FETCH_FAILED.add(root)
-    base = guard.resolve_default_base(root)
+    base = git_reads.resolve_default_base(root)
     if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
         return result
@@ -3197,11 +3196,11 @@ def main(argv=None) -> int:
 
     roots = [os.path.abspath(r) for r in args.roots]
     if args.root:
-        primary = guard.primary_checkout(os.path.abspath(args.root))
+        primary = git_reads.primary_checkout(os.path.abspath(args.root))
         if primary is not None and not (
                 _is_toplevel(primary) and os.path.normcase(os.path.realpath(
-                    guard.git_common_dir(primary) or "")) == os.path.normcase(os.path.realpath(
-                        guard.git_common_dir(os.path.abspath(args.root)) or "-"))):
+                    git_reads.git_common_dir(primary) or "")) == os.path.normcase(os.path.realpath(
+                        git_reads.git_common_dir(os.path.abspath(args.root)) or "-"))):
             primary = None  # a submodule or a separate git dir: dirname(common dir) is wrong
         if primary is None:
             print("janitor: %s is not inside a repository" % args.root, file=sys.stderr)

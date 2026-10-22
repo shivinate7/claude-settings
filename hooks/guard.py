@@ -190,6 +190,9 @@ _load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 while True:
     try:
+        _loading = "git_reads"
+        import git_reads
+        _loading = "guard_core"
         import guard_core
         from guard_core import (
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
@@ -269,7 +272,7 @@ while True:
     except Exception as exc:
         if time.monotonic() < _load_deadline:
             time.sleep(_LOAD_STEP_SECONDS)
-            for _name in ("guard_core",) + _FAMILY_MODULES:
+            for _name in ("git_reads", "guard_core") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)
             importlib.invalidate_caches()
             _loading = "guard_core"
@@ -309,10 +312,10 @@ while True:
 
 
 # `_git`, `config_dir` and the session reads are never bound here: a test or the janitor patches
-# them on guard_core, and `guard.<name>` must read that one object. Code below calls them through
-# the module. Other files reach every moved name through this hook.
+# them on git_reads, and `guard.<name>` must read that one object, so git_reads is searched first.
+# Code below calls them through the module. Other files reach every shared name through this hook.
 def __getattr__(name):
-    for module in [guard_core] + [sys.modules[family] for family in _FAMILY_MODULES]:
+    for module in [git_reads, guard_core] + [sys.modules[family] for family in _FAMILY_MODULES]:
         if hasattr(module, name):
             return getattr(module, name)
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
