@@ -96,7 +96,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override pass: one act or a timed pass, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read, the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -10735,9 +10735,17 @@ def decide(case):
         env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
+    command = [sys.executable, GUARD]
+    if case.get("tool") in dict(LB_TOOLS).values():
+        # A lane-start call makes the guard read the machine's load. A case about another rule must
+        # not meet this host's load, or a busy host turns it red (the load brake refuses a
+        # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
+        # the case names one (`load`). Only the load-brake family sets a busy or full reading.
+        command = [sys.executable, "-c", LB_PROBE, GUARD, os.devnull,
+                   json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, GUARD], input=payload, capture_output=True, text=True, env=env,
+        command, input=payload, capture_output=True, text=True, env=env,
         timeout=120, cwd=case.get("process_cwd") or None,
     )
     elapsed = time.monotonic() - started
@@ -14324,6 +14332,8 @@ except Exception as exc:
 out["children"] = children
 with open(side, "w", encoding="utf-8") as handle:
     json.dump(out, handle, default=str)
+if out.get("probe_error"):
+    sys.exit("probe: " + out["probe_error"])   # decide() reads a non-zero exit as an error, never an allow
 """
 
 LB_DIR = os.path.join(ROOT, "loadbrake")
@@ -14540,6 +14550,50 @@ def lb_probe_reads_check():
                 side["reads"], got, len(side["files"])))
 
 
+# A stand-in guard whose own reader reads busy. It denies on a busy reading and allows otherwise.
+LB_STAND_IN = '''import json, sys
+
+
+def read_load():
+    return {"memory_pct": 99.0, "disk_free_pct": 60.0, "cpu_pct": 99.0}
+
+
+def main():
+    sys.stdin.read()
+    busy = read_load()["memory_pct"] > 90
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+          "permissionDecision": "deny" if busy else "allow", "permissionDecisionReason": "host busy"}}))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def lb_neutral_default_check():
+    """decide() gives a lane-start call a neutral load unless the case names one (`load`), so a case about
+    another rule never meets the host's load. A call that starts no lane runs the guard file itself."""
+    global GUARD
+    folder = os.path.join(ROOT, "neutral-load")
+    os.makedirs(folder, exist_ok=True)
+    stand_in = os.path.join(folder, "guard.py")
+    with open(stand_in, "w", encoding="utf-8") as handle:
+        handle.write(LB_STAND_IN)
+
+    def judged(tool, **more):
+        given = {"prompt": "x"} if tool == "Agent" else {"command": "echo hi"}
+        return decide(dict({"raw": None, "tool": tool, "cwd": folder, "session": None, "env_path": None,
+                            "config": None, "tool_input": given}, **more))[0]
+
+    real, GUARD = GUARD, stand_in
+    try:
+        got = (judged("Agent"), judged("Agent", load=lb_reading(memory_pct=99.0)), judged("Bash"))
+    finally:
+        GUARD = real
+    want = ("allow", "deny", "deny")
+    return got == want, "a lane call, a lane call named busy, a Bash call: %s, want %s" % (got, want)
+
+
 LB_CHECKS = []   # the checks that reach the real reader: the Windows slice runs these too
 
 
@@ -14553,6 +14607,8 @@ def lb_add(label, check, real=False):
 lb_add("probe control: a child process the probe starts is counted", lb_probe_child_check)
 lb_add("probe control: a patch on a guard function reaches the judge", lb_probe_patch_check)
 lb_add("probe control: a call to the patched read_load is counted", lb_probe_reads_check)
+lb_add("neutral default: a lane call in another family's case meets a neutral load, not the host's",
+       lb_neutral_default_check)
 
 LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
 LB_MEM_FULL = lb_names("memory", "97.2", "97")
