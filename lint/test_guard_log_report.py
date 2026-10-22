@@ -1071,13 +1071,17 @@ class AllRulesTests(unittest.TestCase):
             self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 1, 0), days_ago(3)), code)
         self.assertNotIn("STE009", rows)  # a code the line never held has no row
 
-    def test_a_cut_combined_line_in_an_old_log_still_dates_each_code(self):
-        # --days all makes the old line part of the window. A line outside a shorter window is not pinned:
-        # no source emits an STE id, so whether its codes keep a row is the report's own choice.
+    def test_a_cut_combined_line_outside_the_window_still_dates_each_code(self):
         field, kept = self.cut_id()
-        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "all"))
+        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "7"))
         for code in kept:
-            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 0, 0), days_ago(400)), code)
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((0, 0, 0), days_ago(400)), code)
+
+    def test_a_plain_ste_line_outside_the_window_keeps_its_row_and_no_other_ste_row_shows(self):
+        # The log holds the code, so the row stays and a cull sees its date. No STE code the log lacks is listed.
+        rows = rule_table(self.report([stamped(400, "deny", "STE008")], "--all-rules", "--days", "7"))
+        self.assertEqual(sorted(r for r in rows if r.startswith("STE")), ["STE008"])
+        self.assertEqual((counts(rows["STE008"]), first_seen(rows["STE008"])), ((0, 0, 0), days_ago(400)))
 
     def test_days_all_reads_the_whole_log(self):
         lines = [stamped(400, "deny", "waiter"), stamped(1, "deny", "waiter")]
