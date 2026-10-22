@@ -86,8 +86,8 @@ only in chat is not done. Land the design in its spec or decision entry now, or 
 the design abandoned.<!-- rule:building-land-design-or-abandon --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
 file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term --> Comment only what complex code does and why. Never narrate history or review rounds.<!-- rule:building-comments-say-why -->
 
-**Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
-records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
+**Speak plainly.** Give every id a short plain name the first time it appears, like "D12, short titles for
+records". That covers decision and debt ids, roadmap step ids, lane numbers, PR and issue numbers, commit hashes, rule anchors, and hook and script names. Never cite a bare id. A numbered id carries no order, so state the work order in words.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
 the history.<!-- rule:speak-rewrite-superseded-in-place -->
 
