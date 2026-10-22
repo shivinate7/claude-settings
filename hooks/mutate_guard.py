@@ -771,7 +771,7 @@ MUTATIONS = [
      'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)'),
+     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, not standing)'),
     ("step-up: a builder try 3 on a non-opus model is no longer refused",
      'if role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
      'if False and role == "builder" and kind == "try" and n == "3" and "opus" not in model:',

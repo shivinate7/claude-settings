@@ -11177,7 +11177,6 @@ add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent
 add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model=["haiku"])
 add("floor: Agent with model sonnet is allowed", "allow", tool="Agent", prompt="x", model="sonnet")
-add("floor: Agent with model opus is allowed", "allow", tool="Agent", prompt="x", model="opus")
 add("floor: Agent with no model is allowed", "allow", tool="Agent", prompt="x")
 
 # ---- Rule 9, Haiku roles (owner ruling 2026-10-07). Haiku is allowed only for Explore,
@@ -11199,11 +11198,10 @@ add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# An Opus spawn on an owner-word role passes: floor_hit denies haiku only, and step-up fires
-# only on a "Round N of 3" or "Try N of 3" marker line.
-for _role in ("Explore", "claude", "builder", "reviewer", "test-author"):
-    add("floor: Agent %s with model opus is allowed (owner word)" % _role, "allow",
-        tool="Agent", prompt="do it", model="opus", subagent_type=_role)
+# Explore on opus passes: the owner's class-level word of 2026-10-21 covers an audit Explore, and
+# the guard cannot tell an audit from a plain search. The Opus ceiling block below asks for the rest.
+add("floor: Agent Explore with model opus is allowed (owner word)", "allow",
+    tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
 # near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
 for _tool in ("Agent",):
@@ -11217,7 +11215,8 @@ add("floor: Agent record-writer with model sonnet is still allowed", "allow",
 # ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
 # "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
 # fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
-# Owner ruling 2026-10-12: a reviewer on "Round 3 of 3" may run opus. Round 2 stays sonnet only.
+# Owner ruling 2026-10-12: a reviewer on "Round 3 of 3" may run opus (the step-up allows it; the
+# Opus ceiling below asks). Round 2 stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
 # so the floor allows it. Step-up still denies a reviewer round 2 that does not name sonnet, and
@@ -11243,8 +11242,9 @@ add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
-add("floor step-up: builder Try 1 of 3 on opus is allowed (main ceiling pin)", "allow",
-    tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Try 1 of 3 on opus asks (only try 3 is a standing word)", "ask",
+    "subagent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
+    subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
     "allow", tool="Agent", subagent_type="reviewer", model="haiku",
     prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.")
@@ -11255,11 +11255,65 @@ add("floor step-up: round line after a lone quote on line two is denied", "deny"
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
-add("floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)", "allow",
-    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="claude-opus-5-5",
-    subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, not standing)", "ask",
+    "subagent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
+    model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+
+# ---- Rule 9, the Opus ceiling (owner ruling 2026-10-21, decision subagent-model-cap). An Agent or
+# Task spawn that sets model opus asks the owner under `subagent-model-cap`, unless a standing word
+# covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level word, pinned above).
+# A reviewer's round 3 is a per-spawn word, so it asks. The floor and the step-up deny first, so
+# `Round 2 of 3` on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
+# and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
+# Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
+# the role does not own earns the word), a false ask (a standing word, a Sonnet spawn, or text that
+# only names opus asks).
+CEILING = "subagent-model-cap"
+add("ceiling: Agent with model opus and no role asks", "ask", CEILING, tool="Agent", prompt="x",
+    model="opus", carries=(("opus", "Opus"),))
+add("ceiling: Task with model opus asks", "ask", CEILING, tool="Task", prompt="x", model="opus")
+for _spelling in ("claude-opus-5-5", "Claude-OPUS-5-5", ["opus"]):
+    add("ceiling: Agent with the model spelled %r asks" % (_spelling,), "ask", CEILING,
+        tool="Agent", prompt="x", model=_spelling)
+for _role in ("claude", "general-purpose", "builder", "reviewer", "test-author", "record-writer",
+              "Planner"):
+    add("ceiling: Agent %s with model opus and no standing word asks" % _role, "ask", CEILING,
+        tool="Agent", prompt="do it", model="opus", subagent_type=_role)
+add("ceiling: Agent Plan with model opus is allowed (standing word)", "allow",
+    tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
+add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing word)", "allow",
+    tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
+add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing word)", "allow",
+    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
+    subagent_type="builder")
+# The marker is a line of its own, as step_up_hit reads it. A lone quote and comment openers in the
+# lines above it hide nothing.
+add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is allowed",
+    "allow", tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
+    model="opus", subagent_type="builder")
+# A marker the role does not own, or one that is only prose, earns no word.
+for _role, _brief in (
+        ("reviewer", "Try 3 of 3. Finish the fix."),
+        ("general-purpose", "Try 3 of 3. Finish the fix."),
+        ("test-author", "Try 3 of 3. Finish the fix."),
+        ("builder", "Round 3 of 3. Finish the fix."),
+        ("builder", "Try 2 of 3. Finish the fix."),
+        ("builder", "This is not try 3 of 3, only the first pass."),
+        ("builder", "Plan: Try 3 of 3 later, after the review.")):
+    add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
+        tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
+# Text that only names opus is no model.
+add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
+    tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
+    description="opus lane", subagent_type="general-purpose")
+add("ceiling: Agent with no model whose brief names opus is allowed", "allow",
+    tool="Agent", prompt="Run on model opus, as the owner said.", subagent_type="builder")
+add("ceiling: Task on sonnet is allowed", "allow", tool="Task", prompt="x", model="sonnet",
+    subagent_type="general-purpose")
+sh("ceiling: a shell command that only names a spawn on opus is not a spawn",
+   "echo spawn the agent with model opus", "allow", cwd=NOGIT)
 
 
 def _flow(model, role=None):
@@ -13826,6 +13880,51 @@ for _act in OV_ACTS:
             skip_case(_label, NO_PS)
         else:
             LOG_CHECKS_EXTRA.append((_label, ov_act_check(_act, _is_timed)))
+
+
+# The ask on an Opus spawn is liftable (owner, 2026-10-21: an override pass lifts it like any other
+# ask), while the same rule's ask on a settings write stays outside every pass (ov_role_acts and
+# ov_cap_shell_acts below, owner 2026-10-18 16:25 CDT). Each story first wants the ask with no pass.
+OV_OPUS_SPAWN = {"prompt": "Review the diff for typos.", "model": "opus",
+                 "subagent_type": "general-purpose"}
+
+
+def ov_opus_spawn_check(timed):
+    """A one-act pass lets an Opus spawn through once, then it asks again. A timed pass lets it through
+    every time until the pass ends, and the call at the end instant asks."""
+    kind = "timed" if timed else "once"
+    rule = "subagent-model-cap"
+
+    def check():
+        config, session = ov_config("opus-spawn-" + kind), "ov-opus-spawn-" + kind
+
+        def call(seconds):
+            return lambda: ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, seconds)
+
+        ok, why = ov_story([("with no pass", call(0), "ask", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first spawn", call(60), "allow", rule),
+                     ("spawn just before the end", call(OV_TIMED_SECONDS - 1), "allow", rule),
+                     ("spawn at the end instant", call(OV_TIMED_SECONDS), "ask", rule)]
+        else:
+            steps = [("first spawn", call(60), "allow", rule),
+                     ("second spawn, pass spent", call(120), "ask", rule)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "an Opus spawn asked with no pass, then went through %s" % (
+            "until the end" if timed else "once")
+    return check
+
+
+for _is_timed in (False, True):
+    LOG_CHECKS_EXTRA.append(
+        ("override: a timed pass lets an Opus spawn through until it ends" if _is_timed
+         else "override: a one-act pass lets an Opus spawn through once, then it asks again",
+         ov_opus_spawn_check(_is_timed)))
 
 
 def ov_once_expiry_check():
