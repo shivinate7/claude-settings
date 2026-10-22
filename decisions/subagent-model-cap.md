@@ -97,8 +97,9 @@ id stays outside every pass. The ask fires only on an Opus spawn, so it stalls a
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
 write that changes the fallback stays: a write is a standing change, not a dispatch. The gate sees only
-Agent and Task calls; a Workflow script is read by the static scan, and a model set through a variable is
-unseen (`floor-workflow-runtime-models`).
+Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
+`start_session` on Opus; the static scan of a Workflow script reads only the Haiku floor, and a model set
+through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.

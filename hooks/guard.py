@@ -1635,7 +1635,7 @@ OPUS_STANDING_ROLES = ("Plan", "Explore")
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
     is the role Plan or Explore, or a builder whose brief holds a `Try 3 of 3` line (the same marker
-    step_up_hit reads). A reviewer's round 3 is no standing word. The spawn ask is liftable by an
+    step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
     override pass, so never_passed does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
         return ""
