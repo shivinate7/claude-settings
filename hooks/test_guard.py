@@ -14252,7 +14252,7 @@ FAMILY = "load-brake"
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 LB_PROBE = r"""
-import importlib.util, json, os, subprocess, sys
+import importlib.machinery, importlib.util, json, os, subprocess, sys
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
 real_popen = subprocess.Popen
@@ -14287,7 +14287,10 @@ def listing():
 
 out = {"reads": 0}
 try:
-    loader = importlib.util.spec_from_file_location("guard_under_test", guard_path)
+    # The loader is named, so a GUARD_UNDER_TEST copy with a .bak suffix loads like guard.py does.
+    loader = importlib.util.spec_from_file_location(
+        "guard_under_test", guard_path,
+        loader=importlib.machinery.SourceFileLoader("guard_under_test", guard_path))
     g = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(g)
     mods = [g] + [m for n, m in list(sys.modules.items()) if n.startswith("guard_") and m is not None]
