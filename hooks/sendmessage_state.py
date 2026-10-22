@@ -9,6 +9,8 @@ The state comes from `claude agents --json`, read by mods/session-board/hooks/re
 - idle: allow, no model call. The message starts a turn; it interrupts nothing.
 - waiting (on a permission answer): allow, no model call. The receiver is paused, not mid-task.
 - busy: one model call (decision_watch.invoke_model, the one model caller). FLAG denies.
+- the advisor ("advisor-" and a 2-to-6 character suffix, no other hyphen): allow, no board read, no model call. A question to the advisor is never
+  mid-task talk (CLAUDE.md, questions-ask-advisor-first).
 - unseen (main, an in-process teammate, no row, a duplicate name, node or claude missing): allow here.
   The wording judge, the SendMessage prompt hook in settings.json, covers that receiver.
 
@@ -18,6 +20,7 @@ else beside this file's real path (a symlink install, a worktree). Neither found
 """
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -32,6 +35,9 @@ try:
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
 
+# The advisor session's name in ListAgents: "advisor-" and a 2-to-6 character suffix with no other hyphen.
+# ListAgents shows no folder, so the name is the only mark (decisions/advisor-answers-questions.md).
+ADVISOR_NAME = re.compile(r"advisor-[A-Za-z0-9]{2,6}")
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
 # THE TIME BUDGET. The reader allows 8 s and the model call MODEL_TIMEOUT, so the settings.json
@@ -113,7 +119,7 @@ def main():
         to, message = tool_input.get("to"), tool_input.get("message")
         if not isinstance(to, str) or not to.strip() or not isinstance(message, str):
             return 0
-        if receiver_state(to) != "busy":
+        if ADVISOR_NAME.fullmatch(to.strip()) or receiver_state(to) != "busy":
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(build_prompt(to, message), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)

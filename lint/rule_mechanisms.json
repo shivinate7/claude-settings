@@ -500,6 +500,12 @@
         "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
       }
     },
+    "questions-ask-advisor-first": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing checks that a question went to the advisor before the owner. A hook would read the session records for a running advisor session and judge whether the question is one only the owner answers. hooks/sendmessage_state.py only lets the message through."
+      }
+    },
     "style-cut-narration": {
       "mechanism": {
         "kind": "unmechanized",
