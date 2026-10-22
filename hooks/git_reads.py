@@ -33,7 +33,7 @@ def is_worktree(where: str):
     """True in a linked worktree, False in an ordinary checkout, None when unknown.
 
     A worktree is the tree whose git directory differs from the repository's common git directory.
-    MEASURED on this machine: an ordinary checkout answers `.git` to both questions, while a linked
+    On this machine an ordinary checkout answers `.git` to both questions, while a linked
     worktree answers `<repo>/.git/worktrees/<name>` and `<repo>/.git`.
     """
     if not where or not os.path.isdir(where):
@@ -170,7 +170,7 @@ def stash_stack(where: str):
 def read_default_base(where: str, remote: str = "origin"):
     """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
 
-    Owner's ruling 2026-10-16: `<remote>/HEAD` when it resolves, then `<remote>/main`, then
+    The order is `<remote>/HEAD` when it resolves, then `<remote>/main`, then
     `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
     rest are never tried. A dangling `<remote>/HEAD` falls through. The second value is the name
     the symbolic ref holds, even when that branch does not verify or a later read failed; it is ""
@@ -298,7 +298,7 @@ def worktree_locked(where: str, target: str):
 # skipped rather than treated as a read failure, so one corrupt file cannot make an otherwise
 # readable directory look unreadable.
 #
-# MEASURED on Windows: a session record's `startedAt` is written 1.7 to 3.2 seconds after the
+# On Windows a session record's `startedAt` is written 1.7 to 3.2 seconds after the
 # kernel's own process-creation time. A correct read can fall outside a 5-second window under
 # load, so the tolerance widens to 60 seconds on every platform.
 SESSION_LIVE_TOLERANCE_MS = 60000
@@ -346,7 +346,7 @@ def _process_start_ms_windows(pid: int):
     -o lstart=` below prints local time with no zone marker at all. FILETIME carries no such
     trap: no zone is assumed, because none is ever ambiguous.
 
-    MEASURED cost on the reference machine: 0.137 ms per call.
+    Cost on the reference machine: 0.137 ms per call.
     """
     import ctypes
     import ctypes.wintypes
@@ -387,7 +387,7 @@ def _process_start_ms(pid: int):
     into an epoch by treating it as LOCAL time on THIS SAME machine. The number it returns then
     lines up with the epoch millisecond a session record already carries, written by
     `Date.now()` on the same local machine.
-    MEASURED trap, named in the plan this task comes from. Parsing the identical string as UTC
+    The trap: parsing the identical string as UTC
     introduced a five-hour offset and made a live session look expired. `calendar.timegm` and
     `datetime.fromisoformat(...).timestamp()` after tagging the string UTC both carry that trap.
     `mktime` does not, because it never assumes a zone the string never named.
@@ -433,7 +433,7 @@ def session_is_live(record):
 
     The tolerance is one-sided. `actual` (read now, fixed forever once the kernel records a
     process's creation FILETIME) more than the tolerance AHEAD of `started` (written 1.7-3.2s
-    later by `Date.now()`, MEASURED) is the recycled-pid signature -- but a clock stepping
+    later by `Date.now()`) is the recycled-pid signature -- but a clock stepping
     BACKWARDS between those two original measurements produces the exact same shape for a
     process that never died: `started` reads too small because it was captured after the step.
     The two are indistinguishable from this reading alone, so that direction answers None
@@ -462,7 +462,7 @@ def _path_identity(path: str):
     physical location (a Windows `subst` drive or a mapped network drive against its UNC or
     local equivalent). `None` when the identity itself could not be read.
 
-    MEASURED: `os.path.realpath` does not reliably canonicalise such a spelling to the same
+    `os.path.realpath` does not reliably canonicalise such a spelling to the same
     string as its equivalent -- mapping drive `T:` to a UNC share left `realpath` naming
     the UNC path for one spelling and the local path for the other, so they never compared
     equal as strings. `os.stat`'s `(st_dev, st_ino)` agreed for both. That pair, not the path
