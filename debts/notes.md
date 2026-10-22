@@ -174,7 +174,7 @@
 - merge-notice-unrelated-number: a PR number elsewhere in a reply block can suppress a real unnamed merge notice (hooks/decision_watch.py)
 - merge-text-allows-untested: test rows allowing grep and git log commands naming merge words have no branch that can fail (hooks/test_guard.py)
 - mod-gate-name-edges: non-ASCII mod folder names come back quoted from git, and duplicate plugin names let an unbumped change pass (lint/check_mod_versions.py)
-- model-clip-unmeasured: prompt clips PROMPT_MAX_LEN, REPLY_MAX, PROMPT_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
+- model-clip-unmeasured: prompt clips PROMPT_MAX_LEN and REPLY_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
 - mods-check-mjs-skipped: the mod test glob skips mods/plain-diff/check.mjs, so a red check.mjs passes CI (gates.yml)
 - mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (gates.yml)
 - mods-load-needs-new-session: a mod loads only in a session started after the change (marketplace load path)
@@ -398,7 +398,7 @@
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
 - ste-comment-gt-mask-early: A > inside a comment such as <!-- a > b --> ends the mask early, so the rest of the comment is read as text (lint/ste_gate.py). Decision: ste-gate-fixes-not-nags
-- prompt-hooks-fail-open: Prompt hooks (Agent, AskUserQuestion, decisions/ Edit and Write, SendMessage) can deny but have no documented onFailure, so a failed prompt hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position
