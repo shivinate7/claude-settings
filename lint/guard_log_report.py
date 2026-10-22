@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_gate.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-from guard_core import SESSION_LOG_PLACEHOLDER  # noqa: E402
+from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override pass lifted: counted, and a key only when present
@@ -29,6 +29,20 @@ COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the STE gate writes for sev
 UNKNOWN = "unknown session"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session")
+COMBINED_CODE = re.compile(r"STE\d+")
+WHOLE_CODE = re.compile(r"STE\d{3}")  # every ste_lint.RULES code is STE and three digits
+
+
+def codes(rule):
+    """The STE codes one combined rule id names, or [] for any other id. The gate's logger cuts a long
+    id and ends it LOG_CUT_MARK; the last piece of a cut id may be a partial code, so it counts only
+    when it is a whole code."""
+    if not rule.endswith(LOG_CUT_MARK):
+        return rule.split(",") if COMBINED.fullmatch(rule) else []
+    parts = rule[:-len(LOG_CUT_MARK)].split(",")
+    if len(parts) < 2 or not all(COMBINED_CODE.fullmatch(p) for p in parts[:-1]):
+        return []
+    return [p for p in parts if WHOLE_CODE.fullmatch(p)]
 
 
 def parse_line(raw):
@@ -66,7 +80,7 @@ def summarize(lines, days, now, session=None):
             out["unreadable"] += 1
             continue
         day = row.when.date().isoformat()
-        for rule_id in [row.rule] + (row.rule.split(",") if COMBINED.fullmatch(row.rule) else []):
+        for rule_id in [row.rule] + codes(row.rule):
             out["first"][rule_id] = min(day, out["first"].get(rule_id, day))
         if days is None:
             out["per_day"].setdefault(day, 0)
@@ -95,11 +109,10 @@ def all_rules(s, ids):
     its counts to each code, and keeps its own row."""
     by_rule = {r: dict(c) for r, c in s["by_rule"].items()}
     for rule_id, c in s["by_rule"].items():
-        if COMBINED.fullmatch(rule_id):
-            for code in rule_id.split(","):
-                mine = by_rule.setdefault(code, dict.fromkeys(COUNTED, 0))
-                for k, n in c.items():
-                    mine[k] = mine.get(k, 0) + n
+        for code in codes(rule_id):
+            mine = by_rule.setdefault(code, dict.fromkeys(COUNTED, 0))
+            for k, n in c.items():
+                mine[k] = mine.get(k, 0) + n
     for rule_id in ids:
         by_rule.setdefault(rule_id, dict.fromkeys(COUNTED, 0))
     for rule_id, c in by_rule.items():
