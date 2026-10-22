@@ -404,7 +404,7 @@ def case_override_off():
 
 
 # Each of these holds the word `override`, and none of them is the whole prompt. The notice forms are
-# the tags question_outcome.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
+# the tags shared_names.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
 OV_NO_GRANT = [
     ("a word at the end of a message", "please override"),
     ("a message that starts with the word", "override the guard for me"),

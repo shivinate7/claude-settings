@@ -1166,7 +1166,7 @@ def _timeout_run(argv, **kwargs):
 
 
 def case_invoke_model_return_shape_pinned():
-    # reply_judge and question_outcome call invoke_model: its (verdict | None, error | None) return must not move.
+    # reply_judge calls invoke_model: its (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
