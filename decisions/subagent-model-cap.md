@@ -7,7 +7,8 @@ Opus runs only for Plan, the advisor (agents inherit it), and the builder's thir
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
 An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
-claude-code-guide, test-author, reviewer and record-writer. Prose alone enforces the ceiling.
+claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
+or Task spawn that sets model opus asks, unless Plan, Explore or a builder's `Try 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
@@ -61,7 +62,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 The Agent prompt judge blocks an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model blocks. Explore stays a
 Haiku role, so Sonnet is the floor for the judge only. Opus for an audit Explore is the owner's word,
-given at class level on 2026-10-21; the judge passes it, and only prose holds the ceiling. A plain search passes on the Haiku default. The caller
+given at class level on 2026-10-21; the judge and the guard pass it. A plain search passes on the Haiku default. The caller
 spot-checks findings before it acts on an audit.
 
 `lint/check_skill_model_rows.py` fails CI when a skill under `skills/` has no row, or a row names a
@@ -81,18 +82,24 @@ unless the file is a Haiku role. `agents/plan.md` pins Plan.
 the brief. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
 word. A try 3 builder needs Opus.
 
-**No pin, no per-spawn gate.** The variable is a true fallback: it decides only the spawns that name no
+**No pin, and the ceiling is an ask.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
 spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
-No per-spawn gate guards the ceiling. Reason: an ask blocks the dispatch, so a fan-out stalls at the first
-ask until the owner returns. A gate also fires only on over-provisioning and is blind to
-under-provisioning (`guard-that-cries-wolf-is-spent`). A justification line is written after the model is
-chosen, so it defends the choice. The one line before dispatch (`roles-opus-shaped-say-so`) names the
-reason before the choice, so it stays. It asks; the owner's word decides. One gate stays: the ask on a
-write that changes the fallback. A write is a standing change, not a dispatch, so it stalls nothing
-mid-fan-out.
+The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
+words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
+`subagent-model-cap`, unless a standing word covers it: the role Plan, the role Explore (the class-level
+word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
+it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override pass
+lifts the spawn ask like any other ask (`owner-override-pass`); the ask on a settings write under the same
+id stays outside every pass. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
+asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
+before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
+write that changes the fallback stays: a write is a standing change, not a dispatch. The gate sees only
+Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
+`start_session` on Opus; the static scan of a Workflow script reads only the Haiku floor, and a model set
+through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `subagent-model-cap`.

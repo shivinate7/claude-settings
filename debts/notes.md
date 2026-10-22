@@ -431,7 +431,7 @@
 - floor-builtin-agents: a built-in agent with no file in agents/ picks its own model and never puts it in the tool input. Decision: subagent-model-cap
 - explore-audit-judge-misread: the Agent prompt judge is a model and can misread a borderline Explore brief. the caller spot-checks findings before acting on an audit. Decision: subagent-model-cap
 - model-ceiling-fork-skill-inherit: a fork and a skill run in a subagent with model inherit run the main model. only the prose ceiling guards them. Decision: subagent-model-cap
-- model-ceiling-no-after-read: a spawn above Sonnet with no owner word passes without a prompt. nothing reads it after the turn. Cost accepted: one lane at higher spend. Decision: subagent-model-cap
+- model-ceiling-no-after-read: a spawn above Sonnet through a fork, a skill, a Workflow `agent()` call (literal or variable) or `start_session` passes without a prompt, because the guard reads only an Agent or Task call. nothing reads it after the turn. Cost accepted: one lane at higher spend. Decision: subagent-model-cap
 - under-provisioning-unguarded: nothing catches a too-weak model before the rework cycle, except the step-up and the floor. Decision: subagent-model-cap
 - done-line-tier-unchecked: no check reads which tier a lane ran, so a Done line need not name a tier above Sonnet. report_gate.py cannot see the model. Decision: subagent-model-cap
 - detached-launch-heredoc-blind: an & job inside bash <<EOF is not seen, because the rule drops each heredoc body first. Decision: detached-launch-refused
