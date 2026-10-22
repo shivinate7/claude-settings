@@ -98,7 +98,7 @@ from shared_names import STATE_DIR_NAME  # noqa: E402  stdlib only
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
 # (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
-from _transcript import last_human_epoch, head_moved_since  # noqa: E402
+from _transcript import last_human_epoch, head_moved_since, is_last_human  # noqa: E402
 
 # THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it
 # caps each python run itself (PY_MS there), so no Stop row timeout bounds it now. In split
@@ -164,27 +164,8 @@ def _safe_why(text):
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied, not imported, so this Stop hook
-# stays readable as one file (rule building-allow-list-is-the-constant does not govern this copy:
-# a transcript helper is no permit list).
-
-def is_last_human(rec):
-    if rec.get("type") != "user":
-        return False
-    if rec.get("isSidechain"):
-        return False
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list):
-        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-        has_tool_result = any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-        )
-        return has_text and not has_tool_result
-    return False
-
+# is_last_human is imported from lint/_transcript.py, the one home. read_transcript below is an
+# older copy.
 
 def read_transcript(path):
     records = []
@@ -615,7 +596,7 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
 # path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See decisions/question-outcome-check.md.
+# scrubs the token from any error text it returns. See decisions/reply-judge-samples-never-blocks.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 

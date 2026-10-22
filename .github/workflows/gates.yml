@@ -133,9 +133,6 @@ jobs:
       - name: SendMessage state fixture suite
         run: python3 hooks/test_sendmessage_state.py
 
-      - name: Question outcome fixture suite
-        run: python3 hooks/test_question_outcome.py
-
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -467,8 +464,8 @@ jobs:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_macos == 'true' || github.event_name != 'pull_request' }}
-    # Cap 25 min = about 2x the slowest green run (figures: debt measured-time-table).
-    timeout-minutes: 25
+    # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -542,10 +539,6 @@ jobs:
       - name: SendMessage state fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_sendmessage_state.py
-
-      - name: Question outcome fixture suite
-        if: ${{ !cancelled() }}
-        run: python3 hooks/test_question_outcome.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}
@@ -880,10 +873,6 @@ jobs:
       - name: SendMessage state fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_sendmessage_state.py
-
-      - name: Question outcome fixture suite
-        if: ${{ !cancelled() }}
-        run: python hooks/test_question_outcome.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}

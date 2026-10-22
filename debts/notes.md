@@ -1,6 +1,6 @@
 # Notes: findings too unlikely to hit to be debts
 - SendMessage prompt hook may never fire: check that a logged SendMessage call gets a verdict. Decision: haiku-prompt-hooks (blocking prompt hooks trial).
-- AskUserQuestion gain/loss rule may block terse real choices: check it on real questions. Decision: haiku-prompt-hooks (blocking prompt hooks trial).
+- AskUserQuestion gain/loss rule may block terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a deny case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
 - agent-brief-no-matcher: SubagentStart agent-brief hook has no matcher, so every agent type gets the standing rules (settings.json)
@@ -58,7 +58,7 @@
 - fb-judge-marker-race: the judge child can remove a fresh capture marker written in a microsecond gap, closing capture early (hooks/feedback_judge.py)
 - frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
 - gate-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (gate wrappers)
-- gate-own-errors-fail-open: question_outcome, guard and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
+- gate-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
 - gate-remedy-needs-bash: gate remedy names sh install.sh, which Bash cannot run while the guard is missing (gate wrappers)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
@@ -138,12 +138,6 @@
 - install-worktree-check-gaps: four small gaps in the installer's worktree check, including an empty catch that hides other errors (install.ps1)
 - install-writes-in-place: CLAUDE.md pointer, settings.json, skills folder, log and marker are written in place; non-guard hooks import guard modules with no reload (install.sh, install.ps1)
 - janitor-loop-no-alias-skip: bin/claude-janitor keeps the old loop with no Store alias skip; it is a user command (bin/claude-janitor)
-- judge-cut-mark-reserve-over: fit_span reserves 37 chars for the cut mark even when nothing can be cut, so the prompt can exceed PROMPT_MAX by 36 (question_outcome.py)
-- judge-cuts-long-ruling: a ruling over 800 chars is cut at a sentence end, so a late settled point may be missed (question_outcome.py RULING_CAP)
-- judge-fence-lookalikes: _defang misses full-width, zero-width, lower-case and spaced fence lookalikes and tokens split across options (question_outcome.py)
-- judge-heading-false-match: RULING_HEADING also matches headings such as "Ruling out ..." (question_outcome.py)
-- judge-skips-other-headings: rulings under a heading other than the known ruling headings are not read (question_outcome.py RULING_HEADING)
-- judge-uncommitted-order: a new uncommitted record is ordered by file mtime, after the git-listed ones (question_outcome.py)
 - judgment-exits-debt-count: re-kinding an unmechanized rule to judgment takes it off the waiting list; only the 8-word reason floor and two pins stand in the way (lint/rule_audit.py)
 - kept-bloat-rows-unaudited: 97 kept BLOAT fix rows were not read against a corpus; how often a swap changes meaning is unmeasured (lint/ste_lint.py FIXABLE)
 - kill-guard-word-only: kill_hit reads only the command word; gtimeout 5 pkill -f node and watch pkill pass (hooks/guard_kill.py)
@@ -179,7 +173,7 @@
 - merge-notice-unrelated-number: a PR number elsewhere in a reply block can suppress a real unnamed merge notice (hooks/decision_watch.py)
 - merge-text-allows-untested: test rows allowing grep and git log commands naming merge words have no branch that can fail (hooks/test_guard.py)
 - mod-gate-name-edges: non-ASCII mod folder names come back quoted from git, and duplicate plugin names let an unbumped change pass (lint/check_mod_versions.py)
-- model-clip-unmeasured: prompt clips PROMPT_MAX_LEN, REPLY_MAX, PROMPT_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
+- model-clip-unmeasured: prompt clips PROMPT_MAX_LEN and REPLY_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
 - mods-check-mjs-skipped: the mod test glob skips mods/plain-diff/check.mjs, so a red check.mjs passes CI (gates.yml)
 - mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (gates.yml)
 - mods-load-needs-new-session: a mod loads only in a session started after the change (marketplace load path)
@@ -229,9 +223,6 @@
 - purge-snapshot-race: unexpired rows are read once at purge start, so a later reap logging the same commit is unseen (janitor/sweep.py)
 - purge-update-ref-mutant-missing: no mutant drops only the commit argument of update-ref -d (janitor/mutate_sweep.py)
 - pwsh-cmd-script-gaps: pwsh -c taskkill, cmd lone &, -EncodedCommand, substitution in script and iex forms pass the kill, WSL and stream rules (hooks/guard_core.py)
-- question-goal-line-masks-order: a decorated '- goal: old' line earlier masks a real Problem-first order violation (hooks/question_outcome.py)
-- question-preface-punctuation: a punctuation-led preface line before Goal: is denied, then the retry passes the free pass unchecked (hooks/question_outcome.py)
-- question-problem-line-forms: '1. Problem:' and 'Problem :' do not count as Problem lines (hooks/question_outcome.py)
 - quoted-script-unnamed-runner: rm -rf or tail -f inside a quoted script for an unnamed runner, such as docker run img sh -c, passes (hooks/guard_push_delete.py)
 - rate-wait-outside-ttl-budget: a rate wait does not grow the lock's TTL budget, so later checks waits can pass expiry (merge/merge.py Lock.extend_for)
 - reader-tree-kill-unproven: a mutant killing only the top process passes all cases; a hung claude agents child can linger (hooks/sendmessage_state.py)
@@ -346,7 +337,6 @@
 - clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
 - asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
 - foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
-- question-check-style-slice: _style_rules in hooks/question_outcome.py cuts 2 chars off a style line not starting with '- '; not reachable today. Decision: question-outcome-check
 - feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
 - sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
 - builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes write deny. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
@@ -399,7 +389,7 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- prompt-hooks-fail-open: Prompt hooks (Agent, AskUserQuestion, decisions/ Edit and Write, SendMessage) can deny but have no documented onFailure, so a failed prompt hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position
@@ -445,7 +435,7 @@
 - report-on-empty-turn-unchecked: The report gate returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_gate.py. Decision: claude-md-shrink
 - slug-cite-gloss-unchecked: The report gate checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_gate.py. Decision: claude-md-shrink
 - stash-reminder-text-outside-repo: The harness worktree reminder still tells a worker to push a tagged stash entry, which guard_shared_tree.py now denies. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
-- token-read-accepted-risk: The guard blocks writes to the hook-token state folder but not reads, so a session can print the token into its transcript. .credentials.json carries the same risk. Decision: question-outcome-check
+- token-read-accepted-risk: The guard blocks writes to the hook-token state folder but not reads, so a session can print the token into its transcript. .credentials.json carries the same risk. Decision: reply-judge-samples-never-blocks
 - ruling-kind-lint-scope: The lint checks each Plan line present and that a Home exists, not which platforms a ruling needs nor that the home enforces it. Decision: rulings-declare-kind
 - ruling-kind-write-judge-misses: The Write and Edit prompt judges are models and can miss a case. only the Write judge and the lint check a whole record. Decision: rulings-declare-kind
 - one-shared-record-stamp-left-out: The stamp engine leaves out build steps, debts, the flat-file fallback when ORDER.json is missing, branch-side reads (--stale, --unclaim, --landed, --porcelain, merging()), and folder/prefix forms with no pending form. Decision: one-shared-record-stamp
@@ -475,7 +465,6 @@
 - model-cap-alias-rows-merged: Alias, availableModels and /model picker rows in subagent-model-cap are one row now. the haiku 'follows Claude Code' wording is gone. Decision: subagent-model-cap
 - discard-fail-closed-list-in-code-only: The shape list that keeps the ask in a linked worktree now lives only in hooks/guard_shared_tree.py. Decision: agent-worktree-discard-is-noted
 - silent-undo-flag-print-no-cap-unrecorded: The 'print every flagged line, no cap' choice left the decision and is unverified in lint/check_silent_undo.py. Decision: silent-undo-check-design
-- rulings-past-judge-cap: these rulings exceed the 800-char judge cap, so the judge sees only their first sentences and misses the later points. standing-merge-grant (ladder, hold, refusal), install-hooks-whole (lock), merge-reinstalls-from-main (pinned swap, local fast-forward), the-janitor-is-one-machine-wide-sweep (deadline, oldest-first), when-a-worktree-may-be-removed (write-back), stop-guardrail-became-a-command-hook, unattended-sweep-stops-proven-orphans, agent-end-reap-stops-what-a-finished-agent-left, reply-judge-samples-never-blocks, plain-prose-lint (label tags), stall-watch, install-refuses-linked-tree. Measured 2026-10-18 for these twelve only; other rulings may be over the cap too (hooks/question_outcome.py RULING_CAP). Decision: question-judge-reads-rulings (the question judge refuses a settled question)
 - feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch
@@ -483,9 +472,7 @@
 - merge-retarget-before-merge: a base change after the last wait pass and before gh pr merge lands the merge on the new base; no retarget seen. Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none
 - ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still say "Write in Simplified Technical English". Owner's word, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). Decision: plain-prose-lint
 - undo-check-rename-alarm: check_silent_undo goes red when a PR renames a file and main edits the old name, because it reads with --no-renames; a Drops-lines trailer passes it. Fix when it fires on a real merge: read renames with -M for the PR side only (lint/check_silent_undo.py). Decision: none
-- judge-reads-related-only: a judge that sees only the records a question touches, so the prompt stays small as rulings grow; owner interested 2026-10-18. Decision: question-judge-reads-rulings
 - git-h-stash-reads-bare: `git -h stash` allows on main. The guard skips -h as a git option and reads a bare git stash, which passes over a clean tree. `bash -c "git stash pop"` allows too, the known wrapper gap in guard-shell-wrap-discard-unread (hooks/guard_core.py _git_subcommand_index). Decision: stash-stack-is-a-shared-subject (the stash stack is a shared subject)
-- judge-prompt-fit-timeout: the question judge prompt can hold RULINGS_MAX (95,000 chars) of rulings inside PROMPT_MAX (150,000). Whether the model reads that much inside MODEL_TIMEOUT (90 s) is unmeasured, as a comment in hooks/question_outcome.py says. Decision: question-judge-reads-rulings (the question judge refuses a settled question)
 - catalog-cell-pipes-over-cap: cell() cuts a cell to CELL_CAP before it writes each pipe as \|, so a cut cell can render a few chars over the cap. Test e13 goes red on any cut cell, so no cell is cut today (lint/hook_catalog.py). Decision: catalog-cells-never-cut (catalog cells are never cut)
 - comment-narration-limits: lint/check_comment_narration.py (lane comment-narration-lint, not on main yet) flags a legit line, such as "round 2 decimals" or a hex id (7 repo lines in the review), and has no suppression marker. A moved block shows as added. No test pins the split("\n") of the diff in added_lines. Decision: none
 - linked-tree-cites-old-decision: install.sh, install.ps1, hooks/test_install_src.sh and install.test.ps1 cite merge-reinstalls-from-main for the rule that a linked worktree is allowed only at <clone>-live, detached at main. That rule now lives in install-refuses-linked-tree. The off-main line comment in hooks/test_install_src.sh is the same case. Fix: re-point the comments that state these rules. Decision: install-refuses-linked-tree (the installer refuses a linked worktree, except the live pin)
@@ -504,7 +491,7 @@
 - watch-escaped-cap-key: a JSON-escaped cap key outside env is a lift to the guard but not to the fast path, so its expiry check is skipped; only an attacker writes it (hooks/config_watch.py lift_candidate). Decision: config-watch-fast-exit
 - watch-bad-json-mixed-cap: in unparseable JSON the last text cap assignment wins, so opus then sonnet reads as Sonnet; such a file loads no settings (hooks/config_watch.py). Decision: config-watch-fast-exit
 - watch-sonnet-1m-reported: a first-sight cap of sonnet[1m] reads as unknown, a false alarm in the safe direction (hooks/config_watch.py). Decision: config-watch-fast-exit
-- config-dir-copies: config_dir logic is copied in daily_note, override_pass, precompact_handoff, question_outcome and sim_boot_record; shared_names is its home (hooks/shared_names.py). Decision: config-watch-fast-exit
+- config-dir-copies: config_dir logic is copied in daily_note, override_pass, precompact_handoff and sim_boot_record; shared_names is its home (hooks/shared_names.py). Decision: config-watch-fast-exit
 - drops-body-nested-fence: a 4-backtick fence that holds a 3-backtick fence closes on the 3 backticks, so lines after it read as body text. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-fence-in-comment: a fence opener inside an `<!-- -->` comment drops a real trailer after it (false alarm). Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)

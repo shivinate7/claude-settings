@@ -87,7 +87,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `output-never-paste-passing-output` | Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-bring-decisions-as-question` | Bring my decisions as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-answer-has-a-home` | An answer to a question I bring is a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
+| `questions-ask-advisor-first` | When you have a question for me, run ListAgents first. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-order-of-labels` | Done, Deviations, Decided by the advisor, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -99,6 +100,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
 | `a-kill-by-pid-needs-an-owned-pid` | Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
+| `advisor-answers-questions` | Owner, 2026-10-22: a session with a question for the owner first runs `ListAgents`. | [`decisions/advisor-answers-questions.md`](../decisions/advisor-answers-questions.md) |
 | `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops. | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
@@ -155,8 +157,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`decisions/playwright-install-once.md`](../decisions/playwright-install-once.md) |
 | `precompact-handoff` | Auto-compact drops detail. | [`decisions/precompact-handoff.md`](../decisions/precompact-handoff.md) |
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
-| `question-judge-reads-rulings` | The question judge (question-outcome-check) reads the repo's decision and debt records and refuses a question the owner already settled. | [`decisions/question-judge-reads-rulings.md`](../decisions/question-judge-reads-rulings.md) |
-| `question-outcome-check` | A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`. | [`decisions/question-outcome-check.md`](../decisions/question-outcome-check.md) |
+| `premise-format` | A premise is a claim, not a fact. | [`decisions/premise-format.md`](../decisions/premise-format.md) |
+| `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`decisions/question-reviewer-agent-hook.md`](../decisions/question-reviewer-agent-hook.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `reply-judge-samples-never-blocks` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`decisions/reply-judge-samples-never-blocks.md`](../decisions/reply-judge-samples-never-blocks.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
@@ -173,7 +175,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stall-watch` | The session learns within minutes that a background command stalled, and diagnoses the cause. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
 | `standing-merge-grant` | Owner ruling, 2026-10-10: the orchestrating session has standing merge authority in claude-settings. | [`decisions/standing-merge-grant.md`](../decisions/standing-merge-grant.md) |
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "A stash entry belongs to no branch." The guard reads `git stash` against the whole stack, not only the working tree. | [`decisions/stash-stack-is-a-shared-subject.md`](../decisions/stash-stack-is-a-shared-subject.md) |
-| `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
+| `ste-gate-fixes-not-nags` | Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write gate (`ste_gate.py`) and no markdown sweep (`md_sweep.py`). | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `stop-guardrail-became-a-command-hook` | The Stop guardrail is never a `type: agent` hook. | [`decisions/stop-guardrail-became-a-command-hook.md`](../decisions/stop-guardrail-became-a-command-hook.md) |
 | `subagent-model-cap` | Each agent role has its own model and effort, in the table below. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
 | `subagent-powershell-tool` | With Claude Code's PowerShell tool. | [`decisions/subagent-powershell-tool.md`](../decisions/subagent-powershell-tool.md) |
@@ -200,8 +202,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hook-catalog-page` | `docs/catalog.md` lists every hook, judge, mod and skill. | [`decisions/hook-catalog-page.md`](../decisions/hook-catalog-page.md) |
 | `install-refuses-linked-tree` | The installer refuses a linked worktree. | [`decisions/install-refuses-linked-tree.md`](../decisions/install-refuses-linked-tree.md) |
 | `install-sh-stays-off-windows` | `install.sh` does nothing on Windows. | [`decisions/install-sh-stays-off-windows.md`](../decisions/install-sh-stays-off-windows.md) |
+| `machine-load-brake` | Owner, 2026-10-21 (spec) and 2026-10-22 (rulings): a lane-start call reads the machine's load, and a busy or full machine refuses new lanes. | [`decisions/machine-load-brake.md`](../decisions/machine-load-brake.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
-| `owner-override-pass` | The owner types `override` as a whole prompt. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
+| `owner-override-pass` | The owner starts a prompt with the word `override`. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
 | `post-merge-hook-is-a-fallback` | Owner, 2026-10-22: `install.ps1` writes its git post-merge hook only when it installs a copy, not a link. | [`decisions/post-merge-hook-is-a-fallback.md`](../decisions/post-merge-hook-is-a-fallback.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
@@ -225,6 +228,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `gitignore-skips-map-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`debts/gitignore-skips-map-tests.md`](../debts/gitignore-skips-map-tests.md) |
+| `guard-cull-held-two` | `gh-api-method` and `ln-over-directory` have zero guard.log lines on this Windows machine (20,685 lines since 2026-09-16), yet they stay. | [`debts/guard-cull-held-two.md`](../debts/guard-cull-held-two.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`debts/hooks-to-mods-judges.md`](../debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
@@ -250,11 +254,14 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `push-head-mismatch-trap` | `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. | [`debts/push-head-mismatch-trap.md`](../debts/push-head-mismatch-trap.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
 | `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`debts/refusal-route-around-guard.md`](../debts/refusal-route-around-guard.md) |
+| `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`debts/ruling-kind-vacuous-local-pass.md`](../debts/ruling-kind-vacuous-local-pass.md) |
+| `settled-question-check-gap` | A question that a decision or a debt already settles can reach the owner. | [`debts/settled-question-check-gap.md`](../debts/settled-question-check-gap.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`debts/sharables-adopts-the-stamp.md`](../debts/sharables-adopts-the-stamp.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`debts/skill-copy-no-typescript.md`](../debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`debts/squash-lane-branch-kept.md`](../debts/squash-lane-branch-kept.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`debts/stamp-shallow-depth-two.md`](../debts/stamp-shallow-depth-two.md) |
+| `ste-stubs-delete` | `ste_gate.py` and `md_sweep.py` do nothing. | [`debts/ste-stubs-delete.md`](../debts/ste-stubs-delete.md) |
 | `test-guard-no-progress-line` | `hooks/test_guard.py` prints nothing for minutes, so the stall watch cuts off a healthy full run. | [`debts/test-guard-no-progress-line.md`](../debts/test-guard-no-progress-line.md) |
 | `three-skill-findings` | Two fixes for `skills/compliance-check` wait for the owner. | [`debts/three-skill-findings.md`](../debts/three-skill-findings.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`debts/upgrade-strips-name-port.md`](../debts/upgrade-strips-name-port.md) |

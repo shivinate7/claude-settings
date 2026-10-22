@@ -4,8 +4,8 @@
 
 Owner, 2026-10-12: a gate whose script or python is missing refuses the call. A gate that times out or crashes does not, because load must never take the setup down, except a missing guard module, which refuses.
 
-- The three command gates in `settings.json` exit 2 when their script or python is missing: PreToolUse `guard.py` and `question_outcome.py`, and PermissionRequest `rm_prompt_answer.py`.
-- For the two PreToolUse gates, exit 2 refuses the call and one stderr line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the permission flow unchanged and discards stderr, so a missing script shows the normal prompt with no remedy line. This is safe: the gate can only allow, so a prompt is the closed state. `test_wrappers.py` pins exit 2.
+- The two command gates in `settings.json` exit 2 when their script or python is missing: PreToolUse `guard.py` and PermissionRequest `rm_prompt_answer.py`.
+- For the PreToolUse gate `guard.py`, exit 2 refuses the call and one stderr line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the permission flow unchanged and discards stderr, so a missing script shows the normal prompt with no remedy line. This is safe: the gate can only allow, so a prompt is the closed state. `test_wrappers.py` pins exit 2.
 - A missing script names `sh install.sh`, or on Windows `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first.
 - No gate carries `onFailure`: a gate that times out or crashes lets the call through. The PreToolUse `guard.py` hook timeout is 60 s (owner, 2026-10-14). A command that needs longer runs unjudged. The command length that crosses 60 s is unmeasured.
 - The STE write gate is not a safety gate. It is removed (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`).
@@ -13,7 +13,7 @@ Owner, 2026-10-12: a gate whose script or python is missing refuses the call. A 
 
 Why: wrappers that ended `; exit 0` let the call through on a missing script, so the guard's refusals vanished exactly when the guard was broken.
 
-Cost: a machine with `settings.json` but no hooks refuses Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill, AskUserQuestion and two MCP tools. This lasts until the hooks are installed. The refusal names the remedy.
+Cost: a machine with `settings.json` but no hooks refuses Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill and two MCP tools. This lasts until the hooks are installed. The refusal names the remedy.
 
 Protected by `hooks/test_wrappers.py`: each gate wrapper exits 2 with the remedy line on a missing script and a missing python. With a script present it execs it, passes stdin through, and returns its exit code. Advisory entries exit 0. The suite is red on a `settings.json` where a gate carries `onFailure`.
 

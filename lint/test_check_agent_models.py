@@ -5,10 +5,12 @@ Haiku is allowed only in the agent files for Explore, claude-code-guide, test-au
 Every other agent or skill file keeps the Sonnet floor.
 Failure classes: false deny (a listed role fails), false allow (another file passes, by name
 collision, case or alias), unreadable frontmatter.
+One case reads the real agents/plan.md: its "Premises first" paragraph cites the premise record.
 """
-import contextlib, io, os, sys, tempfile, unittest
+import contextlib, io, os, re, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_models as C  # noqa: E402
 
@@ -52,6 +54,27 @@ class Haiku(unittest.TestCase):
 
     def test_unclosed_frontmatter_still_fails_for_a_listed_role(self):
         self.assertEqual(verdict("agents/reviewer.md", "haiku", closed=False)[0], 1)
+
+
+# The kind is the backticked first cell of a table row, as hooks/test_precompact_handoff.py reads it.
+KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
+
+
+class PlanPremises(unittest.TestCase):
+    def test_premises_first_cites_the_record_and_copies_no_kind(self):
+        with open(os.path.join(ROOT, "agents", "plan.md"), encoding="utf-8") as handle:
+            paragraphs = re.split(r"\n\s*\n", handle.read())
+        found = [p for p in paragraphs if p.startswith("Premises first")]
+        self.assertEqual(len(found), 1, "agents/plan.md needs one 'Premises first' paragraph")
+        self.assertIn("`premise-format`", found[0])
+        # One home for the kinds: decisions/premise-format.md. The plan agent points at it.
+        with open(os.path.join(ROOT, "decisions", "premise-format.md"), encoding="utf-8") as handle:
+            kinds = KIND_ROW.findall(handle.read())
+        self.assertTrue(kinds, "no kind rows in decisions/premise-format.md")
+        for kind in kinds:
+            with self.subTest(kind=kind):
+                self.assertIsNone(re.search(r"\b%s\b" % kind, found[0], re.I),
+                                  "the paragraph copies the kind %r; cite the record" % kind)
 
 
 if __name__ == "__main__":
