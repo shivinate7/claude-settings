@@ -21,7 +21,7 @@ A premise is a claim, not a fact. It is one line: `- P<n> [<kind>] <claim>. Sour
 - Act on a weak or stale premise only after a check upgrades it. A check that confirms a premise rewrites its line with the new source and date. A check that refutes it deletes the line or replaces it with the true fact and its source. Keep no "was wrong" note. Fix the same fact in any brief, decision or plan that holds it. If work already rested on it, say so under Deviations in the next report.
 - A premise that becomes a ruling moves to its home. The premise line then cites that home as `ruling`.
 - A kind outside this table is weak: the handoff reorient lists it with the weak ones.
-- One home. The table above is the meaning of each kind. `PREMISE_KINDS` in `hooks/precompact_handoff.py` is the list the parser reads, and a test keeps it equal to this table. No other file copies the list.
+- One home. The table above is the meaning of each kind. `PREMISE_KINDS` in `hooks/precompact_handoff.py` is the list the parser reads, and a test keeps it equal to this table. The kinds run strongest first, and the first one is the kind a compaction reorient leaves out of its list. The one other copy is in `hooks/precompact_handoff_prompt.md`: an installed prompt cannot point at `decisions/`, so it lists the kinds itself, and a test keeps it equal to this table.
 
 Owner, 2026-10-21: the handoff holds the premises. Raw evidence lives in the record that uses it.
 

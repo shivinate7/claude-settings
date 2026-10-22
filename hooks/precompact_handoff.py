@@ -66,8 +66,8 @@ NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
 DEFAULT_WINDOW = 500_000
-# The source kinds of a handoff premise. decisions/premise-format.md says what each means and
-# lists the same names; case_premise_kinds_one_home keeps the two equal.
+# The source kinds of a handoff premise, strongest first. decisions/premise-format.md says what
+# each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 _PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
@@ -409,7 +409,7 @@ def handoff_premises(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
-    except OSError:
+    except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
         return []
     head = _PREMISES_HEAD.search(text)
     if not head:
@@ -424,7 +424,8 @@ def handoff_premises(path):
 
 def premise_note(path, everyone):
     """The reorient text on premises; "" when the handoff file does not exist. everyone: list
-    every premise, since the handoff came from another session. Else list all but a `ruling`.
+    every premise, since the handoff came from another session. Else list all but the strongest
+    kind, PREMISE_KINDS[0].
     A kind outside PREMISE_KINDS is not a ruling, so it is listed."""
     if not os.path.isfile(path):
         return ""
@@ -432,7 +433,7 @@ def premise_note(path, everyone):
     if not prem:
         note = " The handoff has no Working premises section. Add it per step 4."
     else:
-        weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != "ruling"]
+        weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != PREMISE_KINDS[0]]
         note = (" Premises are claims. Check each before you act on it, then rewrite its "
                 "line: %s." % ", ".join(weak)) if weak else ""
     if not everyone:
