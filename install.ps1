@@ -711,7 +711,7 @@ if (Test-Path (Join-Path $RepoDir 'package-lock.json')) {
     }
 }
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Log "python3 not found on PATH; the guard, STE gate and other gates refuse Bash, Write and Edit calls until Python 3 is installed"
+    Log "python3 not found on PATH; the guard and the other gates refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
 # Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads

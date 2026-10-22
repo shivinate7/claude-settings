@@ -398,12 +398,10 @@ def guard_rule_names(text: str, path: str = "<source>"):
 
 
 def emitted_rule_ids(root: str = ROOT) -> set:
-    """Every rule id the guard and the gates can write to guard.log: the one home for that list.
+    """Every rule id the guard can write to guard.log: the one home for that list.
     Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `subagent-model-cap`
-    reverts). Gate ids are every ste_lint.RULES code."""
-    sys.path.insert(0, os.path.join(root, "lint"))  # `python -I` leaves the script folder off the path
-    import ste_lint
-    ids = set(ste_lint.RULES)
+    reverts). No hook writes an STE code now."""
+    ids = set()
     config_watch = os.path.join(root, "hooks", "config_watch.py")
     for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root))
