@@ -623,7 +623,7 @@ class CitationTests(unittest.TestCase):
 GUARD_IDS_THE_REGEX_MISSED = (
     "force-push", "bare-merge", "guard-crash", "builder-test-edit", "test-author-scope",
     "record-writer-scope", "author-diff", "builder-diff", "writer-diff",
-    "role-diff-nocwd", "role-diff-main-checkout", "role-diff-unresolved")
+    "role-diff-main-checkout", "role-diff-unresolved")
 
 
 class GuardRuleNamesTests(unittest.TestCase):
@@ -636,7 +636,6 @@ class GuardRuleNamesTests(unittest.TestCase):
             'ask_step("force-push", REASON, "git push", "forced push")\n'
             'ask_step("bare-merge", REASON, "gh pr merge 1", "bare merge")\n'
             'record(str(payload.get("tool_name", "")), "crash", "guard-crash", why)\n'
-            'record("SubagentStop", "noted", "role-diff-nocwd", role)\n'
             'record("SubagentStop", "noted", "role-diff-main-checkout", where)\n'
             'record("SubagentStop", "noted", "role-diff-unresolved", found)\n'
             'def diff_rule(role):\n'
