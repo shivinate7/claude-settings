@@ -91,8 +91,7 @@ records but do not cull them.
 
 ## Open choices
 
-1. Same folders in every repo (pick), or each repo keeps its folders and declares them. Asked on
-   Oct 22.
+1. Ruled Oct 22 (owner): same folders in every repo, not a per-repo declaration.
 2. `docs/specs/` as its own kind (pick), or specs fold into plans and die on ship. banchi and q_max
    hold about 110 spec files that describe shipped features, so folding them in would lose that
    truth or keep plans that never die.

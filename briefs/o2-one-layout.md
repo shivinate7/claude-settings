@@ -8,7 +8,7 @@ Lane 1, one layout file and its readers. Add one machine-readable layout file in
 
 Lane 2, move claude-settings. git mv decisions/ to docs/decisions/, debts/ to docs/debts/, plans/ to docs/plans/, ux/ to docs/design/. Keep every file name. Fix each path cite: a prose cite becomes a slug cite (git-cite-by-id); a code comment gets the new path. Regenerate docs/records.md. Confirm landed-dirs.txt and both installers need no change, or change them.
 
-Lane 3, the record. Write decision one-layout-every-repo: the three placement questions (current truth or history? dies when the work ships? does every repo have one?), the layout, and Home: the layout file. Owner ruling lines: Oct 17, claude-settings first, each child repo in Roll out; Oct 20, no copied DESIGN.md template, each repo's DESIGN.md points at the shared ideas.
+Lane 3, the record. Write decision one-layout-every-repo: the three placement questions (current truth or history? dies when the work ships? does every repo have one?), the layout, and Home: the layout file. Owner ruling lines: Oct 22, same folders in every repo, not a per-repo declaration; Oct 17, claude-settings first, each child repo in Roll out; Oct 20, no copied DESIGN.md template, each repo's DESIGN.md points at the shared ideas.
 
 Rulings that bind: one-shared-record-stamp (no record is renumbered or renamed; a move keeps the name); building-allow-list-is-the-constant; git-cite-by-id; building-guard-needs-incident (incident: ste_lint's default path does not match this repo's records folder).
 
