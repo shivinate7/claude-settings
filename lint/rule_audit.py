@@ -74,7 +74,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Dict, List
+from typing import List
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
