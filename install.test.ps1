@@ -574,6 +574,10 @@ try {
 # a machine that installed once takes every time. hookkeep1: an unmarked hook, both runs. hookwrite1:
 # copy mode, forced, over a stale marked hook. hookkeep1 and hookwrite1 pass on a build without the
 # removal; they go red if the removal is too wide or runs in copy mode.
+# hookkeepagents1: links for settings.json but a copied skill, so the hook stays (decision
+# post-merge-hook-is-a-fallback, copied files keep refreshing); hookkeepagents1b is the rerun.
+# hookgonefail1: a marked hook that cannot be deleted must not stop the run summary line, and the
+# install log must say the delete failed.
 # Link mode needs symlink rights. The run itself is the probe: a settings.json that is no link after it
 # prints SKIP, unknown and not red. hookgone and hookkeep clear CLAUDE_SETTINGS_FORCE_COPY, so a
 # copy-mode run cannot stand in for a link run.
@@ -602,6 +606,32 @@ function Get-InstallLogHookMode([string]$Cfg) {
     $line = @(Get-Content -LiteralPath $lp | Where-Object { $_ -match 'install\.ps1: settings\.json=' }) | Select-Object -Last 1
     if ($line -and $line -match 'hook=(.*)$') { return $Matches[1].Trim() }
     return $null
+}
+
+# Get-InstallLogLines CFG: every line of CFG's install log, or an empty array.
+function Get-InstallLogLines([string]$Cfg) {
+    $lp = Join-Path $Cfg 'claude-settings-install.log'
+    if (-not (Test-Path -LiteralPath $lp)) { return @() }
+    return @(Get-Content -LiteralPath $lp)
+}
+
+# Add-NoSubdirRule DIR: deny the current user the right to make a sub-directory in DIR. A directory
+# symlink is a sub-directory, so the link try fails there, while a file in DIR, a link in any other
+# folder, and a copy into a directory that already exists in DIR all still work. That makes a skill
+# copy while settings.json links, in one run, without a change to install.ps1. Returns the rule;
+# hand it to Remove-NoSubdirRule before the folder is deleted.
+function Add-NoSubdirRule([string]$Dir) {
+    $sid  = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::CreateDirectories, [Security.AccessControl.InheritanceFlags]::None, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Deny)
+    $acl = Get-Acl -LiteralPath $Dir
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $Dir -AclObject $acl
+    return $rule
+}
+function Remove-NoSubdirRule([string]$Dir, $Rule) {
+    $acl = Get-Acl -LiteralPath $Dir
+    [void]$acl.RemoveAccessRuleSpecific($Rule)
+    Set-Acl -LiteralPath $Dir -AclObject $acl
 }
 
 $HgRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookgone1-" + [guid]::NewGuid().ToString('N'))
@@ -665,6 +695,94 @@ try {
     }
 } finally {
     Remove-Item -Recurse -Force $HkRoot -ErrorAction SilentlyContinue
+}
+
+# hookkeepagents1: settings.json links but a skill is copied (the skills\ folder refuses a directory
+# link, see Add-NoSubdirRule), so the copy still needs the hook to refresh it after a pull. The marked
+# hook stays, rewritten, and the log says hook=installed. hookkeepagents1b is the rerun, the early exit.
+# The cfg holds an earlier copy of the skill and the install marker, so the run is a repeat install:
+# it refreshes that copy in place and makes no .bak.
+$KaRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookkeepagents1-" + [guid]::NewGuid().ToString('N'))
+$KaHome = Join-Path $KaRoot 'home'
+$KaCfg  = Join-Path $KaRoot 'claude'
+$KaLogs = Join-Path $KaRoot 'logs'
+$KaSkills = Join-Path $KaCfg 'skills'
+$KaSkill  = Join-Path $KaSkills 'sample-skill'
+New-Item -ItemType Directory -Force -Path $KaHome, $KaLogs, $KaSkill | Out-Null
+$KaRule = $null
+try {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $kaMain = New-PinFixture $KaRoot
+    $kaSet  = Join-Path $KaCfg 'settings.json'
+    Set-Content -Path (Join-Path $KaSkill 'SKILL.md') -Value 'v0' -Encoding utf8
+    [IO.File]::WriteAllText((Join-Path $KaCfg '.claude-settings-installed'), '')
+    $kaStale = $HookUtf8.GetBytes("#!/bin/sh`n$HookMarker`n# stale body`nexit 0`n")
+    try { $KaRule = Add-NoSubdirRule $KaSkills } catch { Write-Host "  hookkeepagents1: the deny rule on skills\ failed: $($_.Exception.Message)" }
+    if (-not $KaRule) {
+        Check "hookkeepagents1 fixture: a deny rule on skills\ blocks directory links" $false
+    } else {
+        foreach ($kaName in 'hookkeepagents1', 'hookkeepagents1b') {
+            Set-HookFile $kaMain $kaStale
+            $kaRes    = Invoke-InstallProc (Join-Path $kaMain 'install.ps1') $KaCfg $KaHome $KaLogs
+            $kaLinked = Test-ReparsePoint $kaSet
+            if (-not $kaLinked) {
+                Write-Host "SKIP: ${kaName}: settings.json is no link after the run, so this account cannot make symlinks (unknown, not red)"
+                break
+            }
+            $kaText = Get-HookFileText $kaMain
+            $kaMode = Get-InstallLogHookMode $KaCfg
+            Check "$kaName fixture: settings.json is a link, so link mode ran" $kaLinked
+            Check "$kaName fixture: skills\sample-skill is a real directory, so the skill was copied" ((Test-Path -LiteralPath $KaSkill -PathType Container) -and -not (Test-ReparsePoint $KaSkill))
+            Check "${kaName}: install.ps1 exits 0" ($kaRes.Exit -eq 0)
+            Check "${kaName}: the marked post-merge hook stays in the clone's .git\hooks" ($null -ne $kaText -and $kaText.Contains($HookMarker))
+            Check "${kaName}: the install log's hook= field says installed" ($kaMode -eq 'installed')
+            if ($null -eq $kaText -or $kaMode -ne 'installed') { Write-Host "  ${kaName}: hook file present: $($null -ne $kaText); log hook= '$kaMode'" }
+            if ($kaRes.Exit -ne 0) { Write-Host "  $kaName output: $($kaRes.Text)" }
+        }
+    }
+} finally {
+    if ($KaRule) { try { Remove-NoSubdirRule $KaSkills $KaRule } catch { Write-Host "  hookkeepagents1: could not remove the deny rule on ${KaSkills}: $($_.Exception.Message)" } }
+    Remove-Item -Recurse -Force $KaRoot -ErrorAction SilentlyContinue
+}
+
+# hookgonefail1: links work and the marked hook cannot be deleted. install.ps1 must still write its run
+# summary line, and the install log must name the hook and say the delete failed. The hook is held open
+# with no delete share, the way a git or an editor handle on it would be. Read-only would not do:
+# Remove-Item -Force clears that flag. Read share stays on, so install.ps1 can still read the marker.
+$HfRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookgonefail1-" + [guid]::NewGuid().ToString('N'))
+$HfHome = Join-Path $HfRoot 'home'
+$HfCfg  = Join-Path $HfRoot 'claude'
+$HfLogs = Join-Path $HfRoot 'logs'
+New-Item -ItemType Directory -Force -Path $HfHome, $HfLogs | Out-Null
+$HfHold = $null
+try {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $hfMain = New-PinFixture $HfRoot
+    $hfSet  = Join-Path $HfCfg 'settings.json'
+    Set-HookFile $hfMain ($HookUtf8.GetBytes("#!/bin/sh`n$HookMarker`n# stale body`nexit 0`n"))
+    $HfHold = [IO.File]::Open((Join-Path $hfMain '.git\hooks\post-merge'), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try { $hfRes = Invoke-InstallProc (Join-Path $hfMain 'install.ps1') $HfCfg $HfHome $HfLogs }
+    finally { $HfHold.Dispose(); $HfHold = $null }
+    $hfLinked = Test-ReparsePoint $hfSet
+    $hfText   = Get-HookFileText $hfMain
+    $hfMode   = Get-InstallLogHookMode $HfCfg
+    $hfLines  = @(Get-InstallLogLines $HfCfg)
+    if (-not $hfLinked) {
+        Write-Host "SKIP: hookgonefail1: settings.json is no link after the run, so this account cannot make symlinks (unknown, not red)"
+    } elseif ($null -eq $hfText) {
+        Write-Host "SKIP: hookgonefail1: the hook was deleted although a handle held it open, so this runner cannot make a delete fail (unknown, not red)"
+    } else {
+        Check "hookgonefail1 fixture: settings.json is a link, so link mode ran" $hfLinked
+        Check "hookgonefail1 fixture: the hook is still there, so its delete failed" ($null -ne $hfText)
+        $hfNamed = @($hfLines | Where-Object { $_ -match '(?i)hook.*(fail|could not|cannot|error)' }).Count -ge 1
+        Check "hookgonefail1: install.ps1 still writes its run summary line to the install log" ($null -ne $hfMode)
+        Check "hookgonefail1: the summary line's hook= field does not claim a removal" ($null -ne $hfMode -and $hfMode -ne 'removed')
+        Check "hookgonefail1: the install log names the hook and says the delete failed" $hfNamed
+        if (-not $hfNamed -or $null -eq $hfMode) { Write-Host "  hookgonefail1: exit $($hfRes.Exit); log hook= '$hfMode'; install log: $($hfLines -join ' | ')" }
+    }
+} finally {
+    if ($HfHold) { $HfHold.Dispose() }
+    Remove-Item -Recurse -Force $HfRoot -ErrorAction SilentlyContinue
 }
 
 $HwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookwrite1-" + [guid]::NewGuid().ToString('N'))
@@ -801,6 +919,8 @@ try {
     Write-Host "SKIP: pinlivehook1: install.ps1 runs only on Windows"
     Write-Host "SKIP: hookgone1: install.ps1 runs only on Windows"
     Write-Host "SKIP: hookkeep1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookkeepagents1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookgonefail1: install.ps1 runs only on Windows"
     Write-Host "SKIP: hookwrite1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
     Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
