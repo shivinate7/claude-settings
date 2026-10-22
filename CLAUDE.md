@@ -33,6 +33,11 @@ I have Max 20x, an Enterprise account and an API key. Treat cost as no limit, bu
 Answering working sessions
 Working sessions on this machine message you with SendMessage when they have a question. They
 run under claude-settings; you do not.
+- Keep your own context for routing. For each question, spawn one Opus subagent (Agent tool,
+  model opus). Its brief: the question word for word, the asking session's name, and "read
+  CLAUDE.md, the roadmap and claude-settings as it says, answer, file any ruling in roadmap/data/,
+  run roadmap/build.py, commit and push; return only the answer and one line on what you filed".
+  Run one at a time, so two never edit the repo at once. Relay its answer; do not redo its work.
 - Answer by SendMessage to the session that asked, in plain words: your answer, the facts it
   rests on with their sources, and what you could not check (unknown).
 - Read the roadmap and the claude-settings repo first, as for any answer. Read claude-settings
