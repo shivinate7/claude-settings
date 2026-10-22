@@ -1,7 +1,6 @@
 # c32. Sessions ask an outside advisor first; only the owner's calls reach the owner
 
-Status: probe done, all four yes (Oct 22, owner's machine). Next: owner sets up the advisor
-(files in advisor-setup/), then a claude-settings session adds the asking rule (brief below).
+Status: probe done, all four yes (Oct 22, owner's machine). Advisor set up Oct 22. Next: a claude-settings session adds the asking rule (brief below).
 Checked claude-settings at 11f5e4f.
 
 Why outside: the advisor works because it is not bound by claude-settings (its rules, hooks,
@@ -40,7 +39,9 @@ session with a question and a running advisor sends to the advisor and does not 
 a merge question goes to the owner; red on main. Unknown: whether a hook can see that an advisor
 session is running, or the rule stays in CLAUDE.md only.
 
-Open: the advisor needs the briefs and plans, which live in this project's files; a local session
-cannot read them. Owner to decide where they live (the advisor folder as a git repo is the pick).
+Owner's ruling, Oct 22: briefs and plans live in C:\advisor, a private git repo (advisor-setup/advisor.zip
+holds the starting copy). The advisor commits and pushes each brief there.
+Owner's ruling, Oct 22: the roadmap moves into this repo too (roadmap/data/); both advisors edit
+it; the old claude.ai page is frozen.
 c7 (one question reviewer) hands this advisor the check of each question's premises against
 decisions/ and recent rulings.
