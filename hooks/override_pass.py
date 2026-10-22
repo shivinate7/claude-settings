@@ -1,17 +1,21 @@
 """The owner override pass (decision owner-override-pass): the one home of granting, spending and
 reading it.
 
-The owner types `override` as a whole prompt. hooks/local_time.py, the prompt hook, calls grant().
+The owner starts a prompt with the word `override`. hooks/local_time.py, the prompt hook, calls grant().
 refuse() in hooks/guard_core.py calls take() before it prints a deny or an ask, unless the veto that
 judge() in hooks/guard.py registers finds an act no pass lifts (decision owner-override-pass).
 
 A pass is the file <config dir>/state/override/<session_id>.json, {"kind": "once"|"timed",
 "until": ISO-8601 UTC}. It covers only the session that typed it. state/ is frozen against Claude's
 writes, so a session cannot grant itself a pass. It is valid only while now < until.
-  once   `override`: the next refused act, or 10 minutes. A subagent's call never spends it.
+  once   `override`, or `override <reason>`: the next refused act, or 10 minutes. A subagent's call
+         never spends it. The reason, on one line, goes to guard.log.
   timed  `override 15m`, `override 2h`, `override 15` (minutes): every refused act until the end.
          It reaches subagents. The owner picks the length, so there is no cap.
-  `override off` ends any pass at once.
+  `override off` ends any pass at once. `override`, `override <n>[m|h]` and `override off` mean
+  that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
+  nothing (an intended "off" must never become a grant). A later line starting with the word grants
+  nothing.
 A file that is missing, unreadable or corrupt is no pass. take() never raises into the guard: an
 error means no pass, so the refusal stands.
 """
@@ -22,7 +26,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act pass waits for its act
-PROMPT = re.compile(r"override(?:\s+(?:(off)|(\d+)([mh])?))?", re.I)  # the whole stripped prompt
+PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
+WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
+LOG_REASON_MAX = 300
 SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
 PASSED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when a pass file cannot be read
@@ -44,11 +50,15 @@ def _path(session_id):
 def grant(session_id, prompt, at):
     """Write, replace or remove the session's pass for one owner prompt. Returns (kind, until) for a
     new pass, ("off", None) when `override off` removed one, else None: the prompt is not the word."""
-    said = PROMPT.fullmatch(prompt.strip()) if isinstance(prompt, str) else None
+    said = PROMPT.match(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
     if not said or path is None:
         return None
-    off, number, unit = said.groups()
+    reason = " ".join(said.group(1).split())  # one log line: newlines and tabs fold to spaces
+    word = WORD.fullmatch(reason)
+    if not word and WORD.fullmatch(reason.split(" ")[0]):
+        return None  # a word after `off` or a length: ambiguous, grants nothing
+    off, number, unit = word.groups() if word else (None, None, None)
     if off:
         try:
             os.remove(path)
@@ -66,7 +76,18 @@ def grant(session_id, prompt, at):
     with open(scratch, "w", encoding="utf-8") as handle:
         json.dump({"kind": kind, "until": until.astimezone(timezone.utc).isoformat()}, handle)
     os.replace(scratch, path)
+    if reason and kind == "once":
+        _log_reason(session_id, reason, at)
     return kind, until
+
+
+def _log_reason(session_id, reason, at):
+    """Write the owner's reason as one guard.log line through the guard's own locked writer. A lone
+    surrogate cannot be encoded, so it becomes `?` before the write rather than losing the line."""
+    import guard_core  # lazy: only a grant that has a reason needs it
+    guard_core.set_log_session(session_id)
+    guard_core.record("UserPromptSubmit", "override-reason", "owner-override-pass",
+                      reason[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8"))
 
 
 def take(session_id, agent_id, at):

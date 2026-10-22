@@ -100,6 +100,8 @@ pointer_dir() {
   md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
   [ -f "$md" ] || return 1
   d=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$md" 2>/dev/null | head -n1)
+  # SC2088: the pattern is the literal two characters "~/" that the pointer line holds, never an expansion.
+  # shellcheck disable=SC2088
   case "$d" in
     "~"/*) d="$HOME${d#\~}" ;;
   esac

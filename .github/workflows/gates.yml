@@ -77,6 +77,15 @@ jobs:
       - name: Workflow supply-chain audit (zizmor)
         run: pipx run zizmor==1.30.1 .github/ actions/
 
+      # Lint only, never a format step. Rules and exclusions are in ruff.toml.
+      - name: Python lint (ruff)
+        run: pipx run ruff==0.17.1 check .
+
+      # Every tracked *.sh, warning severity and up. A directive that silences a finding sits
+      # beside the line and says why.
+      - name: Shell lint (ShellCheck)
+        run: git ls-files -z '*.sh' | xargs -0 pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning
+
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
         run: python3 hooks/test_guard.py
@@ -475,6 +484,10 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
 
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 hooks/test_guard_load_os.py
+
       - name: rm shim fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_rm_shim.py
@@ -705,6 +718,10 @@ jobs:
       # The guard suite runs in gates-windows-guard. No Guard mutation harness on Windows: it took 34.5 min
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
+
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python hooks/test_guard_load_os.py
 
       - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}

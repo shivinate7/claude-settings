@@ -8,7 +8,6 @@ characters or fewer, not counting `.md`. Existing files are not checked or renam
         # files given: check those, skip git
 """
 import os
-import subprocess
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
