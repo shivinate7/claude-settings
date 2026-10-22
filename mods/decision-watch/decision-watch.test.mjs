@@ -402,13 +402,22 @@ await test('turn.complete trigger 6: a transcript lookup slower than its 500 ms 
   same(h.modelReqs.length, 0, 'model calls')
 })
 
-// 100 ms, not the lookup's 500 ms bound (or two of them): the handler must not wait on the lookup. The fixed code
-// returns in a few ms, so the margin is large.
-await test('turn.complete trigger 7: with a slow transcript lookup, next(e) returns within 100 ms, not after the lookup bound', async () => {
-  const h = await load(host())
-  slowLookup(h)
+// Owner ruling 2026-10-21 22:21 CDT: the handler may hold the turn up to SEEN_WAIT_MS (500 ms, the same as the lookup
+// bound), so the STOP seen or SKIP line lands before the turn ends. A hung lookup holds it for that bound, no longer,
+// and its SKIP line is already in the log when next(e) returns. A fast lookup is not held, and its STOP seen line is.
+await test('turn.complete trigger 7: a hung transcript lookup holds next(e) until its SKIP line is written, within about 600 ms; a fast lookup returns with its STOP seen line written', async () => {
+  const hung = await load(host())
+  slowLookup(hung)
   const NEXT = { text: 'the answer' }
-  assert.equal(await within(fire(h, 'turn.complete', turnEvent(), NEXT), 100, 'turn.complete waited on the lookup bound'), NEXT)
+  const t0 = Date.now()
+  assert.equal(await within(fire(hung, 'turn.complete', turnEvent(), NEXT), 600, 'turn.complete held past about 600 ms by the hung lookup'), NEXT)
+  const held = Date.now() - t0
+  assert.match(allLog(hung), /^\S+ SKIP /m, `next(e) returned after ${held} ms with no SKIP line in the log: the handler did not wait for the lookup's 500 ms bound`)
+  const fast = await load(host())
+  const t1 = Date.now()
+  assert.equal(await within(fire(fast, 'turn.complete', turnEvent(), NEXT), 400, 'a fast lookup was held for the full wait'), NEXT)
+  assert.match(allLog(fast), /^\S+ STOP seen /m, 'a fast lookup returned with no STOP seen line in the log')
+  assert.doesNotMatch(allLog(fast), /SKIP /, `a fast lookup wrote a SKIP line (returned after ${Date.now() - t1} ms)`)
 })
 
 // /clear gives the process a new session id with no session.start (SessionEndInput and the session.start note in the
