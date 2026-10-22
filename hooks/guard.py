@@ -31,7 +31,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
                        The diff it would send is logged for the reviewer. Never blocks.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
-                       also role-diff-nocwd, role-diff-main-checkout, role-diff-unresolved and
+                       also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
@@ -1516,10 +1516,7 @@ def judge_stop(payload) -> None:
     role = agent_role(payload)
     if not role:
         return
-    where = payload.get("cwd", "")
-    if not isinstance(where, str) or not where:
-        record("SubagentStop", "noted", "role-diff-nocwd", role)
-        return
+    where = str(payload.get("cwd") or "")
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
