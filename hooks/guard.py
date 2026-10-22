@@ -80,6 +80,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   subagent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
+                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore or a
+                       builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -1622,6 +1624,30 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
+OPUS_SPAWN_REASON = (
+    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for a subagent; Opus runs "
+    "only on the owner's word for this spawn, except Plan, a builder's Try 3 of 3 and Explore "
+    "(decision subagent-model-cap). Approve it only when the owner asked for Opus here."
+)
+OPUS_STANDING_ROLES = ("Plan", "Explore")
+
+
+def opus_spawn_hit(tool: str, tool_input) -> str:
+    """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
+    is the role Plan or Explore, or a builder whose brief holds a `Try 3 of 3` line (the same marker
+    step_up_hit reads). A reviewer's round 3 is no standing word. The spawn ask is liftable by an
+    override pass, so never_passed does not read it."""
+    if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
+        return ""
+    role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
+    if role in OPUS_STANDING_ROLES:
+        return ""
+    if role == "builder" and isinstance(brief, str) and any(
+            kind.lower() == "try" and n == "3" for kind, n in STEP_UP_MARKER.findall(brief)):
+        return ""
+    return str(tool_input.get("model"))
+
+
 # ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
 # `;`, `|`, a newline) is denied, and the same step alone asks as before, as does one with a named
@@ -2308,6 +2334,11 @@ def judge(payload) -> None:
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
+
+    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass lifts it.
+    opus_model = opus_spawn_hit(tool, tool_input)
+    if opus_model:
+        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model)
 
     # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:
