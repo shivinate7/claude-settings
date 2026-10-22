@@ -20,5 +20,5 @@ now). Write in Simplified Technical English.
 You do the work yourself. Before you stop for any reason, commit your work to your own branch
 and push it. You cannot spawn agents. Never review your own work.
 
-Report once, with the labels from CLAUDE.md in order: Done, Deviations, Decided by the advisor, Input Needed, Next.
+Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Start with the point. No preamble. Report in under 25 lines unless the brief names another cap.

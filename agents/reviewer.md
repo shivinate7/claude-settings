@@ -51,7 +51,7 @@ Check for:
 
 If the repo has screens, the orchestrator runs design-review after a screen change. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/ux/checklist.md`. The house design values are in `~/.claude/ux/tokens.md`.
 
-Report once, with the labels from CLAUDE.md in order: Done, Deviations, Decided by the advisor, Input Needed, Next.
+Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, sonnet`. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
 label that does not apply. Write in Simplified Technical English. Start with the point. No

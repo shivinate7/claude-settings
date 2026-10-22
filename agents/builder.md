@@ -42,7 +42,7 @@ When your commit is pushed, report at once. Never wait on a CI run, a pull reque
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run
 watch` or a loop with a pause, is not yours to run.
 
-Report once, with the labels from CLAUDE.md in order: Done, Deviations, Decided by the advisor, Input Needed, Next.
+Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
 branch, the files touched with line ranges, and the checks run with their outcome. Drop a label
 that does not apply. Write in Simplified Technical English. Start with the point. No preamble.
