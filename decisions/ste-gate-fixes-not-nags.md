@@ -18,4 +18,4 @@ sends the writer back for another write, and it starts a process on every Write,
 Unmeasured: how often a writer now meets an STE error first in CI instead of at the write.
 
 Kind: process
-Home: actions/ste-lint
+Home: actions/ste-lint/action.yml
