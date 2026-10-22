@@ -1511,12 +1511,14 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 def judge_stop(payload) -> None:
     """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. Every path that cannot judge logs too: a
-    missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
+    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
+    diff that could not be read log too. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
     where = str(payload.get("cwd") or "")
+    if not where:
+        return
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
