@@ -3,7 +3,7 @@
   "points": [
     "The test: can every agent find the right file in any repo without being told where it is?",
     "Three questions decide where a file goes: is it current truth or history? does it die when the work ships? does every repo have one?",
-    "Layout: CLAUDE.md under 200 lines with AGENTS.md as a symlink; .claude/rules/; tokens/tokens.json; docs/design (DESIGN.md, mockups, reference), docs/decisions, docs/debts with notes.md, docs/plans; scripts/shoot; shots/ gitignored.",
+    "Layout (o2, drafted Oct 22): CLAUDE.md under 200 lines with AGENTS.md as a symlink; .claude/rules/; docs/decisions, docs/debts with notes.md, docs/plans (deleted on ship), docs/specs (how a shipped feature works), docs/records.md; with screens, docs/design (DESIGN.md, mockups, reference), tokens/tokens.json, shots/ gitignored. A repo declares its own extra folders; one layout file in claude-settings is what every tool reads.",
     "Path-scoped rules (paths: frontmatter in .claude/rules/) load only when Claude touches matching files; ~/.claude/rules/ applies in every project. Your installer doesn't land a rules folder yet.",
     "Tokens in the W3C Design Tokens format (stable since 2025.10), generated into CSS and Swift with Style Dictionary or Terrazzo.",
     "No history in the tree: delete superseded decisions, since git keeps them.",

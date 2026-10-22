@@ -1,0 +1,19 @@
+One layout for every repo, claude-settings part. Goal: one file in claude-settings names where each kind of file lives in every repo; each shared tool reads its paths from that file; claude-settings moves its own records into the layout. Child repos move later, each in its own session. Start after the running cleanup batch merges.
+
+Today, checked at 987f682: records sit at the root: decisions/ (106), debts/ (51), plans/ (1). ux/ (5) holds the shared design ideas. Four tools copy the record path and disagree: lint/check_record_slugs.py DIRS ("decisions/", "debts/"; hooks/guard.py reads it), lint/hook_catalog.py RECORD_FOLDERS, lint/check_ruling_kind.py DIR, and lint/ste_lint.py decisions_dir, which defaults to "docs/decisions". actions/stamp/examples use both forms. banchi and q_max keep records under docs/.
+
+The layout. Core, every repo: CLAUDE.md; AGENTS.md as a symlink to it; .claude/rules/; docs/decisions/; docs/debts/ with README.md and notes.md; docs/plans/ (delete a plan when its work ships); docs/specs/ (how a shipped feature works now); docs/records.md (generated). Repos with screens add: docs/design/ (DESIGN.md, mockups/, reference/); tokens/tokens.json; shots/ (gitignored); the shoot config that d6 names. No history folders (FORMER/, RETIRED/, archive/): git keeps history. A repo declares its own extra kinds (example: home's records/) in one extras file in its own tree.
+
+Lane 1, one layout file and its readers. Add one machine-readable layout file in claude-settings (suggested: lint/layout.json) holding the core and screen kinds above. Make check_record_slugs, check_ruling_kind, hook_catalog, ste_lint and the stamp examples take record paths from it, and merge a repo's extras file when present. The guard keeps its own literal if a runtime file read is unsafe there, as CONFIG_FROZEN_DIRS does; then add a check that the literal equals the layout file, the way lint/check_landed_dirs.py checks landed-dirs.txt. No reader holds a record path of its own after this lane.
+
+Lane 2, move claude-settings. git mv decisions/ to docs/decisions/, debts/ to docs/debts/, plans/ to docs/plans/, ux/ to docs/design/. Keep every file name. Fix each path cite: a prose cite becomes a slug cite (git-cite-by-id); a code comment gets the new path. Regenerate docs/records.md. Confirm landed-dirs.txt and both installers need no change, or change them.
+
+Lane 3, the record. Write decision one-layout-every-repo: the three placement questions (current truth or history? dies when the work ships? does every repo have one?), the layout, and Home: the layout file. Owner ruling lines: Oct 17, claude-settings first, each child repo in Roll out; Oct 20, no copied DESIGN.md template, each repo's DESIGN.md points at the shared ideas.
+
+Rulings that bind: one-shared-record-stamp (no record is renumbered or renamed; a move keeps the name); building-allow-list-is-the-constant; git-cite-by-id; building-guard-needs-incident (incident: ste_lint's default path does not match this repo's records folder).
+
+Tests, red on main and green on the fix: each reader finds the records of a fixture repo laid out under docs/; a fixture with an extras file adds its extra kind; a mutant that puts a literal "decisions/" back in one reader is killed by the constant check. Lane 1 changes a guard's input, so it gets the review rounds of roles-review-cap-three.
+
+Overlaps: c21 (standard lint in CI) waits for this lane before any repo-wide format. c19's later lanes (Stop dispatcher, cached git reads) wait too. Rebase on any open PR that touches lint/ or hooks/guard.py.
+
+Report, 25 lines or fewer: the layout file's path and kinds, each reader changed, files moved, path cites fixed, test names with red and green, and any path you could not move.
