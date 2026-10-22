@@ -11198,8 +11198,8 @@ add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# Explore on opus passes: the owner's class-level word of 2026-10-21 covers an audit Explore, and
-# the guard cannot tell an audit from a plain search. The Opus ceiling block below asks for the rest.
+# Explore on opus passes: a standing word covers an audit Explore, and the guard cannot tell an
+# audit from a plain search. The Opus ceiling block below asks for the rest.
 add("floor: Agent Explore with model opus is allowed (owner word)", "allow",
     tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
@@ -11215,8 +11215,8 @@ add("floor: Agent record-writer with model sonnet is still allowed", "allow",
 # ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
 # "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
 # fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
-# Owner ruling 2026-10-12: a reviewer on "Round 3 of 3" may run opus (the step-up allows it; the
-# Opus ceiling below asks). Round 2 stays sonnet only.
+# A reviewer on the last step-up ("Round N of 3" with N = 3) may run opus: the step-up allows it
+# and the Opus ceiling below asks. The middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
 # so the floor allows it. Step-up still denies a reviewer round 2 that does not name sonnet, and
@@ -11261,11 +11261,11 @@ add("floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, n
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
-# ---- Rule 9, the Opus ceiling (owner ruling 2026-10-21, decision subagent-model-cap). An Agent or
+# ---- Rule 9, the Opus ceiling (decision subagent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `subagent-model-cap`, unless a standing word
 # covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level word, pinned above).
-# A reviewer's round 3 is a per-spawn word, so it asks. The floor and the step-up deny first, so
-# `Round 2 of 3` on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
+# A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
+# so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
 # the role does not own earns the word), a false ask (a standing word, a Sonnet spawn, or text that
@@ -13882,9 +13882,9 @@ for _act in OV_ACTS:
             LOG_CHECKS_EXTRA.append((_label, ov_act_check(_act, _is_timed)))
 
 
-# The ask on an Opus spawn is liftable (owner, 2026-10-21: an override pass lifts it like any other
-# ask), while the same rule's ask on a settings write stays outside every pass (ov_role_acts and
-# ov_cap_shell_acts below, owner 2026-10-18 16:25 CDT). Each story first wants the ask with no pass.
+# The ask on an Opus spawn is liftable (an override pass lifts it like any other ask), while the
+# same rule's ask on a settings write stays outside every pass (ov_role_acts and ov_cap_shell_acts
+# below). Each story first wants the ask with no pass.
 OV_OPUS_SPAWN = {"prompt": "Review the diff for typos.", "model": "opus",
                  "subagent_type": "general-purpose"}
 
