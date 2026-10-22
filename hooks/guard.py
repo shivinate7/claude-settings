@@ -1635,7 +1635,7 @@ LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU, LOAD_BUSY_CPU_MEMORY = 85.0, 15.0, 85.0, 75.0
 LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
 LOAD_BUSY_REASON = "the machine is busy (%s). %s"
-LOAD_BUSY_FOREGROUND = "Run this lane in the foreground, one at a time: an Agent call with run_in_background false, or with it left out. "
+LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
 
@@ -1748,7 +1748,7 @@ def load_hit(tool: str, tool_input) -> tuple:
         remedy = " and ".join((["wait until the load drops"] if waits else [])
                               + (["free disk space"] if len(waits) < len(busy) else []))
         text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
-                else LOAD_BUSY_FOREGROUND + "Or " + remedy)
+                else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
 
