@@ -426,7 +426,7 @@
     "output-bring-decisions-as-question": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "reports-order-of-labels": {
@@ -544,15 +544,20 @@
     },
     "style-question-restates-goal": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "hooks/question_outcome.py",
-        "test": "hooks/test_question_outcome.py::case_1_missing_restate_is_denied"
+        "kind": "unmechanized",
+        "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
+      }
+    },
+    "style-question-based-on": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-question-states-problem": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-never-hand-off-doable-step": {
@@ -564,7 +569,7 @@
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-question-inside-box": {

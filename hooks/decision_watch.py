@@ -597,7 +597,7 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
 # path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See decisions/question-outcome-check.md.
+# scrubs the token from any error text it returns. See decisions/reply-judge-samples-never-blocks.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
