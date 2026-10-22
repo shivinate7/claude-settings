@@ -778,5 +778,40 @@ class SessionEndFetchThrottle(unittest.TestCase):
                          "a fetching run must still reap a branch the fresh remote holds")
 
 
+class HookLoadsNoGuardModule(unittest.TestCase):
+    """c16, janitor sweep fast on big repos. The hook starts at the end of every session, so its
+    start-up cost is paid at every session's end. Neither importing it nor one whole run may load a
+    module of the guard family. A fresh interpreter answers, because this file imported `guard`
+    itself. The family comes from guard's own list, not a copy of it."""
+
+    def modules_after(self, steps, env_extra=None):
+        family = sorted({"guard", "guard_core", *guard._FAMILY_MODULES})
+        code = ("import json, sys\nsys.path.insert(0, %r)\n%s\n"
+                "print(json.dumps(sorted(set(sys.modules) & set(%r))))" % (HERE, steps, family))
+        env = dict(os.environ)
+        env.update(env_extra or {})
+        done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
+                              timeout=60, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_importing_the_hook_loads_no_guard_module(self):
+        self.assertEqual(self.modules_after("import session_end_sweep"), [],
+                         "importing the hook loaded these guard modules")
+
+    def test_one_whole_hook_run_loads_no_guard_module(self):
+        repo = os.path.join(ROOT, "no_guard_repo")
+        make_repo(repo)
+        marker = os.path.join(ROOT, "no_guard_sweep_ran")
+        stub = os.path.join(ROOT, "no_guard_sweep.py")
+        write(stub, "open(%r, 'w').close()\n" % marker)
+        steps = ("import session_end_sweep\nsession_end_sweep.handle("
+                 "{'hook_event_name': 'SessionEnd', 'cwd': %r}, elapsed_seconds=0)" % repo)
+        loaded = self.modules_after(steps, {"JANITOR_SWEEP_PATH": stub})
+        self.assertTrue(os.path.isfile(marker), "the hook never ran the sweep, so this run proved "
+                        "nothing: it must find the repository without the guard")
+        self.assertEqual(loaded, [], "one hook run loaded these guard modules")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
