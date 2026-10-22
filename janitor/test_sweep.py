@@ -6580,9 +6580,9 @@ class SweepFinishesTests(unittest.TestCase):
 # c16, janitor sweep fast on big repos. Every case below drives `sweep.main`, never `sweep_repo`
 # alone: `main` switches on the per-run caches a real run has, and a count taken without them
 # measures a harness. `--fast` is one more flag in the group that holds `--tier1` and `--branches`.
-#   1. The git reads that ask "is this branch in main?" are batched: their number does not grow
-#      with the number of branches or worktrees. Only a branch the batch cannot prove gets a
-#      `git cherry`.
+#   1. The git reads that ask "is this branch in main?" are batched, in `--branches`, in `--fast`
+#      and in the default sweep: their number does not grow with the number of branches or
+#      worktrees. Only a branch the batch cannot prove gets a `git cherry`.
 #   2. `--fast` reaps a worktree only when its branch is already in main. It keeps every tree it
 #      cannot prove safe: dirty, locked, in a live session, unreadable, or the batch unreadable.
 #   3. Importing sweep.py loads no module of the guard family.
@@ -6590,7 +6590,7 @@ class SweepFinishesTests(unittest.TestCase):
 # The git subcommands that ask whether a branch is in main. `rev-list` is here because a per-tree
 # `rev-list` is as good a proof as a per-tree `merge-base`.
 PROOF_COMMANDS = ("merge-base", "cherry", "for-each-ref", "branch", "show-ref", "log", "rev-list")
-NO_FAST = "sweep.main refused its arguments, so there is no --fast mode: %s"
+REFUSED = "sweep.main refused its arguments (is there a --fast mode yet?): %s"
 # Reads a fast tree may cost, one each: is it the primary checkout, how long idle, is it dirty,
 # what is HEAD; plus one spare. The full sweep costs about 13 per tree.
 FAST_READS_PER_TREE = 6
@@ -6716,7 +6716,7 @@ class FastSweepTests(unittest.TestCase):
             pass
 
     def setUp(self):
-        self.assertIsNone(self.refused, NO_FAST % self.refused)
+        self.assertIsNone(self.refused, REFUSED % self.refused)
 
     def assertMergedRemoved(self):
         self.assertFalse(os.path.isdir(self.merged), "the merged tree is still there")
@@ -6763,7 +6763,7 @@ class FastSweepUnreadableTests(unittest.TestCase):
         blind, control = _add_tree(root, "blind"), _add_tree(root, "control")
         refused, _results, calls = _run_main(
             root, ["--fast", "--confirm"], 30, fail=lambda argv, cwd: _aimed_at(blind, argv, cwd))
-        self.assertIsNone(refused, NO_FAST % refused)
+        self.assertIsNone(refused, REFUSED % refused)
         self.assertFalse(os.path.isdir(control), "the readable control tree was not removed, so "
                          "this keep proves nothing")
         self.assertTrue(any(_aimed_at(blind, c, None) for c in calls), "the sweep never read the "
@@ -6778,7 +6778,7 @@ class FastSweepUnreadableTests(unittest.TestCase):
         refused, _results, calls = _run_main(
             root, ["--fast", "--confirm"], 30,
             fail=lambda argv, cwd: _git_command(argv) in PROOF_COMMANDS)
-        self.assertIsNone(refused, NO_FAST % refused)
+        self.assertIsNone(refused, REFUSED % refused)
         self.assertTrue(any(_git_command(c) in PROOF_COMMANDS for c in calls),
                         "the sweep asked no merged question, so the keeps prove nothing")
         for path in trees:
@@ -6787,23 +6787,34 @@ class FastSweepUnreadableTests(unittest.TestCase):
             self.assertTrue(_listed(root, path))
 
 
-class FastSweepGitCallTests(unittest.TestCase):
+class _TreeCountRuns:
     """One repository run in preview at two sizes: 2 merged trees, then 5, each beside one unmerged
-    tree. The verdicts come first, so a sweep that judged nothing cannot pass on a low count."""
+    tree. The verdicts come first, so a sweep that judged nothing cannot pass on a low count.
+    FLAGS says which sweep, HOURS how far ahead the clock runs."""
+
+    FLAGS, HOURS = [], 0
 
     @classmethod
     def setUpClass(cls):
         cls.runs = {}
-        root = _fast_repo("count")
+        root = _fast_repo("count-" + cls.__name__)
         merged = [_add_tree(root, "m%d" % i) for i in range(2)]
         unmerged = _add_tree(root, "u", "unmerged")
-        cls.runs[2] = (list(merged), unmerged) + _run_main(root, ["--fast"], 30)
+        cls.runs[2] = (list(merged), unmerged) + _run_main(root, cls.FLAGS, cls.HOURS)
         merged += [_add_tree(root, "m%d" % i) for i in range(2, 5)]
-        cls.runs[5] = (list(merged), unmerged) + _run_main(root, ["--fast"], 30)
+        cls.runs[5] = (list(merged), unmerged) + _run_main(root, cls.FLAGS, cls.HOURS)
+
+    def proof_calls(self):
+        """{size: the proof calls of that run}."""
+        found = {}
+        for n, (_m, _u, refused, _results, calls) in self.runs.items():
+            self.assertIsNone(refused, REFUSED % refused)
+            found[n] = [c for c in calls if _git_command(c) in PROOF_COMMANDS]
+        return found
 
     def test_each_merged_tree_is_a_reap_and_the_unmerged_tree_a_keep(self):
         for n, (merged, unmerged, refused, results, _calls) in self.runs.items():
-            self.assertIsNone(refused, NO_FAST % refused)
+            self.assertIsNone(refused, REFUSED % refused)
             self.assertEqual(len(results), 1)
             verdict = {_norm_path(d["path"]): d["action"] for d in results[0]["worktrees"]}
             self.assertEqual(sorted(verdict), sorted(_norm_path(p) for p in merged + [unmerged]),
@@ -6812,23 +6823,39 @@ class FastSweepGitCallTests(unittest.TestCase):
                              {_norm_path(p) for p in merged})
 
     def test_merged_proof_calls_do_not_grow_with_the_tree_count(self):
-        proof = {}
-        for n, (_m, _u, refused, _results, calls) in self.runs.items():
-            self.assertIsNone(refused, NO_FAST % refused)
-            proof[n] = sum(1 for c in calls if _git_command(c) in PROOF_COMMANDS)
-        self.assertEqual(proof[2], proof[5], "proof calls went from %d to %d when the merged "
-                         "trees went from 2 to 5" % (proof[2], proof[5]))
-        # One unmerged tree is the one the batch cannot prove, so it may cost its own `cherry`.
-        self.assertLessEqual(proof[5], FAST_PROOF_CALLS + 1, "proof calls for 6 trees")
+        proof = self.proof_calls()
+        self.assertEqual(len(proof[2]), len(proof[5]), "proof calls went from %d to %d when the "
+                         "merged trees went from 2 to 5" % (len(proof[2]), len(proof[5])))
+
+
+class FastSweepGitCallTests(_TreeCountRuns, unittest.TestCase):
+    """`--fast`, clock 30 hours ahead, so no idle rule decides anything."""
+
+    FLAGS, HOURS = ["--fast"], 30
+
+    def test_merged_proof_calls_stay_under_a_small_cap(self):
+        # `rev-list` is outside the cap: `prime_pushed` may run one per sweep to settle every
+        # tree's push state. The unmerged tree is the one the batch cannot prove, so it may cost
+        # its own `cherry`.
+        proof = [c for c in self.proof_calls()[5] if _git_command(c) != "rev-list"]
+        self.assertLessEqual(len(proof), FAST_PROOF_CALLS + 1, "proof calls for 6 trees: %r" % proof)
 
     def test_the_other_reads_per_tree_stay_small(self):
         total = {}
         for n, (_m, _u, refused, _results, calls) in self.runs.items():
-            self.assertIsNone(refused, NO_FAST % refused)
+            self.assertIsNone(refused, REFUSED % refused)
             total[n] = len(calls)
         per_tree = (total[5] - total[2]) / 3.0
         self.assertLessEqual(per_tree, FAST_READS_PER_TREE, "git calls per extra tree: %.1f "
                              "(%d for 3 trees, %d for 6)" % (per_tree, total[2], total[5]))
+
+
+class DefaultSweepGitCallTests(_TreeCountRuns, unittest.TestCase):
+    """The default sweep, the one SessionEnd launches today, unattended. The clock runs 2 hours
+    ahead: a merged tree passes the 1 hour idle keep, and the pushed unmerged tree is still kept
+    by the 24 hour one. No per-tree slope here: this sweep does real work on each tree."""
+
+    FLAGS, HOURS = [], 2
 
 
 def _import_branches(root, stream):
