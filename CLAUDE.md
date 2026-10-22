@@ -7,7 +7,7 @@ outcome the decision protected and what protects it now. Propose a fix. Wait for
 show it red then green, or fix the defect it found. When the test itself may be stale, use
 the stale-decision protocol above.<!-- rule:outcomes-tests-are-claims --> My
 word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
-into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
+into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written.<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
 pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
