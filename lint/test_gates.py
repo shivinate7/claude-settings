@@ -155,6 +155,8 @@ class ReportGateTests(unittest.TestCase):
             GOOD_REPORT,
             # Catches: a colon inside a bold label is read as a bad label.
             "> **Done:** BUILT abc123\n> **Next:** ship it",
+            # Catches: the advisor-answers label (questions-ask-advisor-first) is read as unknown.
+            "> **Done** BUILT abc123\n> **Deviations** none\n> **Decided by the advisor** test names\n> **Next** ship",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
@@ -187,6 +189,8 @@ class ReportGateTests(unittest.TestCase):
             "> **Done** BUILT\n> **Next** ship\n> **Deviations** none",
             # Catches: the same order check misses colon labels.
             "> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none",
+            # Catches: the advisor-answers label passes after Input Needed.
+            "> **Done** BUILT\n> **Input Needed** merge?\n> **Decided by the advisor** names",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:

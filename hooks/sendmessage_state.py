@@ -9,6 +9,8 @@ The state comes from `claude agents --json`, read by mods/session-board/hooks/re
 - idle: allow, no model call. The message starts a turn; it interrupts nothing.
 - waiting (on a permission answer): allow, no model call. The receiver is paused, not mid-task.
 - busy: one model call (decision_watch.invoke_model, the one model caller). FLAG denies.
+- a receiver named "advisor-...": allow, no board read, no model call. A question to the advisor is never
+  mid-task talk (CLAUDE.md, questions-ask-advisor-first).
 - unseen (main, an in-process teammate, no row, a duplicate name, node or claude missing): allow here.
   The wording judge, the SendMessage prompt hook in settings.json, covers that receiver.
 
@@ -32,6 +34,7 @@ try:
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
 
+ADVISOR_PREFIX = "advisor-"  # the advisor session's name in ListAgents (decisions/advisor-answers-questions.md)
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
 # THE TIME BUDGET. The reader allows 8 s and the model call MODEL_TIMEOUT, so the settings.json
@@ -113,7 +116,7 @@ def main():
         to, message = tool_input.get("to"), tool_input.get("message")
         if not isinstance(to, str) or not to.strip() or not isinstance(message, str):
             return 0
-        if receiver_state(to) != "busy":
+        if to.strip().startswith(ADVISOR_PREFIX) or receiver_state(to) != "busy":
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(build_prompt(to, message), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
