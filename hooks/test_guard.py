@@ -96,6 +96,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override pass: one act or a timed pass, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -132,6 +133,9 @@ class _TaggedLogs(list):
 # A case this platform does not run is a SKIP row with its reason: never a PASS, never a silent drop.
 # skip_case records it here, and the rows join LOG_CHECKS with the other log checks, further down.
 SKIP_ROWS = []
+# A log check in this set builds its own folders and reads none of the lazy fixtures, so a run that
+# selects only such checks (GUARD_FAMILY=load-brake) skips the fixture build, which takes minutes.
+FIXTURELESS_CHECKS = set()
 NO_PS = "Windows has no ps, so ownership reads unknown and this case does not run here"
 NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
@@ -10741,7 +10745,12 @@ def decide(case):
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
-    out = result.stdout.strip()
+    return read_decision(result.stdout)
+
+
+def read_decision(stdout):
+    """The (decision, reason) a guard run printed. Empty output is an allow."""
+    out = stdout.strip()
     if not out:
         return "allow", ""
     try:
@@ -14202,6 +14211,395 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# =========================================================================== the machine-load brake
+FAMILY = "load-brake"
+# Batch 4, c14. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# the guard reads the machine's load once: memory, disk free on the home drive, CPU, and on Windows
+# the count of claude processes. The levels (placeholders, owner to tune):
+#   busy  memory over 85%, disk free under 15%, CPU over 85%, or over about 8 claude processes.
+#         One lane at a time: a lane call is refused while a lane is already running.
+#   full  memory over 95%, or disk free under 5%. A lane call is refused, even the first.
+# The refusal names the reading. A read that fails, or a reading left unread, counts as normal.
+# Every other tool reads no load. The read starts no child process and writes no file.
+#
+# THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
+# honored), patches the two functions below, and calls main() with the real stdin payload. The
+# builder must honor this contract:
+#   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
+#                  no argument and does every OS read. It returns a dict with the keys memory_pct
+#                  (percent of physical memory IN USE), disk_free_pct (percent FREE on the home
+#                  drive), cpu_pct, claude_procs (a count of processes whose image name is claude
+#                  or claude.exe, Windows only). A missing key or a None is an unread reading, which
+#                  counts as normal. read_load may raise: every reading then counts as normal.
+#   live_lanes(payload)  the same home. It takes the hook payload (a dict) and returns how many
+#                  lanes already run in this session. busy refuses a lane call when it is 1 or more.
+#                  The spec leaves the real source open (the hooks keep no list of running lanes
+#                  today); the source must start no child process and write no file.
+# The judge must call each by its bare name, so the probe's patch (set on every guard module that
+# holds the name) is the function that runs. A function the probe cannot replace fails every case.
+# The reading of a call is one read_load() per lane-start call, and none on any other call.
+# The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
+# os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
+LB_PROBE = r"""
+import importlib.util, json, os, subprocess, sys
+guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+children = []
+real_popen = subprocess.Popen
+
+
+class CountingPopen(real_popen):
+    def __init__(self, *args, **kwargs):
+        children.append(str(args[0] if args else kwargs.get("args"))[:80])
+        super().__init__(*args, **kwargs)
+
+
+subprocess.Popen = CountingPopen
+
+
+def counted(name, real):
+    def call(*args, **kwargs):
+        children.append(name)
+        return real(*args, **kwargs)
+    return call
+
+
+for name in ("system", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp",
+             "startfile"):
+    if hasattr(os, name):
+        setattr(os, name, counted(name, getattr(os, name)))
+
+
+def listing():
+    return sorted(os.path.join(folder, n) for top in spec.get("watch", [])
+                  for folder, _, names in os.walk(top) for n in names)
+
+
+out = {"reads": 0, "lane_calls": 0}
+try:
+    loader = importlib.util.spec_from_file_location("guard_under_test", guard_path)
+    g = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(g)
+    mods = [g] + [m for n, m in list(sys.modules.items()) if n.startswith("guard_") and m is not None]
+    holders = [m for m in mods if hasattr(m, "read_load")]
+    out["had_reader"] = bool(holders)
+
+    def put(name, fn):
+        for m in mods:
+            if m is g or hasattr(m, name):
+                setattr(m, name, fn)
+
+    before = listing()
+    if spec["mode"] == "selfcheck_child":
+        subprocess.run([sys.executable, "-c", "pass"])
+    elif spec["mode"] == "reader":
+        if not holders:
+            out["missing"] = True
+        else:
+            try:
+                out["reading"] = holders[0].read_load()
+            except Exception as exc:
+                out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
+    else:
+        if "reading" in spec:
+            def read_load():
+                out["reads"] += 1
+                if spec["reading"] == "raise":
+                    raise OSError("fake read failure")
+                return dict(spec["reading"])
+            put("read_load", read_load)
+        if "lanes" in spec:
+            def live_lanes(*args, **kwargs):
+                out["lane_calls"] += 1
+                return spec["lanes"]
+            put("live_lanes", live_lanes)
+        if spec.get("patch_floor") == "deny":
+            g.floor_hit = lambda tool, tool_input: "haiku"
+        elif spec.get("patch_floor") == "read":
+            g.floor_hit = lambda tool, tool_input: g.read_load() and ""
+        try:
+            g.main()
+        except SystemExit:
+            pass
+    out["files"] = [p for p in listing() if p not in before]
+except Exception as exc:
+    out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
+out["children"] = children
+with open(side, "w", encoding="utf-8") as handle:
+    json.dump(out, handle, default=str)
+"""
+
+LB_DIR = os.path.join(ROOT, "loadbrake")
+LB_TOOLS = (("Agent", "Agent"), ("Task", "Task"), ("Workflow", "Workflow"),
+            ("start_session", "mcp__ccd_session__start_session"))
+LB_LANE_INPUT = {
+    "Agent": {"description": "d", "prompt": "x", "model": "sonnet"},
+    "Task": {"description": "d", "prompt": "x", "model": "sonnet"},
+    "Workflow": {"script": _flow("sonnet")},
+    "mcp__ccd_session__start_session": {"initiation": "user_asked", "prompt": "x", "model": "sonnet"},
+}
+LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0, "claude_procs": 3}
+LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0, "claude_procs": 20}
+
+
+def lb_reading(**changes):
+    """A normal reading with the named readings changed."""
+    return dict(LB_NORMAL, **changes)
+
+
+def lb_run(tool, spec, tool_input=None, event=None):
+    """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
+    and what the probe saw (reads, lane_calls, children, files, had_reader, reading...)."""
+    os.makedirs(LB_DIR, exist_ok=True)
+    run = tempfile.mkdtemp(dir=LB_DIR)
+    try:
+        dirs = {name: os.path.join(run, name) for name in ("cfg", "tmp", "side", "cwd")}
+        for path in dirs.values():
+            os.makedirs(path)
+        side_file = os.path.join(dirs["side"], "probe.json")
+        spec = dict(spec, watch=[dirs["cfg"], dirs["tmp"]])
+        if event:
+            body = {"hook_event_name": event}
+        else:
+            given = LB_LANE_INPUT[tool] if tool_input is None else tool_input
+            body = {"tool_name": tool, "tool_input": {
+                k: v.replace("{cwd}", dirs["cwd"]) if isinstance(v, str) else v
+                for k, v in given.items()}}
+        body["cwd"] = dirs["cwd"]
+        body["session_id"] = "lb-" + os.path.basename(run)
+        env = dict(os.environ)
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            env[name] = dirs["tmp"]
+        env["CLAUDE_CONFIG_DIR"] = dirs["cfg"]
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
+        done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
+                              input=json.dumps(body), capture_output=True, text=True, env=env,
+                              timeout=120)
+        try:
+            with open(side_file, "r", encoding="utf-8") as handle:
+                side = json.load(handle)
+        except Exception:
+            return "error", "the probe wrote nothing: " + done.stderr.strip()[-160:], {}
+        if side.get("probe_error"):
+            return "error", "the probe failed: " + side["probe_error"], side
+        decision, reason = read_decision(done.stdout)
+        return decision, reason, side
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+
+
+def lb_names(word, *numbers, percent=True):
+    """Patterns a refusal's reason must match to name a reading: the word, and one of the numbers
+    (a reading spelled whole, rounded or to one place) followed by % or the word percent."""
+    tail = r"\s*(?:%|percent)" if percent else ""
+    return (re.compile(word, re.I), re.compile(
+        r"(?<![\d.])(?:%s)(?!\d)(?!\.\d)%s" %("|".join(re.escape(n) for n in numbers), tail)))
+
+
+def lb_decision_check(tool, reading, lanes, want, names=(), reads=1):
+    """A lane-start call under a forced reading, with `lanes` lanes already running."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": reading, "lanes": lanes})
+        if got == "error":
+            return False, reason
+        called = side.get("reads")
+        if got != want:
+            return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
+        if called != reads:
+            return False, "%s as wanted, but the reader ran %s times, want %d" % (got, called, reads)
+        if got == "allow" and side["files"]:
+            return False, "an allowed lane call wrote %d file(s)" % len(side["files"])
+        for pattern in names:
+            if not pattern.search(reason):
+                return False, "the reason does not name the reading (%s): %s" % (
+                    pattern.pattern[:30], reason[:100])
+        return True, "%s, the reader ran %d time" % (got, called)
+    return check
+
+
+def lb_no_read_check(tool, tool_input=None, event=None):
+    """A call that is not a lane start, under the worst reading and three running lanes."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH, "lanes": 3},
+                                   tool_input, event)
+        if got == "error":
+            return False, reason
+        if got != "allow":
+            return False, "%s, want allow: %s" % (got, reason[:90])
+        if side.get("reads") or side.get("lane_calls"):
+            return False, "the call read the load (%s read_load, %s live_lanes)" % (
+                side.get("reads"), side.get("lane_calls"))
+        return True, "allow, no read"
+    return check
+
+
+def lb_real_children_check(tool):
+    """A lane-start call with the real reader and the real lane count starts no child process,
+    whatever the machine reads and whatever the call is then judged."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "judge"})
+        if got == "error":
+            return False, reason
+        if not side.get("had_reader"):
+            return False, "the guard has no read_load, so no real reading was taken"
+        if side["children"]:
+            return False, "%d child process(es) started: %s" % (len(side["children"]), side["children"][:3])
+        return True, "%s, no child process" % got
+    return check
+
+
+def lb_reader(spec_check):
+    """A check on the real read_load, called alone. `spec_check(side)` returns (ok, note)."""
+    def check():
+        got, reason, side = lb_run(None, {"mode": "reader"}, tool_input={})
+        if got == "error":
+            return False, reason
+        if side.get("missing"):
+            return False, "no read_load function in guard.py or a guard_*.py module"
+        return spec_check(side)
+    return check
+
+
+def lb_reader_children(side):
+    if side["children"]:
+        return False, "read_load started %d child process(es): %s" % (len(side["children"]), side["children"][:3])
+    return True, "no child process"
+
+
+def lb_reader_files(side):
+    if side["files"]:
+        return False, "read_load wrote %d file(s): %s" % (len(side["files"]), side["files"][:2])
+    return True, "no file written"
+
+
+def lb_reader_shape(side):
+    supported = sys.platform in ("win32", "darwin")
+    if side.get("raised"):
+        if supported:
+            return False, "read_load raised on a supported platform: %s" % side["raised"]
+        return True, "read_load raised on %s, which counts as normal" % sys.platform
+    reading = side.get("reading")
+    if not isinstance(reading, dict):
+        return False, "read_load returned %r, want a dict" % (reading,)
+    for key in ("memory_pct", "disk_free_pct", "cpu_pct", "claude_procs"):
+        value = reading.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= (
+                100 if key != "claude_procs" else 10 ** 6):
+            return False, "%s is %r, want a number in range" % (key, value)
+    if supported:
+        need = ("memory_pct", "disk_free_pct", "cpu_pct") + (("claude_procs",) if sys.platform == "win32" else ())
+        unread = [key for key in need if reading.get(key) is None]
+        if unread:
+            return False, "read_load left %s unread on %s" % (", ".join(unread), sys.platform)
+        if not (reading["memory_pct"] > 0 and reading["disk_free_pct"] > 0):
+            return False, "memory_pct and disk_free_pct read 0: %r" % (reading,)
+    return True, "%s" % {k: reading[k] for k in sorted(reading)}
+
+
+def lb_probe_child_check():
+    got, reason, side = lb_run(None, {"mode": "selfcheck_child"}, tool_input={})
+    if got == "error":
+        return False, reason
+    return (len(side["children"]) == 1,
+            "the probe counted %d child(ren), want 1" % len(side["children"]))
+
+
+def lb_probe_patch_check():
+    got, reason, side = lb_run("Agent", {"mode": "judge", "patch_floor": "deny"})
+    if got == "error":
+        return False, reason
+    return (got == "deny" and "floor" in reason,
+            "a patched floor_hit gave %s: %s, want a floor deny" % (got, reason[:60]))
+
+
+def lb_probe_reads_check():
+    got, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "lanes": 0,
+                                         "patch_floor": "read"})
+    if got == "error":
+        return False, reason
+    return (got == "allow" and side["reads"] == 1 and not side["files"],
+            "a patched read_load called once was counted %s times, the call was %s, %d file(s) written" % (
+                side["reads"], got, len(side["files"])))
+
+
+LB_CHECKS = []   # the checks that reach the real reader: the Windows slice runs these too
+
+
+def lb_add(label, check, real=False):
+    LOG_CHECKS_EXTRA.append(("load-brake: " + label, check))
+    FIXTURELESS_CHECKS.add(check)
+    if real:
+        LB_CHECKS.append(check)
+
+
+lb_add("probe control: a child process the probe starts is counted", lb_probe_child_check)
+lb_add("probe control: a patch on a guard function reaches the judge", lb_probe_patch_check)
+lb_add("probe control: a call to the patched read_load is counted", lb_probe_reads_check)
+
+for _short, _tool in LB_TOOLS:
+    _mem = lb_names("memory", "91.7", "91", "92")
+    lb_add("%s, memory 91.7%% with one lane running: refused, names the reading" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 1, "deny", _mem))
+    lb_add("%s, memory 91.7%% with two lanes running: refused" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 2, "deny"))
+    lb_add("%s, memory 91.7%% with no lane running: the first lane is allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 0, "allow"))
+    lb_add("%s, a normal reading with three lanes running: allowed" % _short,
+           lb_decision_check(_tool, LB_NORMAL, 3, "allow"))
+    lb_add("%s, memory 97.2%% with no lane running: full, refused, names the reading" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=97.2), 0, "deny",
+                             lb_names("memory", "97.2", "97")))
+    lb_add("%s, a read that raises with one lane running: allowed" % _short,
+           lb_decision_check(_tool, "raise", 1, "allow"))
+
+lb_add("Agent, disk 9.4% free with one lane running: busy, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), 1, "deny",
+                         lb_names("disk", "9.4", "9", "90.6", "91", "90")))
+lb_add("Agent, disk 9.4% free with no lane running: allowed",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), 0, "allow"))
+lb_add("Agent, disk 3.1% free with no lane running: full, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=3.1), 0, "deny",
+                         lb_names("disk", "3.1", "3", "96.9", "97")))
+lb_add("Agent, CPU 93.4% with one lane running: busy, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), 1, "deny", lb_names("cpu", "93.4", "93")))
+lb_add("Agent, CPU 99% with no lane running: CPU never fills the machine, allowed",
+       lb_decision_check("Agent", lb_reading(cpu_pct=99.0), 0, "allow"))
+lb_add("Agent, 14 claude processes with one lane running: busy, refused, names the count",
+       lb_decision_check("Agent", lb_reading(claude_procs=14), 1, "deny",
+                         lb_names("claude", "14", percent=False)))
+lb_add("Agent, 14 claude processes with no lane running: allowed",
+       lb_decision_check("Agent", lb_reading(claude_procs=14), 0, "allow"))
+lb_add("Agent, memory unread and the rest normal, with one lane running: allowed",
+       lb_decision_check("Agent", lb_reading(memory_pct=None), 1, "allow"))
+lb_add("Agent, an empty reading with one lane running: allowed",
+       lb_decision_check("Agent", {}, 1, "allow"))
+lb_add("Agent, memory unread but disk 3.1% free: one unread reading hides no other, refused",
+       lb_decision_check("Agent", lb_reading(memory_pct=None, disk_free_pct=3.1), 0, "deny",
+                         lb_names("disk", "3.1", "3", "96.9", "97")))
+
+lb_add("Bash reads no load under the worst reading", lb_no_read_check("Bash", {"command": "echo hi"}))
+lb_add("PowerShell reads no load under the worst reading",
+       lb_no_read_check("PowerShell", {"command": "Write-Output hi"}))
+lb_add("Edit reads no load under the worst reading",
+       lb_no_read_check("Edit", {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}))
+lb_add("Write reads no load under the worst reading",
+       lb_no_read_check("Write", {"file_path": "{cwd}/notes.txt", "content": "a"}))
+lb_add("a session tool that starts no lane reads no load under the worst reading",
+       lb_no_read_check("mcp__ccd_session__list_start_targets", {}))
+lb_add("a SubagentStop reads no load under the worst reading",
+       lb_no_read_check(None, {}, event="SubagentStop"))
+
+for _short, _tool in LB_TOOLS:
+    lb_add("%s with the real reader starts no child process" % _short,
+           lb_real_children_check(_tool), real=True)
+lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
+lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
+lb_add("the real reader returns readings in range, and on Windows and Mac reads memory, disk and CPU",
+       lb_reader(lb_reader_shape), real=True)
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -14228,6 +14626,9 @@ WINDOWS_CHECKERS = {
 # audit-high: the fail-closed checks read no Windows-only code, but the Windows slice runs on
 # every pull request, and a missing sibling is the Windows incident. They run in that slice too.
 WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
+# load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx,
+# GetSystemTimes and a process snapshot) that no Linux run exercises.
+WINDOWS_CHECKERS.update(LB_CHECKS)
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
@@ -14722,7 +15123,7 @@ def run_cases():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
-    if any(not only or only in label for label, _ in logs):
+    if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
         if only and only not in label:
