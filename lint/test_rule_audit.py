@@ -3,7 +3,7 @@
 
 Each test builds a small CLAUDE.md fragment, a map, and (when it matters) a guard.py or
 gates.yml fragment in memory, then calls `check(...)` directly. No subprocess: the audit
-itself does not touch the transcript or the hook protocol the way ste_gate/report_gate do.
+itself does not touch the transcript or the hook protocol the way report_gate does.
 
 Run with:
 
@@ -702,23 +702,35 @@ class EmittedRuleIdsTests(unittest.TestCase):
             os.path.join("hooks", "guard.py"): refuse % "main-rule",
             os.path.join("hooks", "guard_x.py"): 'ask_step("sibling-rule", R, "m", "l")\n',
             os.path.join("hooks", "test_guard.py"): refuse % "test-only-rule",
-            os.path.join("lint", "ste_gate.py"): 'LOG = "STE-fallback"\nBAD = ["STE-Upper", "STE-a1", "x STE-word"]\n',
-            os.path.join("lint", "_transcript.py"): 'LOG = "STE-unchecked"\n',
+            os.path.join("lint", "_transcript.py"): 'X = 1\n',
         }
 
-    def test_a_fixture_root_gives_guard_siblings_config_watch_and_gate_ids_and_no_test_file(self):
+    def ids_of(self, files):
+        """The ids of a fixture root. A crash is a failure that names its cause: the root has no
+        lint/ste_gate.py, deleted by the ste-gate-fixes-not-nags decision."""
+        try:
+            return rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
+        except FileNotFoundError as e:
+            self.fail("emitted_rule_ids reads a gate file the root does not have: %s" % e)
+
+    def test_a_fixture_root_gives_guard_siblings_config_watch_and_ste_codes_and_no_test_file(self):
         files = self.files()
         files[os.path.join("hooks", "config_watch.py")] = 'record("ConfigChange", "reverted", "watch-rule", "m")\n'
-        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
-        for wanted in ("main-rule", "sibling-rule", "watch-rule", "STE-fallback", "STE-unchecked"):
+        ids = self.ids_of(files)
+        for wanted in ("main-rule", "sibling-rule", "watch-rule"):
             self.assertIn(wanted, ids)
-        for unwanted in ("test-only-rule", "STE-Upper", "STE-a1", "x STE-word"):
-            self.assertNotIn(unwanted, ids)
+        self.assertNotIn("test-only-rule", ids)
         import ste_lint
         self.assertTrue(set(ste_lint.RULES) <= ids)  # every STE code is an id
 
+    def test_a_leftover_ste_gate_file_adds_no_id(self):
+        files = self.files()
+        files[os.path.join("lint", "ste_gate.py")] = 'LOG = "STE-fallback"\n'
+        ids = self.ids_of(files)
+        self.assertNotIn("STE-fallback", ids)
+
     def test_a_root_with_no_config_watch_is_read_without_it(self):
-        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, self.files()))
+        ids = self.ids_of(self.files())
         self.assertIn("main-rule", ids)
         self.assertNotIn("watch-rule", ids)
 

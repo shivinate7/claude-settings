@@ -23,8 +23,8 @@ REPORT_GATE = os.path.join(HERE, "report_gate.py")
 HOOKS = os.path.join(HERE, "..", "hooks")
 
 sys.path.insert(0, HERE)
+sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
-from _transcript import format_finding, landed_work  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -1451,26 +1451,6 @@ class SourceProseLintTests(unittest.TestCase):
         self.assertEqual(matches[0].line, 4)
 
 
-class FindingEchoSanitizationTests(unittest.TestCase):
-    """lint/_transcript.py's format_finding is the one place lint/md_sweep.py and
-    lint/ste_gate.py turn an ste_lint.py finding into text for a hook's reason: ste_gate.py's
-    permissionDecisionReason, live on every Write, Edit and MultiEdit, and md_sweep.py's Stop
-    block reason. A finding's `message` is attacker-reachable: ste_lint.py's STE003, STE007,
-    STE008, STE009, STE011, STE013, STE015 and STE017 rules build it with %r around a substring
-    matched out of the linted file (see ste_lint.py's check_words). format_finding must not
-    trust that text.
-
-    Handed a crafted finding directly (not routed back through ste_lint.py's own %r, which
-    already escapes a raw control byte before it would reach here), format_finding must still
-    come out clean: this is the same belt this module gives every finding, not a claim that
-    today's %r-wrapped rules leak an unescaped byte.
-    """
-
-    def test_77_control_character_in_message_is_not_echoed_raw(self):
-        finding = {"line": 3, "code": "STE002", "message": "'is\x1fadded' is passive."}
-        self.assertNotIn("\x1f", format_finding(finding))
-
-
 class ValeBloatPairTests(unittest.TestCase):
     """STE011 pairs copied from the Vale style packs (decisions/fewest-words-mandate.md)."""
 
@@ -1629,69 +1609,14 @@ class UICopyRoundTwoTests(unittest.TestCase):
         self.assertEqual(codes, ["STE011"])
 
 
-class TurnEndEarlyExitTests(unittest.TestCase):
-    """lint/_transcript.py's `landed_work` is the one early exit for a Stop hook: False only
-    when nothing is dirty in the work tree since the last human message. The repo below is
-    quiet (every file backdated), so each test changes ONE thing and the answer must follow it. `read_turn` is the tail reader the idle hooks use."""
+class TurnReaderTests(unittest.TestCase):
+    """`read_turn` is the tail reader the idle hooks use; the config report reads only this turn."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = os.path.join(self.tmp.name, "repo")
         os.makedirs(self.repo)
-        self.vcs("init", "-q")
-        for name in ("a.md", "n.txt"):
-            with open(os.path.join(self.repo, name), "w", encoding="utf-8") as f:
-                f.write("one\n")
-        self.vcs("add", "-A")
-        self.vcs("commit", "-q", "-m", "init")
-        old = datetime.now(timezone.utc).timestamp() - 1000
-        for name in ("a.md", "n.txt"):  # the work tree only: the repo's own files churn under us
-            os.utime(os.path.join(self.repo, name), (old, old))
-
-    def vcs(self, *args):
-        subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=T",
-                        "-C", self.repo] + list(args), check=True, capture_output=True, text=True)
-
-    def transcript(self, stamp="auto"):
-        record = human("go")
-        if stamp == "auto":
-            stamp = (datetime.now(timezone.utc) - timedelta(seconds=100)).isoformat().replace("+00:00", "Z")
-        if stamp:
-            record["timestamp"] = stamp
-        return write_transcript([record, assistant_text("hi")], self.tmp.name)
-
-    def landed(self, **kw):
-        return landed_work(self.transcript(kw.pop("stamp", "auto")), kw.pop("cwd", self.repo), **kw)
-
-    def test_idle_turn_exits(self):
-        self.assertFalse(self.landed())
-
-    def test_uncommitted_edit_does_not_exit(self):
-        with open(os.path.join(self.repo, "n.txt"), "w", encoding="utf-8") as f:
-            f.write("two\n")
-        self.assertTrue(self.landed())
-
-    def test_untracked_file_does_not_exit(self):
-        with open(os.path.join(self.repo, "new.txt"), "w", encoding="utf-8") as f:
-            f.write("x\n")
-        self.assertTrue(self.landed())
-
-    def test_deleted_file_does_not_exit(self):
-        os.remove(os.path.join(self.repo, "n.txt"))
-        self.assertTrue(self.landed())
-
-    def test_dirt_older_than_the_message_exits(self):
-        target = os.path.join(self.repo, "n.txt")
-        with open(target, "w", encoding="utf-8") as f:
-            f.write("two\n")
-        old = datetime.now(timezone.utc).timestamp() - 1000
-        os.utime(target, (old, old))
-        self.assertFalse(self.landed())
-
-    def test_unknown_reads_keep_the_hook_running(self):
-        self.assertTrue(self.landed(stamp=""))  # no timestamp on the human record
-        self.assertTrue(self.landed(cwd=self.tmp.name))  # not a work tree
 
     def test_read_turn_matches_the_full_read(self):
         sidechain = dict(human("sub"), isSidechain=True)

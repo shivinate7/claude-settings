@@ -843,7 +843,6 @@ class OverrideDecisionTests(unittest.TestCase):
 
 GUARD_SOURCES = sorted(glob.glob(os.path.join(HOOKS_DIR, "guard*.py"))) + [
     os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `subagent-model-cap` reverts
-GATE_SOURCES = [os.path.join(REPO_ROOT, "lint", "ste_gate.py"), os.path.join(REPO_ROOT, "lint", "_transcript.py")]
 RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}  # the position of the rule id in each call
 
 
@@ -877,14 +876,10 @@ def emitted_guard_rules(source):
 
 
 def emitted_gate_rules():
-    """The ids the STE gates write: every STE code (lint/ste_lint.py RULES) and the `STE-<word>`
-    literals ste_gate.py and _transcript.py log when a check could not run."""
+    """The STE ids: every STE code (lint/ste_lint.py RULES). No `STE-<word>` id is read from any
+    file: ste_gate.py, which wrote them, is deleted (the ste-gate-fixes-not-nags decision)."""
     import ste_lint
-    ids = set(ste_lint.RULES)
-    for path in GATE_SOURCES:
-        with open(path, encoding="utf-8") as handle:
-            ids |= {c for c in _text_constants(ast.parse(handle.read())) if re.fullmatch(r"STE-[a-z]+", c)}
-    return ids
+    return set(ste_lint.RULES)
 
 
 def emitted_rules():
@@ -911,8 +906,10 @@ class EmittedRuleReaderTests(unittest.TestCase):
                        "builder-diff", "author-diff", "writer-diff",    # diff_rule() table
                        "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
                        "subagent-model-cap",                            # guard.py and config_watch.py
-                       "STE001", "STE-fallback", "STE-unchecked"):      # the gates
+                       "STE001"):                                       # an STE code
             self.assertIn(needle, ids)
+        for gone in ("STE-fallback", "STE-unchecked"):                  # only the deleted gate wrote these
+            self.assertNotIn(gone, ids)
         self.assertGreaterEqual(len(ids), 40)  # a floor: a reader that finds fewer has lost a call shape
 
     def test_a_comment_opener_inside_a_string_hides_no_call(self):
@@ -1049,19 +1046,19 @@ class AllRulesTests(unittest.TestCase):
             "right: rule_audit reads it, the oracle does not")
 
     def cut_id(self):
-        """The rule field the gate's logger writes for a combined id past its limit, made by the real
-        writer, so the mark and the limit are never copied here. Returns (field, the codes it kept)."""
-        import _transcript
+        """The rule field the deleted STE gate's logger wrote for a combined id past its 40-character
+        limit. An old guard.log still holds such lines, and nothing writes them now. The cut is made
+        by guard_core.log_cut, so the mark is never copied here. Returns (field, the codes it kept)."""
         import guard_core
         codes = ["STE%03d" % n for n in (1, 3, 7, 8, 11, 12, 13, 14)]
-        field = guard_core.log_cut(",".join(codes), _transcript.GUARD_LOG_RULE_MAX)
+        field = guard_core.log_cut(",".join(codes), 40)
         kept = field.split(" ")[0].split(",")
         self.assertTrue(field.endswith(" [cut]"), "the fixture is no longer cut: %r" % field)
         self.assertTrue(2 <= len(kept) < len(codes), kept)
         return field, kept
 
     def test_a_code_seen_only_in_a_cut_combined_line_gets_its_count_and_first_date(self):
-        # The gate's logger cuts the rule field at 40 characters and marks it ` [cut]`. The cut id is no
+        # The old gate's logger cut the rule field at 40 characters and marked it ` [cut]`. The cut id is no
         # longer a clean combined id, but the codes it kept did fire: `never` would let a cull delete them.
         field, kept = self.cut_id()
         out = self.report([stamped(3, "deny", field), stamped(1, "ask", field)], "--all-rules", "--days", "7")
