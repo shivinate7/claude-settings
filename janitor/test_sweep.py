@@ -6787,6 +6787,72 @@ class FastSweepUnreadableTests(unittest.TestCase):
             self.assertTrue(_listed(root, path))
 
 
+class FastSweepIdleKeepTests(unittest.TestCase):
+    """`--fast --confirm` with the clock at +0 hours: the merged tree is seconds old, so the 1 hour
+    idle keep is the only rule that can hold it. The cases above run 30 hours ahead, where that keep
+    never fires. One repository, two runs: the unattended run keeps the tree, then `--attended`
+    removes the SAME tree. That second run is the control: the tree is clean, unlocked, merged and
+    unlive, so the first keep can only be the idle rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = _fast_repo("idle")
+        cls.tree = _add_tree(cls.root, "young")
+        cls.refused, cls.results, cls.calls = _run_main(cls.root, ["--fast", "--confirm"])
+        cls.still_there = os.path.isdir(cls.tree) and _listed(cls.root, cls.tree)
+        cls.person_refused, cls.person_results, cls.person_calls = _run_main(
+            cls.root, ["--fast", "--attended", "--confirm"])
+
+    def decision_of(self, results):
+        self.assertEqual(len(results), 1)
+        found = [d for d in results[0]["worktrees"] if _norm_path(d["path"]) == _norm_path(self.tree)]
+        self.assertEqual(len(found), 1, "the sweep did not judge the tree: %r" % (results[0]["worktrees"],))
+        return found[0]
+
+    def test_keeps_a_merged_tree_idle_less_than_an_hour(self):
+        self.assertIsNone(self.refused, REFUSED % self.refused)
+        decision = self.decision_of(self.results)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("recently-active"), decision)
+        self.assertEqual(_removals_of(self.calls, self.tree), [], "the sweep tried to remove it")
+        self.assertTrue(self.still_there, "the tree was removed or unregistered")
+
+    def test_a_persons_run_removes_that_same_tree(self):
+        self.assertIsNone(self.person_refused, REFUSED % self.person_refused)
+        self.assertEqual(self.decision_of(self.person_results)["action"], "reap")
+        self.assertTrue(_removals_of(self.person_calls, self.tree), "no removal was tried")
+        self.assertFalse(os.path.isdir(self.tree), "the tree is still there")
+        self.assertFalse(_listed(self.root, self.tree), "the tree is still registered")
+
+
+class FastSweepNoRemoteBaseTests(unittest.TestCase):
+    """`--fast` refuses a repository whose default branch has no remote copy: a local `main` may hold
+    work no remote has, so "in main" proves no copy exists. The refusal must be the only thing that
+    holds the tree, so the same repository is swept again once it has a remote, and then the tree
+    goes."""
+
+    def test_refuses_a_repository_whose_default_branch_is_local_only(self):
+        root = os.path.join(ROOT, "fast-no-remote")
+        make_repo(root, {"f.txt": "base\n"})
+        tree = _add_tree(root, "merged")
+        base = sweep.git_reads.resolve_default_base(root)
+        require(base == "main", "the fixture needs a local-only default branch, got %r" % (base,))
+
+        refused, results, calls = _run_main(root, ["--fast", "--confirm"], 30)
+        self.assertIsNone(refused, REFUSED % refused)
+        self.assertEqual([r["refused"] for r in results], ["no-remote-default-base"])
+        self.assertEqual(results[0]["worktrees"], [], "a refused repository judged a tree")
+        self.assertEqual(_removals_of(calls, tree), [], "the sweep tried to remove it")
+        self.assertTrue(os.path.isdir(tree) and _listed(root, tree), "the tree was removed")
+
+        give_remote(root)
+        refused, results, calls = _run_main(root, ["--fast", "--confirm"], 30)
+        self.assertIsNone(refused, REFUSED % refused)
+        self.assertIsNone(results[0]["refused"], "a repository with a remote default base was refused")
+        self.assertFalse(os.path.isdir(tree), "with a remote the same tree is removed, so the "
+                         "refusal above was the only thing holding it")
+
+
 class _TreeCountRuns:
     """One repository run in preview at two sizes: 2 merged trees, then 5, each beside one unmerged
     tree. The verdicts come first, so a sweep that judged nothing cannot pass on a low count.
