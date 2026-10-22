@@ -594,7 +594,7 @@
     "building-guard-needs-incident": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
+        "reason": "Whether a named incident, measured risk or likely risk justifies a rule is a human read of the rule's record. Grow while things change, then cull what never fired (owner, 2026-10-21)."
       }
     },
     "roles-review-cap-three": {
