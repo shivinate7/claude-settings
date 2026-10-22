@@ -89,8 +89,8 @@ a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
-`subagent-model-cap`, unless a standing word covers it: the role Plan, the role Explore (the class-level
-word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
+`subagent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
+class-level word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override pass
 lifts the spawn ask like any other ask (`owner-override-pass`); the ask on a settings write under the same
 id stays outside every pass. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
@@ -98,7 +98,7 @@ asked for. A justification line is written after the model is chosen, so it defe
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
 write that changes the fallback stays: a write is a standing change, not a dispatch. The gate sees only
 Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
-`start_session` on Opus; the static scan of a Workflow script reads only the Haiku floor, and a model set
+`start_session` on Opus. The static scan of a Workflow script reads only the Haiku floor, and a model set
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
