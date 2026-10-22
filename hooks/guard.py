@@ -230,8 +230,9 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, PROJECT_FROZEN_FILES, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
+            FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
             project_config_shell_hit,
+            PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
         from guard_env import (

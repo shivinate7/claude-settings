@@ -26,7 +26,6 @@ Interface the check must meet (the builder builds to it):
 
 Each case names the defect it pins in its docstring or comment. Red cases are marked "Red".
 """
-import glob
 import os
 import re
 import shutil

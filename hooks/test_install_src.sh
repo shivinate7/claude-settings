@@ -341,6 +341,8 @@ case8() {
   rc=$?
 
   missing=""
+  # landed_dirs prints one directory per line; each becomes its own ls-files argument, so the split is meant.
+  # shellcheck disable=SC2046
   for path in $(git -C "$REPO_ROOT" ls-files $(landed_dirs)); do
     [ -f "$h/claude-settings/$path" ] || missing="$missing mirror:$path"
     [ -f "$cfg/$path" ] || missing="$missing landed:$path"
@@ -510,6 +512,8 @@ pointer_case6() {
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
   co="$h/Developer/claude-settings"
   make_checkout "$co" "# pointer6 content"
+  # The pointer line must hold a literal "~/", so install.sh expands it; $HOME would test another form.
+  # shellcheck disable=SC2088
   seed_pointer "$cfg" "~/Developer/claude-settings"
   elsewhere="$work/pointer6-elsewhere"; mkdir -p "$elsewhere"
   stub_bin="$work/pointer6-bin"; make_curl_stub "$stub_bin"
@@ -1711,7 +1715,7 @@ path_case1() {
   out2=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh); rc2=$?
   marks=$(grep -cF "$PATH_MARK" "$h/.zshrc"); lines=$(grep -cF "$PATH_LINE" "$h/.zshrc")
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
-  elif [ "$marks" != 1 ] || [ "$lines" != 1 ]; then bad "$name" "~/.zshrc holds $marks marks and $lines export lines, expected 1 and 1"
+  elif [ "$marks" != 1 ] || [ "$lines" != 1 ]; then bad "$name" "the ~/.zshrc holds $marks marks and $lines export lines, expected 1 and 1"
   elif [ "$(cat "$h/.zshrc")" != "$after1" ]; then bad "$name" "second run changed ~/.zshrc"
   elif ! head -1 "$h/.zshrc" | grep -qF "# my zshrc"; then bad "$name" "existing rc content was not kept"
   elif [ -e "$h/.bashrc" ]; then bad "$name" "a zsh SHELL also wrote ~/.bashrc"
@@ -1729,8 +1733,8 @@ path_case2() {
   fi
   out=$(run_path_install "$co" "$h" "$cfg" /bin/bash); rc=$?
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "~/.bashrc has no marker line"
-  elif ! grep -qF "$PATH_LINE" "$h/.bashrc"; then bad "$name" "~/.bashrc has no export line"
+  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "the ~/.bashrc has no marker line"
+  elif ! grep -qF "$PATH_LINE" "$h/.bashrc"; then bad "$name" "the ~/.bashrc has no export line"
   elif [ -e "$h/.zshrc" ]; then bad "$name" "a bash SHELL wrote ~/.zshrc"
   else ok "$name"; fi
   rm -rf "$h"
@@ -1748,7 +1752,7 @@ path_case3() {
          bash -c 'unset SHELL; [ -z "${SHELL+x}" ] || exit 99; source ./install.sh' 2>&1 ); rc=$?
   if [ $rc -eq 99 ]; then bad "$name" "fixture precondition failed: SHELL could not be unset"
   elif [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "~/.bashrc has no marker line"
+  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "the ~/.bashrc has no marker line"
   else ok "$name"; fi
   rm -rf "$h"
 }
@@ -1762,8 +1766,8 @@ path_case4() {
   out1=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/bin/bash bash ./install.sh --cloud 2>&1 ); rc1=$?
   out2=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/usr/bin/zsh CLAUDE_CODE_REMOTE=true bash ./install.sh 2>&1 ); rc2=$?
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
-  elif [ "$(cat "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "~/.bashrc was changed in cloud mode"
-  elif [ "$(cat "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "~/.zshrc was changed in cloud mode"
+  elif [ "$(cat "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "the ~/.bashrc was changed in cloud mode"
+  elif [ "$(cat "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "the ~/.zshrc was changed in cloud mode"
   else ok "$name"; fi
   rm -rf "$h"
 }
