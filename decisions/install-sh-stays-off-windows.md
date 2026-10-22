@@ -12,7 +12,7 @@ Reason: the Mac/Linux installer ran on every Windows session start and landed th
 - After a merge, `merge/install_from_main.sh` moves the pin, then runs `install.ps1` on MINGW (lines 165-174, the call at 169). `install.ps1` makes new links. It only creates a missing pin (`install.ps1:107-108`).
 - Existing files in `~/.claude` update through the pin link.
 - New files appear only after that `install.ps1` run, or a manual one.
-- The `install.ps1` post-merge hook runs `install.ps1` only.
+- The post-merge hook exists only on a copy install (decision post-merge-hook-is-a-fallback). It re-copies files, and re-runs `install.ps1` when a pull changed it.
 
 Kind: build
 Plan: decisions/install-sh-stays-off-windows.md#the-ruling (all)
