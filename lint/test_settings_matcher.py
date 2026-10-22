@@ -142,7 +142,7 @@ class JudgeModelIds(unittest.TestCase):
 # AskUserQuestion check keep their own calls. The Stop rows are pinned by script name, not by index.
 DECISION_WATCH_PLUGIN = "decision-watch@claude-settings"
 STOP_SCRIPTS_AFTER_SWAP = sorted([
-    "stall_watch.py", "report_gate.py", "md_sweep.py", "config_watch.py", "ruling_home.py",
+    "stall_watch.py", "report_gate.py", "config_watch.py", "ruling_home.py",
     "precompact_handoff.py", "reply_judge.py", "feedback_gate.py", "reread_check.py",
 ])
 
@@ -187,6 +187,28 @@ class DecisionWatchSwap(unittest.TestCase):
         self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "AskUserQuestion prompt judge missing")
         names = [n for c in command_rows(entries) for n in script_names(c)]
         self.assertIn("question_outcome.py", names)
+
+
+# The STE write gate and the markdown sweep are not wired in settings.json.
+# CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
+class SteHooksRemoved(unittest.TestCase):
+    def test_no_hook_runs_the_removed_scripts(self):
+        with open(SETTINGS, encoding="utf-8") as f:
+            events = json.load(f)["hooks"]
+        for script in ("ste_gate.py", "md_sweep.py"):
+            with self.subTest(script=script):
+                wired = ["%s %s" % (event, entry.get("matcher", "*"))
+                         for event, entries in events.items() for entry in entries
+                         if script in [n for c in command_rows([entry]) for n in script_names(c)]]
+                self.assertEqual(wired, [], "%s is still wired in settings.json" % script)
+
+    def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
+        # The three real gates stay: hooks/test_wrappers.py pins that each one fails closed.
+        with open(SETTINGS, encoding="utf-8") as f:
+            names = [n for c in command_rows(json.load(f)["hooks"]["PreToolUse"]) for n in script_names(c)]
+        for script in ("guard.py", "question_outcome.py"):
+            with self.subTest(script=script):
+                self.assertIn(script, names)
 
 
 # The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
