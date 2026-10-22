@@ -565,6 +565,132 @@ try {
     Remove-Item -Recurse -Force $LhRoot -ErrorAction SilentlyContinue
 }
 
+# ---- hookgone / hookkeep / hookwrite: the git post-merge hook install.ps1 keeps only for copy mode ----
+# Owner ruling 2026-10-22 (stale-postmerge-hook): when symlinks work, install.ps1 removes its own
+# post-merge hook, the one that carries the marker line, and the install log's hook= field says
+# `removed`. A post-merge hook without the marker is not ours and stays byte for byte. When symlinks
+# fail, the marked hook is still written.
+# hookgone1: the run that makes the links. hookgone1b: a rerun over links already made, the early exit
+# a machine that installed once takes every time. hookkeep1: an unmarked hook, both runs. hookwrite1:
+# copy mode, forced, over a stale marked hook. hookkeep1 and hookwrite1 pass on a build without the
+# removal; they go red if the removal is too wide or runs in copy mode.
+# Link mode needs symlink rights. The run itself is the probe: a settings.json that is no link after it
+# prints SKIP, unknown and not red. hookgone and hookkeep clear CLAUDE_SETTINGS_FORCE_COPY, so a
+# copy-mode run cannot stand in for a link run.
+
+$HookMarker = '# claude-settings post-merge hook'
+$HookUtf8   = [Text.UTF8Encoding]::new($false)
+
+# Set-HookFile CLONE BYTES: the post-merge hook of the git clone at CLONE.
+function Set-HookFile([string]$Clone, [byte[]]$Bytes) {
+    $d = Join-Path $Clone '.git\hooks'
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+    [IO.File]::WriteAllBytes((Join-Path $d 'post-merge'), $Bytes)
+}
+
+# Get-HookFileText CLONE: the hook's text, or $null when there is none.
+function Get-HookFileText([string]$Clone) {
+    $p = Join-Path $Clone '.git\hooks\post-merge'
+    if (Test-Path -LiteralPath $p) { return [IO.File]::ReadAllText($p) }
+    return $null
+}
+
+# Get-InstallLogHookMode CFG: the hook= value on the last run summary line of CFG's install log, or $null.
+function Get-InstallLogHookMode([string]$Cfg) {
+    $lp = Join-Path $Cfg 'claude-settings-install.log'
+    if (-not (Test-Path -LiteralPath $lp)) { return $null }
+    $line = @(Get-Content -LiteralPath $lp | Where-Object { $_ -match 'install\.ps1: settings\.json=' }) | Select-Object -Last 1
+    if ($line -and $line -match 'hook=(.*)$') { return $Matches[1].Trim() }
+    return $null
+}
+
+$HgRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookgone1-" + [guid]::NewGuid().ToString('N'))
+$HgHome = Join-Path $HgRoot 'home'
+$HgCfg  = Join-Path $HgRoot 'claude'
+$HgLogs = Join-Path $HgRoot 'logs'
+New-Item -ItemType Directory -Force -Path $HgHome, $HgLogs | Out-Null
+try {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $hgMain  = New-PinFixture $HgRoot
+    $hgSet   = Join-Path $HgCfg 'settings.json'
+    $hgStale = $HookUtf8.GetBytes("#!/bin/sh`n$HookMarker`n# stale body`nexit 0`n")
+    foreach ($hgRun in @(@{ Name = 'hookgone1'; Say = 'first run, which makes the links' }, @{ Name = 'hookgone1b'; Say = 'rerun over links already made' })) {
+        Set-HookFile $hgMain $hgStale
+        $hgRes    = Invoke-InstallProc (Join-Path $hgMain 'install.ps1') $HgCfg $HgHome $HgLogs
+        $hgLinked = Test-ReparsePoint $hgSet
+        if (-not $hgLinked) {
+            Write-Host "SKIP: $($hgRun.Name): settings.json is no link after the run, so this account cannot make symlinks (unknown, not red)"
+            break
+        }
+        $hgText = Get-HookFileText $hgMain
+        $hgMode = Get-InstallLogHookMode $HgCfg
+        Check "$($hgRun.Name) fixture: settings.json is a link, so link mode ran ($($hgRun.Say))" $hgLinked
+        Check "$($hgRun.Name): install.ps1 exits 0" ($hgRes.Exit -eq 0)
+        Check "$($hgRun.Name): the marked post-merge hook is gone from the clone's .git\hooks" ($null -eq $hgText)
+        Check "$($hgRun.Name): the install log's hook= field says removed" ($hgMode -eq 'removed')
+        if ($null -ne $hgText -or $hgMode -ne 'removed') { Write-Host "  $($hgRun.Name): hook file present: $($null -ne $hgText); log hook= '$hgMode'" }
+        if ($hgRes.Exit -ne 0) { Write-Host "  $($hgRun.Name) output: $($hgRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $HgRoot -ErrorAction SilentlyContinue
+}
+
+$HkRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookkeep1-" + [guid]::NewGuid().ToString('N'))
+$HkHome = Join-Path $HkRoot 'home'
+$HkCfg  = Join-Path $HkRoot 'claude'
+$HkLogs = Join-Path $HkRoot 'logs'
+New-Item -ItemType Directory -Force -Path $HkHome, $HkLogs | Out-Null
+try {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $hkMain = New-PinFixture $HkRoot
+    $hkSet  = Join-Path $HkCfg 'settings.json'
+    # A Git LFS style hook: a shell hook, no marker, a CR inside and no final newline, so a rewrite shows.
+    $hkOwn  = $HookUtf8.GetBytes("#!/bin/sh`ncommand -v git-lfs >/dev/null 2>&1 || exit 2`r`ngit lfs post-merge `"`$@`"")
+    $hkWant = [Convert]::ToBase64String($hkOwn)
+    Set-HookFile $hkMain $hkOwn
+    foreach ($hkName in 'hookkeep1', 'hookkeep1b') {
+        $hkRes    = Invoke-InstallProc (Join-Path $hkMain 'install.ps1') $HkCfg $HkHome $HkLogs
+        $hkLinked = Test-ReparsePoint $hkSet
+        if (-not $hkLinked) {
+            Write-Host "SKIP: ${hkName}: settings.json is no link after the run, so this account cannot make symlinks (unknown, not red)"
+            break
+        }
+        $hkPath = Join-Path $hkMain '.git\hooks\post-merge'
+        $hkGot  = if (Test-Path -LiteralPath $hkPath) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($hkPath)) } else { '' }
+        Check "$hkName fixture: settings.json is a link, so link mode ran" $hkLinked
+        Check "${hkName}: install.ps1 exits 0" ($hkRes.Exit -eq 0)
+        Check "${hkName}: a post-merge hook without the marker stays, byte for byte" ($hkGot -eq $hkWant)
+        Check "${hkName}: the install log's hook= field does not claim a removal" ((Get-InstallLogHookMode $HkCfg) -ne 'removed')
+        if ($hkRes.Exit -ne 0) { Write-Host "  $hkName output: $($hkRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $HkRoot -ErrorAction SilentlyContinue
+}
+
+$HwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-hookwrite1-" + [guid]::NewGuid().ToString('N'))
+$HwHome = Join-Path $HwRoot 'home'
+$HwCfg  = Join-Path $HwRoot 'claude'
+$HwLogs = Join-Path $HwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $HwHome, $HwLogs | Out-Null
+try {
+    $hwMain = New-PinFixture $HwRoot
+    Set-HookFile $hwMain ($HookUtf8.GetBytes("#!/bin/sh`n$HookMarker`n# stale body`nexit 0`n"))
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try { $hwRes = Invoke-InstallProc (Join-Path $hwMain 'install.ps1') $HwCfg $HwHome $HwLogs }
+    finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    $hwSet  = Join-Path $HwCfg 'settings.json'
+    $hwText = Get-HookFileText $hwMain
+    Check "hookwrite1 fixture: settings.json is a copy, so copy mode ran" ((Test-Path -LiteralPath $hwSet) -and -not (Test-ReparsePoint $hwSet))
+    Check "hookwrite1: install.ps1 exits 0" ($hwRes.Exit -eq 0)
+    Check "hookwrite1: the marked post-merge hook is still there when symlinks fail" ($null -ne $hwText -and $hwText.Contains($HookMarker))
+    Check "hookwrite1: the hook was rewritten, not left as the stale one" ($null -ne $hwText -and -not $hwText.Contains('# stale body'))
+    Check "hookwrite1: the install log's hook= field says installed" ((Get-InstallLogHookMode $HwCfg) -eq 'installed')
+    if ($hwRes.Exit -ne 0) { Write-Host "  hookwrite1 output: $($hwRes.Text)" }
+} finally {
+    Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $HwRoot -ErrorAction SilentlyContinue
+}
+
 $LsRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-pinlivestale1-" + [guid]::NewGuid().ToString('N'))
 $LsHome = Join-Path $LsRoot 'home'
 $LsCfg  = Join-Path $LsRoot 'claude'
@@ -673,6 +799,9 @@ try {
     Write-Host "SKIP: pinlivewt1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinlivewt2: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinlivehook1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookgone1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookkeep1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookwrite1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
     Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
 }
