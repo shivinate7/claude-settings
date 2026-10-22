@@ -1,10 +1,10 @@
 {
   "ask": "Lane 2 of the guard-rule brief; its full text is in the Ask of c10 (let the guard grow, then cull what never fired).",
-  "note": "Checked at 5584d1b: lint/guard_log_report.py already prints per-rule deny, ask and noted counts, per day and per session, and guard.log is never pruned. The gap is rules that never fired: they have no line, so they never appear. The brief adds a list of every rule id with 0 counts and its first-fire date. Moved up from Later, Oct 21: the guard cull (c23) needs it.",
+  "note": "Checked at 5584d1b: lint/guard_log_report.py already prints per-rule deny, ask and noted counts, per day and per session, and guard.log is never pruned. The gap is rules that never fired: they have no line, so they never appear. The brief adds a list of every rule id with 0 counts and its first-fire date. Moved up from Later, Oct 21: the guard cull (c23) needs it. Goal session report, Oct 22: in batch #562 (CI running), lane guard-report-all-rules.",
   "order": 119,
   "phase": "cleanup",
-  "status": "todo",
+  "status": "active",
   "title": "Track guard refusals per session",
-  "updatedAt": "2026-10-21T20:15:00Z",
+  "updatedAt": "2026-10-22T18:15:00Z",
   "why": "Shows whether the experience improves as the system shrinks."
 }
