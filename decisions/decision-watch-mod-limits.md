@@ -30,7 +30,7 @@ Owner ruling 2026-10-21 16:28 CDT. The mod listens on `turn.complete`. It does n
 - A turn with `agentId` set is a subagent turn. The mod skips it, as the session-board mod does.
 - `turn.complete` has no transcript path. The mod finds the transcript from the session id and cwd, the way `/dw` does.
 - One judge runs at a time. A turn that finds one running logs "SKIP busy".
-- The handler returns `next(e)` after at most 50 ms (the wait for the "STOP seen" line). The lookup and the judge run in the background. It
+- The handler returns `next(e)` after at most 500 ms (the wait for the "STOP seen" line). The lookup and the judge run in the background. It
   never blocks the turn. It has no `stop_hook_active` skip.
 - The lookup reads the session id on each turn and keeps none, because a `/clear` gives a new id with no `session.start`. A lookup that
   fails or passes 0.5 s logs a SKIP line and judges nothing.

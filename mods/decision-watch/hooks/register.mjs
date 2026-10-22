@@ -3,7 +3,7 @@
 // with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
 // as a notice (decision decision-watch-mod-limits). It never blocks and never changes the turn result.
 //
-// turn.complete returns next(e) after at most SEEN_WAIT_MS (50 ms), for the "STOP seen" line. The lookup and
+// turn.complete returns next(e) after at most SEEN_WAIT_MS (500 ms), for the "STOP seen" line. The lookup and
 //               the judging run in the background, one judge at a time. A subagent turn (agentId set) is skipped,
 //               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). The
 //               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
@@ -293,7 +293,7 @@ const MAX_LINE = 2000;
 const TIME_LEN = 24; // length of an ISO timestamp, the start of each log line
 const LOG_WAIT_MS = 2000;
 const LOOKUP_MS = 500; // the transcript lookup, off the return path
-const SEEN_WAIT_MS = 50; // the most the handler waits for the STOP seen line
+const SEEN_WAIT_MS = 500; // the most the handler waits for the STOP seen line
 const MODEL_MS = 50000;
 const PY_MS = 30000; // each python run (unmeasured; split mode calls no model); the mod's timer adds 1 s
 const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
