@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against three style rules. It runs on every fifth Stop and never blocks. A finding comes back as a note on the next turn.
+"""At Stop, a model (Haiku) judges the final reply against four style rules. It runs on every fifth Stop and never blocks. A finding comes back as a note on the next turn.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -33,11 +33,17 @@ COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_i
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
-    "Judge the final reply below against three rules. "
+    "Judge the final reply below against four rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
+    "output-never-hand-off-doable-step: a command left to the owner needs its own fenced code block, "
+    "ready to run as is, with one shell in the block. "
+    "A button path needs no block; a command needs one, even a login command such as gh auth login. "
+    "The block sits outside the report blockquote. "
+    "A command the reply already ran is not a step left to the owner. "
+    "A command named in a report line as done work, a line that says what ran, is not a step left to the owner. "
     "Running background work never makes a reply unfinished. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
