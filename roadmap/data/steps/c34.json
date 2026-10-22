@@ -1,0 +1,9 @@
+{
+  "title": "The merge tool waits for CI to finish, not for a fixed 30 minutes",
+  "status": "todo",
+  "phase": "cleanup",
+  "order": 111.6,
+  "why": "Oct 22: the merge tool's 30-minute wait ran out while #562's last Windows job was still running; nothing was red, and the session had to start the wait again. The same day the macOS job cap was raised from 25 to 50 minutes because it kept cancelling the batch's macOS job, and one timing test in the report-gate tests failed once in a full run and passed alone.",
+  "note": "Filed Oct 22 from the goal session's message. Your question: should this and c33 (repos with no CI) move up? Advisor take: neither blocks work now (this one costs a restart, not a wrong merge), so keep the order; fold this into the next batch only if a lane is small. Unchecked: where the 30-minute figure lives in merge/, and whether the timing test is red on main.",
+  "updatedAt": "2026-10-22T18:50:00Z"
+}
