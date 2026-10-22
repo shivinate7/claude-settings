@@ -83,10 +83,11 @@ default you did not ask for.
 
 A hook that wants one tier passes `--root PATH` with one mode. `--root PATH`
 sweeps the one repository that PATH belongs to. PATH can be a linked worktree
-or a folder inside it. The two mode flags exclude each other.
+or a folder inside it. The three mode flags exclude each other.
 
     sweep.py --root PATH --tier1               stale registrations and husks
     sweep.py --root PATH --branches --confirm  branches only
+    sweep.py --root PATH --fast --confirm      worktrees already in main only
 
 `--tier1` acts for real and needs no `--confirm`. It prunes stale worktree
 registrations and deletes husks. It removes no worktree, reaps no branch, and
@@ -96,6 +97,13 @@ stops no process. It runs no process tier.
 `--confirm`. It removes no worktree and prunes no registration, so every
 branch that a worktree checks out stays held. When git gives no worktree
 list, it refuses the repository.
+
+`--fast` removes only a worktree whose HEAD is already in the default branch. It
+needs a remote-tracking default branch, such as `origin/main`, and refuses the
+repository without one. It makes no fetch, no remote read and no branch work, and it
+prunes no registration. It keeps the clean, lock, live-session, 1 hour idle and
+process keeps, and a tree it cannot prove merged stays. It previews without
+`--confirm`.
 
 ## What it refuses
 

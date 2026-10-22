@@ -306,19 +306,20 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
 
     def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
         """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is a plain, hand-typed constant, so
-        nothing else stops `guard._git`'s real subprocess timeout drifting away from it. THIS
-        TEST reads the real number back out of `guard._git`'s own source and pins it against the
+        nothing else stops `git_reads._git`'s real subprocess timeout drifting away from it. THIS
+        TEST reads the real number back out of `git_reads._git`'s own source and pins it against the
         module's constant. The three arithmetic/settings.json arms around it never re-read
-        guard.py, so a bump of `guard._git`'s `timeout=` turns only this arm red."""
+        git_reads.py, so a bump of `git_reads._git`'s `timeout=` turns only this arm red."""
+        import importlib
         import inspect
         import re
-        source = inspect.getsource(guard._git)
+        source = inspect.getsource(importlib.import_module("git_reads")._git)
         match = re.search(r"timeout\s*=\s*(\d+)", source)
-        self.assertIsNotNone(match, "could not find guard._git's own timeout= in its source")
+        self.assertIsNotNone(match, "could not find git_reads._git's own timeout= in its source")
         real_timeout = float(match.group(1))
         self.assertEqual(
             real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS,
-            "guard._git's real subprocess timeout (%r) no longer matches "
+            "git_reads._git's real subprocess timeout (%r) no longer matches "
             "session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS (%r); update the hand-typed "
             "constant (and RESOLVE_ROOT_WORST_CASE_SECONDS / HOOK_WORST_CASE_SECONDS follow it)"
             % (real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS),
@@ -776,6 +777,41 @@ class SessionEndFetchThrottle(unittest.TestCase):
                       "a fetching run must keep the only copy once the stale ref is pruned")
         self.assertNotIn("still-pushed", local_branches(repo),
                          "a fetching run must still reap a branch the fresh remote holds")
+
+
+class HookLoadsNoGuardModule(unittest.TestCase):
+    """c16, janitor sweep fast on big repos. The hook starts at the end of every session, so its
+    start-up cost is paid at every session's end. Neither importing it nor one whole run may load a
+    module of the guard family. A fresh interpreter answers, because this file imported `guard`
+    itself. The family comes from guard's own list, not a copy of it."""
+
+    def modules_after(self, steps, env_extra=None):
+        family = sorted({"guard", "guard_core", *guard._FAMILY_MODULES})
+        code = ("import json, sys\nsys.path.insert(0, %r)\n%s\n"
+                "print(json.dumps(sorted(set(sys.modules) & set(%r))))" % (HERE, steps, family))
+        env = dict(os.environ)
+        env.update(env_extra or {})
+        done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
+                              timeout=60, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_importing_the_hook_loads_no_guard_module(self):
+        self.assertEqual(self.modules_after("import session_end_sweep"), [],
+                         "importing the hook loaded these guard modules")
+
+    def test_one_whole_hook_run_loads_no_guard_module(self):
+        repo = os.path.join(ROOT, "no_guard_repo")
+        make_repo(repo)
+        marker = os.path.join(ROOT, "no_guard_sweep_ran")
+        stub = os.path.join(ROOT, "no_guard_sweep.py")
+        write(stub, "open(%r, 'w').close()\n" % marker)
+        steps = ("import session_end_sweep\nsession_end_sweep.handle("
+                 "{'hook_event_name': 'SessionEnd', 'cwd': %r}, elapsed_seconds=0)" % repo)
+        loaded = self.modules_after(steps, {"JANITOR_SWEEP_PATH": stub})
+        self.assertTrue(os.path.isfile(marker), "the hook never ran the sweep, so this run proved "
+                        "nothing: it must find the repository without the guard")
+        self.assertEqual(loaded, [], "one hook run loaded these guard modules")
 
 
 if __name__ == "__main__":
