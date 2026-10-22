@@ -282,6 +282,25 @@ def list_local_branches(where: str):
     return [line.strip() for line in answer.stdout.splitlines() if line.strip()]
 
 
+def merged_batch(where: str, base: str):
+    """The local branches already in BASE, from ONE `for-each-ref --merged`: {"base": BASE,
+    "names": the branch names, "tips": their commit ids}. None when the read failed. A branch is in
+    the batch exactly when `merge-base --is-ancestor <branch> BASE` would say yes. It proves "in
+    main" for every branch and every worktree HEAD at once. What it does not hold is asked of the
+    repository one by one (`cherry`), and a read that fails keeps."""
+    answer = guard._git(where, "for-each-ref", "--merged=" + base,
+                        "--format=%(objectname) %(refname:short)", "refs/heads")
+    if answer is None or answer.returncode != 0:
+        return None
+    names, tips = set(), set()
+    for line in answer.stdout.splitlines():
+        sha, _, name = line.strip().partition(" ")
+        if sha and name:
+            names.add(name)
+            tips.add(sha)
+    return {"base": base, "names": names, "tips": tips}
+
+
 def _short_branch_ref(ref: str) -> str:
     prefix = "refs/heads/"
     return ref[len(prefix):] if ref.startswith(prefix) else ref
@@ -331,16 +350,17 @@ def parse_worktree_list(where: str):
 
 # ------------------------------------------------------------------ the branch keep rule
 #
-# The REAP-OR-KEEP boolean is guard.branch_is_empty(where, base, branch) alone, unchanged:
-# ancestor, then cherry-empty, then remote-contains, any one passing proves the work survives the
-# branch, None (any test could not be read) means keep. This function decides nothing that
-# function did not already decide; the refusals ahead of it (default branch, protected prefix,
-# checked out) and the label after it (which of the three tests passed) are the only things added
-# here, and neither can turn a keep into a reap or a reap into a keep.
+# The REAP-OR-KEEP answer is guard.branch_proof(where, base, branch) alone, the same three tests
+# guard.branch_is_empty runs: ancestor, then cherry-empty, then remote-contains, any one passing
+# proves the work survives the branch, None (any test could not be read) means keep. Its answer
+# is also the label of the test that passed. The refusals ahead of it (default branch, protected
+# prefix, checked out) are the only things added here, and they can only turn a reap into a keep.
 
 
-def decide_branch(where: str, base: str, branch: str, protected_prefixes, checked_out_branches):
-    """Return one decision dict: {"name", "action": "reap"|"keep", "reason"}."""
+def decide_branch(where: str, base: str, branch: str, protected_prefixes, checked_out_branches,
+                  batch=None):
+    """Return one decision dict: {"name", "action": "reap"|"keep", "reason"}. BATCH
+    (`merged_batch`) answers the ancestor test for every branch at once; None reads it per branch."""
     if branch in ("main", "master"):
         return {"name": branch, "action": "keep", "reason": "default-branch"}
     for prefix in protected_prefixes:
@@ -348,30 +368,18 @@ def decide_branch(where: str, base: str, branch: str, protected_prefixes, checke
             return {"name": branch, "action": "keep", "reason": "protected-prefix:" + prefix}
     if branch in checked_out_branches:
         return {"name": branch, "action": "keep", "reason": "checked-out"}
-    empty = guard.branch_is_empty(where, base, branch)
-    if empty is None:
+    label = guard.branch_proof(where, base, branch,
+                               None if batch is None else branch in batch["names"])
+    if label is None:
         return {"name": branch, "action": "keep", "reason": "unreadable-subject"}
-    if empty is False:
+    if label is False:
         return {"name": branch, "action": "keep", "reason": "only-copy"}
-    label = _branch_reap_label(where, base, branch)
     if label == "on-remote" and _fetch_throttled(where):
         # A throttled run skipped the fetch, so the remote-tracking refs may be 10 minutes old and
         # an on-remote read could name a head the remote has since lost. A branch merged into the
         # base (ancestor, cherry-empty) needs no remote read and still goes.
         return {"name": branch, "action": "keep", "reason": "unreadable-subject: fetch throttled"}
     return {"name": branch, "action": "reap", "reason": label}
-
-
-def _branch_reap_label(where: str, base: str, branch: str) -> str:
-    """Cosmetic only: guard.branch_is_empty above already decided REAP. This re-reads the same
-    three tests, in the same order, purely to name which one passed in the preview line. A bug
-    here can only mislabel a reap; it cannot turn a keep into a reap, because the boolean already
-    came from guard.branch_is_empty and this function's return value never feeds back into it."""
-    if guard.branch_is_ancestor(where, base, branch):
-        return "ancestor"
-    if guard.branch_cherry_empty(where, base, branch):
-        return "cherry-empty"
-    return "on-remote"
 
 
 # ------------------------------------------------------------------ the worktree keep rule
@@ -598,11 +606,20 @@ def worktree_idle_seconds(path: str, now=None):
     return (time.time() if now is None else now) - newest
 
 
-def _merged_read(where: str, path: str):
+def _merged_read(where: str, path: str, batch=None):
     """True when HEAD in PATH holds no commit the default branch lacks, by ancestry or by patch
     (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). False when it holds one. None
     when git could not tell. HEAD is read in the worktree itself, never in WHERE. One home: the
-    strict keep and the unpushed keep both ask it."""
+    strict keep and the unpushed keep both ask it. BATCH (`merged_batch`) holds the commits that
+    are in the default branch: a HEAD in it is merged with no further read, and any other HEAD
+    goes to `cherry`, which also proves an older commit of the branch."""
+    if batch is not None:
+        head = guard._git(path, "rev-parse", "HEAD")
+        if head is None or head.returncode != 0 or not head.stdout.strip():
+            return None
+        if head.stdout.strip() in batch["tips"]:
+            return True
+        return guard.branch_cherry_empty(path, batch["base"], "HEAD")
     base = guard.resolve_default_base(where)
     if base is None:
         return None
@@ -612,16 +629,19 @@ def _merged_read(where: str, path: str):
     return merged
 
 
-def _strict_keep(where: str, path: str, idle):
+def _strict_keep(where: str, path: str, idle, batch=None, fast=False):
     """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
     Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
     (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged,
     except after STRICT_UNMERGED_IDLE_SECONDS: the caller already kept an unpushed tree, so an
-    unmerged tree here is pushed."""
-    merged = _merged_read(where, path)
+    unmerged tree here is pushed. FAST: no push was read, so an unmerged tree is always kept."""
+    merged = _merged_read(where, path, batch)
     if merged is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not merged:
+        if fast:
+            return {"path": path, "action": "keep",
+                    "reason": "unmerged: HEAD has a commit the default branch lacks"}
         if idle is None:
             return {"path": path, "action": "keep", "reason": "unreadable-subject"}
         if idle >= STRICT_UNMERGED_IDLE_SECONDS:
@@ -685,12 +705,16 @@ def _idle_then_dirty(entry: dict, attended: bool):
     return idle, path, dirty
 
 
-def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):
+def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,
+                    batch=None, fast: bool = False):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
-    keeps hold it. A repo's own `reap:worktrees` script turns it off."""
+    keeps hold it. A repo's own `reap:worktrees` script turns it off. BATCH (`merged_batch`) is
+    the one read that says which commits are in the default branch. FAST reads no remote and no
+    push state: the tree goes only when its HEAD is in the default branch (and idle 1 hour,
+    unless attended), and with no BATCH nothing is proven, so it stays."""
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
         idle, path = (None if attended else entry["idle"]), entry["path"]
         dirty = guard.porcelain(path)
@@ -714,7 +738,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if live:
         return {"path": path, "action": "keep", "reason": "live-session"}
-    pushed = fully_pushed(path)
+    pushed = True if fast else fully_pushed(path)
     if pushed is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not pushed:
@@ -723,14 +747,20 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         # repository has a remote: with none, nothing is pushed, so every worktree is kept.
         remotes = guard._git(where, "remote")
         has_remote = remotes is not None and remotes.returncode == 0 and remotes.stdout.strip()
-        merged = _merged_read(where, path) if has_remote else False
+        merged = _merged_read(where, path, batch) if has_remote else False
         if merged is None:
             return {"path": path, "action": "keep", "reason": "unreadable-subject"}
         if not merged:
             return {"path": path, "action": "keep",
                     "reason": "unpushed: HEAD has a commit on no remote branch"}
-    if not attended:
-        kept = _strict_keep(where, path, idle)
+    if fast:
+        if batch is None:
+            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+        kept = _strict_keep(where, path, float("inf") if attended else idle, batch, fast=True)
+        if kept:
+            return kept
+    elif not attended:
+        kept = _strict_keep(where, path, idle, batch)
         if kept and agent_rule and _is_agent_worktree(where, path):
             kept = _agent_rule_keep(kept, idle)
         if kept:
@@ -2742,7 +2772,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
-    every branch any worktree has checked out."""
+    every branch any worktree has checked out. "fast" judges worktrees only, with no fetch, no
+    remote read and no branch work: a tree goes only when its HEAD is already in the default
+    branch, and the default branch must be a remote-tracking ref."""
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
@@ -2757,17 +2789,24 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         result["refused"] = "opted-out"
         return result
 
-    if mode != "tier1" and not _past_deadline():
+    if mode not in ("tier1", "fast") and not _past_deadline():
         if not _fetch_prune(root) and _FETCH_FAILED is not None:
             _FETCH_FAILED.add(root)
     base = guard.resolve_default_base(root)
     if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
         return result
+    if mode == "fast" and not base.startswith("origin/"):
+        # A local default branch may hold work no remote has: "in main" is no proof of a copy.
+        result["refused"] = "no-remote-default-base"
+        return result
+    # One read for every "is it in main?" below. None (tier1, or a read that failed) leaves each
+    # decision to ask git for itself, except in "fast", which keeps what it cannot prove.
+    batch = None if mode == "tier1" else merged_batch(root, base)
 
     # Before the worktree list is read, so a pruned registration is not judged as a worktree.
-    # "branches" prunes nothing: a stale registration then keeps its branch held.
-    if mode != "branches":
+    # "branches" and "fast" prune nothing: a stale registration then keeps its branch held.
+    if mode not in ("branches", "fast"):
         result["pruned"] = prune_registrations(root, confirm)
 
     # The agent rule (when-a-worktree-may-be-removed) is the default remover of finished agent
@@ -2803,7 +2842,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         # A failed real prune leaves them registered, so they stay.
         entries = [e for e in entries if not e["prunable"]]
 
-    branches = [] if mode == "tier1" else list_local_branches(root)
+    branches = [] if mode in ("tier1", "fast") else list_local_branches(root)
     if branches is None:
         result["refused"] = "unreadable-branch-list"
         return result
@@ -2830,10 +2869,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, attended, agent_rule)
+        return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")
 
-    judged = _oldest_idle_first(entries) if mode == "full" else []
-    if judged and not _past_deadline():
+    judged = _oldest_idle_first(entries) if mode in ("full", "fast") else []
+    if judged and mode == "full" and not _past_deadline():
         prime_pushed(root, judged)
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
@@ -2864,7 +2903,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         late = {"name": b, "action": "keep", "reason": "not judged: deadline"}
         if _past_deadline():
             return late
-        decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches)
+        decision = decide_branch(root, base, b, protected_prefixes, checked_out_branches, batch)
         return late if decision["action"] == "reap" and _past_deadline() else decision
 
     for branch, decision in zip(branches, _pmap(
@@ -2874,7 +2913,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         if confirm and decision["action"] == "reap":
             reap_branch(root, branch, decision, restore_log_path)
 
-    if mode == "branches":
+    if mode in ("branches", "fast"):
         return result
 
     # Past the deadline the folder scans and their reaps wait for the next run. An unscanned
@@ -3140,6 +3179,10 @@ def main(argv=None) -> int:
     modes.add_argument("--branches", action="store_true",
                        help="only branches: reap those with no unique work, removing no "
                             "worktree; a preview without --confirm")
+    modes.add_argument("--fast", action="store_true",
+                       help="only worktrees whose branch is already in the default branch, "
+                            "judged with no fetch, no remote read and no branch work; "
+                            "a preview without --confirm")
     parser.add_argument("--settings-path", metavar="PATH",
                          help="testing only: overrides the settings.json read for janitor.roots")
     args = parser.parse_args(argv)
@@ -3186,7 +3229,8 @@ def main(argv=None) -> int:
                 print("janitor: no repositories found under %s" % where, file=sys.stderr)
                 return 1
 
-    mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
+    mode = ("tier1" if args.tier1 else "branches" if args.branches
+            else "fast" if args.fast else "full")
     global _LIVE_HEADS, _DEADLINE, _FETCH_FAILED
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
     _LIVE_HEADS = {}

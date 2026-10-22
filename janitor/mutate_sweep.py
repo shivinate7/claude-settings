@@ -163,17 +163,17 @@ MUTATIONS = [
      "test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else"),
     ("modes: --tier1 reaps branches too",
      "sweep",
-     '    branches = [] if mode == "tier1" else list_local_branches(root)\n',
+     '    branches = [] if mode in ("tier1", "fast") else list_local_branches(root)\n',
      '    branches = list_local_branches(root)\n',
      "test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else"),
     ("modes: --branches removes worktrees",
      "sweep",
-     '    judged = _oldest_idle_first(entries) if mode == "full" else []\n',
+     '    judged = _oldest_idle_first(entries) if mode in ("full", "fast") else []\n',
      '    judged = _oldest_idle_first(entries)\n',
      "test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs"),
     ("modes: --branches prunes registrations",
      "sweep",
-     '    if mode != "branches":\n        result["pruned"] =',
+     '    if mode not in ("branches", "fast"):\n        result["pruned"] =',
      '    if True:\n        result["pruned"] =',
      "test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs"),
     ("modes: --branches reaps on an empty worktree list",
@@ -232,10 +232,8 @@ MUTATIONS = [
     # back None and the case is skipped there: it cannot prove this mutant.
     ("refusal: an unreadable branch subject reaps instead of keeping",
      "sweep",
-     '    empty = guard.branch_is_empty(where, base, branch)\n'
-     '    if empty is None:\n'
+     '    if label is None:\n'
      '        return {"name": branch, "action": "keep", "reason": "unreadable-subject"}',
-     '    empty = guard.branch_is_empty(where, base, branch)\n'
      '    if False:\n'
      '        return {"name": branch, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_is_kept",
@@ -269,7 +267,7 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
-     '    pushed = fully_pushed(path)\n'
+     '    pushed = True if fast else fully_pushed(path)\n'
      '    if pushed is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      '    if False:\n'
@@ -290,7 +288,7 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
-     '    pushed = fully_pushed(path)\n'
+     '    pushed = True if fast else fully_pushed(path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
@@ -923,18 +921,18 @@ MUTATIONS = [
     # ---- merged counts as safe, strays listed, run log ----
     ("merged exemption: a squash-merged, never-pushed lane is kept as unpushed",
      "sweep",
-     '        merged = _merged_read(where, path) if has_remote else False\n',
+     '        merged = _merged_read(where, path, batch) if has_remote else False\n',
      '        merged = False\n',
      "test_a_squash_merged_lane_never_pushed_is_removable"),
     ("merged exemption: every unpushed commit counts as merged",
      "sweep",
-     '        merged = _merged_read(where, path) if has_remote else False\n',
+     '        merged = _merged_read(where, path, batch) if has_remote else False\n',
      '        merged = True\n',
      "test_a_truly_unpushed_unique_commit_is_still_kept"),
     ("merged exemption: the has-remote guard is dropped",
      "sweep",
-     '        merged = _merged_read(where, path) if has_remote else False\n',
-     '        merged = _merged_read(where, path)\n',
+     '        merged = _merged_read(where, path, batch) if has_remote else False\n',
+     '        merged = _merged_read(where, path, batch)\n',
      "test_a_repository_with_no_remote_keeps_every_worktree"),
     ("strays: the sweep lists none",
      "sweep",
@@ -949,13 +947,13 @@ MUTATIONS = [
     # ---- strict default: merged and idle 1 hour (decisions/when-a-worktree-may-be-removed.md) ----
     ("strict: the merged-and-idle gate is skipped",
      "sweep",
-     '    if not attended:\n        kept = _strict_keep(where, path, idle)',
-     '    if False:\n        kept = _strict_keep(where, path, idle)',
+     '    elif not attended:\n        kept = _strict_keep(where, path, idle, batch)',
+     '    elif False:\n        kept = _strict_keep(where, path, idle, batch)',
      "test_strict_keeps_a_pushed_but_unmerged_tree"),
     ("strict: decide_worktree defaults to the permissive person's rules",
      "sweep",
-     'def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True):',
-     'def decide_worktree(where: str, entry: dict, attended: bool = True, agent_rule: bool = True):',
+     'def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,',
+     'def decide_worktree(where: str, entry: dict, attended: bool = True, agent_rule: bool = True,',
      "test_strict_removes_a_detached_merged_tree_and_keeps_a_detached_unmerged_one"),
     ("strict: sweep_repo defaults to the permissive person's rules",
      "sweep",
@@ -964,13 +962,13 @@ MUTATIONS = [
      "test_the_attended_flag_reaches_the_sweep"),
     ("strict: the gate applies to a person's run too",
      "sweep",
-     '    if not attended:\n        kept = _strict_keep(where, path, idle)',
-     '    if True:\n        kept = _strict_keep(where, path, idle)',
+     '    elif not attended:\n        kept = _strict_keep(where, path, idle, batch)',
+     '    elif True:\n        kept = _strict_keep(where, path, idle, batch)',
      "test_a_persons_run_removes_an_unmerged_active_tree_as_before"),
     ("strict: an unmerged tree no longer keeps",
      "sweep",
-     '    if not merged:\n        if idle is None:',
-     '    if False:\n        if idle is None:',
+     '    if not merged:\n        if fast:',
+     '    if False:\n        if fast:',
      "test_strict_keeps_a_pushed_but_unmerged_tree"),
     ("strict: a pushed unmerged tree idle 24 hours no longer reaps",
      "sweep",
@@ -979,13 +977,13 @@ MUTATIONS = [
      "test_strict_removes_a_pushed_unmerged_tree_idle_25_hours"),
     ("strict: merged is tested by ancestry alone, not by patch",
      "sweep",
-     '        merged = guard.branch_cherry_empty(path, base, "HEAD")',
-     '        merged = False',
+     '        return guard.branch_cherry_empty(path, batch["base"], "HEAD")',
+     '        return False',
      "test_strict_removes_a_tree_merged_by_patch_idle_2_hours"),
     ("strict: merged is read in the root checkout, not the worktree",
      "sweep",
-     '    merged = guard.branch_is_ancestor(path, base, "HEAD")',
-     '    merged = guard.branch_is_ancestor(where, base, "HEAD")',
+     '    if batch is not None:\n        head = guard._git(path, "rev-parse", "HEAD")',
+     '    if batch is not None:\n        head = guard._git(where, "rev-parse", "HEAD")',
      "test_strict_keeps_a_pushed_but_unmerged_tree"),
     ("strict: a recently active tree no longer keeps",
      "sweep",
@@ -1021,8 +1019,8 @@ MUTATIONS = [
      "test_strict_removes_a_merged_tree_idle_2_hours"),
     ("strict: sweep_repo drops the flag before it judges a worktree",
      "sweep",
-     'return decide_worktree(root, entry, attended, agent_rule)',
-     'return decide_worktree(root, entry, agent_rule=agent_rule)',
+     'return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")',
+     'return decide_worktree(root, entry, agent_rule=agent_rule, batch=batch, fast=mode == "fast")',
      "test_the_attended_flag_reaches_the_sweep"),
     ("strict: main drops the flag before it sweeps",
      "sweep",
@@ -1055,9 +1053,9 @@ MUTATIONS = [
      "test_a_branch_deleted_on_the_remote_is_not_pushed_so_its_tree_is_kept"),
     ("pushed check: an unreadable pushed read reaps instead of keeping",
      "sweep",
-     '    pushed = fully_pushed(path)\n'
+     '    pushed = True if fast else fully_pushed(path)\n'
      '    if pushed is None:',
-     '    pushed = fully_pushed(path)\n'
+     '    pushed = True if fast else fully_pushed(path)\n'
      '    if False:',
      "test_unreadable_pushed_check_keeps"),
     ("stale lock: an unreadable process start counts as stale",
@@ -1245,8 +1243,8 @@ MUTATIONS = [
      "test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it"),
     ("agent rule: the repo's own remover no longer turns the rule off",
      "sweep",
-     'return decide_worktree(root, entry, attended, agent_rule)',
-     'return decide_worktree(root, entry, attended, True)',
+     'return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")',
+     'return decide_worktree(root, entry, attended, True, batch, mode == "fast")',
      "test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself"),
     ("agent rule: the repo's own remover is never run",
      "sweep",

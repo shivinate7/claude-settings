@@ -1372,23 +1372,33 @@ def branch_on_remote(where: str, branch: str):
     return bool(answer.stdout.strip())
 
 
-def branch_is_empty(where: str, base: str, branch: str):
-    """True when `branch` holds no work absent elsewhere, False when it holds the only copy,
-    None when any one of the three tests could not be read."""
-    ancestor = branch_is_ancestor(where, base, branch)
+def branch_proof(where: str, base: str, branch: str, ancestor=None):
+    """The first of the three tests that proves `branch`'s work survives it: "ancestor",
+    "cherry-empty" or "on-remote", in that order. False when none does (the branch holds the only
+    copy). None when any one test could not be read. ANCESTOR is the answer a caller already holds
+    for the first test (one batched read for many branches): True or False; None reads it here."""
+    if ancestor is None:
+        ancestor = branch_is_ancestor(where, base, branch)
     if ancestor is None:
         return None
     if ancestor:
-        return True
+        return "ancestor"
     cherry_empty = branch_cherry_empty(where, base, branch)
     if cherry_empty is None:
         return None
     if cherry_empty:
-        return True
+        return "cherry-empty"
     on_remote = branch_on_remote(where, branch)
     if on_remote is None:
         return None
-    return on_remote
+    return "on-remote" if on_remote else False
+
+
+def branch_is_empty(where: str, base: str, branch: str):
+    """True when `branch` holds no work absent elsewhere, False when it holds the only copy,
+    None when any one of the three tests could not be read."""
+    proof = branch_proof(where, base, branch)
+    return None if proof is None else bool(proof)
 
 
 # ------------------------------------------------------------------ a removed or pruned worktree
