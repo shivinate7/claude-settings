@@ -63,6 +63,8 @@ if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ] && [ ${#FILES[@]} -gt 0 ]; then
   for f in ${FILES[@]+"${FILES[@]}"}; do
     DROP=0
     for pattern in ${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}; do
+      # SC2053: the exclude pattern is a glob on purpose, so the right side stays unquoted.
+      # shellcheck disable=SC2053
       if [[ "$f" == $pattern ]]; then
         DROP=1
         break

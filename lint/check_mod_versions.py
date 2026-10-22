@@ -16,7 +16,6 @@ diff, plugin.json or marketplace.json exits 1, also outside CI.
 import json
 import os
 import re
-import subprocess
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)

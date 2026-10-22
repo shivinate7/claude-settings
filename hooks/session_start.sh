@@ -80,6 +80,8 @@ config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 global_md="$config_dir/CLAUDE.md"
 if [ -f "$global_md" ]; then
   d=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$global_md" 2>/dev/null | head -n1)
+  # SC2088: the pattern is the literal two characters "~/" that the pointer line holds, never an expansion.
+  # shellcheck disable=SC2088
   case "$d" in
     "~"/*) d="$HOME${d#\~}" ;;
   esac
