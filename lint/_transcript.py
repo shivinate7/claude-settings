@@ -66,6 +66,10 @@ def is_last_human(rec):
         return False
     if rec.get("isSidechain"):
         return False
+    # A cross-session reply is type user too, but it is a peer's words, never the owner's.
+    origin = rec.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") == "peer":
+        return False
     msg = rec.get("message") or {}
     content = msg.get("content")
     if isinstance(content, str):
@@ -353,7 +357,7 @@ def guard_logger(hook):
             core = state["core"]
             if core is not None:
                 if not isinstance(rule, str):
-                    rule = ",".join(sorted({str(code or "STE") for code in rule})) or "STE-wording"
+                    rule = ",".join(sorted({str(code or "STE") for code in rule}))
                 name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
                 matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
                            + detail)

@@ -93,7 +93,9 @@ MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
-GUARD_RULE_RE = re.compile(r'(?:refuse|record)\(\s*\w+\s*,\s*"[a-z-]+"\s*,\s*"([a-z-]+)"')
+# Where a rule id sits in each call that writes a guard.log line (0-based argument index).
+GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}
+GATE_SOURCES = ("ste_gate.py", "_transcript.py")  # under lint/: they write `STE-<word>` ids
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 
 # FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
@@ -102,7 +104,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 60
+UNMECHANIZED_EXPECTED = 61
 JUDGMENT_EXPECTED = 20
 REASON_MIN_WORDS = 8
 
@@ -339,11 +341,15 @@ def read(path: str) -> str:
         return f.read()
 
 
+def guard_paths(root: str) -> List[str]:
+    """Every guard module under root: hooks/guard.py and its hooks/guard_*.py siblings."""
+    return sorted(glob.glob(os.path.join(root, "hooks", "guard*.py")))
+
+
 def guard_text(root: str) -> str:
-    """The text of every guard module under root: hooks/guard.py and its hooks/guard_*.py
-    siblings. A rule refused in any of them is a guard rule. Empty when there is none."""
-    paths = sorted(glob.glob(os.path.join(root, "hooks", "guard*.py")))
-    return "\n".join(read(path) for path in paths)
+    """The text of every guard module under root. A rule refused in any of them is a guard rule.
+    Empty when there is none."""
+    return "\n".join(read(path) for path in guard_paths(root))
 
 
 def claude_md_anchors(text: str) -> List[str]:
@@ -355,8 +361,58 @@ def rule_text(root: str = ROOT) -> str:
     return "\n".join(read(os.path.join(root, p)) for p in RULE_FILES)
 
 
-def guard_rule_names(text: str):
-    return set(GUARD_RULE_RE.findall(text))
+def _string_constants(node) -> set:
+    return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+
+
+def guard_rule_names(text: str, path: str = "<source>"):
+    """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
+    that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
+    record() (third argument) or ask_step() (first), by position or as `rule=`; the table in
+    diff_rule(); and the `code, why = {...}` role-scope table. A call that passes a variable names
+    no id. An f-string id cannot be listed, so it raises ValueError naming `path:line`: a rule
+    that can fire but is not listed would hide from a never-fired cull."""
+    ids = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            at = GUARD_RULE_ARG.get(name)
+            if at is None:
+                continue
+            args = [kw.value for kw in node.keywords if kw.arg == "rule"]
+            if len(node.args) > at:
+                args = [node.args[at]]
+            for arg in args:
+                if isinstance(arg, ast.JoinedStr):
+                    raise ValueError(f"{path}:{node.lineno}: {name}() takes an f-string rule id; "
+                                     "pass a string literal so the id can be listed")
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    ids.add(arg.value)
+        elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
+            for stmt in node.body:  # a docstring is a bare string statement: it names no id
+                if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
+                    ids |= _string_constants(stmt)
+        elif (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple)
+              and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]):
+            ids |= _string_constants(node.value)
+    return ids
+
+
+def emitted_rule_ids(root: str = ROOT) -> set:
+    """Every rule id the guard and the gates can write to guard.log: the one home for that list.
+    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `subagent-model-cap`
+    reverts). Gate ids are every ste_lint.RULES code, plus the `STE-<word>` ids ste_gate.py and
+    _transcript.py log when a check could not run."""
+    sys.path.insert(0, os.path.join(root, "lint"))  # `python -I` leaves the script folder off the path
+    import ste_lint
+    ids = set(ste_lint.RULES)
+    for name in GATE_SOURCES:
+        ids |= {c for c in _string_constants(ast.parse(read(os.path.join(root, "lint", name))))
+                if re.fullmatch(r"STE-[a-z]+", c)}
+    config_watch = os.path.join(root, "hooks", "config_watch.py")
+    for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
+        ids |= guard_rule_names(read(path), os.path.relpath(path, root))
+    return ids
 
 
 def ci_step_names(text: str):
@@ -525,6 +581,11 @@ def main() -> None:
 
     workflow_text = read(WORKFLOW) if os.path.exists(WORKFLOW) else ""
 
+    try:
+        emitted_rule_ids(ROOT)  # an id the reader cannot list fails here, with its file:line
+    except ValueError as e:
+        print(f"rule_audit: FAIL\n - {e}")
+        sys.exit(1)
     problems = check(claude_text, rule_map, guard_text(ROOT), workflow_text)
     if problems:
         print("rule_audit: FAIL")

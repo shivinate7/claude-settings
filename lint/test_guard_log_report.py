@@ -15,6 +15,13 @@ Pinned contract:
   --by-session prints counts per session, by rule and decision. The session value is a label
   only: it never changes a decision, a rule, or the other list.
 - One reader: no file outside this one may parse guard.log lines. OneReaderTests checks it.
+- --all-rules prints the same per-rule table with one more column, the date of the rule's first
+  guard.log line (YYYY-MM-DD) or "never". Every rule id the guard and the gates emit has a row,
+  0 counts included. A rule id that only the log holds keeps its row. A line of any decision
+  (override, reverted, crash too) counts as the rule having fired. A combined STE line
+  (`STE007,STE008`) credits each code, and so does one the gate's logger cut at its field limit
+  (`STE001,STE003 [cut]`). AllRulesTests checks the ids against the source.
+- --days all reads the whole log. Any other word is refused. AllRulesTests checks it.
 
 Run with:
 
@@ -22,10 +29,12 @@ Run with:
 """
 import ast
 import contextlib
+import glob
 import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -34,6 +43,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import guard_log_report as glr  # noqa: E402
+import rule_audit  # noqa: E402
 
 NOW = datetime(2026, 10, 11, 12, 0, 0)
 REVERTED = "2026-10-09T11:00:00\tBash\treverted\tshared-tree\tgit stash drop"
@@ -823,6 +833,271 @@ class OverrideDecisionTests(unittest.TestCase):
         self.assertEqual(s["per_day"]["2026-10-11"], 1)  # the per-day row counts denies only
         self.assertEqual(s["by_session"]["sess-a"]["machine-wide-kill"].get("override"), 2)
         self.assertEqual(s["by_session"]["sess-b"]["shared-tree"].get("override"), 1)
+
+
+# ------------------------------------------------------------ the rules that never fired
+#
+# No constant holds the rule ids. They are string literals where the guard writes a line, so the
+# expected set below is read from that source with `ast`, never copied into this file. A copy
+# would go stale the day a rule is added, and the cull would trust it.
+
+GUARD_SOURCES = sorted(glob.glob(os.path.join(HOOKS_DIR, "guard*.py"))) + [
+    os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `subagent-model-cap` reverts
+GATE_SOURCES = [os.path.join(REPO_ROOT, "lint", "ste_gate.py"), os.path.join(REPO_ROOT, "lint", "_transcript.py")]
+RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}  # the position of the rule id in each call
+
+
+def _text_constants(node):
+    return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+
+
+def emitted_guard_rules(source):
+    """The rule ids one guard source can write to guard.log, read with `ast`.
+
+    Three shapes write an id: a literal in refuse()/record() (third argument) or ask_step()
+    (first argument); the table in diff_rule(); and the `code, why = {...}` role-scope table.
+    A call that passes a variable (`record(tool, decision, rule, ...)`) names no id.
+    """
+    ids = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            at = RULE_ARG.get(name)
+            if at is not None and len(node.args) > at and isinstance(node.args[at], ast.Constant) \
+                    and isinstance(node.args[at].value, str):
+                ids.add(node.args[at].value)
+        elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
+            for stmt in node.body:  # a docstring is a bare string statement: it names no id
+                if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
+                    ids |= _text_constants(stmt)
+        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple) \
+                and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]:
+            ids |= _text_constants(node.value)
+    return ids
+
+
+def emitted_gate_rules():
+    """The ids the STE gates write: every STE code (lint/ste_lint.py RULES) and the `STE-<word>`
+    literals ste_gate.py and _transcript.py log when a check could not run."""
+    import ste_lint
+    ids = set(ste_lint.RULES)
+    for path in GATE_SOURCES:
+        with open(path, encoding="utf-8") as handle:
+            ids |= {c for c in _text_constants(ast.parse(handle.read())) if re.fullmatch(r"STE-[a-z]+", c)}
+    return ids
+
+
+def emitted_rules():
+    ids = set(emitted_gate_rules())
+    for path in GUARD_SOURCES:
+        with open(path, encoding="utf-8") as handle:
+            ids |= emitted_guard_rules(handle.read())
+    return ids
+
+
+class EmittedRuleReaderTests(unittest.TestCase):
+    """The reader that says which ids exist is itself pinned, so a red AllRulesTests names the report."""
+
+    def test_it_reads_every_shape_that_writes_an_id_from_the_real_source(self):
+        # Both readers: rule_audit's is the product, the one in this file is the oracle.
+        for who, ids in (("rule_audit", rule_audit.emitted_rule_ids()), ("oracle", emitted_rules())):
+            with self.subTest(reader=who):
+                self.check_needles(ids)
+
+    def check_needles(self, ids):
+        for needle in ("shared-tree",                                   # refuse() literal
+                       "role-diff-main-checkout", "guard-crash",        # record() after a tool-name literal
+                       "bare-merge",                                    # ask_step() only
+                       "builder-diff", "author-diff", "writer-diff",    # diff_rule() table
+                       "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
+                       "subagent-model-cap",                            # guard.py and config_watch.py
+                       "STE001", "STE-fallback", "STE-unchecked"):      # the gates
+            self.assertIn(needle, ids)
+        self.assertGreaterEqual(len(ids), 40)  # a floor: a reader that finds fewer has lost a call shape
+
+    def test_a_comment_opener_inside_a_string_hides_no_call(self):
+        src = ('record(tool, "noted", "a-rule", "// not a comment /* nor this */ # nor this")\n'
+               'refuse(tool, "deny", "b-rule", "x", "y")\n')
+        self.assertEqual(emitted_guard_rules(src), {"a-rule", "b-rule"})
+
+    def test_a_multi_line_string_that_only_describes_a_call_names_no_id(self):
+        src = ('DOC = """\nrefuse(tool, "deny", "ghost-rule", R, m)\n"""\n'
+               'record(tool, "noted", "real-rule", "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"real-rule"})
+
+    def test_a_lone_quote_in_text_hides_no_call(self):
+        src = ("# don't stop here\nNOTE = \"it's\"\nrefuse(tool, \"deny\", \"after-quote\", NOTE, \"m\")\n")
+        self.assertEqual(emitted_guard_rules(src), {"after-quote"})
+
+    def test_a_variable_rule_names_no_id(self):
+        self.assertEqual(emitted_guard_rules("record(tool, decision, rule, matched)\n"), set())
+
+
+def run_cli(argv):
+    """Run main(argv); return (exit code, stdout, stderr). A refused flag exits 2 and is a result."""
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = glr.main(argv)
+    except SystemExit as exc:
+        rc = exc.code
+    return rc, out.getvalue(), err.getvalue()
+
+
+def _cells(line):
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def rule_table(out):
+    """The per-rule table of a report as {rule: {column name: cell}}. Columns are read by header
+    name, so the optional override column and the first-seen column's own name do not matter."""
+    lines = out.splitlines()
+    head = next((i for i, line in enumerate(lines) if line.startswith("| rule |")), None)
+    if head is None:
+        raise AssertionError("no per-rule table in the report:\n" + out)
+    names = _cells(lines[head])
+    rows = {}
+    for line in lines[head + 2:]:
+        if not line.startswith("|"):
+            break
+        cells = _cells(line)
+        rows[cells[0]] = dict(zip(names[1:], cells[1:]))
+    return rows
+
+
+def first_seen(row):
+    """The one column that is no count: the date of the rule's first line, or "never"."""
+    extra = [cell for name, cell in row.items() if name not in ("deny", "ask", "noted", "override")]
+    if len(extra) != 1 or not re.fullmatch(r"never|\d{4}-\d\d-\d\d", extra[0]):
+        raise AssertionError("expected one first-seen column holding YYYY-MM-DD or never: %r" % (row,))
+    return extra[0]
+
+
+def counts(row):
+    return tuple(int(row[name]) for name in ("deny", "ask", "noted"))
+
+
+def days_ago(n):
+    return (datetime.now().date() - timedelta(days=n)).isoformat()
+
+
+def stamped(n, decision, rule, matched="x"):
+    """A five-field guard.log line n days back, at noon so a day boundary never moves it."""
+    return "\t".join([days_ago(n) + "T12:00:00", "Bash", decision, rule, matched])
+
+
+class AllRulesTests(unittest.TestCase):
+    def report(self, lines, *flags):
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out, err = run_cli(["--log", path] + list(flags))
+        self.assertEqual(rc, 0, "the report refused its flags: %s" % err)
+        return out
+
+    def test_a_rule_with_no_lines_shows_0_and_never(self):
+        out = self.report([stamped(1, "deny", "shared-tree")], "--all-rules", "--days", "7")
+        row = rule_table(out)["git-env-set"]
+        self.assertEqual((counts(row), first_seen(row)), ((0, 0, 0), "never"))
+
+    def test_every_rule_of_an_empty_log_shows_0_and_never(self):
+        rows = rule_table(self.report([], "--all-rules", "--days", "all"))
+        self.assertTrue(rows)
+        self.assertEqual({(counts(r), first_seen(r)) for r in rows.values()}, {((0, 0, 0), "never")})
+
+    def test_a_rule_with_lines_shows_its_counts_and_first_date(self):
+        out = self.report([
+            stamped(3, "deny", "shared-tree"), stamped(2, "ask", "shared-tree"),
+            stamped(1, "deny", "shared-tree"), stamped(0, "noted", "shared-tree"),
+            stamped(2, "deny", "retired-rule"),  # an id no source emits any more keeps its row
+        ], "--all-rules", "--days", "7")
+        rows = rule_table(out)
+        self.assertEqual((counts(rows["shared-tree"]), first_seen(rows["shared-tree"])),
+                         ((2, 1, 1), days_ago(3)))
+        self.assertEqual((counts(rows["retired-rule"]), first_seen(rows["retired-rule"])),
+                         ((1, 0, 0), days_ago(2)))
+        self.assertEqual(first_seen(rows["git-env-set"]), "never")  # its neighbours stay silent
+
+    def test_a_line_of_any_decision_means_the_rule_fired(self):
+        # A lifted refusal, a revert and a crash are lines. `never` would let a cull delete a rule that acted.
+        out = self.report([stamped(5, "override", "machine-wide-kill"),
+                           stamped(4, "reverted", "subagent-model-cap"),
+                           stamped(3, "crash", "guard-crash")], "--all-rules", "--days", "7")
+        rows = rule_table(out)
+        self.assertEqual([first_seen(rows[r]) for r in ("machine-wide-kill", "subagent-model-cap", "guard-crash")],
+                         [days_ago(5), days_ago(4), days_ago(3)])
+
+    def test_a_combined_ste_line_credits_each_code(self):
+        # The gate writes the codes it found as one id, `STE007,STE008`. STE007 fired on that line.
+        out = self.report([stamped(2, "deny", "STE007,STE008")], "--all-rules", "--days", "7")
+        rows = rule_table(out)
+        self.assertEqual((first_seen(rows["STE007"]), first_seen(rows["STE008"])), (days_ago(2), days_ago(2)))
+        self.assertEqual(first_seen(rows["STE009"]), "never")
+
+    def test_the_listed_ids_equal_the_ids_the_guard_and_gates_emit(self):
+        listed = set(rule_table(self.report([], "--all-rules", "--days", "all")))
+        expected = emitted_rules()
+        self.assertEqual(
+            (sorted(expected - listed), sorted(listed - expected)), ([], []),
+            "left: emitted by the source but not listed (a rule that never fired would not show); "
+            "right: listed but emitted nowhere (a stale copy)")
+
+    def test_rule_audit_reads_the_same_ids_as_the_independent_reader(self):
+        got, expected = rule_audit.emitted_rule_ids(), emitted_rules()
+        self.assertEqual(
+            (sorted(expected - got), sorted(got - expected)), ([], []),
+            "left: the oracle reads it, rule_audit does not (a rule that never fired would not show); "
+            "right: rule_audit reads it, the oracle does not")
+
+    def cut_id(self):
+        """The rule field the gate's logger writes for a combined id past its limit, made by the real
+        writer, so the mark and the limit are never copied here. Returns (field, the codes it kept)."""
+        import _transcript
+        import guard_core
+        codes = ["STE%03d" % n for n in (1, 3, 7, 8, 11, 12, 13, 14)]
+        field = guard_core.log_cut(",".join(codes), _transcript.GUARD_LOG_RULE_MAX)
+        kept = field.split(" ")[0].split(",")
+        self.assertTrue(field.endswith(" [cut]"), "the fixture is no longer cut: %r" % field)
+        self.assertTrue(2 <= len(kept) < len(codes), kept)
+        return field, kept
+
+    def test_a_code_seen_only_in_a_cut_combined_line_gets_its_count_and_first_date(self):
+        # The gate's logger cuts the rule field at 40 characters and marks it ` [cut]`. The cut id is no
+        # longer a clean combined id, but the codes it kept did fire: `never` would let a cull delete them.
+        field, kept = self.cut_id()
+        out = self.report([stamped(3, "deny", field), stamped(1, "ask", field)], "--all-rules", "--days", "7")
+        rows = rule_table(out)
+        for code in kept:
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 1, 0), days_ago(3)), code)
+        self.assertEqual(first_seen(rows["STE009"]), "never")  # a code the line never held stays silent
+
+    def test_a_cut_combined_line_outside_the_window_still_dates_each_code(self):
+        field, kept = self.cut_id()
+        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "7"))
+        for code in kept:
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((0, 0, 0), days_ago(400)), code)
+
+    def test_days_all_reads_the_whole_log(self):
+        lines = [stamped(400, "deny", "waiter"), stamped(1, "deny", "waiter")]
+        everything = rule_table(self.report(lines, "--days", "all"))
+        self.assertEqual(everything["waiter"]["deny"], "2")
+        week = rule_table(self.report(lines, "--days", "7"))
+        self.assertEqual(week["waiter"]["deny"], "1")  # the same log, one week: the old line is out
+
+    def test_days_all_with_all_rules_dates_the_first_line_and_counts_it(self):
+        out = self.report([stamped(400, "deny", "waiter"), stamped(1, "deny", "waiter")],
+                          "--all-rules", "--days", "all")
+        row = rule_table(out)["waiter"]
+        self.assertEqual((counts(row), first_seen(row)), ((2, 0, 0), days_ago(400)))
+
+    def test_days_refuses_a_word_other_than_all(self):
+        rc, out, err = run_cli(["--log", os.devnull, "--days", "soon"])
+        self.assertEqual(rc, 2)
+        self.assertIn("--days", err)
+
+    def test_without_the_flag_a_silent_rule_is_not_listed(self):
+        out = self.report([stamped(1, "deny", "shared-tree")], "--days", "7")
+        self.assertIn("| shared-tree | 1 | 0 | 0 |", out)
+        self.assertNotIn("git-env-set", out)
 
 
 if __name__ == "__main__":

@@ -618,5 +618,110 @@ class CitationTests(unittest.TestCase):
                       rule_audit.citation_problem("nope.py::x", tempfile.gettempdir()))
 
 
+# The ids hooks/guard.py writes that the old regex reader (a call with the rule third and a plain
+# name first) never saw: ask_step() ids, a record() after a call, and the two tables.
+GUARD_IDS_THE_REGEX_MISSED = (
+    "force-push", "bare-merge", "guard-crash", "builder-test-edit", "test-author-scope",
+    "record-writer-scope", "author-diff", "builder-diff", "writer-diff",
+    "role-diff-main-checkout", "role-diff-unresolved")
+
+
+class GuardRuleNamesTests(unittest.TestCase):
+    """`guard_rule_names(text)` reads rule ids out of guard source with `ast`."""
+
+    ids = staticmethod(rule_audit.guard_rule_names)
+
+    def test_each_call_and_table_shape_that_writes_an_id_is_read(self):
+        src = (
+            'ask_step("force-push", REASON, "git push", "forced push")\n'
+            'ask_step("bare-merge", REASON, "gh pr merge 1", "bare merge")\n'
+            'record(str(payload.get("tool_name", "")), "crash", "guard-crash", why)\n'
+            'record("SubagentStop", "noted", "role-diff-main-checkout", where)\n'
+            'record("SubagentStop", "noted", "role-diff-unresolved", found)\n'
+            'def diff_rule(role):\n'
+            '    """A docstring that says "ghost-diff" names no id."""\n'
+            '    return {A: "author-diff", W: "writer-diff"}.get(role, "builder-diff")\n'
+            'code, why = {A: ("test-author-scope", R1), W: ("record-writer-scope", R2)}'
+            '.get(role, ("builder-test-edit", R3))\n')
+        self.assertEqual(self.ids(src), set(GUARD_IDS_THE_REGEX_MISSED))
+
+    def test_a_variable_rule_names_no_id(self):
+        self.assertEqual(self.ids("record(tool, decision, rule, matched)\nrefuse(tool, 'deny', code, R, m)\n"), set())
+
+    def test_a_comment_that_shows_a_call_names_no_id(self):
+        self.assertEqual(self.ids('# refuse(tool, "deny", "ghost-rule", R, m)\n'), set())
+
+    def test_a_comment_opener_inside_a_string_hides_no_call(self):
+        src = ('record(tool, "noted", "a-rule", "// not a comment /* nor this */ # nor this")\n'
+               'refuse(tool, "deny", "b-rule", "x", "y")\n')
+        self.assertEqual(self.ids(src), {"a-rule", "b-rule"})
+
+    def test_a_multi_line_string_that_only_shows_a_call_names_no_id(self):
+        src = ('DOC = """\nrefuse(tool, "deny", "ghost-rule", R, m)\n"""\n'
+               'record(tool, "noted", "real-rule", "m")\n')
+        self.assertEqual(self.ids(src), {"real-rule"})
+
+    def test_a_lone_quote_in_text_hides_no_call(self):
+        src = ('# don\'t stop here\nNOTE = "it\'s"\n"""Don\'t"""\n'
+               'refuse(tool, "deny", "after-quote", NOTE, "m")\n')
+        self.assertEqual(self.ids(src), {"after-quote"})
+
+    def found_or_loud(self, src, wanted):
+        """A call the reader cannot place by position is found, or the reader refuses it. It is never
+        dropped without a word: a rule that can fire but is not listed hides from a never-fired cull."""
+        try:
+            ids = self.ids(src)
+        except Exception:
+            return  # loud
+        self.assertTrue(any(wanted in i for i in ids), "dropped without a word: %r from %r" % (ids, src))
+
+    def test_found_or_loud_is_not_vacuous(self):
+        self.found_or_loud('refuse(tool, "deny", "lit-rule", R, m)\n', "lit-rule")
+        with self.assertRaises(AssertionError):
+            self.found_or_loud('refuse(tool, "deny", "lit-rule", R, m)\n', "another-rule")
+
+    def test_a_keyword_rule_id_is_found_or_the_reader_refuses_it(self):
+        self.found_or_loud('refuse(tool, "deny", rule="kw-rule", reason=R, matched=m)\n', "kw-rule")
+        self.found_or_loud('ask_step(rule="kw-ask", reason=R)\n', "kw-ask")
+
+    def test_an_f_string_rule_id_is_found_or_the_reader_refuses_it(self):
+        self.found_or_loud('refuse(tool, "deny", f"fs-{n}", R, m)\n', "fs-")
+        self.found_or_loud('record(tool, "noted", f"plain-fs", "m")\n', "plain-fs")
+
+
+class EmittedRuleIdsTests(unittest.TestCase):
+    """`emitted_rule_ids(root)` is the one list of every id the guard and the gates write to guard.log."""
+
+    def test_the_real_source_yields_every_id_the_old_regex_missed(self):
+        ids = rule_audit.emitted_rule_ids()
+        self.assertEqual(sorted(set(GUARD_IDS_THE_REGEX_MISSED) - ids), [])
+
+    def files(self):
+        refuse = 'refuse(tool, "deny", "%s", REASON, matched)\n'
+        return {
+            os.path.join("hooks", "guard.py"): refuse % "main-rule",
+            os.path.join("hooks", "guard_x.py"): 'ask_step("sibling-rule", R, "m", "l")\n',
+            os.path.join("hooks", "test_guard.py"): refuse % "test-only-rule",
+            os.path.join("lint", "ste_gate.py"): 'LOG = "STE-fallback"\nBAD = ["STE-Upper", "STE-a1", "x STE-word"]\n',
+            os.path.join("lint", "_transcript.py"): 'LOG = "STE-unchecked"\n',
+        }
+
+    def test_a_fixture_root_gives_guard_siblings_config_watch_and_gate_ids_and_no_test_file(self):
+        files = self.files()
+        files[os.path.join("hooks", "config_watch.py")] = 'record("ConfigChange", "reverted", "watch-rule", "m")\n'
+        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
+        for wanted in ("main-rule", "sibling-rule", "watch-rule", "STE-fallback", "STE-unchecked"):
+            self.assertIn(wanted, ids)
+        for unwanted in ("test-only-rule", "STE-Upper", "STE-a1", "x STE-word"):
+            self.assertNotIn(unwanted, ids)
+        import ste_lint
+        self.assertTrue(set(ste_lint.RULES) <= ids)  # every STE code is an id
+
+    def test_a_root_with_no_config_watch_is_read_without_it(self):
+        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, self.files()))
+        self.assertIn("main-rule", ids)
+        self.assertNotIn("watch-rule", ids)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -464,8 +464,8 @@ jobs:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_macos == 'true' || github.event_name != 'pull_request' }}
-    # Cap 25 min = about 2x the slowest green run (figures: debt measured-time-table).
-    timeout-minutes: 25
+    # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -480,6 +480,10 @@ jobs:
       - name: Guard fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
+
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 hooks/test_guard_load_os.py
 
       - name: rm shim fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -707,6 +711,10 @@ jobs:
       # The guard suite runs in gates-windows-guard. No Guard mutation harness on Windows: it took 34.5 min
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
+
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python hooks/test_guard_load_os.py
 
       - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
