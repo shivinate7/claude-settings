@@ -5,8 +5,9 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
   `fb` also starts feedback capture to the session's inbox file. Capture ends at `fb done`,
   after 10 minutes of quiet, or when a judge says a prompt is not feedback.
-  A prompt that is only `override`, `override <n>[m|h]` or `override off` also grants or ends the
-  owner override pass (decision owner-override-pass; hooks/override_pass.py) and prints one more line.
+  A prompt whose first word is `override` also grants a one-act owner override pass, and the rest is the
+  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
+  (decision owner-override-pass; hooks/override_pass.py). It prints one more line.
 - --subagent: At SubagentStart, gives the subagent the time in US Central as context.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
@@ -183,7 +184,7 @@ def capture(raw, stamp, at=None):
 
 
 def grant_override(raw, at):
-    """Owner prompt `override`, `override <n>[m|h]` or `override off` (decision owner-override-pass):
+    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]` or `override off` (decision owner-override-pass):
     grants or ends the session's pass and prints one line. Any failure is one stderr line, no pass."""
     try:
         hook = json.loads(raw.decode("utf-8"))

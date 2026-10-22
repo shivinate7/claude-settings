@@ -31,7 +31,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
                        The diff it would send is logged for the reviewer. Never blocks.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
-                       also role-diff-nocwd, role-diff-main-checkout, role-diff-unresolved and
+                       also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
@@ -80,6 +80,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   subagent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
+                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore or a
+                       builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -1511,14 +1513,13 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 def judge_stop(payload) -> None:
     """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. Every path that cannot judge logs too: a
-    missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
+    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
+    diff that could not be read log too. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
-    where = payload.get("cwd", "")
-    if not isinstance(where, str) or not where:
-        record("SubagentStop", "noted", "role-diff-nocwd", role)
+    where = str(payload.get("cwd") or "")
+    if not where:
         return
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
@@ -1741,6 +1742,30 @@ def load_hit(tool: str, tool_input) -> tuple:
                 else LOAD_BUSY_FOREGROUND + "Or " + remedy)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
+
+
+OPUS_SPAWN_REASON = (
+    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for a subagent; Opus runs "
+    "only on the owner's word for this spawn, except Plan, a builder's Try 3 of 3 and Explore "
+    "(decision subagent-model-cap). Approve it only when the owner asked for Opus here."
+)
+OPUS_STANDING_ROLES = ("Plan", "Explore")
+
+
+def opus_spawn_hit(tool: str, tool_input) -> str:
+    """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
+    is the role Plan or Explore, or a builder whose brief holds a `Try 3 of 3` line (the same marker
+    step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
+    override pass, so never_passed does not read it."""
+    if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
+        return ""
+    role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
+    if role in OPUS_STANDING_ROLES:
+        return ""
+    if role == "builder" and isinstance(brief, str) and any(
+            kind.lower() == "try" and n == "3" for kind, n in STEP_UP_MARKER.findall(brief)):
+        return ""
+    return str(tool_input.get("model"))
 
 
 # ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
@@ -2430,7 +2455,12 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The machine-load brake: one read on a lane-start call, none on any other call.
+    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass lifts it.
+    opus_model = opus_spawn_hit(tool, tool_input)
+    if opus_model:
+        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model)
+
+    # 9d. The machine-load brake: one read on a lane-start call, none on any other call.
     load_reason, load_matched = load_hit(tool, tool_input)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)

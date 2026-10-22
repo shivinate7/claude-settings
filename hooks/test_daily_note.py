@@ -67,7 +67,7 @@ def steady(rule, count, days, decision="deny"):
 def healthy_log():
     return (steady("env-file", 40, HISTORY) + steady("waiter", 30, HISTORY)
             + [row("2026-10-13T12:00:00", "ask", "force-push", "git push -f"),
-               row("2026-10-13T12:01:00", "fixed", "STE-wording", "notes.md fixed=2", "Write")])
+               row("2026-10-13T12:01:00", "fixed", "STE", "notes.md fixed=2", "Write")])
 
 
 def guard_crash(stamp):
