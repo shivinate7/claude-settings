@@ -14319,20 +14319,20 @@ for _label, _check in (
 
 # =========================================================================== the machine-load brake
 FAMILY = "load-brake"
-# Batch 4, c14 (the machine-load brake). On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use and disk free on the home drive, each a share of
 # this machine's capacity, and CPU as a second signal. It counts no claude process and no running lane.
 # The levels (placeholders, owner to tune):
 #   busy  memory over 85%, disk free under 15%, or (CPU over 85% AND memory over 75%).
-#         One lane at a time: the guard refuses a lane that runs in the background and allows one that makes
-#         the caller wait. An Agent or Task call runs in the background only when run_in_background is true.
-#         run_in_background false, or left out, is foreground, and it is allowed at busy. Any Workflow is
-#         refused: it has no foreground form. The refusal says to run the lane in the foreground.
-#   full  memory over 95%, or disk free under 5%. Every lane call is refused, a foreground Agent too.
+#         An Agent or Task call passes busy only when run_in_background is absent or exactly false. Any other
+#         value (true, a string, null, a number) is refused. Any Workflow is refused. The refusal says to wait
+#         for the load to drop, or to start the lane as an Agent call that leaves run_in_background out or sets
+#         it false. A disk reading names free disk space instead.
+#   full  memory over 95%, or disk free under 5%. Every lane call is refused, an Agent or Task call too.
 #         CPU never makes the machine full.
 # The refusal names the reading that tripped it. A read that fails, or a reading left unread, counts as normal.
 # Every other tool reads no load. The read starts no child process and writes no file.
-# Not pinned: start_session at busy. It has no foreground form, and the rulings name Agent, Task and Workflow.
+# Not pinned: start_session at busy.
 #
 # THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
 # honored), patches the function below, and calls main() with the real stdin payload. The
@@ -14447,12 +14447,14 @@ LB_LANE_INPUT = {
 }
 LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0}
 LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0}
-# The tools that take run_in_background, and the three ways a call can say it: true, false, or left out.
-# Only true is background: false and left out both make the caller wait.
+# The tools that take run_in_background. At busy, only an absent or exactly false value passes.
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
          (False, "run_in_background false"))
-LB_FOREGROUND = re.compile(r"foreground", re.I)   # the busy refusal's remedy
+LB_REMEDY = re.compile(re.escape("Wait until the load drops, or start this lane as an Agent call that leaves "
+                                 "run_in_background out or sets it false."), re.I)
+LB_FREE_DISK = re.compile(r"free disk space", re.I)   # the disk reading's remedy
+LB_FOREGROUND = re.compile(r"foreground", re.I)   # a busy refusal of an Agent or Task call never says this
 
 
 def lb_reading(**changes):
@@ -14467,6 +14469,11 @@ def lb_lane_input(tool, background=None):
     if background is not None and tool in dict(LB_SPAWNS).values():
         given["run_in_background"] = background
     return given
+
+
+def lb_spawn_input(tool, value):
+    """A spawn call whose run_in_background is `value` exactly as given: a string, null or a number included."""
+    return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
 def lb_run(tool, spec, tool_input=None, event=None):
@@ -14519,7 +14526,7 @@ def lb_names(word, *numbers, percent=True):
         r"(?<![\d.])(?:%s)(?!\d)(?!\.\d)%s" %("|".join(re.escape(n) for n in numbers), tail)))
 
 
-def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1):
+def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=()):
     """A lane-start call under a forced reading. `background` is the call's run_in_background:
     True, False, or None to leave it out. `tool_input` replaces the whole input."""
     def check():
@@ -14538,6 +14545,9 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
             if not pattern.search(reason):
                 return False, "the reason does not name the reading (%s): %s" % (
                     pattern.pattern[:30], reason[:100])
+        for pattern in lacks:
+            if pattern.search(reason):
+                return False, "the reason matches %r, which it must not: %s" % (pattern.pattern[:30], reason[:100])
         return True, "%s, the reader ran %d time" % (got, called)
     return check
 
@@ -14717,26 +14727,26 @@ LB_MEM90 = lb_names("memory", "90.0", "90")
 LB_MEM80 = lb_names("memory", "80.0", "80")
 LB_CPU94 = lb_names("cpu", "94.0", "94")
 
-# Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only an
-# explicit true is refused. False and left out are allowed.
+# Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only a value
+# other than absent or false is refused.
 for _short, _tool in LB_SPAWNS:
     for _bg, _say in LB_BG:
         lb_add("%s, normal reading, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, LB_NORMAL, "allow", background=_bg))
         if _bg is True:
-            lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, says run it in the foreground"
+            lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, gives the wait or Agent-call remedy"
                    % (_short, _say),
-                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_FOREGROUND,),
-                                     background=_bg))
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_REMEDY,),
+                                     background=_bg, lacks=(LB_FOREGROUND,)))
         else:
-            lb_add("%s, memory 91.7%%, %s: busy, a foreground lane is allowed" % (_short, _say),
+            lb_add("%s, memory 91.7%%, %s: busy, allowed" % (_short, _say),
                    lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
         lb_add("%s, memory 97.2%%, %s: full, refused, names the reading" % (_short, _say),
                lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg))
         lb_add("%s, a read that raises, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, "raise", "allow", background=_bg))
 
-# Workflow and start_session have no foreground form. Workflow is refused at busy; start_session at busy is not pinned.
+# Workflow is refused at busy. start_session at busy is not pinned.
 lb_add("Workflow, memory 91.7%: busy, refused, names the reading",
        lb_decision_check("Workflow", lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY))
 lb_add("Workflow named, not scripted, memory 91.7%: busy, refused",
@@ -14747,13 +14757,14 @@ for _short, _tool in (("Workflow", "Workflow"), ("start_session", "mcp__ccd_sess
            lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL))
     lb_add("%s, a read that raises: allowed" % _short, lb_decision_check(_tool, "raise", "allow"))
 
-# The other readings, on Agent. Each trips on its own, and a foreground lane passes busy but not full.
-lb_add("Agent, disk 9.4% free, run_in_background left out: busy, a foreground lane is allowed",
+# The other readings, on Agent. Each trips on its own, and an absent or false run_in_background passes busy
+# but not full.
+lb_add("Agent, disk 9.4% free, run_in_background left out: busy, allowed",
        lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "allow"))
-lb_add("Agent, disk 9.4% free, run_in_background true: busy, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "deny", LB_DISK_BUSY + (LB_FOREGROUND,),
-                         background=True))
-lb_add("Agent, disk 9.4% free, run_in_background false: busy, a foreground lane is allowed",
+lb_add("Agent, disk 9.4% free, run_in_background true: busy, refused, names the reading and free disk space",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "deny", LB_DISK_BUSY + (LB_FREE_DISK,),
+                         background=True, lacks=(LB_FOREGROUND,)))
+lb_add("Agent, disk 9.4% free, run_in_background false: busy, allowed",
        lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "allow", background=False))
 lb_add("Agent, disk 3.1% free, run_in_background false: full, refused, names the reading",
        lb_decision_check("Agent", lb_reading(disk_free_pct=3.1), "deny", LB_DISK_FULL, background=False))
@@ -14767,10 +14778,17 @@ lb_add("Agent, CPU 99%, run_in_background false: CPU never fills the machine, al
 # CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
 # memory 80% is refused.
 for _short, _tool in LB_SPAWNS:
-    lb_add("%s, memory 90%%, run_in_background left out: busy, a foreground lane is allowed" % _short,
+    lb_add("%s, memory 90%%, run_in_background left out: busy, allowed" % _short,
            lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow"))
     lb_add("%s, memory 90%%, run_in_background true: busy, refused, names the memory" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90, background=True))
+           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
+                             background=True, lacks=(LB_FOREGROUND,)))
+    lb_add("%s, memory 90%%, run_in_background false: busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow", background=False))
+    for _label, _value in (('the string "true"', "true"), ("null", None), ("the number 1", 1)):
+        lb_add("%s, memory 90%%, run_in_background %s: busy, refused, names the memory" % (_short, _label),
+               lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
+                                 tool_input=lb_spawn_input(_tool, _value), lacks=(LB_FOREGROUND,)))
     lb_add("%s, CPU 94%%, memory 70%%, disk 50%% free, run_in_background true: CPU alone is not busy, allowed"
            % _short,
            lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=70.0, disk_free_pct=50.0), "allow",
@@ -14807,7 +14825,7 @@ lb_add("a SubagentStop reads no load under the worst reading",
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
            lb_real_children_check(_tool), real=True)
-lb_add("Agent run in the foreground with the real reader starts no child process",
+lb_add("Agent with run_in_background false, the real reader, starts no child process",
        lb_real_children_check("Agent", background=False), real=True)
 lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
