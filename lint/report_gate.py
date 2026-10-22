@@ -21,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, tool_uses  # noqa: E402
+from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -322,7 +322,6 @@ def main():
     if not turn_landed(after):
         return
 
-    from ste_gate import last_reply
     text = last_reply(hook)
     shape_ok = report_shape_ok(text)
     reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]

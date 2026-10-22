@@ -2,7 +2,6 @@
 - SendMessage prompt hook may never fire: check that a logged SendMessage call gets a verdict. Decision: haiku-prompt-hooks (blocking prompt hooks trial).
 - AskUserQuestion gain/loss rule may block terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a deny case. Decision: wsl-allow-list (WSL allow list).
-- advisory-note-not-logged: STE gate and sweep show advisory findings as a note and write no guard.log line (lint/ste_gate.py, lint/md_sweep.py)
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
 - agent-brief-no-matcher: SubagentStart agent-brief hook has no matcher, so every agent type gets the standing rules (settings.json)
 - agent-brief-text-copy-drifts: agent brief rule text copies CLAUDE.md and agents/*.md; a rule change needs a second edit and the test pins the copy (hooks/agent_brief.py)
@@ -59,7 +58,7 @@
 - fb-judge-marker-race: the judge child can remove a fresh capture marker written in a microsecond gap, closing capture early (hooks/feedback_judge.py)
 - frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
 - gate-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (gate wrappers)
-- gate-own-errors-fail-open: guard, ste_gate and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
+- gate-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
 - gate-remedy-needs-bash: gate remedy names sh install.sh, which Bash cannot run while the guard is missing (gate wrappers)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
@@ -209,7 +208,6 @@
 - plain-diff-quoted-path-label: a git-quoted path with an emoji shows a wrong label, so no turn note matches (mods/plain-diff hooks/lib.mjs)
 - plain-diff-secret-file-names: terraform.tfstate, .kube/config, wp-config.php and AuthKey_*.p8 are not caught by name (mods/plain-diff isSecretPath)
 - plain-diff-trimnote-regex: trimNote table-row regex is quadratic on absurd input and was not re-timed after round 3 (mods/plain-diff hooks/lib.mjs)
-- plain-prose-writes-only: the STE gate and sweep judge file writes only; replies, briefs and agent messages are unchecked (lint/ste_gate.py, lint/md_sweep.py)
 - pointer-detach-false-alarm: the pointer guard refuses checkout --detach main though session_start counts that state as on main (hooks/guard_pointer.py)
 - pr-checks-watch-unmeasured: gh pr checks --watch is allowed in background with unmeasured API cost; wrapped and captured gh run watch forms are unread (hooks/guard_stream.py)
 - printf-quote-walk-bandaid: walk_quotes reads a quote inside $( ) as the outer string's own; discards_output cuts and rereads to cover it (hooks/guard_core.py, hooks/guard.py)
@@ -296,14 +294,9 @@
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI)
 - ste-eg-in-fence-reported: the lint reports e.g. inside a blockquote fence or pre block as a warning; a false alarm (lint/ste_lint.py LATIN)
 - ste-exclude-star-crosses-dir: the bash re-match in run.sh lets * cross /, so skills/*.md also skips skills/x/y.md (actions/ste-lint/run.sh)
-- ste-gate-closed-pipe-no-log: if the reader closes stdout early the STE gate raises at its flush before the log call; POSIX error unmeasured (lint/ste_gate.py answer)
-- ste-hook-timeout-fails-open: fixer 5 s plus lint 15 s equals the 20 s hook timeout; a huge quote-heavy input kills the hook and the gate fails open (lint/ste_gate.py)
-- ste-macos-child-route-unverified: the child-process route for the STE autofix is not verified on macOS (lint/ste_gate.py)
-- ste-rewrite-unchecked-lands: if the lint cannot run after the fixer rewrites text, the rewrite still lands, logged STE-unchecked (lint/ste_gate.py)
 - stream-guard-quadratic: the stream guard slices the word list per bare word; a 20,000-word segment takes 8.2 s (hooks/guard_stream.py)
 - sweep-anchor-first-match: mutate_sweep apply path replaces the first anchor match, so a second copy in one file passes silently (janitor/mutate_sweep.py)
 - sweep-no-deadline-many-trees: SessionEnd sweep calls already running are not capped by the deadline; a kill mid worktree remove can leave a half-removed tree (janitor/sweep.py, session_end_sweep.py)
-- sweep-note-delivery-unmeasured: unmeasured whether the model sees the md_sweep Stop systemMessage for advisory-only findings (lint/md_sweep.py)
 - sweep-test-symlink-privilege: two tests in janitor/test_sweep.py error with WinError 1314 on a Windows host with no symlink right instead of skipping (janitor)
 - sweep-tests-sleep-bounds: _peak_concurrency uses a 0.2 s sleep; on a slow host a parallel-confirm mutant can survive (janitor/test_sweep.py)
 - symrun-link-gap-unmeasured: the symrun case needs a mixed-id window; the link route's gap is unmeasured and may flake on a loaded runner (install-no-gap.test.ps1, install.ps1)
@@ -354,7 +347,6 @@
 - plain-diff-limits: false positives hide ordinary source (about 1% of this repo's history, 0.7% of Python stdlib, not re-measured); note quality unmeasured; docs/mockup.html notes are hand-typed. Decision: plain-diff-mod-limits
 - stamp-engine-dropped-rules: path cites run longest slug first and a rewritten file keeps its line ending; both live in actions/stamp code and tests, no longer in the decision. Decision: one-shared-record-stamp
 - ste-config-notice: load_config in lint/ste_lint.py prints a stderr notice for max_words_procedural and max_words_descriptive in a config (lint/ste_lint.py)
-- ste-bloat-fix-meaning: a STE011 bloat rewrite can change meaning in a sentence no test holds; how often a deny led to a retry is unmeasured (lint/ste_gate.py). Decision: ste-gate-fixes-not-nags
 - guard-log-no-outcome: guard.log holds matched text, not the outcome, so it cannot say whether a deny was right; a hand-graded sample is the next measurement and none exists. Decision: guard-log-read-weekly
 - daily-note-no-volume-check: the daily note has no volume check; a count jump over a 7-day baseline fired on 6 of 14 real days from growth in use alone (hooks/daily_note.py). Decision: guard-log-read-weekly
 - guard-log-one-machine: guard.log is one machine per log; a count is a lower bound (verdicts, not harm or false alarms). Decision: guard-log-read-weekly
@@ -397,7 +389,6 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- ste-comment-gt-mask-early: A > inside a comment such as <!-- a > b --> ends the mask early, so the rest of the comment is read as text (lint/ste_gate.py). Decision: ste-gate-fixes-not-nags
 - prompt-hooks-fail-open: Prompt hooks (Agent, decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
@@ -441,7 +432,6 @@
 - env-file-rule-false-alarms: The env-file guard refuses `ag -f` and `ack -f` (boolean -f), `grep -r --exclude=.env` and `rg -t py .env`. all four are safe. Where: hooks/guard_env.py. Decision: none
 - git-rm-cached-false-alarm: The push-delete guard denies `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
 - records-page-gen-false-alarm: The records-page guard denies a commit after a generator run in one call even when the page is unchanged, and reads `--root <other>`, `-h` and `--che` as runs. Where: hooks/guard_merge.py _runs_generator. Decision: records-index-at-merge
-- ste-edit-fence-blind: The Edit and MultiEdit path rewrites text inside blockquote fences, multi-line pre, script blocks and HTML comments that Write denies. share one fence mask. Where: lint/ste_gate.py. Decision: ste-gate-fixes-not-nags
 - report-on-empty-turn-unchecked: The report gate returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_gate.py. Decision: claude-md-shrink
 - slug-cite-gloss-unchecked: The report gate checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_gate.py. Decision: claude-md-shrink
 - stash-reminder-text-outside-repo: The harness worktree reminder still tells a worker to push a tagged stash entry, which guard_shared_tree.py now denies. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject

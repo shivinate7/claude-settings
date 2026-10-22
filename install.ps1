@@ -5,7 +5,7 @@
 # What it does:
 #   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md (UTF-8, no BOM)
 #   ~\.claude\agents\*.md    -> role definitions (builder, reviewer), symlink per file
-#   ~\.claude\lint\*         -> STE linter + hook gate (needs python3 on PATH), symlink per file
+#   ~\.claude\lint\*         -> STE linter and report gate (needs python3 on PATH), symlink per file
 #   ~\.claude\hooks\*        -> PreToolUse guard + session-start line, symlink per file
 #   ~\.claude\settings.json  -> symlink to <clone>\settings.json (needs Developer Mode or admin),
 #                               falls back to a copy plus a git post-merge hook that re-copies
@@ -713,7 +713,7 @@ if (Test-Path (Join-Path $RepoDir 'package-lock.json')) {
     }
 }
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Log "python3 not found on PATH; the guard, STE gate and other gates refuse Bash, Write and Edit calls until Python 3 is installed"
+    Log "python3 not found on PATH; the guard and the other gates refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
 # Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads

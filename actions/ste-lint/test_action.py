@@ -175,6 +175,28 @@ rc, out = run("all")
 check("all: exit 0, finding logged", rc == 0 and "a.md:5: STE001" in out and "::error file=a.md,line=5::" in out, out)
 
 
+# This step gates STE001, STE011 and STE013 on changed lines. STE001 is above.
+for code, line in (("STE011", "In conclusion, the plan works."), ("STE013", "This step is not unsafe.")):
+    def kept_change(work, line=line):
+        write(work, "a.md", "\n" + line + "\n", "a")
+        git(work, "commit", "-qam", "kept")
+    rc, out = run("changed", change=kept_change)
+    check("%s on a changed line fails the step" % code,
+          rc == 1 and "a.md:5: %s " % code in out and "::error file=a.md,line=5::%s " % code in out, out)
+
+
+# A changed UI file still fails on bloat, and a five-word button is no finding (no label-length cap).
+def tsx_change(work):
+    write(work, "B.tsx", "export const B = () => <p>In order to save, press it.</p>;\n"
+                         "export const C = () => <button>Save the file right now</button>;\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "tsx")
+
+
+rc, out = run("changed", change=tsx_change, CHANGED_PATHS_GLOB="*.tsx")
+check("changed UI file: STE011 on the copy still fails the step", rc == 1 and "B.tsx:1: STE011 " in out, out)
+check("changed UI file: a five-word button is not a finding", "STE020" not in out and "B.tsx:2:" not in out, out)
+
+
 # Gate only the lines the diff added: a long line already on main is not gated (the job summary lists it).
 def touch_elsewhere(work):
     write(work, "a.md", "# T\n\n" + LONG + "\n\nAnother short line.\n")
