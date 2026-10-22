@@ -836,6 +836,78 @@ def case_reorient_flags_missing_premises():
                 c.cleanup()
 
 
+def _not_utf8(data):
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    return False
+
+
+UNREADABLE_WORDS = re.compile(r"unreadable|not readable|could not (?:be )?read|cannot be read|"
+                              r"can't (?:be )?read|unable to read")
+
+
+def case_reorient_survives_undecodable_handoff():
+    """A handoff with one byte that is not UTF-8 (a cut write, a paste from another code page)
+    must not silence the reorient message: it is the only thing that sends the session back to
+    its handoff. The premises read as none or unreadable (or are read past the bad byte); the
+    rest of the message stays whole. Three paths: compaction with and without a digest, and a
+    fork (which lists every premise)."""
+    base = HANDOFF_WITH_PREMISES.encode("utf-8")
+    variants = (
+        ("stray 0xff in the Goal", base.replace(b"Fix the handoff.", b"Fix the \xff handoff.")),
+        ("cut multi-byte char in a premise line",
+         base.replace(b"passes on this branch.", b"passes on this branch \xe2\x82.")),
+    )
+    for vi, (vtag, data) in enumerate(variants):
+        check("undecodable (%s): the test bytes are not UTF-8" % vtag,
+              data != base and _not_utf8(data))
+        for mi, mode in enumerate(("compaction, digest ok", "compaction, digest missing", "fork")):
+            label = "%s, %s" % (vtag, mode)
+            c = Case("badbyte%d%d" % (vi, mi))
+            try:
+                if mode == "fork":
+                    other = "sess-other"
+                    old = os.path.join(c.cfg, "handoffs", other + ".md")
+                    os.makedirs(os.path.dirname(old), exist_ok=True)
+                    with open(old, "wb") as f:
+                        f.write(data)
+                    put(os.path.join(c.cfg, "state", "handoff", other + ".dir"), c.repo)
+                    proc = c.run(["--reorient"], {"session_id": c.session_id, "source": "fork",
+                                                  "hook_event_name": "SessionStart",
+                                                  "cwd": c.repo})
+                else:
+                    if mode.endswith("digest ok"):
+                        write_compaction(c)
+                    os.makedirs(os.path.dirname(c.handoff_path()), exist_ok=True)
+                    with open(c.handoff_path(), "wb") as f:
+                        f.write(data)
+                    proc = c.run_reorient()
+                out = proc.stdout or ""
+                low = squash(out)
+                why = "rc=%r stdout=%r stderr=%r" % (proc.returncode, out[-200:],
+                                                     proc.stderr[-200:])
+                check("undecodable (%s): exits 0" % label, proc.returncode == 0, why)
+                check("undecodable (%s): the reorient message still prints, with the prompt "
+                      "file and the session's own handoff path" % label,
+                      c.prompt_path() in out and c.handoff_path() in out, why)
+                if mode == "fork":
+                    check("undecodable (%s): names the handoff to read" % label, old in out, why)
+                else:
+                    check("undecodable (%s): says summary facts are notes until checked" % label,
+                          NOTES_SENTENCE in low, why)
+                    if mode.endswith("digest ok"):
+                        check("undecodable (%s): names the digest path" % label,
+                              c.digest_path() in out, why)
+                check("undecodable (%s): premises read as none, unreadable, or past the bad "
+                      "byte" % label,
+                      NO_SECTION_MESSAGE in low or bool(UNREADABLE_WORDS.search(low))
+                      or {"P2", "P3", "P4", "P5"} <= ids_in(out), why)
+            finally:
+                c.cleanup()
+
+
 def case_nudge_points_at_step4():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
@@ -899,6 +971,81 @@ def case_premise_kinds_one_home():
           "parser accepts", shown == PREMISE_KIND_NAMES, "shown: %r" % sorted(shown))
 
 
+# Runs `--reorient` in a child where precompact_handoff.PREMISE_KINDS is replaced by argv[2]
+# before main() runs, so a test can change the constant without touching the file.
+PATCHED_REORIENT = (
+    "import importlib.util, json, os, sys\n"
+    "sys.path.insert(0, os.path.dirname(sys.argv[1]))\n"
+    "spec = importlib.util.spec_from_file_location('precompact_handoff_patched', sys.argv[1])\n"
+    "mod = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(mod)\n"
+    "if len(sys.argv) > 2:\n"
+    "    mod.PREMISE_KINDS = tuple(json.loads(sys.argv[2]))\n"
+    "sys.argv = [sys.argv[1], '--reorient']\n"
+    "sys.exit(mod.main())\n")
+
+
+def premises_listed(c, kinds_of_lines, patched_kinds=None):
+    """Write a handoff with one premise per entry of kinds_of_lines (P1, P2, ...; None writes
+    no [kind] at all), run the compaction reorient, and return (ids it lists, the process).
+    patched_kinds replaces PREMISE_KINDS in the child; None leaves the module's own."""
+    text = "## Working premises\n" + "".join(
+        "- P%d%s A claim. Source: none. Checked never.\n"
+        % (i, "" if k is None else " [%s]" % k) for i, k in enumerate(kinds_of_lines, 1))
+    put(c.handoff_path(), text)
+    args = [sys.executable, "-c", PATCHED_REORIENT, MODULE]
+    if patched_kinds is not None:
+        args.append(json.dumps(list(patched_kinds)))
+    payload = {"session_id": c.session_id, "hook_event_name": "SessionStart",
+               "source": "compact", "cwd": c.repo}
+    proc = subprocess.run(args, input=json.dumps(payload), capture_output=True, text=True,
+                          env=c.env(), cwd=c.repo)
+    return ids_in(proc.stdout), proc
+
+
+def case_premise_strength_comes_from_kinds():
+    """The parser's strong/weak split comes from PREMISE_KINDS, not from a kind named in code.
+    Seam (the record says the kinds run strongest first): at reorient time the first entry of
+    precompact_handoff.PREMISE_KINDS is the one kind a compaction reorient leaves out of its
+    list; every other entry, and every kind outside the constant, is listed. The constant is
+    read at call time, so a test can replace it."""
+    mod_kinds = None
+    try:
+        spec = importlib.util.spec_from_file_location("precompact_handoff_kinds", MODULE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod_kinds = tuple(mod.PREMISE_KINDS)
+    except Exception as e:
+        print("strength: no usable PREMISE_KINDS in the module: %r" % e)
+    check("strength: PREMISE_KINDS lists the strongest kind first, `ruling`, as the record does",
+          bool(mod_kinds) and mod_kinds[0] == "ruling", "got %r" % (mod_kinds,))
+    if not mod_kinds:
+        return
+    c = Case("strength")
+    try:
+        # Every kind in the constant is classified, and a kind outside it is weak: a kind the
+        # record does not list, an empty [], and no brackets at all.
+        outside = ["final", "", None]
+        probe = list(mod_kinds) + outside
+        listed, proc = premises_listed(c, probe)
+        want = {"P%d" % i for i in range(2, len(probe) + 1)}
+        check("strength: the first kind of PREMISE_KINDS is the only one left out; the rest of "
+              "the constant, an unknown kind, an empty [] and no kind are all listed",
+              listed == want, "listed %r, want %r, stderr %r"
+              % (sorted(listed), sorted(want), proc.stderr[-200:]))
+        # Rename the strongest kind in the constant: the new name is now left out, and the old
+        # name, now outside the constant, is listed. A literal "ruling" in the parser fails this.
+        renamed = ("decree",) + mod_kinds[1:]
+        listed, proc = premises_listed(c, ["decree", "ruling", mod_kinds[1]], renamed)
+        check("strength: with PREMISE_KINDS = decree first, a [decree] premise is left out and "
+              "a [ruling] premise is listed (the strong kind is read from the constant, not "
+              "named in the parser)",
+              listed == {"P2", "P3"}, "listed %r, want ['P2', 'P3'], stderr %r"
+              % (sorted(listed), proc.stderr[-200:]))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -924,8 +1071,10 @@ def main() -> int:
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()
+    case_reorient_survives_undecodable_handoff()
     case_nudge_points_at_step4()
     case_premise_kinds_one_home()
+    case_premise_strength_comes_from_kinds()
 
     if FAILED:
         print()
