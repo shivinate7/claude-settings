@@ -31,9 +31,7 @@ Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run ins
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
 """
 import atexit
-import contextlib
 import importlib.util
-import io
 import json
 import os
 import shutil

@@ -1,0 +1,14 @@
+# Lint only. A failing `ruff check` in the gates job is the only use: no format step, no hook.
+# F = Pyflakes (unused imports, undefined names, empty f-strings). E9 = syntax and read errors.
+# No target-version: ruff then checks syntax against its newest Python, so a newer file never
+# reads as an error on an older default.
+extend-exclude = ["skills/impeccable"]  # vendored; not ours to lint
+
+[lint]
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+# Bandaid: builders do not edit test files. Each line below is an unused import. A test-author
+# deletes the import and this line together.
+"hooks/test_sendmessage_state.py" = ["F401"]  # contextlib, io
+"lint/test_check_skill_model_rows.py" = ["F401"]  # glob
