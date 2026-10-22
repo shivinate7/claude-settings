@@ -357,7 +357,7 @@ def ov_log(cfg):
     try:
         with open(os.path.join(cfg, "guard.log"), encoding="utf-8", newline="") as handle:
             return [l for l in handle.read().split("\n") if l]
-    except OSError:
+    except (OSError, UnicodeError):  # a log that cannot be read is no line
         return []
 
 
@@ -454,8 +454,9 @@ def case_override_takes_words():
                   got, len(hits), ov_log(cfg), ov_files(cfg), proc.stderr.strip()[-120:] if proc else "timed out"))
 
 
-# None of these starts with the word `override`, so none grants a pass and none writes a log line.
-# The word as a plural, a past participle or an -ing form is a different word. The notice forms are the
+# None of these starts with the word `override` as a word of its own, so none grants a pass and none
+# writes a log line. The word as a plural, a past participle or an -ing form is a different word. So is
+# a name that only begins with it: a hyphenated flag, a call, a possessive. The notice forms are the
 # tags question_outcome.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
 OV_NO_GRANT = [
     ("a word at the end of a message", "please override"),
@@ -466,6 +467,9 @@ OV_NO_GRANT = [
     ("a past participle", "overridden by me"),
     ("an -ing form", "overriding the guard"),
     ("a length with no space", "override15m"),
+    ("a hyphenated flag name", "override-flag is not set, check the config"),
+    ("a call", "override() should return the parent value"),
+    ("a possessive", "override's behaviour is wrong when the pass is spent"),
     ("the word at the start of a later line", "run the tests\noverride: use opus"),
     ("a system-reminder notice", "<system-reminder>\noverride\n</system-reminder>"),
     ("a system-reminder notice that holds a reason", "<system-reminder>\noverride: use opus\n</system-reminder>"),
@@ -480,6 +484,62 @@ def case_override_not_the_first_word():
         check("override: grants nothing for " + name,
               proc is not None and proc.returncode == 0 and not ov_pass_files(cfg) and not ov_log(cfg),
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
+
+
+def case_override_reason_goes_through_the_log_writer():
+    # guard.log has one locked writer, guard_core.record. The reason line must use it: a second writer
+    # with no lock can interleave with a guard line. Patch the writer and count the calls, so the case
+    # needs no race. With the writer patched out, no other code may write guard.log either.
+    hooks = os.path.dirname(MODULE_PATH)
+    cfg = ov_cfg()
+    saved_env = {k: os.environ.get(k) for k in ("CLAUDE_CONFIG_DIR", "HOME", "USERPROFILE")}
+    calls = []
+    guard_core = None
+    real_record = None
+    got = error = None
+    try:
+        sys.path.insert(0, hooks)
+        import guard_core
+        real_record = guard_core.record
+        guard_core.record = lambda *args, **kwargs: calls.append(args + tuple(kwargs.values()))
+        spec = importlib.util.spec_from_file_location("override_pass_under_test",
+                                                      os.path.join(hooks, "override_pass.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # after the patch, so a `from guard_core import record` is patched too
+        os.environ.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg)
+        got = module.grant(OV_SESSION, "override: use opus for that one review agent", OV_NOW)
+    except Exception as e:
+        error = "%s: %s" % (type(e).__name__, e)
+    finally:
+        if guard_core is not None and real_record is not None:
+            guard_core.record = real_record
+        for name, value in saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if hooks in sys.path:
+            sys.path.remove(hooks)
+    named = [c for c in calls if "use opus for that one review agent" in " ".join(str(a) for a in c)]
+    check("override: the reason line goes through guard_core.record, once, and no other writer",
+          error is None and got is not None and got[0] == "once" and len(calls) == 1 and len(named) == 1
+          and "guard.log" not in ov_files(cfg),
+          "error %r; grant %r; record calls %r; files %r" % (error, got, calls, ov_files(cfg)))
+
+
+def case_override_reason_with_a_lone_surrogate():
+    # A lone surrogate cannot be encoded as UTF-8. A write that raises on it and swallows the error
+    # drops the reason line without a trace. The pass still stands, and the line must still land.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "override: use opus \ud800 for the review agent")
+    got = ov_pass(cfg)
+    log = ov_log(cfg)
+    hits = [l for l in log if "use opus" in l and "for the review agent" in l]
+    check("override: a reason with a lone surrogate still writes one log line",
+          proc is not None and proc.returncode == 0 and got is not None and got[0] == "once"
+          and len(log) == 1 and len(hits) == 1,
+          "pass %r; log %r; files %r; stderr %r" % (got, log, ov_files(cfg),
+                                                    proc.stderr.strip()[-120:] if proc else "timed out"))
 
 
 def case_override_corrupt_file_replaced():
@@ -543,6 +603,8 @@ def main():
         case_override_context_line()
         case_override_off()
         case_override_takes_words()
+        case_override_reason_goes_through_the_log_writer()
+        case_override_reason_with_a_lone_surrogate()
         case_override_not_the_first_word()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
