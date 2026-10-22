@@ -611,16 +611,17 @@ def _merged_read(where: str, path: str, batch=None):
     (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). False when it holds one. None
     when git could not tell. HEAD is read in the worktree itself, never in WHERE. One home: the
     strict keep and the unpushed keep both ask it. BATCH (`merged_batch`) holds the commits that
-    are in the default branch: a HEAD in it is merged with no further read, and any other HEAD
-    goes to `cherry`, which also proves an older commit of the branch."""
+    are in the default branch: a HEAD in it is merged with no further read. Any other HEAD is
+    asked of git as before (ancestry, then patch), and the default branch is read once."""
     if batch is not None:
         head = guard._git(path, "rev-parse", "HEAD")
         if head is None or head.returncode != 0 or not head.stdout.strip():
             return None
         if head.stdout.strip() in batch["tips"]:
             return True
-        return guard.branch_cherry_empty(path, batch["base"], "HEAD")
-    base = guard.resolve_default_base(where)
+        base = batch["base"]
+    else:
+        base = guard.resolve_default_base(where)
     if base is None:
         return None
     merged = guard.branch_is_ancestor(path, base, "HEAD")
