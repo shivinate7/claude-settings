@@ -707,21 +707,24 @@ class EmittedRuleIdsTests(unittest.TestCase):
 
     def ids_of(self, files):
         """The ids of a fixture root. A crash is a failure that names its cause: the root has no
-        lint/ste_gate.py, deleted by the ste-gate-fixes-not-nags decision."""
+        gate file, because no hook writes an STE id now (decision ste-gate-fixes-not-nags)."""
         try:
             return rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
         except FileNotFoundError as e:
             self.fail("emitted_rule_ids reads a gate file the root does not have: %s" % e)
 
-    def test_a_fixture_root_gives_guard_siblings_config_watch_and_ste_codes_and_no_test_file(self):
+    def test_a_fixture_root_gives_guard_siblings_config_watch_and_no_test_file_and_no_ste_code(self):
         files = self.files()
         files[os.path.join("hooks", "config_watch.py")] = 'record("ConfigChange", "reverted", "watch-rule", "m")\n'
         ids = self.ids_of(files)
         for wanted in ("main-rule", "sibling-rule", "watch-rule"):
             self.assertIn(wanted, ids)
         self.assertNotIn("test-only-rule", ids)
-        import ste_lint
-        self.assertTrue(set(ste_lint.RULES) <= ids)  # every STE code is an id
+        self.assertEqual(sorted(i for i in ids if i.startswith("STE")), [],
+                         "no hook writes an STE code to guard.log, so a cull would call each one never-fired")
+
+    def test_the_real_source_holds_no_ste_code(self):
+        self.assertEqual(sorted(i for i in rule_audit.emitted_rule_ids() if i.startswith("STE")), [])
 
     def test_a_leftover_ste_gate_file_adds_no_id(self):
         files = self.files()

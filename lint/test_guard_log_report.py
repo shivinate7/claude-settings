@@ -16,8 +16,9 @@ Pinned contract:
   only: it never changes a decision, a rule, or the other list.
 - One reader: no file outside this one may parse guard.log lines. OneReaderTests checks it.
 - --all-rules prints the same per-rule table with one more column, the date of the rule's first
-  guard.log line (YYYY-MM-DD) or "never". Every rule id the guard and the gates emit has a row,
-  0 counts included. A rule id that only the log holds keeps its row. A line of any decision
+  guard.log line (YYYY-MM-DD) or "never". Every rule id the guard emits has a row, 0 counts
+  included. No hook writes an STE code now, so an STE row appears only when the log holds one.
+  A rule id that only the log holds keeps its row. A line of any decision
   (override, reverted, crash too) counts as the rule having fired. A combined STE line
   (`STE007,STE008`) credits each code, and so does one the gate's logger cut at its field limit
   (`STE001,STE003 [cut]`). AllRulesTests checks the ids against the source.
@@ -875,15 +876,10 @@ def emitted_guard_rules(source):
     return ids
 
 
-def emitted_gate_rules():
-    """The STE ids: every STE code (lint/ste_lint.py RULES). No `STE-<word>` id is read from any
-    file: ste_gate.py, which wrote them, is deleted (the ste-gate-fixes-not-nags decision)."""
-    import ste_lint
-    return set(ste_lint.RULES)
-
-
 def emitted_rules():
-    ids = set(emitted_gate_rules())
+    """Every id the guard writes. No STE id is emitted: no hook writes one now (decision
+    ste-gate-fixes-not-nags), so an STE row of --all-rules comes from the log alone."""
+    ids = set()
     for path in GUARD_SOURCES:
         with open(path, encoding="utf-8") as handle:
             ids |= emitted_guard_rules(handle.read())
@@ -905,11 +901,10 @@ class EmittedRuleReaderTests(unittest.TestCase):
                        "bare-merge",                                    # ask_step() only
                        "builder-diff", "author-diff", "writer-diff",    # diff_rule() table
                        "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
-                       "subagent-model-cap",                            # guard.py and config_watch.py
-                       "STE001"):                                       # an STE code
+                       "subagent-model-cap"):                           # guard.py and config_watch.py
             self.assertIn(needle, ids)
-        for gone in ("STE-fallback", "STE-unchecked"):                  # only the deleted gate wrote these
-            self.assertNotIn(gone, ids)
+        self.assertEqual(sorted(i for i in ids if i.startswith("STE")), [],  # only the removed gate wrote these
+                         "an STE id no hook writes would show as never-fired in a cull")
         self.assertGreaterEqual(len(ids), 40)  # a floor: a reader that finds fewer has lost a call shape
 
     def test_a_comment_opener_inside_a_string_hides_no_call(self):
@@ -1028,7 +1023,16 @@ class AllRulesTests(unittest.TestCase):
         out = self.report([stamped(2, "deny", "STE007,STE008")], "--all-rules", "--days", "7")
         rows = rule_table(out)
         self.assertEqual((first_seen(rows["STE007"]), first_seen(rows["STE008"])), (days_ago(2), days_ago(2)))
-        self.assertEqual(first_seen(rows["STE009"]), "never")
+        self.assertNotIn("STE009", rows)  # a code the log never held has no row: no hook emits it
+
+    def test_an_empty_log_lists_no_ste_row(self):
+        rows = rule_table(self.report([], "--all-rules", "--days", "all"))
+        self.assertEqual(sorted(r for r in rows if r.startswith("STE")), [])
+
+    def test_a_log_with_one_ste_code_lists_that_row_and_no_other_ste_row(self):
+        rows = rule_table(self.report([stamped(2, "deny", "STE008")], "--all-rules", "--days", "7"))
+        self.assertEqual(sorted(r for r in rows if r.startswith("STE")), ["STE008"])
+        self.assertEqual((counts(rows["STE008"]), first_seen(rows["STE008"])), ((1, 0, 0), days_ago(2)))
 
     def test_the_listed_ids_equal_the_ids_the_guard_and_gates_emit(self):
         listed = set(rule_table(self.report([], "--all-rules", "--days", "all")))
@@ -1065,13 +1069,15 @@ class AllRulesTests(unittest.TestCase):
         rows = rule_table(out)
         for code in kept:
             self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 1, 0), days_ago(3)), code)
-        self.assertEqual(first_seen(rows["STE009"]), "never")  # a code the line never held stays silent
+        self.assertNotIn("STE009", rows)  # a code the line never held has no row
 
-    def test_a_cut_combined_line_outside_the_window_still_dates_each_code(self):
+    def test_a_cut_combined_line_in_an_old_log_still_dates_each_code(self):
+        # --days all makes the old line part of the window. A line outside a shorter window is not pinned:
+        # no source emits an STE id, so whether its codes keep a row is the report's own choice.
         field, kept = self.cut_id()
-        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "7"))
+        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "all"))
         for code in kept:
-            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((0, 0, 0), days_ago(400)), code)
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 0, 0), days_ago(400)), code)
 
     def test_days_all_reads_the_whole_log(self):
         lines = [stamped(400, "deny", "waiter"), stamped(1, "deny", "waiter")]
