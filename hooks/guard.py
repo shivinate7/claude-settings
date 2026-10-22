@@ -1626,13 +1626,13 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
 # use and disk free on the home drive are shares of this machine's capacity; CPU is a second signal. Busy
-# (memory over 85%, disk free under 15%, CPU over 85%) refuses a background lane. Full (memory over 95%, disk
-# free under 5%) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
+# (memory over 85%, disk free under 15%, or CPU over 85% with memory over 75%) refuses a background lane
+# (run_in_background true; left out is foreground). Full (memory over 95%, disk free under 5%) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
-LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU = 85.0, 15.0, 85.0
+LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU, LOAD_BUSY_CPU_MEMORY = 85.0, 15.0, 85.0, 75.0
 LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
 LOAD_BUSY_REASON = "the machine is busy (%s). %s"
-LOAD_BUSY_FOREGROUND = "Run this lane in the foreground, one at a time: an Agent call with run_in_background false. "
+LOAD_BUSY_FOREGROUND = "Run this lane in the foreground, one at a time: an Agent call with run_in_background left out. "
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
 
@@ -1729,11 +1729,14 @@ def load_hit(tool: str, tool_input) -> tuple:
     if full:
         return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
     # Only an Agent or Task lane has a foreground form. A session start has none, and no ruling covers it at busy.
-    if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and tool_input.get("run_in_background") is False):
+    if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and tool_input.get("run_in_background") is not True):
         return "", ""
-    busy = [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
+    # A 200 ms CPU sample is a spike: CPU counts only with memory also high, and then both are named.
+    cpu_busy = cpu is not None and memory is not None and cpu > LOAD_BUSY_CPU and memory > LOAD_BUSY_CPU_MEMORY
+    memory_busy = memory is not None and (memory > LOAD_BUSY_MEMORY or cpu_busy)
+    busy = [t for t in (memory_busy and "memory %.1f%% in use" % memory,
                         disk is not None and disk < LOAD_BUSY_DISK and "disk %.1f%% free" % disk,
-                        cpu is not None and cpu > LOAD_BUSY_CPU and "CPU %.1f%% busy" % cpu) if t]
+                        cpu_busy and "CPU %.1f%% busy" % cpu) if t]
     if busy:
         # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
         waits = [t for t in busy if not t.startswith("disk")]

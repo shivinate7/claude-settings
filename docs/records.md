@@ -200,7 +200,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hook-catalog-page` | `docs/catalog.md` lists every hook, judge, mod and skill. | [`decisions/hook-catalog-page.md`](../decisions/hook-catalog-page.md) |
 | `install-refuses-linked-tree` | The installer refuses a linked worktree. | [`decisions/install-refuses-linked-tree.md`](../decisions/install-refuses-linked-tree.md) |
 | `install-sh-stays-off-windows` | `install.sh` does nothing on Windows. | [`decisions/install-sh-stays-off-windows.md`](../decisions/install-sh-stays-off-windows.md) |
-| `machine-load-brake` | Owner, 2026-10-21 (spec) and 2026-10-22 (rulings): a lane-start call reads the machine's load, and a busy or full machine refuses new lanes. | [`decisions/machine-load-brake.md`](../decisions/machine-load-brake.md) |
+| `machine-load-brake` | Owner, 2026-10-21 (spec) and 2026-10-22 (rulings; CPU and foreground at 15:00 CDT): a lane-start call reads the machine's load, and a busy or full machine refuses new lanes. | [`decisions/machine-load-brake.md`](../decisions/machine-load-brake.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `owner-override-pass` | The owner starts a prompt with the word `override`. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
