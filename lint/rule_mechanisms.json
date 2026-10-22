@@ -503,7 +503,7 @@
     "questions-ask-advisor-first": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing checks that a question went to the advisor before the owner. A hook would read the session records for a running advisor- session and judge whether the question is one only the owner answers. hooks/sendmessage_state.py only lets the message through."
+        "reason": "Nothing checks that a question went to the advisor before the owner. A hook would read the session records for a running advisor session and judge whether the question is one only the owner answers. hooks/sendmessage_state.py only lets the message through."
       }
     },
     "style-cut-narration": {

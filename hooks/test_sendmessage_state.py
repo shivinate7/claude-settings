@@ -419,9 +419,12 @@ def case_advisor_receiver_allows_with_no_board_read_or_model_call():
     check("advisor- receiver, busy: allow, no model call, no board read",
           r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and not r.reader_calls
           and not r.agents_calls and r.loaded, detail(r))
-    r = run_hook(hook_input(to="advisorx", message="Chat."), rows=[row(SID_A, "advisorx", "busy")], answer=FLAG)
-    check("a name that only starts 'advisor' (no dash) is a peer, judged as before",
-          r.deny() is not None and len(r.model_calls) == 1, detail(r))
+    # Only "advisor-" plus a 2-to-6 character suffix with no other hyphen is the advisor. A session in a
+    # folder such as wt\advisor-asks gets a name like advisor-asks-xx and is a peer, judged as before.
+    for name in ("advisorx", "advisor-asks-xx", "advisor-a", "advisor-abcdefg"):
+        r = run_hook(hook_input(to=name, message="Chat."), rows=[row(SID_A, name, "busy")], answer=FLAG)
+        check("%s is a peer, judged as before" % name,
+              r.deny() is not None and len(r.model_calls) == 1, detail(r))
 
 
 def case_malformed_input_fails_open_with_no_deny():    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
