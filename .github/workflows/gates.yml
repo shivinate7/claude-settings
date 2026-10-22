@@ -124,9 +124,6 @@ jobs:
       - name: SendMessage state fixture suite
         run: python3 hooks/test_sendmessage_state.py
 
-      - name: Question outcome fixture suite
-        run: python3 hooks/test_question_outcome.py
-
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -530,10 +527,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_sendmessage_state.py
 
-      - name: Question outcome fixture suite
-        if: ${{ !cancelled() }}
-        run: python3 hooks/test_question_outcome.py
-
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_rm_prompt_answer.py
@@ -863,10 +856,6 @@ jobs:
       - name: SendMessage state fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_sendmessage_state.py
-
-      - name: Question outcome fixture suite
-        if: ${{ !cancelled() }}
-        run: python hooks/test_question_outcome.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}

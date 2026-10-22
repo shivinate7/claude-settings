@@ -539,8 +539,8 @@
     "style-question-restates-goal": {
       "mechanism": {
         "kind": "gate",
-        "ref": "hooks/question_outcome.py",
-        "test": "hooks/test_question_outcome.py::case_1_missing_restate_is_denied"
+        "ref": "settings.json",
+        "test": "lint/test_settings_matcher.py::QuestionReviewer.test_agent_hook_prompt_names_every_rubric_item"
       }
     },
     "style-question-states-problem": {

@@ -5,7 +5,7 @@
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
 Opus runs only for Plan, the advisor (agents inherit it), and the builder's third try by standing word,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
-An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. Any other spawn
+An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level word and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. Prose alone enforces the ceiling.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
@@ -47,11 +47,11 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
 | safety-classifier fallback | on, the default | n/a |
-| prompt-hook judges: AskUserQuestion, Agent, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| prompt-hook judges: Agent, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | feedback judge (`hooks/feedback_judge.py`, a detached child of `hooks/local_time.py`; runs only while `fb` capture is open and the prompt does not open with `fb`) | claude-sonnet-5-5, through `decision_watch.invoke_model` | xhigh |
-| question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
+| prompt-hook judges: AskUserQuestion, the question reviewer (an agent hook, `settings.json`) | claude-opus-5-5, by the owner's standing word of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default; an agent hook has no effort field |
 | SendMessage state judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
