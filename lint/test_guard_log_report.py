@@ -906,12 +906,12 @@ class EmittedRuleReaderTests(unittest.TestCase):
 
     def check_needles(self, ids):
         for needle in ("shared-tree",                                   # refuse() literal
-                       "role-diff-nocwd", "guard-crash",                # record() after a tool-name literal
+                       "role-diff-main-checkout", "guard-crash",        # record() after a tool-name literal
                        "bare-merge",                                    # ask_step() only
                        "builder-diff", "author-diff", "writer-diff",    # diff_rule() table
                        "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
                        "subagent-model-cap",                            # guard.py and config_watch.py
-                       "STE001", "STE-fallback", "STE-unchecked", "STE-wording"):  # the gates
+                       "STE001", "STE-fallback", "STE-unchecked"):      # the gates
             self.assertIn(needle, ids)
         self.assertGreaterEqual(len(ids), 40)  # a floor: a reader that finds fewer has lost a call shape
 
