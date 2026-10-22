@@ -14,8 +14,7 @@ Brief, claude-settings (small lane, next batch):
 1. Move the line-131 summary into a script file written next to ste_emit.py in $EMIT_DIR, the same
    way HUNK_MAP_PY and SPLIT_PY already work, and run it with `python3 "$EMIT_DIR/summary.py" ...`.
    Do not use `-I` (it drops PYTHONPATH, so ste_emit stops loading) or `-P` (needs 3.11+).
-2. Add a case to actions/ste-lint/test_action.py: a fixture repo with json.py, json/__init__.py
-   (in a second fixture, since both cannot coexist usefully) and ste_emit.py at its root, each
+2. Add a case to actions/ste-lint/test_action.py: fixture repos with json.py, or json/__init__.py, plus ste_emit.py at the root, each
    writing a marker file, plus one .md file. Run with SCOPE=all and SCOPE=changed. Pass: no marker
    file, and the summary table and annotations still appear. Show it red on main, green after 1.
 3. Add one sentence to action.yml's scope description: the action runs no code from the linted tree.
