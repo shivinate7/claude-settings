@@ -1,0 +1,10 @@
+{
+  "ask": "Draft the one-home rule: the builder.md wording, how a variant extends a shared piece in CSS, Swift and tests, and the compliance-check group that finds copies. Use the q_max map-skill drift as the worked example.",
+  "note": "Already planned in parts: design tokens in one file generated into CSS and Swift (o2, r2, r3, topic t08); spacing from a few layout primitives instead of per-screen margins (d7, t09); one DESIGN.md per repo (r4); the roadmap page reads each item from its one home and stores no copy (o8). Live proof of the problem: q_max copied the map skill and it drifted, failing PR 969 (o6), and q_max holds a verbatim copy of a claude-settings test. Missing: the general rule for agents; shared UI components with variants (tokens are values, not components); shared test steps that a test can extend; and a check that finds copies. Proposed homes: a builder rule (search for the shared piece first; extend it with a variant; a copy needs a stated reason); a compliance-check group that reports duplicate code and vendored copies (o4); shared skills pinned, never vendored. Lands with the layout (o2), since o2 decides where each shared thing lives.",
+  "order": 115,
+  "phase": "organize",
+  "status": "todo",
+  "title": "One home for each shared thing; exceptions build on it, never copy it",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Your rule, Oct 20: never duplicate and rebuild. Anything used in more than one place (a button size, a panel gap, steps 1 to 6 of a test, a skill) has one home, and everything else points at it. An exception (a different button, a twist on step 5a) calls the shared piece and changes only what differs, so a fix to the shared piece reaches every use and nothing drifts. The result looks the same; it is just more resilient."
+}

@@ -1,0 +1,9 @@
+{
+  "note": "Sent. Stop rule chosen: debts + decisions.",
+  "order": 10,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Send the cull rulings to the running session",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Fast path for deletions, notes tier for unlikely gaps, no history in the tree, prose leaves only with a proving test, a time box, and size numbers each batch."
+}

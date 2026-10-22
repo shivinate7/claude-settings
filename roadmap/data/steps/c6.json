@@ -1,0 +1,9 @@
+{
+  "note": "Done by the cull, measured Oct 19 at #513: lint/rule_mechanisms.json (99 rows) names a test for all six rules the cull ruling listed (the five above plus git-cite-by-id), each in hooks/test_guard.py. Their CLAUDE.md prose is cut to a short reminder plus a one-line reason (10-23 words each; roles-third-try-steps-up still 32). Not checked: whether a mutant targets each named case.",
+  "order": 60,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Write proving tests for five guard rules",
+  "updatedAt": "2026-10-19T15:25:00Z",
+  "why": "Their rows name no test, so their prose can't be deleted safely yet. Start with shared-trees-no-destructive-git."
+}

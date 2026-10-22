@@ -1,0 +1,9 @@
+{
+  "note": "Cull closed Oct 19 on its time box (your ruling). Final at cull batch 6 (#508, the last cull batch): decisions 90 (down 33% from 134), debt files 16 (down 96% from 364, swept into debts/notes.md), hook lines 47,461 (up 0.6%), CLAUDE.md 2,329 words (up 1.7%). The stop rule was never met; its named work was done in c6 (proving tests for five guard rules). decisions/cull-rules.md stays for the child-repo culls in Roll out. Regrowth is watched on the Clean up numbers.",
+  "order": 20,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Read each batch's size report",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "The four numbers show whether the cull is shrinking the system or growing it."
+}

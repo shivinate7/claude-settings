@@ -1,0 +1,103 @@
+{
+  "baseline": {
+    "at": "455bb21",
+    "debts": 364,
+    "decisions": 134,
+    "hooks": 47196,
+    "words": 2290
+  },
+  "batches": [
+    {
+      "at": "5921750b",
+      "debts": 364,
+      "decisions": 126,
+      "hooks": 47582,
+      "label": "Cull 1A (#499)",
+      "words": 2362
+    },
+    {
+      "at": "d81e1438",
+      "debts": 364,
+      "decisions": 127,
+      "hooks": 47520,
+      "label": "Cull 1B (#500)",
+      "words": 2362
+    },
+    {
+      "at": "2fcbded1",
+      "debts": 364,
+      "decisions": 121,
+      "hooks": 47519,
+      "label": "Cull 2A (#501)",
+      "words": 2362
+    },
+    {
+      "at": "ad82281c",
+      "debts": 41,
+      "decisions": 121,
+      "hooks": 47471,
+      "label": "Cull 2B (#502)",
+      "words": 2362
+    },
+    {
+      "at": "00201d3a",
+      "debts": 41,
+      "decisions": 121,
+      "hooks": 47469,
+      "label": "Cull 2C (#503)",
+      "words": 2336
+    },
+    {
+      "at": "7db72303",
+      "debts": 45,
+      "decisions": 106,
+      "hooks": 47468,
+      "label": "Cull 3 (#505)",
+      "words": 2329
+    },
+    {
+      "at": "37938c8c",
+      "debts": 23,
+      "decisions": 99,
+      "hooks": 47462,
+      "label": "Cull 4 (#506)",
+      "words": 2329
+    },
+    {
+      "at": "014e327a",
+      "debts": 17,
+      "decisions": 92,
+      "hooks": 47462,
+      "label": "Cull 5 (#507)",
+      "words": 2329
+    },
+    {
+      "at": "705768ac",
+      "debts": 16,
+      "decisions": 90,
+      "hooks": 47461,
+      "label": "Cull 6 (#508), last cull batch",
+      "words": 2329
+    },
+    {
+      "at": "6fe52c12",
+      "debts": 27,
+      "decisions": 96,
+      "hooks": 48384,
+      "label": "Main after regular Batch 5 (#513), Oct 19, not a cull batch",
+      "words": 2409
+    },
+    {
+      "at": "84d40760",
+      "debts": 47,
+      "decisions": 100,
+      "hooks": 49261,
+      "label": "Main at #528, Oct 20 11:46 am, not a cull batch",
+      "words": 2399
+    }
+  ],
+  "closed": "Mon Oct 19, 10:18 am, owner ruling on the time box",
+  "note": "Measured by the advisor from the repo on Oct 19 at each merge on main, not from a session report. Counting: decision files excluding README; debt files excluding README and notes.md; all hooks/*.py lines including tests; CLAUDE.md words. Decisions baseline corrected 133 to 134 on Oct 17. Two batch numberings exist: 'Cull batch 1A-6' (#499-#508, Oct 17-18) and regular 'Batch 4/5' (#512, #513). The cull ended at cull batch 6; since then decisions rose 90 to 96 and debt files 16 to 27. Debts went to debts/notes.md as ruled (502 entries, 11,751 words; nothing loads it into sessions). Hook lines split at main: code 17,147 (baseline 16,963, +1.1%), tests 31,237 (baseline 30,233, +3.3%); #513 alone added 1,031, mostly tests plus hooks/override_pass.py (103 lines). Re-measured Oct 20 at 84d4076 by the advisor after the rebuild: hook code 17,441 and tests 31,820 (sum 49,261); debts/notes.md has 514 entries (515 lines).",
+  "stopRule": "Debts and decisions each cut under 5% for two batches in a row; hook lines just go down.",
+  "timebox": "Mon Oct 19"
+}

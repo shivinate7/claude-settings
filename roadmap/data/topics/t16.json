@@ -1,0 +1,16 @@
+{
+  "order": 160,
+  "points": [
+    "Ramble freely. Don't tidy your thoughts first: sorting them and filing what's tangible is the advisor's job. One small habit helps a lot: name the repo or step when you know it.",
+    "Send every session question to the project chat; one advisor thread answers and rolls over to a fresh one at about 40 back-and-forths, a new batch, or a slip (see the hand-off guide). When a tangent belongs somewhere else, say 'park this'. It goes on the page as a note or a Later step, and the chat comes back to where it was.",
+    "Keep 'In progress' to two or three steps. Before starting another, finish or park one.",
+    "When it all feels like too much, open this page, read 'In progress' and 'Up next', and do only the first one.",
+    "For a decision you don't want to weigh, ask for the pick and a one-line reason, then take it unless it feels wrong.",
+    "Use fb: inside a Claude Code session for bursts aimed at that session. Use an advisor chat for anything about the plan or the system as a whole.",
+    "End every advisor chat with 'compare this chat against the page'.",
+    "Once a week, spend ten minutes on the page: flip statuses, look at anything off track, and take one thing to a new chat.",
+    "Say 'short version' when you've got the hang of something, and 'walk me through it' when it's new."
+  ],
+  "summary": "Tangents are fine. This is how to keep them from costing you.",
+  "title": "How to use this project, given how you think"
+}

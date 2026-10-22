@@ -1,0 +1,9 @@
+{
+  "note": "Done. #384 closed unmerged Oct 19; #455 and #456 merged Oct 20 (their content landed through #525, the map skill move); #457 closed unmerged Oct 20. Branch claude-p-fetch-key is kept, as you approved.",
+  "order": 50,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Close PRs #455 and #456, decide #384",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "#457 replaces the two drafts. #384 has sat as a draft since Oct 13."
+}

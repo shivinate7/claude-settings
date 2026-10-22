@@ -1,0 +1,9 @@
+{
+  "note": "Done, checked Oct 20 at 84d4076. agents/builder.md: 'Never run the full suites locally. When your lane changes a file a mutation harness targets, run that harness once through verdict before pushing.' CLAUDE.md: 'CI is the merge gate for the full suites and the mutation harnesses.' Unknown: the wall time of one harness run (the brief asked the lane to record it; no record found in the repo). If runs prove slow, option B (anchor-only flag) is the fallback.",
+  "order": 97,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Builders run the mutation harness once before pushing a guard change",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "A guard edit that moves a mutation's anchor text is caught only in CI today, which costs a red batch: drop the lane, re-run, open a fix lane. Five anchor re-point commits Oct 15-19 (40f4f251, f5e9ce3f, b700ade4, a3f56cb4, 3e23abf7). How many turned a batch red is unknown."
+}

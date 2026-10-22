@@ -1,0 +1,10 @@
+{
+  "ask": "Which of my hooks exist only to make sessions remember things, and which could filing-at-once replace?",
+  "note": "Builds on rules you already have (output-answer-has-a-home, never drop an item silently) and on fb:. Once filing is reliable, some remember-guards can be retired in a later cull.",
+  "order": 140,
+  "phase": "organize",
+  "status": "todo",
+  "title": "File it the moment it's said",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Guards that make a session remember are a backstop. What actually works: anything that matters goes to a lasting home (a repo file, a roadmap page) in the same turn it's said. A session's job is filing, not remembering, so a compaction or a lost session costs nothing. This includes fb: items: tasks and ideas land in the repo's todo, not only the handoff, and each closed item is checked against its home."
+}

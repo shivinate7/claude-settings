@@ -1,0 +1,8 @@
+{
+  "order": 240,
+  "phase": "design",
+  "status": "todo",
+  "title": "Redesign /board as the first test",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "It was a proof of concept built from three plain elements. Mockup first, then rebuild with Svg for status and progress."
+}

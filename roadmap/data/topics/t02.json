@@ -1,0 +1,12 @@
+{
+  "order": 20,
+  "points": [
+    "banchi (strongest): tokens.css used about 7,100 times against 10 hex literals; DESIGN.md says the screenshot loop is mandatory; motion and iconography specs; 88 Playwright design checks. Gaps: nothing forces the loop; make screenshot renders at 1280 while CLAUDE.md asks for 1440 and 820; CLAUDE.md is 34.7KB.",
+    "q_max: rigorous token rules and about 40 harness checks, but no taste guidance and no design skill. Three token layers (--aq-*, --f2-*, Tailwind). Browser checks run only on manual dispatch, nightly off. Several components are over half comments. Your own review: only the home page looks amazing, other pages look like plain text workpads.",
+    "home-app: SpeakerSheet and the widgets, built from mockups in docs/design/, are polished. Views.swift is 1,927 lines with about 95 literal spacing values, many off the 4px grid. The web has 12 distinct radii, colour-only tokens, hand-synced 129/136/204px offsets, and 36 hand-drawn SVG icons mixed with Unicode glyphs. No Swift token layer. No screenshot tooling, and the simulator is rationed.",
+    "home: ops records and four scripts. No UI.",
+    "claude-settings: ux/ has behaviour and copy rules but thin visual values (4px gaps, 8px radius, role colours). No motion default and no icon set."
+  ],
+  "summary": "banchi, q_max, home-app, home, claude-settings.",
+  "title": "What each repo audit found"
+}

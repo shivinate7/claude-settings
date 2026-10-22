@@ -1,0 +1,15 @@
+{
+  "order": 60,
+  "points": [
+    "Oct 9 to Oct 17: hook Python 20,173 to 47,196 lines; decision files 64 to 134 (corrected from 133: measured 134 at 455bb21, and decisions/ has no README); debt files about 288 (Oct 15) to 364; CLAUDE.md 1,915 to 2,290 words. Counts exclude each folder's README.",
+    "Of 1,037 non-merge commits since Oct 13, 978 touched guards, lint, merge tooling, debts or decisions. 36 touched ux/, skills or agents.",
+    "Why it grows: every finding becomes a debt, and a guard change takes up to three review rounds plus the net-value test, so a cleanup lane breeds new work.",
+    "Rulings sent: deletion fast path; notes tier for unlikely gaps; no history in the tree (git keeps it, keep a one-line reason); prose leaves only with proof; no file moves during the cull; time box to Monday Oct 19.",
+    "Stop rule chosen: debts and decisions each cut under 5% for two batches running. It was never met; the cull closed Oct 19 on its time box. Hook lines just need to go down. Since Windows stays native (Oct 17), the sandbox won't bring the big hook cut; it has to come from culling guard code directly.",
+    "Order, decided Oct 17: finish claude-settings end to end (clean up, organize, design) before touching any child repo. Any step's child-repo part moves to Roll out.",
+    "In-flight lanes, decided Oct 17: you let work already in flight land before the rulings took effect. So batch #499 mixes in-flight lanes with cull lanes; don't hold its hook growth or flat debts against the cull.",
+    "How to measure, so numbers match: decisions = files in decisions/; debts = files in debts/ minus README.md and notes.md; hook lines = lines of every .py under hooks/, tests included; words = wc -w of CLAUDE.md. Done on a commit with git ls-tree and git show."
+  ],
+  "summary": "The numbers, the cause, and the rulings you sent.",
+  "title": "The cull, and why the system kept growing"
+}

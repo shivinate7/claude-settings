@@ -1,0 +1,9 @@
+{
+  "note": "The next big step for claude-settings, after the next batch, since o2 moves files. Your rulings: claude-settings first, each child repo in Roll out (Oct 17); no copied DESIGN.md template (Oct 20): claude-settings holds the shared ideas (one home then variants, spacing by relationship, containers not margins) and shared tools such as scripts/shoot (d6); each repo's DESIGN.md points at those ideas and holds its own concrete design. c19's later lanes (Stop dispatcher, cached git reads) wait for o2.",
+  "order": 110,
+  "phase": "organize",
+  "status": "todo",
+  "title": "One layout for every repo",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "docs/design, docs/decisions, docs/debts, docs/plans, tokens/tokens.json, scripts/shoot. Plus a DESIGN.md template."
+}

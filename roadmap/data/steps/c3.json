@@ -1,0 +1,9 @@
+{
+  "note": "Checked Oct 20 at 84d4076: janitor/sweep.py now runs fetch --prune (records the roots whose fetch failed). Not confirmed: that a test goes red on an unfetched remote commit, and the q_max keep-reason counts the brief asked for (session report not seen in the advisor chat). Lesson, Oct 19: a session cannot see the advisor chat, so a brief that cites an owner ruling must state the ruling itself.",
+  "order": 30,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Fix the janitor sweep",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "It never fetches, so one unfetched remote commit makes it keep every worktree as unreadable. Fetch first, and skip remote heads the clone lacks."
+}

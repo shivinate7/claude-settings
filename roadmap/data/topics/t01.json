@@ -1,0 +1,17 @@
+{
+  "order": 10,
+  "points": [
+    "Claude makes visuals by writing code without seeing the result. SVG maps closely to the picture because every element has coordinates; with HTML and CSS the layout comes out of flexbox, grid, the cascade and font metrics, which Claude has to predict. That's where spacing goes off and things overflow.",
+    "What helps any session: a reference screenshot or a design system, a render-screenshot-fix loop, and a specific look ('dense, editorial, high contrast') rather than just the content.",
+    "A great one-shot artifact is Opus on a blank canvas. In your repos, screens are built by Sonnet by rule, checked for compliance not feel, with polish tools off and the screenshot loop optional.",
+    "Plan runs on Opus but writes steps, files, risks and checks in under 25 lines. It can't write files and never loads frontend-design or ux/, so every visual decision falls to the Sonnet builder.",
+    "Design-review's blind reviewers run on Haiku in round 1 (agents/reviewer.md). Rounds escalate only on a FAIL, so a flat screen that passes is never looked at again.",
+    "frontend-design loads only for a new screen or a repo with no design yet. impeccable's build commands (polish, layout, animate, bolder, delight) are refused by the guard rule impeccable-review-only.",
+    "No browser MCP is configured anywhere, and claude-settings does not install Playwright (banchi and q_max bring their own). In solo mode, styling-only edits merge on passing checks alone.",
+    "Word pressure: STE020 refuses button or label text over 4 words, and the fewest-words decision says it counts most in front-end work. There is no house icon set to fall back on.",
+    "Across repos, screens that started from a mockup came out polished (banchi's #/gallery, q_max's home page, home-app's SpeakerSheet). The rest drift.",
+    "How design-review is built: reviewer A checks the pinned Vercel web-interface rules plus your house checklist; reviewer B runs impeccable's audit and critique. Both are blind to the repo's design records; the orchestrator compares afterwards, and any clash goes to you. Nothing in it builds, and both reviewers inherit the reviewer agent's Haiku model."
+  ],
+  "summary": "The core diagnosis behind the Design phase.",
+  "title": "Why UI quality swings"
+}

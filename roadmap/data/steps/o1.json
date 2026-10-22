@@ -1,0 +1,9 @@
+{
+  "ask": "The cull is done. Write the organize-phase brief, starting with the rules folder and ui.md.",
+  "order": 125,
+  "phase": "organize",
+  "status": "todo",
+  "title": "Install a rules folder with a UI rule",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "A path-scoped rule loads design guidance whenever an agent touches a .tsx, .css or .swift file."
+}

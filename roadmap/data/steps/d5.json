@@ -1,0 +1,9 @@
+{
+  "note": "One-home rule (o11), revised Oct 20 by your ruling: only the ideas move into ux/ (spacing by relationship, the four jobs of motion, the icon rule). banchi keeps its own values and screens, and its docs point at ux/ for the ideas instead of restating them.",
+  "order": 250,
+  "phase": "design",
+  "status": "todo",
+  "title": "Promote banchi's design specs into ux/",
+  "updatedAt": "2026-10-20T19:08:00Z",
+  "why": "Spacing by relationship, the four jobs of motion, the icon rule, a named reference screen. Settle the 4px rule against banchi's 2, 3 and 6px steps."
+}

@@ -1,0 +1,9 @@
+{
+  "note": "One-home rule (o11), revised Oct 20 by your ruling: home-app's tokens.json is the one home for its values, and both the Swift and the web side are generated from it. claude-settings supplies the idea (spacing by relationship, motion roles), not shared values.",
+  "order": 330,
+  "phase": "rollout",
+  "status": "todo",
+  "title": "home-app: real tokens on both surfaces",
+  "updatedAt": "2026-10-20T19:08:00Z",
+  "why": "Swift has no token layer, and style.css tokens cover color only. Generate both from one tokens.json."
+}

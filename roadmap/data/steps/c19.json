@@ -1,0 +1,10 @@
+{
+  "ask": "Lanes 1 to 3 (if filter on config_watch, decision-watch finds Python once, idle polling) are in the combined brief, full text in the Ask of c18 (hooks stop loading code they never use). No measuring step (your ruling, Oct 21). Lane 4 (Mac-only hooks registered only on Mac; hooks started without a shell, with absolute paths and onFailure: block, so install renders settings.json per machine) waits for a design proposal after that batch lands. Later, after o2 and only if still needed: a Stop-only dispatcher and cached git reads (from the old hook load step).",
+  "note": "Counted at 5553dc6, not timed on Windows. On Windows every command hook starts bash.exe (through Git Bash) and then python.exe. A sample turn (1 prompt, 5 Bash, 5 Edits, 5 Reads, 1 Stop) starts about 65 bash.exe and 46 python.exe per session: a Bash call 6 and 2, an Edit 4 and 4 (a .md edit adds ste_lint), a Stop 9 and 9. The decision-watch mod adds where.exe plus 1 or 2 python per Stop. Idle sessions poll git: session-board every 30 s, desktop-statusline 2 calls every 60 s. 'if' filter probe on Windows, Oct 21: path patterns with a slash never match (paths arrive with backslashes); bare suffix patterns match, but per tool and case-sensitively, and a miss silently skips the gate. Your ruling, Oct 21: filter config_watch only, on exact file names; the ste_gate and prose_judge filters are parked. Reopen them only if Edit and Write shell starts still matter once c22's fixes land and the memory monitor re-runs. Order: lanes 1 to 3 in the running batch; lane 4 design next; a Stop dispatcher after o2 only if still needed; an http hook server last, since one down server fails every gate.",
+  "order": 102,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Start fewer processes per tool call",
+  "updatedAt": "2026-10-21T20:15:00Z",
+  "why": "Your report, Oct 21: too many Python and bash spawns, worst with several Claude Code desktop sessions at once. Hooks run once per session, so the count multiplies with every open session."
+}

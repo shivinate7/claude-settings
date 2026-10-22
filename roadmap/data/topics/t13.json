@@ -1,0 +1,41 @@
+{
+  "blocks": [
+    {
+      "label": "Per-repo UI audit",
+      "text": "Audit this repo for how well it supports high-quality UI/UX work by an AI agent. Do not change any code. Write your findings to ui-audit.md.\n\n1. Stack: list the UI framework, styling approach, component library, icon set(s), animation library, and fonts actually in use. Flag anything mixed or duplicated, e.g. two icon sets or Tailwind plus ad-hoc CSS.\n\n2. Design system health: are there design tokens (spacing, color, radius, type scale, shadows, motion durations)? Sample the styling and count how many distinct spacing values, colors, and border radii appear in practice. List the different patterns used for layout and centering, with example file paths.\n\n3. Agent context: what design guidance exists for you in CLAUDE.md, skills, docs, or reference images? Quote anything relevant. Note what's missing that you would want before building a new screen.\n\n4. Verification loop: can you currently render the UI and look at it (dev server, Playwright, browser or screenshot MCP, Storybook, visual regression tests)? If not, what's the smallest setup that would let you screenshot and self-check your work?\n\n5. Weak spots: pick the 3 screens or components that look weakest and say specifically why: spacing, alignment, hierarchy, iconography, motion, or overall feel.\n\n6. Recommendations, ranked by impact versus effort. Consider rules to add to CLAUDE.md, tokens to consolidate, a screenshot-and-critique loop, committing to one icon set and one motion library, and outside tools. Recommend an outside tool only if you can name the specific problem in this repo that it solves."
+    },
+    {
+      "label": "Strong vs weak repo comparison",
+      "text": "Repo A consistently gets strong UI from you and repo B gets weak UI. Read both ui-audit.md files and the relevant code in each.\n\nExplain what concretely differs: tokens, constraints, existing component quality, CLAUDE.md guidance, verification ability. Separate what's causing the difference from what's incidental.\n\nThen write a reusable design-guidance section I can drop into any repo's CLAUDE.md, built from what makes repo A work. Also list anything repo B needs set up first, such as tokens or a screenshot loop."
+    },
+    {
+      "label": "Cull rulings, reusable",
+      "text": "Owner rulings, now. They apply to this cull and every cull after it.\n\n1. Deletion fast path. A change that only deletes (rules, prose, guard code, tests, records) and adds nothing gets one review round. It skips rounds 2 and 3 and the net-value test, unless round 1 finds a hole that Claude could hit in normal work. Then it takes the normal path.\n\n2. Notes tier. A finding becomes a debt only if Claude is likely to hit it in normal work. Any other finding is one line in debts/notes.md, with no red test and no decision edit. A note becomes a debt after a real incident. Sweep the existing debts against this rule: move each one that fails it to notes.md and delete its file.\n\n3. No history in the tree. A decision file holds only a ruling in force, plus a one-line reason. Delete each decision that is superseded, or that a guard or gate now enforces with nothing left to say. Git keeps the history. Do not add history sections, changelogs or \"previously\" notes to any file.\n\n4. Prose leaves only with proof. Delete a rule's prose only when its row in lint/rule_mechanisms.json names a test, the test's case name states the ruling's behaviour, and a mutant that breaks the guard is killed by that test. A rule that fails any part keeps its prose until the test exists. Keep the reminder of 3 words or fewer and the one-line reason either way.\n\n5. Order and scope. This cull runs first. Do not move or rename files during it. Reorganizing the folders comes after the cull, as its own lanes. The only additions allowed are the tests that ruling 4 needs. The cull is time-boxed to <date>. Stop sooner if debts and decisions each cut under 5% for two batches in a row. Then report and stop.\n\nBefore and after each batch, report four numbers: hook Python lines, debt files, decision files, and CLAUDE.md words. Baseline at <commit>: <numbers>. A batch succeeds only if debts and decisions go down and hook lines do not grow."
+    },
+    {
+      "label": "Screenshot commands",
+      "text": "# Web: one screenshot per size and theme, no project setup needed\nnpx playwright screenshot --viewport-size=390,844 --color-scheme=dark http://localhost:8080 shots/home-phone-dark.png\nnpx playwright screenshot --viewport-size=1440,900 --color-scheme=light http://localhost:8080 shots/home-desktop-light.png\n\n# iOS: one boot, both themes, then shut down\nxcrun simctl boot <device-id>\nxcrun simctl ui booted appearance dark\nxcrun simctl io booted screenshot shots/rooms-dark.png\nxcrun simctl ui booted appearance light\nxcrun simctl io booted screenshot shots/rooms-light.png\nxcrun simctl shutdown <device-id>"
+    },
+    {
+      "label": "Sandbox settings for the trial (Mac, and WSL2 on Windows)",
+      "text": "\"sandbox\": {\n  \"enabled\": true,\n  \"allowUnsandboxedCommands\": false,\n  \"failIfUnavailable\": true,\n  \"filesystem\": { \"allowWrite\": [\"<your worktrees dir>\"] },\n  \"network\": { \"allowedDomains\": [\"github.com\", \"registry.npmjs.org\"] }\n}\n\n# Probe it: ask Claude to run this. It must fail\n# (Operation not permitted on macOS, Read-only file system on WSL2).\ntouch ~/sandbox-probe"
+    },
+    {
+      "label": "Path-scoped UI rule (~/.claude/rules/ui.md)",
+      "text": "---\npaths:\n  - \"**/*.{tsx,jsx,css,html,vue,swift}\"\n---\nBefore any UI change: read docs/design/DESIGN.md and ~/.claude/ux/principles.md.\nSpacing comes from a relation, never a nearby number (ux/tokens.md).\nBuild to the lane's mockup in docs/design/mockups/. Run scripts/shoot and look before you hand off."
+    },
+    {
+      "label": "Starting prompt: reply-style edits chat",
+      "text": "Task for this chat: draft the reply-style edits for claude-settings. Steps on the roadmap: 'Fix the reply-style conflict' and 'Visual questions come with a picture of each option', plus the reference topic 'Reply style and questions'.\n\n1. Read the roadmap page in full first, as the project instructions say.\n2. Clone github.com/shivinate7/claude-settings. Read output-styles/shiv-stylisms.md, every rule anchor that starts with style-, and the decisions question-outcome-check, haiku-prompt-hooks and the fewest-words decision. Find the judge prompts that check questions and replies.\n3. Draft exact edits for five rules:\n   a. Plain words win over short when they clash.\n   b. Each option says in one plain line how it works, then what I gain and lose.\n   c. Options I can't tell apart mean fewer options, or a decision made and stated.\n   d. One decision per question.\n   e. A question about how something looks says so, and links a picture of each option.\n4. For each edit: show the before and after text, say which judge prompt must change so it doesn't refuse the new rule, and measure the word change per file.\n5. Walk me through the drafts before finalizing; this is a judgment task, so take the time.\n6. The deliverable is a brief a Claude Code session can apply after the cull ends. File it on the page in the 'Fix the reply-style conflict' step, and touch only that step and the visual-questions step. Re-read the page right before you file. Don't push to any repo."
+    }
+  ],
+  "order": 130,
+  "points": [
+    "These snippets are starting copies. Once one lands in a repo, the repo file is its home and this topic points at it. The cull rulings already have a home: decisions/cull-rules.md in claude-settings.",
+    "The two audit prompts work on any repo: run the first in each repo, then the second across a strong one and a weak one.",
+    "The cull rulings are the ones you sent on Oct 17, with the date, commit and numbers left as placeholders, so you can reuse them for each child repo's cull.",
+    "The screenshot commands, sandbox settings and path-scoped UI rule are starting points to test, not finished config."
+  ],
+  "summary": "Copy these instead of asking again.",
+  "title": "Reusable prompts and snippets"
+}

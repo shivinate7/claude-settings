@@ -1,0 +1,9 @@
+{
+  "note": "Done Oct 21. Landed in PRs #541 and #542 (the hook load batch): config_watch hashes first and exits before loading the guard; local_time no longer pulls in the guard family (new shared_names module); stall_watch exits at once on Windows; ci_wake got a pre-filter; the SessionEnd fetch runs at most once per 10 minutes per repo; verdict logs older than 7 days are pruned. The lane report was lost, so it closed on repo evidence. What was left moved: the Stop dispatcher and cached git reads to c19 (start fewer processes per tool call), the double question judge to c7 (fix the reply-style conflict).",
+  "order": 99,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Cut the load hooks add to every tool call",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "A q_max session's report (Oct 20) found a model call on every Edit and Write, two judges on each question, about 6 hook launches per Bash call, 9 Stop hooks per turn, and the guard family (14 modules, 9,926 lines) loaded on every prompt. This is the first concrete plan for hook code, the one number the cull never moved."
+}

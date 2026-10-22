@@ -1,0 +1,10 @@
+{
+  "ask": "",
+  "note": "Filed Oct 22 from your question; nothing on the page covered it. Which repos have no CI is unknown (I can reach only claude-settings; likely home, the ops-records repo). Which errors the sessions hit is not yet named. Interacts with c15: moving STE checks to CI removes them entirely from a repo with no CI.",
+  "order": 111.5,
+  "phase": "cleanup",
+  "status": "todo",
+  "title": "Sessions in repos with no CI still catch and fix their errors",
+  "updatedAt": "2026-10-22T16:30:00Z",
+  "why": "Your question, Oct 22: sessions in repos with no CI run into errors that need fixing. The rules assume CI: CI is the merge gate (roles-each-layer-proves-once), never merge failing CI, the red-CI drop-and-fix flow (c30), and c15 and c21 move checks from edit time into CI. In a repo without CI, each of those has nothing to read."
+}

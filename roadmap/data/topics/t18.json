@@ -1,0 +1,15 @@
+{
+  "order": 180,
+  "points": [
+    "Your rule, Oct 20: anything used in more than one place has one home, and everything else points at it. An exception starts from the shared piece and changes only what differs. The output looks the same; a fix to the home reaches every use, so nothing drifts or goes stale.",
+    "In code terms: a shared component or function with options (a variant or override), not a copy edited by hand. Programmers call the idea a single source of truth.",
+    "Design: tokens hold values (spacing, colour, radius); components hold shapes (a Button with size and tone options); a screen uses both. An odd button is a variant of Button, not a new button.",
+    "Tests: shared steps live in one helper or fixture; a test that needs a twist at step 5a calls the helper and overrides that one step.",
+    "Across repos: a shared skill, script or test is pinned to claude-settings, never vendored. The q_max map-skill copy drifted and failed PR 969 (Oct 20). That is the failure this rule prevents.",
+    "Where each layer lives (your ruling, Oct 20): claude-settings holds the ideas and shared tools, since it governs every repo. Each repo holds its concrete design in its own files, because the repos differ: home-app is Swift plus web, q_max is separate, banchi has its own look. The rule applies inside each repo too: one home per value, component or test step.",
+    "When a copy is right: the two things only look alike and will change for different reasons. Then the copy states that reason in one line.",
+    "Enforcement: the builder looks for the shared piece first; compliance-check reports copied code and vendored files (o4, o11)."
+  ],
+  "summary": "Your rule against copies, and how it maps onto code, design and tests.",
+  "title": "One home, then variants"
+}

@@ -1,0 +1,8 @@
+{
+  "order": 320,
+  "phase": "rollout",
+  "status": "todo",
+  "title": "q_max: merge its three token layers",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "--aq-*, --f2-* and Tailwind drift apart. One layer stops it."
+}

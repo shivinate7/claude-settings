@@ -1,0 +1,9 @@
+{
+  "ask": "One pass over the six skills in claude-settings (checked at 73ed71a: ci-hygiene, compliance-check, design-review, fresh-prose, impeccable, plain-english-map). Per skill: does it still match the rules and decisions after the cleanup phase, is it still used, and does it start processes or load files it never uses (c26, watching costs less than what it watches). Fix, merge or cull each. impeccable is vendored: update it to the newest upstream version that passes its checks, per verification-newest-that-passes. compliance-check is covered by o4 (rework compliance-check); do it there, not twice.",
+  "note": "Filed Oct 21 from your question. What 'update' means is my reading (match current rules, and refresh the vendored one); say if you meant something else. Runs after the cleanup phase, since that phase is still changing the rules the skills follow.",
+  "order": 135,
+  "phase": "organize",
+  "status": "todo",
+  "title": "Bring every skill up to date with the current rules",
+  "why": "Your note, Oct 21: the plan should cover updating all the skills eventually. Before this, no step did; only compliance-check had one (o4) and o11 covered shared skills being pinned, not copied."
+}

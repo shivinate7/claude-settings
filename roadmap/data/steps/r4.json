@@ -1,0 +1,8 @@
+{
+  "order": 340,
+  "phase": "rollout",
+  "status": "todo",
+  "title": "q_max: merge its six design homes into one DESIGN.md",
+  "updatedAt": "2026-10-17T17:30:00Z",
+  "why": "design/, specs/, docs/design.md, docs/rules/, src/styles.md and brand/ all hold design truth today. One home is how its agents find the look."
+}

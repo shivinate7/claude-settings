@@ -1,0 +1,37 @@
+{
+  "order": 50,
+  "points": [
+    "You run in bypass mode, so guards and deny rules are your only safety layer. Deny rules still block in every mode, bypass included.",
+    "Deny rules match command text, so they miss /bin/rm or bash -c. Read and Edit deny rules also cover cat, head, tail, sed, tee and > or < redirects.",
+    "The Bash sandbox is enforced by the OS however a command is spelled: writes only to the working directory, temp and added directories; network only to allowed hosts. Set allowUnsandboxedCommands to false, or a failed command retries unsandboxed with no prompt in bypass mode. macOS, Linux and WSL2 only: on native Windows, Claude Code runs commands unsandboxed.",
+    "Sandbox plus deny rules can take: destructive-delete, the outside-the-repo part of rm-var-unguarded, env-file and frozen-path. The guard keeps the state- and content-based rules: merge-checks, records-page, draft-pr, cite-by-id, shared-tree, worktree-home, ask-alone, subagent-model-cap, impeccable-review-only and most git rules. Expect 4 or 5 of 22 rule families to move.",
+    "Trust a guard by its test, not its code. A rule's prose leaves only when its row names a test, the test's case name states the ruling, and a mutant that breaks the guard is killed. Five of six guard rows named no test on Oct 17; c6 (proving tests for five guard rules) added them.",
+    "Freeze new guard work except after a real incident, as your building-guard-needs-incident rule says.",
+    "Experience counts too: you've seen fewer false stops this week. Track refusals and asks per session in guard.log to show it.",
+    "Windows matters (found Oct 17): your guard carries heavy PowerShell support, so you run native Windows sessions, and the sandbox does nothing there. Guard code can retire only for sessions that run inside the sandbox. To retire it everywhere, your Windows sessions would have to move into WSL2. Until then, the sandbox adds protection on Mac but shrinks nothing.",
+    "Also set failIfUnavailable, so a session refuses to run commands at all when the sandbox can't start, instead of quietly running them unsandboxed.",
+    "How much of claude-settings is about Windows (measured Oct 17, main 5921750): 8 PowerShell or .cmd files, 3,248 lines; 1,206 lines in hook Python mention PowerShell, WSL, Windows, schtasks or the registry; 61 of 126 decision files and 48 of 364 debt files mention Windows, WSL or PowerShell. Mentions, not all Windows-only, but a large share of the system exists to make two platforms behave.",
+    "Desktop app WSL sessions (docs): the Code tab can run a session inside WSL 2, with git, worktrees, parallel sessions and PR status working. Not yet available there: connectors and plugins, the integrated terminal, session forking, the file browser pane and @ file suggestions. Your mods (board, decision-watch, plain-diff and others) are plugins, so they wouldn't load in a desktop WSL session. Claude Code run from a terminal inside WSL is unaffected. On an organization-managed device, WSL sessions may be blocked by the admin.",
+    "Decided Oct 17: Windows stays native. Losing your plugins in desktop WSL sessions is a dealbreaker. So the sandbox protects Mac sessions only, and the delete, env-file and frozen-path guard code stays, because native Windows has no sandbox. Revisit if desktop WSL sessions start loading plugins."
+  ],
+  "sources": [
+    {
+      "label": "Permission modes",
+      "url": "https://code.claude.com/docs/en/permission-modes.md"
+    },
+    {
+      "label": "Permission rules",
+      "url": "https://code.claude.com/docs/en/permissions.md"
+    },
+    {
+      "label": "Sandboxing",
+      "url": "https://code.claude.com/docs/en/sandboxing.md"
+    },
+    {
+      "label": "Desktop in WSL",
+      "url": "https://code.claude.com/docs/en/desktop-wsl.md"
+    }
+  ],
+  "summary": "What the built-ins can take over, and how to trust a guard.",
+  "title": "Guards, sandbox and bypass mode"
+}

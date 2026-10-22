@@ -1,0 +1,122 @@
+{
+  "design": {
+    "asOf": "Measured Oct 22: claude-settings 11f5e4f, banchi 6c3a171, q_max b47bd00, home-app 956e1ab, home 3fbb3d1",
+    "foot": "banchi's 88 design checks are from the Oct 17 audit.",
+    "metrics": [
+      {
+        "label": "Repos with a screenshot command",
+        "rule": "Only banchi (make screenshot, scripts/screenshot.sh); none in q_max, home-app, home or claude-settings (d6)",
+        "target": "5 of 5",
+        "value": "1 of 5"
+      },
+      {
+        "label": "Design agents in place",
+        "rule": "Designer (d1) and design reviewer (d2); agents/ has neither",
+        "target": "2 of 2",
+        "value": "0 of 2"
+      },
+      {
+        "label": "Repos with one DESIGN.md",
+        "rule": "banchi has docs/DESIGN.md; q_max has docs/design.md plus specs; home-app has none. home has no UI",
+        "target": "4 of 4",
+        "value": "1 of 4"
+      },
+      {
+        "label": "banchi Playwright design checks",
+        "rule": "Oct 17 audit. The strongest repo's safety net; keep it from shrinking",
+        "value": 88
+      }
+    ]
+  },
+  "later": {
+    "asOf": "Measured Oct 22 at claude-settings 11f5e4f",
+    "foot": "Later steps start once the core is steady.",
+    "metrics": [
+      {
+        "label": "Agents defined",
+        "rule": "agents/ in claude-settings. An agent pruner, gated on evals (l4)",
+        "value": 7
+      },
+      {
+        "label": "Skills in claude-settings",
+        "rule": "skills/; one is the vendored impeccable",
+        "value": 6
+      },
+      {
+        "label": "Plugins and mods enabled",
+        "rule": "enabledPlugins in settings.json; 5 are your own mods",
+        "value": 7
+      },
+      {
+        "label": "Guard refusals per session",
+        "rule": "Track guard refusals per session (l1)",
+        "value": "not tracked"
+      }
+    ]
+  },
+  "organize": {
+    "asOf": "Measured Oct 22: claude-settings 11f5e4f, banchi 6c3a171, q_max b47bd00, home-app 956e1ab, home 3fbb3d1",
+    "foot": "All five repos measured.",
+    "metrics": [
+      {
+        "label": "Repos on the shared layout",
+        "rule": "One layout for every repo (o2): claude-settings first, then each child in Roll out",
+        "target": "5 of 5",
+        "value": "0 of 5"
+      },
+      {
+        "label": "Biggest CLAUDE.md, lines",
+        "rule": "banchi 396, q_max 182, claude-settings 106, home-app 15, home 9",
+        "target": "200 or fewer",
+        "value": 396
+      },
+      {
+        "label": "Remote branches, claude-settings",
+        "rule": "Oct 19: 240, Oct 20: 26, Oct 21: 31. Just needs to stay low",
+        "series": [
+          240,
+          26,
+          31,
+          36
+        ],
+        "value": 36
+      },
+      {
+        "label": "Repos with a living roadmap page",
+        "rule": "Give every repo a living roadmap page (o8)",
+        "target": "5 of 5",
+        "value": "0 of 5"
+      }
+    ]
+  },
+  "rollout": {
+    "asOf": "Measured Oct 22: q_max b47bd00, home-app 956e1ab",
+    "foot": "Counting method is in each tile, so later counts compare like with like.",
+    "metrics": [
+      {
+        "label": "q_max token layers",
+        "rule": "--aq-* (174 names), --f2-* (243 names) and Tailwind (src/index.css) (r2)",
+        "target": "1",
+        "value": 3
+      },
+      {
+        "label": "q_max design homes",
+        "rule": "Oct 17 audit count, not re-counted. Today: docs/design.md, design/, specs/redesign.md, specs/design-audit.md, and token decisions d-194 and d-196 (r4)",
+        "target": "1",
+        "value": 6
+      },
+      {
+        "label": "home-app padding or spacing literals",
+        "rule": "Views.swift (2,254 lines): .padding(...) or spacing: calls with a number. The Oct 17 audit counted about 95 another way (r3)",
+        "target": "0",
+        "value": 166
+      },
+      {
+        "label": "home-app web border radii",
+        "rule": "Distinct border-radius values in web CSS, HTML and JS. The Oct 17 audit counted 12, likely CSS only (r3)",
+        "target": "a few tokens",
+        "value": 38
+      }
+    ]
+  }
+}

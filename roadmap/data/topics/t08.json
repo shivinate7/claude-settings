@@ -1,0 +1,35 @@
+{
+  "order": 80,
+  "points": [
+    "The test: can every agent find the right file in any repo without being told where it is?",
+    "Three questions decide where a file goes: is it current truth or history? does it die when the work ships? does every repo have one?",
+    "Layout: CLAUDE.md under 200 lines with AGENTS.md as a symlink; .claude/rules/; tokens/tokens.json; docs/design (DESIGN.md, mockups, reference), docs/decisions, docs/debts with notes.md, docs/plans; scripts/shoot; shots/ gitignored.",
+    "Path-scoped rules (paths: frontmatter in .claude/rules/) load only when Claude touches matching files; ~/.claude/rules/ applies in every project. Your installer doesn't land a rules folder yet.",
+    "Tokens in the W3C Design Tokens format (stable since 2025.10), generated into CSS and Swift with Style Dictionary or Terrazzo.",
+    "No history in the tree: delete superseded decisions, since git keeps them.",
+    "Don't restructure code into apps/ and packages/: one app with a backend gains little from a monorepo layout.",
+    "q_max keeps design truth in six places (design/, specs/, docs/design.md, docs/rules/, src/styles.md, brand/). Merging them into docs/design/DESIGN.md is a copy-delete, which fits the cull's own rule.",
+    "Folders sort volume but don't reduce it: q_max's 759 debts and 560 decisions stay unreadable until they're culled.",
+    "One home, then variants (o11, topic t18): claude-settings holds the shared ideas and shared tools (scripts/shoot, skills); each repo holds its own concrete design (tokens, components) in one home and points at the ideas instead of restating them."
+  ],
+  "sources": [
+    {
+      "label": "CLAUDE.md and rules",
+      "url": "https://code.claude.com/docs/en/memory.md"
+    },
+    {
+      "label": "W3C Design Tokens stable",
+      "url": "https://www.w3.org/community/design-tokens/2025/10/28/design-tokens-specification-reaches-first-stable-version/"
+    },
+    {
+      "label": "Monorepo pitfalls",
+      "url": "https://www.pkgpulse.com/guides/javascript-monorepos-2026-best-practices-pitfalls"
+    },
+    {
+      "label": "Measuring AGENTS.md",
+      "url": "https://aaif.io/blog/measuring-agents-md-what-five-runs-show-that-one-doesn-t"
+    }
+  ],
+  "summary": "One layout for every repo, checked against current practice.",
+  "title": "Folder layout and conventions"
+}

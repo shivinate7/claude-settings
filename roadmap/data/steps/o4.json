@@ -1,0 +1,9 @@
+{
+  "ask": "Draft the compliance-check rework with layout and design groups.",
+  "order": 130,
+  "phase": "organize",
+  "status": "todo",
+  "title": "Rework compliance-check",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Add layout and design groups, so it can see folder shape and screen readiness, not only CLAUDE.md rules."
+}

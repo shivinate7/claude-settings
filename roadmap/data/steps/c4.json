@@ -1,0 +1,9 @@
+{
+  "note": "Done Oct 20: 28 remote heads left in claude-settings, main included (244 on Oct 17). Merges now delete the lane branches a batch absorbed (decision merge-deletes-batch-lanes, merge/merge.py cut_branch). Left over: branch batch-map, deleted in the next batch. q_max (1,017 heads) belongs to Roll out.",
+  "order": 40,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Delete merged remote branches",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "188 of 244 remote branches in claude-settings are already merged. q_max has 1,017 remote heads. Then have each merge cut the lane branches its batch absorbed."
+}

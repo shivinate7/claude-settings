@@ -1,0 +1,15 @@
+{
+  "order": 40,
+  "points": [
+    "Add a designer (Opus, writes HTML mockups, write scope limited to design mockups) and a design-reviewer (Opus, since cost is no limit and visual judgment is where the strongest model pays off; it opens every screenshot). Skip a ux-builder: building to a mockup is ordinary builder work.",
+    "Route with one test: does this lane touch a screen? If yes, the designer runs before the build and design-review after it. Nothing else changes.",
+    "Keep builders, reviewers and test authors separate. A builder can't fairly review itself, and builders-cannot-edit-tests stops weakened tests. Solo mode is the right valve for small changes.",
+    "Haiku at xhigh is fine for round-1 code review, where tests and CI catch what it misses. Not for screens: nothing downstream checks taste. To prove it, rerun a few past design-review screenshots through Haiku and Sonnet and compare.",
+    "Don't add more agent kinds now; process load is the problem. Collections like wshobson/agents and VoltAgent are reading material for prompts, not installs. The roundup found no design reviewer agents in them.",
+    "An agent that improves agents tends to add rules. Make it a pruner, and change an agent only when an eval shows the new version is better (skill-creator benchmarks, claude plugin eval).",
+    "Token cost: frontend-design is about 1,500 words and impeccable's polish, layout and animate references about 2,500. Screenshots cost more (pages x sizes x themes x reviewers), so run design-review only on screen diffs, at the sizes each repo ships.",
+    "With cost no limit, the Sonnet ceiling still makes sense for speed on routine work. Spend Opus where judgment is the point: planning, designing, and judging screens."
+  ],
+  "summary": "Which agents to add, which not, and why.",
+  "title": "Roles and agents"
+}

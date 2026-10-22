@@ -1,0 +1,10 @@
+{
+  "ask": "Janitor sweep speed lane: time a q_max preview split by check, then batch the git calls (one for-each-ref and one merged list for all branches; cherry only for what the batch cannot prove), drop the guard import, and add a fast worktree-only mode that reaps only branches already in main. A worktree it cannot prove safe is kept. Report before and after times.",
+  "note": "Checked in the repo at 84d4076: janitor/sweep.py (3,189 lines) and session_end_sweep.py both import the whole guard family at start. Each worktree is proven safe by up to three checks in turn (ancestor, cherry-empty, remote-contains), each a separate git call, and a git call on Windows costs a process start. The remote-head check is already one batched rev-list --stdin call. Plan: 1. Time a q_max preview first, split by check. 2. Batch: one for-each-ref and one merged-into-main list for all branches, instead of calls per worktree; run cherry only for branches the batch could not prove. 3. Skip the guard import (move the few helpers it needs into a small module, same fix as c13 lanes 3 and 6). 4. A fast mode that only reaps worktrees whose branch is already in main, and leaves the rest for a full run. Less checking must still fail toward keeping a worktree, never toward deleting work. Stopgap given Oct 20: close sessions, then run git worktree remove without --force on each worktree; git refuses dirty or locked ones, and commits stay on their branches. Not measured yet: the sweep time itself.",
+  "order": 121,
+  "phase": "cleanup",
+  "status": "todo",
+  "title": "Make the janitor sweep fast on big repos",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Your ask, Oct 20: the sweep is very slow on Windows. q_max has about 178 registered worktrees and about 1,000 remote heads. You want it faster, by batching checks or checking less."
+}

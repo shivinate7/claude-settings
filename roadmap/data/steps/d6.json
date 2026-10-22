@@ -1,0 +1,9 @@
+{
+  "note": "The script is the check; the browser (the desktop app's pane or Chrome) is for exploring flows, menus and sheets. The desktop pane is allowed in your settings, but cloud sessions don't have it. Commands are in the reference topic 'Reusable prompts and snippets'. Oct 17 order ruling: build the shared script and its template in claude-settings here; adding it to each child repo and fixing banchi's 1280 viewport move to Roll out. One-home fix (o11, Oct 20): no copy of the script per repo. One shared scripts/shoot lives in claude-settings and installs like the hooks; each repo keeps only a small config (its URL, sizes, themes, simulator). Roll out then adds a config, not a script.",
+  "order": 260,
+  "phase": "design",
+  "status": "todo",
+  "title": "A screenshot command in every repo",
+  "updatedAt": "2026-10-20T19:05:00Z",
+  "why": "scripts/shoot with the Playwright CLI and simctl, so agents can look at what they built. Fix banchi's 1280 viewport."
+}

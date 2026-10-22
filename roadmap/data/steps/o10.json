@@ -1,0 +1,10 @@
+{
+  "ask": "Design the session questions page: what the session publishes, how I answer, and how answers get back.",
+  "note": "Build the 'Copy answers' path first: it works on Max and Enterprise alike. Add comments sent to Claude for sessions signed in to your Enterprise account, where a running session replies on its own (needs in-organization sharing, and artifacts enabled by your Enterprise owner). A session that runs on the API key can't publish artifacts at all; they need a claude.ai sign-in.",
+  "order": 170,
+  "phase": "organize",
+  "status": "todo",
+  "title": "A page per session for questions waiting on you",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Two levels: the repo roadmap is lasting, a session page is live. Each busy session publishes its plan (done, now, next) and its open questions, each with Goal, Problem, and options with gain and loss. You answer on the page instead of in the terminal."
+}

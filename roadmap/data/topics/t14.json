@@ -1,0 +1,31 @@
+{
+  "order": 140,
+  "points": [
+    "Lane: one piece of work, done by one builder on its own branch and folder.",
+    "Batch, or integration branch: several finished lanes merged together into one PR, so CI runs once.",
+    "Debt: a known gap, written down so it gets fixed. Note: a gap unlikely to matter, kept as one line.",
+    "Decision record: a file holding one ruling you made, and its reason.",
+    "Guard: a hook that checks each command or edit before it runs, and blocks it or asks you.",
+    "Gate or lint: a check that runs on files or in CI and fails when a rule is broken.",
+    "Worktree: a second copy of a repo in its own folder, so parallel agents don't collide.",
+    "Janitor or sweep: the script that removes finished worktrees and branches.",
+    "Design token: a named value such as --space-3 or --accent, used instead of a raw number. (A model token is different: a chunk of text, which is how usage is counted.)",
+    "Path-scoped rule: an instruction file that loads only when Claude touches matching files.",
+    "Sandbox: a fence the operating system puts around shell commands: which files and websites they can reach.",
+    "Deny rule: a settings line that blocks a command or file pattern in every permission mode.",
+    "Bypass mode: no permission prompts at all; only deny rules, hooks and the sandbox still stop anything.",
+    "MCP server or connector: a plug-in that gives Claude tools for an outside service, such as GitHub or a browser.",
+    "Mutation test: breaking a guard on purpose to prove its test notices.",
+    "Mockup: a picture of a screen, made before building it.",
+    "Artifact: a hosted page Claude publishes, like this roadmap.",
+    "Compaction: when a long session's history is summarized to fit; early details can fade.",
+    "Handoff: the file a session writes so its work survives compaction or a restart.",
+    "Dispatcher: one hook process that runs several checks in turn, instead of one process per check.",
+    "Exec form: a hook started directly from its command and arguments, with no shell in between.",
+    "'if' filter: a pattern on a hook, such as Edit(*.md), that Claude Code checks before starting the hook at all.",
+    "Http hook: a hook that posts to a small local server instead of starting a process.",
+    "claude -p: Claude Code run as a one-shot command (p for print): one prompt in, one answer out, then it exits. Hooks use it to ask a model in the background, and each one is a whole separate Claude Code process."
+  ],
+  "summary": "The terms this plan uses, in everyday words.",
+  "title": "Plain-words glossary"
+}

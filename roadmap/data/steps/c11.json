@@ -1,0 +1,9 @@
+{
+  "note": "Done Oct 19: the sentence 'A check that enforces a rule in this file needs no other incident.' is gone from CLAUDE.md on main (checked at 960cc63, after #515 and #516). Decided 10:42 am, option A. Measured basis: of 99 rule rows, 6 are guard rows hanging off CLAUDE.md rules, none citing an incident; guard code names at least 37 rules. The bigger lever stays reviewer variant hunting.",
+  "order": 96,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Close the no-incident exception in building-guard-needs-incident",
+  "updatedAt": "2026-10-19T18:55:00Z",
+  "why": "The rule says a new guard needs a named incident or a measured risk, then adds: 'A check that enforces a rule in this file needs no other incident.' So any CLAUDE.md rule can get a guard with no incident, and the freeze (c10) has a hole."
+}

@@ -1,0 +1,10 @@
+{
+  "ask": "Draft the visual-question rule: when a question counts as visual, what picture each option needs, and where the session publishes it.",
+  "note": "From a home-app question on Oct 17 (TV keyboard: do the arrows hide while typing). The prose rule goes in with the reply-style edits; the pictures come from the designer step (d1), and session pages (o10) are where they'd sit. AskUserQuestion has a per-option preview field; whether it can show a real picture in your terminal and desktop app is unknown (not checked), so plan on a linked artifact.",
+  "order": 216,
+  "phase": "design",
+  "status": "todo",
+  "title": "Visual questions come with a picture of each option",
+  "updatedAt": "2026-10-21T17:30:00Z",
+  "why": "Agreed Oct 17. When a session asks how something should look, words like 'the keyboard has room' can't be judged. You answer these with 'I want a visual comparison' every time, so the session should bring one first: a mockup of each option side by side, published as an artifact (or a screenshot of each build), linked from the question."
+}

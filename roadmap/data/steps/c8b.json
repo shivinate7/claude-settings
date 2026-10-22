@@ -1,0 +1,10 @@
+{
+  "ask": "Desktop WSL sessions load plugins now. Is moving Windows to WSL2 worth it, and what could we cut?",
+  "note": "Decided Oct 17: Windows stays native. Desktop app WSL sessions don't load plugins, and losing your mods is a dealbreaker. Revisit only if desktop WSL sessions start loading plugins. Rechecked Oct 20 (code.claude.com/docs/en/desktop-wsl): still not available in WSL sessions: the integrated terminal, connectors and plugins, session forking, the file browser pane and @ file suggestions. No trial lane is needed until that changes.",
+  "order": 85,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Decide where Windows sessions run: native or WSL2",
+  "updatedAt": "2026-10-20T18:18:00Z",
+  "why": "On WSL2, Windows behaves like the Mac: the same shell, the same sandbox, one set of rules. Much of claude-settings exists to make native Windows behave (3,248 lines of PowerShell and .cmd; 61 of 126 decisions mention Windows, WSL or PowerShell). Moving opens a big cull. The cost: desktop app WSL sessions don't load plugins yet, so you'd run Claude Code from a WSL terminal, and repos move into the Linux filesystem."
+}
