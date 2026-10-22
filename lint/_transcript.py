@@ -6,23 +6,15 @@ copy.
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
 and its `content` blocks. last_reply returns the text of the last assistant reply.
 
-format_finding turns an STE-lint finding's `message` into text for a person or the model to read.
-That text is attacker-reachable: ste_lint.py's STE003, STE007, STE008, STE009, STE011, STE013,
-STE015 and STE017 rules build a finding's message with %r around a substring matched out of the
-file under lint. `safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe`
-gives a tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
+`safe_finding_text` makes a finding's text fit to print in a line a person or the model reads.
+That text is attacker-reachable: a value matched out of the file under lint can sit inside a
+message. `safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe` gives a
+tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
 approval. It is copied, not imported, so this module does not depend on hooks/guard.py.
 """
 import json
 import os
 import re
-import subprocess
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-try:
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
-    _nowindow = subprocess
 
 FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 FINDING_MAX = 300
@@ -205,15 +197,6 @@ def last_human_epoch(path):
     return None
 
 
-def _git(cwd, *args):
-    try:
-        run = _nowindow.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
-                            timeout=10)
-    except Exception:
-        return None
-    return run.stdout if run.returncode == 0 else None
-
-
 def head_moved_since(cwd, base):
     """True when HEAD took a commit (or any move) after `base`, False when not, None if unknown.
 
@@ -246,41 +229,3 @@ def head_moved_since(cwd, base):
         return os.path.getmtime(reflog) >= base - 1
     except OSError:
         return None
-
-
-def landed_work(path, cwd):
-    """The early exit for a Stop hook that scans dirty files: False only when none is newer.
-
-    False means the last human message is known, and since it no file under `cwd` is dirty
-    in the work tree with a newer mtime (a deleted one counts as newer). Any read that cannot
-    run, a missing timestamp, no work tree, a stat error, answers True, so the hook runs as it
-    did before. A commit alone is not a signal: a hook that scans only dirty files cannot get
-    a target from one. A hook whose fire has another cause (a clock, a baseline, a PR merge)
-    adds its own check beside this call.
-    """
-    base = last_human_epoch(path)
-    if base is None or not cwd or not os.path.isdir(cwd):
-        return True
-    try:
-        status = _git(cwd, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".")
-        if status is None:
-            return True
-        fields = status.split("\0")
-        i = 0
-        while i < len(fields):
-            entry = fields[i]
-            i += 1
-            if not entry:
-                continue
-            if entry[0] in "RC":
-                i += 1  # the rename/copy source path, not a target
-            # A deleted file has no mtime: getmtime raises, and the except below answers True.
-            if os.path.getmtime(os.path.join(cwd, *entry[3:].split("/"))) > base:
-                return True
-        return False
-    except Exception:
-        return True
-
-
-def format_finding(f):
-    return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))

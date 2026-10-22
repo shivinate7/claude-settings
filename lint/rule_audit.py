@@ -95,7 +95,6 @@ WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 # Where a rule id sits in each call that writes a guard.log line (0-based argument index).
 GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}
-GATE_SOURCES = ("ste_gate.py", "_transcript.py")  # under lint/: they write `STE-<word>` ids
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 
 # FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
@@ -401,14 +400,10 @@ def guard_rule_names(text: str, path: str = "<source>"):
 def emitted_rule_ids(root: str = ROOT) -> set:
     """Every rule id the guard and the gates can write to guard.log: the one home for that list.
     Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `subagent-model-cap`
-    reverts). Gate ids are every ste_lint.RULES code, plus the `STE-<word>` ids ste_gate.py and
-    _transcript.py log when a check could not run."""
+    reverts). Gate ids are every ste_lint.RULES code."""
     sys.path.insert(0, os.path.join(root, "lint"))  # `python -I` leaves the script folder off the path
     import ste_lint
     ids = set(ste_lint.RULES)
-    for name in GATE_SOURCES:
-        ids |= {c for c in _string_constants(ast.parse(read(os.path.join(root, "lint", name))))
-                if re.fullmatch(r"STE-[a-z]+", c)}
     config_watch = os.path.join(root, "hooks", "config_watch.py")
     for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root))
