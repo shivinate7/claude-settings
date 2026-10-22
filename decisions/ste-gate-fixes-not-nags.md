@@ -1,26 +1,21 @@
-# The STE gate fixes what it can and denies the rest
+# No STE hook runs on a write; CI carries the lint
 
 ## The ruling
 
-The gate fixes first. For a Markdown write, it rewrites the fixable STE errors and returns the fixed text
-through `updatedInput`. It denies only the errors that remain after the rewrite. The gate fixes and does
-not nag. Reason: a deny sends the writer back for another write.
+Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write gate (`ste_gate.py`) and no markdown
+sweep (`md_sweep.py`). Both scripts are deleted, not parked. A hook that rewrites or denies a write
+sends the writer back for another write, and it starts a process on every Write, Edit and MultiEdit.
 
-- Only STE011 bloat phrases are fixable (`plain-prose-lint`, which lists the rows with no fix).
-- Advisory findings (Latin abbreviations, contractions, nominalizations) never deny and are never
-  rewritten. The gate prints them as a non-blocking note, which a denied write does not show. The owner
-  accepts the note as a temporary nudge.
-- A UI file is never rewritten. A UI file with STE errors is denied. The UI suffixes are `.tsx`, `.jsx`,
-  `.html` and `.vue`.
-- The fixer runs in a child process. Its limit is 5 s (env `STE_FIXER_LIMIT_S`). Text over 262144 bytes
-  skips the fixer (env `STE_FIXER_MAX_BYTES`).
-- A fixer crash, a timeout, or oversize input falls back to plain lint. Plain lint denies the errors it
-  finds. The hook exits 0 on that path. The fixer adds no refusal of its own (`gate-hooks-fail-closed`).
-- Unsafe or ambiguous patterns stay unfixed. An unfixed error denies the write.
-- A fix changes words, never the line count. The gate reads stdin as UTF-8 bytes.
-- Each outcome writes one guard.log line (`lint/ste_gate.py` writes the format): `fixed`, `deny`, or
-  `noted` with rule STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not run).
-  A write with no such outcome, and a write with advisory findings only, writes no line.
+- CI's STE lint (`actions/ste-lint`) carries the lint. It fails the step on STE001, STE011 and STE013
+  on changed lines (`plain-prose-lint`).
+- The autofix stays a hand tool: `lint/ste_lint.py --fix` rewrites fixed STE011 bloat phrases in
+  Markdown. No hook calls it.
+- STE020 (label length) is dropped. STE021 (bad UI escape) folds away with it. The icon-and-label rule
+  and design review carry label length.
+- The real safety gates stay fail-closed: `guard.py`, `question_outcome.py` and `rm_prompt_answer.py`
+  (`gate-hooks-fail-closed`).
+
+Unmeasured: how often a writer now meets an STE error first in CI instead of at the write.
 
 Kind: process
-Home: lint/ste_gate.py
+Home: actions/ste-lint

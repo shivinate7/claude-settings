@@ -1,24 +1,17 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
-`hooks/decision_watch.py`'s config report section already imports `lint/report_gate.py`, which
-already imports `lint/ste_gate.py`. This module holds the one
-copy of these readers, and the four hooks import it.
+`lint/report_gate.py` and `hooks/decision_watch.py` import this module, so the readers have one
+copy.
 
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
-and its `content` blocks. paragraph_blocks / format_finding are the STE-lint-result helpers
-`lint/ste_gate.py` and `lint/md_sweep.py` both use.
+and its `content` blocks. last_reply returns the text of the last assistant reply.
 
-format_finding is also the one place both of those hooks turn a finding's `message` into text
-for a reason a person or the model reads: ste_gate.py's permissionDecisionReason, live on every
-Write, Edit and MultiEdit, and md_sweep.py's Stop block reason. That text is attacker-reachable:
-ste_lint.py's STE003, STE007, STE008, STE009, STE011, STE013, STE015 and STE017 rules build a
-finding's message with %r around a substring matched out of the file under lint, so a turn that
-copies untrusted content into a markdown file puts that content into the next finding.
-`safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe` gives a
-tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
-approval, and copied rather than imported: lint/ste_gate.py and lint/md_sweep.py do not
-otherwise depend on hooks/guard.py, and importing it here would give them that dependency
-for the first time.
+format_finding turns an STE-lint finding's `message` into text for a person or the model to read.
+That text is attacker-reachable: ste_lint.py's STE003, STE007, STE008, STE009, STE011, STE013,
+STE015 and STE017 rules build a finding's message with %r around a substring matched out of the
+file under lint. `safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe`
+gives a tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
+approval. It is copied, not imported, so this module does not depend on hooks/guard.py.
 """
 import json
 import os
@@ -99,9 +92,36 @@ def records_after_last_human(records):
     return records[last_human_idx + 1:]
 
 
+def last_reply(hook):
+    """The last assistant reply's text: the hook's own field, else the last text in the transcript."""
+    text = hook.get("last_assistant_message")
+    if text:
+        return text
+    path = hook.get("transcript_path")
+    if not path or not os.path.exists(path):
+        return ""
+    text = ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                    continue
+                parts = [b.get("text", "") for b in (rec.get("message") or {}).get("content", [])
+                         if isinstance(b, dict) and b.get("type") == "text"]
+                if parts:
+                    text = "\n".join(parts)
+    except Exception:
+        return ""
+    return text
+
+
 def parse_utc_timestamp(text):
     """Epoch seconds for a transcript `timestamp` (a trailing Z is read as UTC), or None."""
-    from datetime import datetime, timezone  # lazy: ste_gate runs on every Write
+    from datetime import datetime, timezone
     text = (text or "").strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
@@ -262,103 +282,5 @@ def landed_work(path, cwd):
         return True
 
 
-def paragraph_blocks(text):
-    """Return (start_line, end_line) 1-indexed ranges, one per run of non-blank lines.
-
-    A block is a paragraph: lines bounded by blank lines. A blank line is one that is empty
-    or holds only whitespace. This is the same unit ste_lint.py's own `segment_markdown`
-    flushes a paragraph at, which is why a multi-line STE001 sentence, reported at the line
-    it starts on, always lands inside the one block its later lines also belong to.
-    """
-    lines = text.split("\n")
-    blocks = []
-    start = None
-    for i, line in enumerate(lines, start=1):
-        if line.strip() == "":
-            if start is not None:
-                blocks.append((start, i - 1))
-                start = None
-        elif start is None:
-            start = i
-    if start is not None:
-        blocks.append((start, len(lines)))
-    return blocks
-
-
 def format_finding(f):
     return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
-
-
-def advisory_lines(findings):
-    """One line per advisory code: its first finding, then how many more of that code follow.
-    At most six lines, one per advisory rule, so no code hides behind a flood of another."""
-    first, extra = {}, {}
-    for f in findings:
-        code = f.get("code")
-        if code in first:
-            extra[code] = extra.get(code, 0) + 1
-        else:
-            first[code] = f
-    return [format_finding(f) + (" (%d more %s)" % (extra[c], c) if c in extra else "")
-            for c, f in first.items()]
-
-
-# ---------------------------------------------------------------- guard.log lines from the gates
-#
-# One home for the STE gate's and md_sweep's guard.log line. The line goes through
-# hooks/guard_core.py `record`, so its columns match every other guard line. The matched field is
-# the file's basename and a count: never a path, never file text. A log failure, a missing
-# guard_core, or a crash here never changes a gate's output or exit code
-# (decisions/gate-hooks-fail-closed.md): every step is inside a try, and a failed import turns
-# logging off.
-GUARD_LOG_RULE_MAX = 40
-GUARD_LOG_MATCHED_MAX = 80
-# Never in a log field: C0 and C1 controls, line and paragraph separators, bidi marks, overrides and
-# isolates, and a lone surrogate (it cannot be encoded, so one would lose the line and leave an
-# empty file behind). guard_core.session_log_field cleans the same way but keeps bidi marks and
-# cuts at 64, so it is not reused. Code points, so no hostile character sits in this source.
-_GUARD_LOG_NAME_BAD = re.compile("[" + "".join(
-    chr(lo) + "-" + chr(hi) for lo, hi in (
-        (0x00, 0x1F), (0x7F, 0x9F), (0x61C, 0x61C), (0x200E, 0x200F), (0x2028, 0x2029),
-        (0x202A, 0x202E), (0x2066, 0x2069), (0xD800, 0xDFFF))) + "]")
-
-
-def guard_logger(hook):
-    """Return log(tool, decision, rule, path, detail) for one hook call.
-
-    `rule` is a string, or the raw list of finding codes. The list is turned into the sorted
-    unique codes here, inside the try, each one through str(), so an odd code (an int, a list)
-    can never raise out of the gate path.
-
-    matched is `<basename> <detail>`, such as `notes.md fixed=2`. The basename is cleaned of
-    hostile characters, and the field is at most 80 characters: a long name is shortened from
-    its head and the detail survives. The
-    first call loads guard_core from the hooks/ folder beside lint/ and names the hook's session
-    once. A call that cannot log does nothing.
-    """
-    state = {}
-
-    def log(tool, decision, rule, path, detail):
-        try:
-            if "core" not in state:
-                state["core"] = None
-                import importlib.util
-                source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks",
-                                      "guard_core.py")
-                spec = importlib.util.spec_from_file_location("guard_core", source)
-                core = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(core)
-                core.set_log_session(hook.get("session_id"))
-                state["core"] = core
-            core = state["core"]
-            if core is not None:
-                if not isinstance(rule, str):
-                    rule = ",".join(sorted({str(code or "STE") for code in rule})) or "STE-wording"
-                name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
-                matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
-                           + detail)
-                core.record(tool, decision, core.log_cut(rule, GUARD_LOG_RULE_MAX), matched)
-        except Exception:
-            pass
-
-    return log

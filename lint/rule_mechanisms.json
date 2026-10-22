@@ -394,9 +394,8 @@
     },
     "output-write-in-ste": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "lint/ste_lint.py",
-        "test": "lint/test_gates.py::PromotedRuleTests.test_ste011_bloat_blocks"
+        "kind": "ci",
+        "ref": "STE lint"
       }
     },
     "output-start-with-point": {

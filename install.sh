@@ -7,7 +7,7 @@
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
 #   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
-#   ~/.claude/lint/*         -> STE linter + hook gate: local symlinks, cloud copies
+#   ~/.claude/lint/*         -> STE linter and report gate: local symlinks, cloud copies
 #   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks, cloud copies
 #   ~/.claude/skills/<name>  -> one whole-directory symlink per shipped skill, local; cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
@@ -377,7 +377,7 @@ land_guard_set() {
 }
 
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
-# agents/: one file per role (builder, reviewer). lint/: the STE linter and its hook gate.
+# agents/: one file per role (builder, reviewer). lint/: the STE linter and the report gate.
 # Local: per-file symlink. Cloud: copy.
 #
 # Local mode also prunes: after landing every file the source defines now, it removes a

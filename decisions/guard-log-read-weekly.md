@@ -13,7 +13,7 @@ The window is the days since the stamp, the stamp day through the day before tod
 - an `STE-unchecked` line: the lint could not run, so those writes are unknown.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
 
-The STE gate and the Stop sweep (`lint/md_sweep.py`) write their own lines through `guard_logger` in `lint/_transcript.py`: `fixed`, `deny`, and `noted` rows for `STE-fallback` and `STE-unchecked`. A write with no such outcome writes no line.
+The STE write gate and the markdown sweep wrote the `STE-fallback` and `STE-unchecked` lines. Both are removed (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`), so no new line of either kind is written. The two checks above read old rows only, and `hooks/daily_note.py` still holds them.
 
 Reason: the table is the outcome meter for the two owner concerns, prompts the owner did not need and agents refused with no allowed path. Judge a rule by its row here, not by its test count.
 
