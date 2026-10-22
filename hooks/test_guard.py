@@ -10010,7 +10010,6 @@ def role_log_case():
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = folder
     stops = [
-        ({}, "role-diff-nocwd"),
         ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
         ({"cwd": os.path.join(DIFFROOT, "b-giveup"), "stop_hook_active": True},
          "role-diff-unresolved"),

@@ -468,7 +468,7 @@
 - build-dirs-reopen-triggers: Reopen the build-folder reap on a hook_cancelled or timedOut:true end, a folder deleted outside the gates, a link followed, or trash names that nothing deletes. Decision: build-dirs-reaped-at-agent-end
 - plain-diff-untracked-files: The plain-diff mod diffs against HEAD or the empty tree. untracked files are not shown. Decision: plain-diff-mod-limits
 - impeccable-guard-limits: The impeccable-review-only guard allows 'audit then polish' in one call and does not read through the launchers pnpx, bun x, timeout N, cmd /c or powershell -Command. Decision: design-skills
-- builder-test-edit-pins-cut: the ruff --ignore and symlink false-alarm pins and the nocwd/main-checkout log stops now live only in guard code and tests. Decision: builders-cannot-edit-tests
+- builder-test-edit-pins-cut: the ruff --ignore and symlink false-alarm pins and the main-checkout log stop now lives only in guard code and tests. Decision: builders-cannot-edit-tests
 - ruling-home-false-alarm-pins: peer writes, reads and old-mtime Bash mentions never block ruling_home.py. the decision no longer says so. Decision: memory-is-never-a-rulings-only-home
 - waiter-monitor-failures-unmeasured: Unmeasured whether Monitor still errors. reopen on a counted rise of Monitor failures in agent reports, or a waiter count in the guard-log table that does not fall. Decision: agents-wait-with-monitor
 - waiter-subshell-bodies-unparsed: bash -c bodies and subshells such as (sleep 30) and $(sleep 30) are not parsed. the owner accepted this. Decision: agents-wait-with-monitor

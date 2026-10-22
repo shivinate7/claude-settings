@@ -353,7 +353,7 @@ def guard_logger(hook):
             core = state["core"]
             if core is not None:
                 if not isinstance(rule, str):
-                    rule = ",".join(sorted({str(code or "STE") for code in rule})) or "STE-wording"
+                    rule = ",".join(sorted({str(code or "STE") for code in rule}))
                 name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
                 matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
                            + detail)
