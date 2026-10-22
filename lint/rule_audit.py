@@ -93,7 +93,9 @@ MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
-GUARD_RULE_RE = re.compile(r'(?:refuse|record)\(\s*\w+\s*,\s*"[a-z-]+"\s*,\s*"([a-z-]+)"')
+# Where a rule id sits in each call that writes a guard.log line (0-based argument index).
+GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}
+GATE_SOURCES = ("ste_gate.py", "_transcript.py")  # under lint/: they write `STE-<word>` ids
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 
 # FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
@@ -355,8 +357,47 @@ def rule_text(root: str = ROOT) -> str:
     return "\n".join(read(os.path.join(root, p)) for p in RULE_FILES)
 
 
+def _string_constants(node) -> set:
+    return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+
+
 def guard_rule_names(text: str):
-    return set(GUARD_RULE_RE.findall(text))
+    """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
+    that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
+    record() (third argument) or ask_step() (first); the table in diff_rule(); and the
+    `code, why = {...}` role-scope table. A call that passes a variable names no id."""
+    ids = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            at = GUARD_RULE_ARG.get(name)
+            if at is not None and len(node.args) > at and isinstance(node.args[at], ast.Constant)                     and isinstance(node.args[at].value, str):
+                ids.add(node.args[at].value)
+        elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
+            for stmt in node.body:  # a docstring is a bare string statement: it names no id
+                if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
+                    ids |= _string_constants(stmt)
+        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple)                 and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]:
+            ids |= _string_constants(node.value)
+    return ids
+
+
+def emitted_rule_ids(root: str = ROOT) -> set:
+    """Every rule id the guard and the gates can write to guard.log: the one home for that list.
+    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `subagent-model-cap`
+    reverts). Gate ids are every ste_lint.RULES code, plus the `STE-<word>` ids ste_gate.py and
+    _transcript.py log when a check could not run."""
+    sys.path.insert(0, os.path.join(root, "lint"))  # `python -I` leaves the script folder off the path
+    import ste_lint
+    ids = set(ste_lint.RULES)
+    for name in GATE_SOURCES:
+        ids |= {c for c in _string_constants(ast.parse(read(os.path.join(root, "lint", name))))
+                if re.fullmatch(r"STE-[a-z]+", c)}
+    ids |= guard_rule_names(guard_text(root))
+    config_watch = os.path.join(root, "hooks", "config_watch.py")
+    if os.path.exists(config_watch):
+        ids |= guard_rule_names(read(config_watch))
+    return ids
 
 
 def ci_step_names(text: str):
