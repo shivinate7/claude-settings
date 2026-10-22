@@ -836,12 +836,12 @@ class StaleAgentLockTests(unittest.TestCase):
             time.tzset()
 
     def test_unreadable_process_start_is_unknown_not_stale(self):
-        real = guard._process_start_ms
-        sys.modules["guard_core"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+        real = sys.modules["git_reads"]._process_start_ms
+        sys.modules["git_reads"]._process_start_ms = lambda pid: sys.modules["git_reads"].PROCESS_START_UNREADABLE
         try:
             self.assertIsNone(sweep.stale_agent_lock_verdict(self.reasons["dead"]))
         finally:
-            sys.modules["guard_core"]._process_start_ms = real
+            sys.modules["git_reads"]._process_start_ms = real
 
     def test_unreadable_pushed_check_keeps(self):
         real = sweep.fully_pushed
@@ -1696,7 +1696,7 @@ class TombstoneTests(unittest.TestCase):
         self.assertIn("old-topic-2", branches)
         tip = run_vcs(root, "rev-parse", "old-topic-2").stdout.strip()
 
-        real_git = guard._git
+        real_git = sys.modules["git_reads"]._git
 
         def failing_git(where, *args):
             if args[:2] == ("branch", "-D"):
@@ -1705,11 +1705,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-restore-fail.jsonl")
         decision = {"name": "old-topic-2", "action": "reap", "reason": "ancestor"}
-        sys.modules["guard_core"]._git = failing_git
+        sys.modules["git_reads"]._git = failing_git
         try:
             sweep.reap_branch(root, "old-topic-2", decision, log_path)
         finally:
-            sys.modules["guard_core"]._git = real_git
+            sys.modules["git_reads"]._git = real_git
 
         self.assertIn("error", decision)
         self.assertIn("old-topic-2", sweep.list_local_branches(root))
@@ -1721,13 +1721,13 @@ class TombstoneTests(unittest.TestCase):
         self.assertTrue(any(e.get("branch") == "old-topic-2" for e in entries))
 
     def _reap_with_git_failing(self, name, failing_args, answer):
-        """Run reap_branch on an ancestor branch while guard._git answers `answer` for the
+        """Run reap_branch on an ancestor branch while git_reads._git answers `answer` for the
         call whose leading args are `failing_args`. Return (decision, log_path, root)."""
         root = os.path.join(ROOT, "tomb-gitfail-" + name)
         make_repo(root, {"f.txt": "x\n"})
         run_vcs(root, "checkout", "-q", "-b", name)
         run_vcs(root, "checkout", "-q", "main")
-        real_git = guard._git
+        real_git = sys.modules["git_reads"]._git
 
         def failing_git(where, *args):
             if args[:len(failing_args)] == failing_args:
@@ -1736,11 +1736,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-gitfail-%s.jsonl" % name)
         decision = {"name": name, "action": "reap", "reason": "ancestor"}
-        sys.modules["guard_core"]._git = failing_git
+        sys.modules["git_reads"]._git = failing_git
         try:
             sweep.reap_branch(root, name, decision, log_path)
         finally:
-            sys.modules["guard_core"]._git = real_git
+            sys.modules["git_reads"]._git = real_git
         return decision, log_path, root
 
     def test_a_failed_tombstone_write_stops_the_delete(self):
@@ -2072,13 +2072,13 @@ class WorktreePruneTests(unittest.TestCase):
     def test_a_failed_prune_leaves_the_registration_and_its_branch_kept(self):
         root, registration = self._stale("prune-fails")
         failed = subprocess.CompletedProcess([], 1, "", "fatal")
-        real = guard._git
-        sys.modules["guard_core"]._git = lambda where, *a: (failed if a == ("worktree", "prune")
+        real = sys.modules["git_reads"]._git
+        sys.modules["git_reads"]._git = lambda where, *a: (failed if a == ("worktree", "prune")
                                         else real(where, *a))
         try:
             result = sweep.sweep_repo(root, True, os.path.join(ROOT, "prune-fails.log"))
         finally:
-            sys.modules["guard_core"]._git = real
+            sys.modules["git_reads"]._git = real
         self.assertTrue(result["pruned"]["error"])
         self.assertTrue(os.path.isdir(registration))
         verdict = [b for b in result["branches"] if b["name"] == "lane-prune-fails"]
@@ -2089,13 +2089,13 @@ class WorktreePruneTests(unittest.TestCase):
         failed = subprocess.CompletedProcess([], 128, "", "fatal")
         for name, answer in (("none", None), ("failed", failed)):
             root, registration = self._stale("prune-blind-" + name)
-            real = guard._git
-            sys.modules["guard_core"]._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
+            real = sys.modules["git_reads"]._git
+            sys.modules["git_reads"]._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
                                             else real(where, *a))
             try:
                 found = sweep.prune_registrations(root, True)
             finally:
-                sys.modules["guard_core"]._git = real
+                sys.modules["git_reads"]._git = real
             self.assertIsNone(found["names"])
             self.assertTrue(os.path.isdir(registration))
 
@@ -2497,38 +2497,38 @@ class PreviewCacheTests(unittest.TestCase):
 
     def test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached(self):
         seen = []
-        real = sweep.guard._git
-        sys.modules["guard_core"]._git = lambda where, *args: seen.append((where, args))
+        real = sys.modules["git_reads"]._git
+        sys.modules["git_reads"]._git = lambda where, *args: seen.append((where, args))
         try:
             self.begin()
             for where in ("a", "a", "b"):
-                sweep.guard._git(where, "worktree", "list", "--porcelain")
-            sweep.guard._git("a", "status", "--porcelain")
-            sweep.guard._git("a", "status", "--porcelain")
+                sys.modules["git_reads"]._git(where, "worktree", "list", "--porcelain")
+            sys.modules["git_reads"]._git("a", "status", "--porcelain")
+            sys.modules["git_reads"]._git("a", "status", "--porcelain")
         finally:
             self.undo()
             self.undo = None
-            sys.modules["guard_core"]._git = real
+            sys.modules["git_reads"]._git = real
         self.assertEqual(len(seen), 4)
 
     def test_session_records_are_read_once_per_preview(self):
         seen = []
-        real = sweep.guard.session_records
-        sys.modules["guard_core"].session_records = lambda: seen.append(1) or []
+        real = sys.modules["git_reads"].session_records
+        sys.modules["git_reads"].session_records = lambda: seen.append(1) or []
         try:
             self.begin()
-            sweep.guard.session_records()
-            sweep.guard.session_records()
+            sys.modules["git_reads"].session_records()
+            sys.modules["git_reads"].session_records()
         finally:
             self.undo()
             self.undo = None
-            sys.modules["guard_core"].session_records = real
+            sys.modules["git_reads"].session_records = real
         self.assertEqual(len(seen), 1)
 
     def test_only_a_preview_caches_and_the_guard_reads_come_back_after(self):
         repo = os.path.join(ROOT, "cache-gate-repo")
         seen = []
-        real_git, real_records = sweep.guard._git, sweep.guard.session_records
+        real_git, real_records = sys.modules["git_reads"]._git, sys.modules["git_reads"].session_records
         with _Stub("_sweep_roots", lambda *a: seen.append(
                 (sweep._RUN is not None, sweep._POOL is not None)) or 0):
             for args in ([repo], ["--confirm", repo], ["--tier1", repo], ["--branches", repo]):
@@ -2537,8 +2537,8 @@ class PreviewCacheTests(unittest.TestCase):
         self.assertEqual(seen, [(True, on), (False, False), (False, False), (True, on)])
         self.assertIsNone(sweep._RUN)
         self.assertIsNone(sweep._POOL)
-        self.assertIs(sweep.guard._git, real_git)
-        self.assertIs(sweep.guard.session_records, real_records)
+        self.assertIs(sys.modules["git_reads"]._git, real_git)
+        self.assertIs(sys.modules["git_reads"].session_records, real_records)
 
 
 class ParallelPreviewTests(unittest.TestCase):
@@ -2883,7 +2883,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         commit = self.rev(repo, "HEAD")
         self.reap(repo, "lane-failed", commit, log)
         self.age_log(log, [91], now)
-        real = sys.modules["guard_core"]._git
+        real = sys.modules["git_reads"]._git
         failed = subprocess.CompletedProcess([], 1, "", "simulated failure")
 
         def failing_delete(where, *args):
@@ -2891,11 +2891,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return failed
             return real(where, *args)
 
-        sys.modules["guard_core"]._git = failing_delete
+        sys.modules["git_reads"]._git = failing_delete
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["guard_core"]._git = real
+            sys.modules["git_reads"]._git = real
 
         self.assertIn("error", decisions[0], "a failed drop must be reported")
         self.assertEqual(self.ref(repo, "lane-failed"), commit, "a failed drop must keep the ref")
@@ -2968,7 +2968,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         commit = self.rev(repo, "HEAD")
         self.reap(repo, "lane-read", commit, log)
         self.age_log(log, [91], now)
-        real = sys.modules["guard_core"]._git
+        real = sys.modules["git_reads"]._git
         failed = subprocess.CompletedProcess([], 128, "", "fatal: simulated")
 
         def failing_read(where, *args):
@@ -2976,11 +2976,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return failed
             return real(where, *args)
 
-        sys.modules["guard_core"]._git = failing_read
+        sys.modules["git_reads"]._git = failing_read
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["guard_core"]._git = real
+            sys.modules["git_reads"]._git = real
 
         self.assertIn("error", decisions[0], "a git failure (exit 128) must be reported")
         self.assertEqual(self.ref(repo, "lane-read"), commit,
@@ -3074,7 +3074,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.age_log(log, [91, 5], now)
         self.assertEqual(self.ref(repo, "lane-race"), young,
                          "fixture: the second reap must hold the ref")
-        real = sys.modules["guard_core"]._git
+        real = sys.modules["git_reads"]._git
         stale = subprocess.CompletedProcess([], 0, old + "\n", "")
 
         def read_says_old(where, *args):
@@ -3082,11 +3082,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return stale
             return real(where, *args)
 
-        sys.modules["guard_core"]._git = read_says_old
+        sys.modules["git_reads"]._git = read_says_old
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["guard_core"]._git = real
+            sys.modules["git_reads"]._git = real
 
         self.assertIn("error", decisions[0], "a refused delete must be reported")
         self.assertEqual(self.ref(repo, "lane-race"), young,
@@ -3192,7 +3192,7 @@ class AgentEndReapBatchTests(unittest.TestCase):
             mock.patch.object(sweep.subprocess, "run", self.fake_lsof),
             mock.patch.object(sweep, "list_all_pids", lambda: list(pids)),
             mock.patch.object(sweep, "_is_primary_checkout", lambda path: False),
-            mock.patch.object(sys.modules["guard_core"], "worktree_live_session", lambda path: False),
+            mock.patch.object(sys.modules["git_reads"], "worktree_live_session", lambda path: False),
             mock.patch.object(sweep, "is_orphan", lambda pid: True),
             mock.patch.object(sweep, "is_current_user_process",
                               lambda pid: pid != self.in_foreign),
@@ -5078,22 +5078,22 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.kept_and_logged(tree, ctl, out, "agent-h2")
 
     def test_h_keeps_a_tree_when_the_merged_read_fails_and_logs_it(self):
-        """Only the merged read (`git merge-base --is-ancestor HEAD <default branch>`) fails. The
-        older rulings keep the tree as unreadable, and the agent rule must not turn that keep
-        into a removal: it is clean, pushed, an agent tree, and idle 5 hours, so it goes in a
-        second run that can read."""
+        """Only the merged read (`git cherry <default branch> HEAD`, the read that decides a HEAD
+        the batched ancestry read does not hold) fails. The older rulings keep the tree as
+        unreadable, and the agent rule must not turn that keep into a removal: it is clean,
+        pushed, an agent tree, and idle 5 hours, so it goes in a second run that can read."""
         tree = self.agent("h5")
         sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
         fired = []
 
         def match(argv, cwd):
-            hit = "merge-base" in argv and (_aimed_at(tree, argv, cwd) or sha in argv or "wt-h5" in argv)
+            hit = "cherry" in argv and (_aimed_at(tree, argv, cwd) or sha in argv or "wt-h5" in argv)
             if hit:
                 fired.append(argv)
             return hit
 
         out = self.run_sweep(5, fail=match)
-        self.assertTrue(fired, "no `merge-base` read was made for the tree. Report: "
+        self.assertTrue(fired, "no `cherry` read was made for the tree. Report: "
                         + self.lines_about(out, "agent-h5"))
         self.assertKept(tree, out)
         self.assertLogged(out, "agent-h5")
@@ -5473,7 +5473,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
 
     def test_git_that_cannot_run_answers_none(self):
         root, _ = self._squash_lane("refs/remotes/origin/gone")
-        with mock.patch.object(sys.modules["guard_core"], "_git", return_value=None):
+        with mock.patch.object(sys.modules["git_reads"], "_git", return_value=None):
             self.assertIsNone(guard.resolve_default_base(root))
 
     def test_squash_merged_lane_is_removable_when_origin_head_dangles(self):
@@ -5501,22 +5501,22 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
 
     def test_unreadable_origin_head_verify_returns_none_not_local_main(self):
-        """A verify read that could not RUN (guard._git returns None) must not read as "does not
+        """A verify read that could not RUN (git_reads._git returns None) must not read as "does not
         exist". Only a git that answers "does not exist" (returncode != 0) may fall through to
         local main. An unreadable verify returns None, so the sweep keeps the lane."""
         root, _ = self._squash_lane("refs/remotes/origin/main")
         require(guard.resolve_default_base(root) == "origin/main",
                 "the unpatched base is not origin/main, so the case proves nothing")
-        real_git = guard._git
+        real_git = sys.modules["git_reads"]._git
         verify_calls = []
 
         def unreadable_verify(where, *args):
             if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
                 verify_calls.append(args)
-                return None  # guard._git could not run git
+                return None  # git_reads._git could not run git
             return real_git(where, *args)
 
-        with mock.patch.object(sys.modules["guard_core"], "_git", side_effect=unreadable_verify):
+        with mock.patch.object(sys.modules["git_reads"], "_git", side_effect=unreadable_verify):
             base = guard.resolve_default_base(root)
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)

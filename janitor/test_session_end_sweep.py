@@ -306,19 +306,20 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
 
     def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
         """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is a plain, hand-typed constant, so
-        nothing else stops `guard._git`'s real subprocess timeout drifting away from it. THIS
-        TEST reads the real number back out of `guard._git`'s own source and pins it against the
+        nothing else stops `git_reads._git`'s real subprocess timeout drifting away from it. THIS
+        TEST reads the real number back out of `git_reads._git`'s own source and pins it against the
         module's constant. The three arithmetic/settings.json arms around it never re-read
-        guard.py, so a bump of `guard._git`'s `timeout=` turns only this arm red."""
+        git_reads.py, so a bump of `git_reads._git`'s `timeout=` turns only this arm red."""
+        import importlib
         import inspect
         import re
-        source = inspect.getsource(guard._git)
+        source = inspect.getsource(importlib.import_module("git_reads")._git)
         match = re.search(r"timeout\s*=\s*(\d+)", source)
-        self.assertIsNotNone(match, "could not find guard._git's own timeout= in its source")
+        self.assertIsNotNone(match, "could not find git_reads._git's own timeout= in its source")
         real_timeout = float(match.group(1))
         self.assertEqual(
             real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS,
-            "guard._git's real subprocess timeout (%r) no longer matches "
+            "git_reads._git's real subprocess timeout (%r) no longer matches "
             "session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS (%r); update the hand-typed "
             "constant (and RESOLVE_ROOT_WORST_CASE_SECONDS / HOOK_WORST_CASE_SECONDS follow it)"
             % (real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS),

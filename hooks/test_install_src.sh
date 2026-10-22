@@ -2191,6 +2191,9 @@ make_guard_clone() {
   done
   # shared_names.py is the one home of the names the guard and the config watch share (not stamped).
   cp "$REPO_ROOT/hooks/shared_names.py" "$1/hooks/shared_names.py"
+  # git_reads.py is the one home of the git and session reads the guard and the janitor share (not
+  # stamped). guard_core.py imports it, so a guard fixture without it cannot load.
+  cp "$REPO_ROOT/hooks/git_reads.py" "$1/hooks/git_reads.py"
 }
 
 # The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
@@ -2505,7 +2508,8 @@ pinlive2() {
 # Owner ruling: hooks/shared_names.py is the one home of PROJECT_FROZEN_FILES and config_dir. The guard
 # imports it with no fallback copy, so a guard run that loads guard.d/<id>/ must find it there. The flat
 # copy is the other way in, and the config watch is a flat hook that must find the set's copy the way
-# guard.py finds the set.
+# guard.py finds the set. hooks/git_reads.py is the one home of the git and session reads the guard and
+# the janitor share. guard_core.py imports it the same way, so the set holds it too, equal to the flat copy.
 guardset_install() {
   install_set_setup
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/$1-bin"
@@ -2518,25 +2522,31 @@ guardset_install() {
 }
 
 guardset1() {
-  name="guardset1: the guard set landed by a copy-mode install holds shared_names.py"
+  name="guardset1: the guard set landed by a copy-mode install holds shared_names.py and git_reads.py"
   guardset_install guardset1
   if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
     bad "$name" "setup: install exit $rc, stamped id [$set_id]: $(tail -n 3 "$work/guardset1-run")"
   elif [ ! -f "$cfg/hooks/guard.d/$set_id/shared_names.py" ]; then
     bad "$name" "guard.d/$set_id holds [$(ls "$cfg/hooks/guard.d/$set_id" | tr '\n' ' ')], no shared_names.py"
+  elif [ ! -f "$cfg/hooks/guard.d/$set_id/git_reads.py" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$cfg/hooks/guard.d/$set_id" | tr '\n' ' ')], no git_reads.py"
+  elif [ ! -f "$cfg/hooks/git_reads.py" ]; then
+    bad "$name" "hooks holds no flat git_reads.py beside the set"
+  elif ! cmp -s "$cfg/hooks/guard.d/$set_id/git_reads.py" "$cfg/hooks/git_reads.py"; then
+    bad "$name" "the set's git_reads.py differs from the flat copy"
   else ok "$name"
   fi
   rm -rf "$h"
 }
 
 guardset2() {
-  name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py beside it"
+  name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py or git_reads.py beside it"
   guardset_install guardset2
   key="CLAUDE_CODE_""SUBAGENT_MODEL"
   proj="$h/proj"; mkdir -p "$proj/.claude"
   file="$proj/.claude/settings.local.json"
   printf '{"env": {"%s": "sonnet"}}\n' "$key" > "$file"
-  rm -f "$cfg/hooks/shared_names.py"
+  rm -f "$cfg/hooks/shared_names.py" "$cfg/hooks/git_reads.py"
   # Claude Code sends a native cwd. On Windows the MSYS form (/c/...) is no folder to native Python.
   wproj=$(cd "$proj" && pwd -W 2>/dev/null || pwd)
   payload=$(printf '{"tool_name": "Bash", "tool_input": {"command": "cp x .claude/settings.local.json"}, "cwd": "%s", "session_id": "c"}' "$wproj")

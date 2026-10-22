@@ -278,11 +278,13 @@ class ReaderPathTests(NoteCase):
         for source in (NOTE, os.path.join(ROOT, "hooks", "local_time.py"),
                        os.path.join(ROOT, "hooks", "guard_core.py"),
                        os.path.join(ROOT, "hooks", "shared_names.py"),
+                       os.path.join(ROOT, "hooks", "git_reads.py"),
                        os.path.join(ROOT, "lint", "guard_log_report.py")):
             self.require_file(source)
         layout = self.scratch("layout")
         for part in (("hooks", "daily_note.py"), ("hooks", "local_time.py"),
-                     ("hooks", "guard_core.py"), ("hooks", "shared_names.py"), ("lint", "guard_log_report.py")):
+                     ("hooks", "guard_core.py"), ("hooks", "shared_names.py"), ("hooks", "git_reads.py"),
+                     ("lint", "guard_log_report.py")):
             os.makedirs(os.path.join(layout, part[0]), exist_ok=True)
             source = os.path.join(ROOT, *part)
             shutil.copyfile(source, os.path.join(layout, *part))
