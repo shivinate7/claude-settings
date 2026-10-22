@@ -19,7 +19,8 @@ Pinned contract:
   guard.log line (YYYY-MM-DD) or "never". Every rule id the guard and the gates emit has a row,
   0 counts included. A rule id that only the log holds keeps its row. A line of any decision
   (override, reverted, crash too) counts as the rule having fired. A combined STE line
-  (`STE007,STE008`) credits each code. AllRulesTests checks the ids against the source.
+  (`STE007,STE008`) credits each code, and so does one the gate's logger cut at its field limit
+  (`STE001,STE003 [cut]`). AllRulesTests checks the ids against the source.
 - --days all reads the whole log. Any other word is refused. AllRulesTests checks it.
 
 Run with:
@@ -42,6 +43,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import guard_log_report as glr  # noqa: E402
+import rule_audit  # noqa: E402
 
 NOW = datetime(2026, 10, 11, 12, 0, 0)
 REVERTED = "2026-10-09T11:00:00\tBash\treverted\tshared-tree\tgit stash drop"
@@ -897,7 +899,12 @@ class EmittedRuleReaderTests(unittest.TestCase):
     """The reader that says which ids exist is itself pinned, so a red AllRulesTests names the report."""
 
     def test_it_reads_every_shape_that_writes_an_id_from_the_real_source(self):
-        ids = emitted_rules()
+        # Both readers: rule_audit's is the product, the one in this file is the oracle.
+        for who, ids in (("rule_audit", rule_audit.emitted_rule_ids()), ("oracle", emitted_rules())):
+            with self.subTest(reader=who):
+                self.check_needles(ids)
+
+    def check_needles(self, ids):
         for needle in ("shared-tree",                                   # refuse() literal
                        "role-diff-nocwd", "guard-crash",                # record() after a tool-name literal
                        "bare-merge",                                    # ask_step() only
@@ -1033,6 +1040,41 @@ class AllRulesTests(unittest.TestCase):
             (sorted(expected - listed), sorted(listed - expected)), ([], []),
             "left: emitted by the source but not listed (a rule that never fired would not show); "
             "right: listed but emitted nowhere (a stale copy)")
+
+    def test_rule_audit_reads_the_same_ids_as_the_independent_reader(self):
+        got, expected = rule_audit.emitted_rule_ids(), emitted_rules()
+        self.assertEqual(
+            (sorted(expected - got), sorted(got - expected)), ([], []),
+            "left: the oracle reads it, rule_audit does not (a rule that never fired would not show); "
+            "right: rule_audit reads it, the oracle does not")
+
+    def cut_id(self):
+        """The rule field the gate's logger writes for a combined id past its limit, made by the real
+        writer, so the mark and the limit are never copied here. Returns (field, the codes it kept)."""
+        import _transcript
+        import guard_core
+        codes = ["STE%03d" % n for n in (1, 3, 7, 8, 11, 12, 13, 14)]
+        field = guard_core.log_cut(",".join(codes), _transcript.GUARD_LOG_RULE_MAX)
+        kept = field.split(" ")[0].split(",")
+        self.assertTrue(field.endswith(" [cut]"), "the fixture is no longer cut: %r" % field)
+        self.assertTrue(2 <= len(kept) < len(codes), kept)
+        return field, kept
+
+    def test_a_code_seen_only_in_a_cut_combined_line_gets_its_count_and_first_date(self):
+        # The gate's logger cuts the rule field at 40 characters and marks it ` [cut]`. The cut id is no
+        # longer a clean combined id, but the codes it kept did fire: `never` would let a cull delete them.
+        field, kept = self.cut_id()
+        out = self.report([stamped(3, "deny", field), stamped(1, "ask", field)], "--all-rules", "--days", "7")
+        rows = rule_table(out)
+        for code in kept:
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((1, 1, 0), days_ago(3)), code)
+        self.assertEqual(first_seen(rows["STE009"]), "never")  # a code the line never held stays silent
+
+    def test_a_cut_combined_line_outside_the_window_still_dates_each_code(self):
+        field, kept = self.cut_id()
+        rows = rule_table(self.report([stamped(400, "deny", field)], "--all-rules", "--days", "7"))
+        for code in kept:
+            self.assertEqual((counts(rows[code]), first_seen(rows[code])), ((0, 0, 0), days_ago(400)), code)
 
     def test_days_all_reads_the_whole_log(self):
         lines = [stamped(400, "deny", "waiter"), stamped(1, "deny", "waiter")]
