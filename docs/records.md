@@ -74,13 +74,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `building-never-drop-item-silently` | Never drop an item without saying so. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-one-home-per-capability` | Give each capability one home, and call it from everywhere. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-allow-list-is-the-constant` | A gate's allow list must point at the constant the code emits, never a copy of it. | [`CLAUDE.md`](../CLAUDE.md) |
-| `building-guard-needs-incident` | Build a new guard or gate rule only against a named incident or a measured risk. | [`CLAUDE.md`](../CLAUDE.md) |
+| `building-guard-needs-incident` | Build a new guard or gate rule only against a named incident, a measured risk, or a likely risk: one Claude is likely to hit in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-fix-cause-not-symptom` | Fix the cause, not the symptom. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-scanner-respects-strings` | Scan source code with the language's own parser or tokenizer when the repo has one. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-land-design-or-abandon` | A capability no user can reach is not built. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-memory-is-short-term` | Memory stays on, as short-term notes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-comments-say-why` | Comment only what complex code does and why. | [`CLAUDE.md`](../CLAUDE.md) |
-| `speak-cite-id-plus-gloss` | Cite a record by id plus a short gloss, like "D12, short titles for records". | [`CLAUDE.md`](../CLAUDE.md) |
+| `speak-cite-id-plus-gloss` | Give every id a short plain name the first time it appears, like "D12, short titles for records". | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-never-explain-in-paragraph` | Never explain a rule in a paragraph. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-rewrite-superseded-in-place` | Rewrite superseded text in place. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-write-in-ste` | Write plainly: short sentences, one term per meaning, no filler. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -203,6 +203,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `owner-override-pass` | The owner types `override` as a whole prompt. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`decisions/plain-diff-mod-limits.md`](../decisions/plain-diff-mod-limits.md) |
+| `post-merge-hook-is-a-fallback` | Owner, 2026-10-22: `install.ps1` writes its git post-merge hook only when it installs a copy, not a link. | [`decisions/post-merge-hook-is-a-fallback.md`](../decisions/post-merge-hook-is-a-fallback.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`decisions/records-index-at-merge.md`](../decisions/records-index-at-merge.md) |
 | `rm-path-wrapper` | `bin/rm` sits ahead of the real `rm` on PATH, for Claude sessions only. | [`decisions/rm-path-wrapper.md`](../decisions/rm-path-wrapper.md) |
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`decisions/shell-scripts-check-out-lf.md`](../decisions/shell-scripts-check-out-lf.md) |
@@ -235,7 +236,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`debts/merge-records-stale-base.md`](../debts/merge-records-stale-base.md) |
-| `merge-revert-cancels-running-ci` | `wait_checks` returns on the first red check while other jobs still run. | [`debts/merge-revert-cancels-running-ci.md`](../debts/merge-revert-cancels-running-ci.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`debts/merge-silent-exit.md`](../debts/merge-silent-exit.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`debts/nowindow-bin-no-fallback.md`](../debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`debts/nowindow-ctrl-c-orphans.md`](../debts/nowindow-ctrl-c-orphans.md) |
