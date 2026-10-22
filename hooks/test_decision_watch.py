@@ -911,7 +911,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/question-outcome-check.md).
+# The one-year token file (decisions/reply-judge-samples-never-blocks.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this

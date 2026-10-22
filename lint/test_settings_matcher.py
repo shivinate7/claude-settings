@@ -182,11 +182,11 @@ class DecisionWatchSwap(unittest.TestCase):
         self.assertIn("reply_judge.py", names)
 
 
-# The question reviewer (owner rulings 2026-10-22): ONE agent hook on PreToolUse AskUserQuestion, model
+# The question reviewer: ONE agent hook on PreToolUse AskUserQuestion, model
 # pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
 # hooks/question_outcome.py. A failed or timed-out agent hook lets the question through, so no code
 # gate backs the rubric: the prompt text is the only home of it, and these cases pin that text.
-# An agent hook takes only these keys (probed on Claude Code 2.1.296, Windows, 2026-10-22). The prompt
+# An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
 # hooks beside it carry `continueOnBlock`, which is not one of them.
 AGENT_HOOK_KEYS = {"type", "prompt", "if", "timeout", "model", "statusMessage", "once"}
 OPUS_PREFIX = "claude-opus-"
