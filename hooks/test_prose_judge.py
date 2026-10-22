@@ -15,10 +15,15 @@ Interface the hook must match:
 - File: hooks/prose_judge.py. Module-level `main()`; exit 0 on every path (a return or SystemExit(0)).
 - Payload: `{"hook_event_name": "PreToolUse", "tool_name": "Edit"|"Write", "tool_input": {...}}`.
   Edit input: file_path, old_string, new_string. Write input: file_path, content.
-- The model caller is `invoke_model` imported from hooks/decision_watch.py and looked up at call
-  time in the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
+- The model caller is `invoke_model`, a module-level function of hooks/prose_judge.py that calls
+  hooks/decision_watch.py's `invoke_model` on first use. main() looks the name up at call time in
+  the module, so the stub can replace it. Call: `invoke_model(prompt, timeout=MODEL_TIMEOUT,
   shape={"ok": (True, False)})`, returning (verdict_dict, error) as reply_judge.py uses it. The
   prompt is the first positional argument. The module exposes the int `MODEL_TIMEOUT`.
+- Lazy load: the hook loads no other module of this repo (decision_watch, guard, and what they pull
+  in) until a path passes the `decisions` check. A skipped path, or input it cannot read, ends the
+  hook with none of them in sys.modules. The seam holds: `invoke_model` is a name in the module that
+  a caller can replace, and the replacement is what main() calls.
 - Which files: a path with a `decisions` folder segment (either slash, any case) is judged, as main's
   `Edit(**/decisions/**)` rows did. Any other path ends the hook at once: no model call, empty
   stdout, exit 0. That covers README.md, docs/x.md, debts/x.md and a file named decisions.md.
@@ -39,6 +44,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -266,6 +272,92 @@ def case_d_bad_input_allows():
         check("d: bad input %r: no call, no deny, exit 0" % raw[:20],
               stub.prompts == [] and "deny" not in out and code == 0, (code, out))
 
+# (e) nothing heavy loads until the hook has work. Each case runs the hook in a fresh interpreter:
+# sys.modules here is shared by every case, so only a new process shows what this hook alone loads,
+# and the stand-in for decision_watch must not leak into the other cases.
+CHILD = r"""
+import io, json, os, sys, types
+hooks, root, mode = sys.argv[1:4]
+sys.path.insert(0, hooks)
+calls = []
+def model(name, verdict):
+    def call(prompt, **kwargs):
+        calls.append(name)
+        return verdict, None
+    return call
+if mode == "broken":
+    sys.modules["decision_watch"] = None  # `from decision_watch import ...` now raises ImportError
+elif mode != "bare":
+    # a stand-in for the real home, so no case can start a real `claude` process
+    home = types.ModuleType("decision_watch")
+    home.invoke_model = model("home", {"ok": True})
+    sys.modules["decision_watch"] = home
+import prose_judge
+if mode == "replaced":
+    prose_judge.invoke_model = model("replaced", {"ok": False, "reason": "R-replaced"})
+sys.stdin = io.TextIOWrapper(io.BytesIO(os.environ["CHILD_PAYLOAD"].encode("utf-8")), encoding="utf-8")
+code = prose_judge.main()
+root = os.path.normcase(os.path.abspath(root))
+loaded = sorted(n for n, m in sys.modules.items() if n != "prose_judge" and getattr(m, "__file__", None)
+                and os.path.normcase(os.path.abspath(m.__file__)).startswith(root))
+sys.stdout.write("\n" + json.dumps({"code": code, "calls": calls, "loaded": loaded}))
+sys.exit(code)  # as the hook's own `sys.exit(main())` does, so the parent reads main's exit code
+"""
+
+
+def fresh_run(payload, mode):
+    """Run the hook in a new interpreter. Return (exit_code, hook_stdout, result_dict_or_None)."""
+    raw = payload if isinstance(payload, str) else json.dumps(payload)
+    env = dict(os.environ, CHILD_PAYLOAD=raw)
+    proc = subprocess.run([sys.executable, "-c", CHILD, HERE, REPO_ROOT, mode], env=env,
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    out, _, tail = proc.stdout.rpartition("\n")
+    try:
+        return proc.returncode, out, json.loads(tail)
+    except ValueError:
+        return proc.returncode, proc.stdout + proc.stderr, None
+
+
+def case_e_a_skipped_input_loads_no_repo_module():
+    if not need_module():
+        return
+    for name, payload in (("Edit src/app.ts", edit("src/app.ts")), ("Write README.md", write("README.md")),
+                          ("unreadable stdin", "not json")):
+        code, out, result = fresh_run(payload, "bare")
+        check("e: %s: hook ran" % name, result is not None and code == 0, (code, out[-200:]))
+        check("e: %s: no repo module loaded" % name, result is not None and result["loaded"] == [],
+              result and result["loaded"])
+        check("e: %s: no output" % name, out == "", repr(out))
+
+
+def case_e_a_replaced_invoke_model_is_the_one_called():
+    if not need_module():
+        return
+    code, out, result = fresh_run(edit("decisions/x.md"), "replaced")
+    hso = (json_or_none(out) or {}).get("hookSpecificOutput") or {}
+    check("e: replaced invoke_model: ran", result is not None and code == 0, (code, out[-200:]))
+    check("e: replaced invoke_model: only the replacement is called", result is not None
+          and result["calls"] == ["replaced"], result and result["calls"])
+    check("e: replaced invoke_model: its verdict denies", hso.get("permissionDecision") == "deny"
+          and "R-replaced" in hso.get("permissionDecisionReason", ""), repr(out))
+
+
+def case_e_the_unreplaced_call_reaches_decision_watch():
+    if not need_module():
+        return
+    code, out, result = fresh_run(write("decisions/x.md"), "home")
+    check("e: unreplaced: ran", result is not None and code == 0, (code, out[-200:]))
+    check("e: unreplaced: decision_watch.invoke_model is called once", result is not None
+          and result["calls"] == ["home"], result and result["calls"])
+    check("e: unreplaced: its allow is empty stdout", out == "", repr(out))
+
+def case_e_a_failed_decision_watch_import_does_not_block():
+    if not need_module():
+        return
+    code, out, result = fresh_run(edit("decisions/x.md"), "broken")
+    check("e: failed import: the hook ends, it does not crash at load", result is not None, (code, out[-200:]))
+    check("e: failed import: not a block (exit 2 or a deny)", code != 2 and "deny" not in out, (code, out[-200:]))
+
 
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
@@ -273,7 +365,10 @@ def main():
                  case_b_md_write_calls_model_once_with_rule_and_change,
                  case_b_model_call_shape_and_timeout, case_c_decisions_folder_is_judged,
                  case_d_model_block_denies_with_the_reason, case_d_model_error_fails_open,
-                 case_d_bad_input_allows):
+                 case_d_bad_input_allows, case_e_a_skipped_input_loads_no_repo_module,
+                 case_e_a_replaced_invoke_model_is_the_one_called,
+                 case_e_the_unreplaced_call_reaches_decision_watch,
+                 case_e_a_failed_decision_watch_import_does_not_block):
         try:
             case()
         except Exception as exc:

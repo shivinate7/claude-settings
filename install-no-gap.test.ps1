@@ -773,7 +773,7 @@ public static class FileIdentity
     }
     # ---- prose1: only the exact placeholder line is stamped; a prose comment is copied unchanged -----
     # A comment that starts INSTALL_ID = " but says something else is not the placeholder. Each stamper
-    # (install.ps1's copy path, the post-merge hook, install.sh's put_file) must leave it as it is, so the
+    # (install.ps1's copy path, the post-merge hook) must leave it as it is, so the
     # installed copy is the source. The installed copy must also still parse as Python. Only the exact
     # line # INSTALL_ID = "uninstalled" is stamped.
     $ProseLine = '# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.'
@@ -839,35 +839,6 @@ public static class FileIdentity
         } finally {
             Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
         }
-    }
-
-    # Route 3: install.sh's put_file, extracted from install.sh and run by sh on the two files.
-    $P3 = New-Scratch 'prose-sh' @('hooks')
-    $Sh3 = Get-GitSh
-    $ShText = [IO.File]::ReadAllText((Join-Path $Repo 'install.sh'))
-    # The block starts at the variables put_file reads (INSTALL_ID_VALUE, and STAMP_PLACEHOLDER and
-    # STAMP_CR where install.sh defines them), so the driver defines them too.
-    $PutAt = $ShText.IndexOf('put_file() {')
-    $ShStart = $ShText.IndexOf('INSTALL_ID_VALUE="$(date')
-    $ShEnd = if ($PutAt -ge 0) { $ShText.IndexOf("`n}", $PutAt) + 2 } else { -1 }
-    $PutFn = if ($ShStart -ge 0 -and $ShEnd -gt $ShStart) { $ShText.Substring($ShStart, $ShEnd - $ShStart) } else { '' }
-    Check "prose1: install.sh route: put_file is found in install.sh" ($PutFn -ne '')
-    $PutDriver = @(
-        'log() { :; }',
-        $PutFn,
-        'put_file src/guard_prose.py out/guard_prose.py || exit 1',
-        'put_file src/guard_stamp.py out/guard_stamp.py || exit 1'
-    ) -join "`n"
-    [IO.File]::WriteAllText((Join-Path $P3.Root 'put.sh'), $PutDriver + "`n", (New-Object Text.UTF8Encoding $false))
-    New-Item -ItemType Directory -Force -Path (Join-Path $P3.Root 'src'), (Join-Path $P3.Root 'out') | Out-Null
-    Write-FixtureFile (Join-Path $P3.Root 'src\guard_prose.py') $ProseText
-    Write-FixtureFile (Join-Path $P3.Root 'src\guard_stamp.py') $PlaceText
-    if ($Sh3 -and $PutFn -ne '') {
-        $pP3 = Start-Process -FilePath $Sh3 -ArgumentList 'put.sh' -WorkingDirectory $P3.Root -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Tmp 'prose1-sh.log') -RedirectStandardError (Join-Path $Tmp 'prose1-sh.log.err')
-        Check "prose1: install.sh route: put_file exits 0 on both files (exit $($pP3.ExitCode))" ($pP3.ExitCode -eq 0)
-        Test-ProseFolder 'prose1: install.sh route' (Join-Path $P3.Root 'out')
-    } else {
-        Check "prose1: install.sh route: sh is found to run put_file" $false
     }
 
     # ---- first1: a first install over an unstamped set (the repo's placeholder set) ----------------

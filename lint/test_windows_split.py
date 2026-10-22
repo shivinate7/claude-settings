@@ -49,7 +49,7 @@ REQUIRED = [
     "python janitor/test_session_end_sweep.py",
     "python janitor/test_install_launchd.py",
     "python janitor/test_install_schtasks.py",
-    "sh hooks/test_install_src.sh",
+    "sh hooks/test_install_windows.sh",
     "node actions/stamp/test_stamp.mjs",
     "bash actions/stamp/test_action.sh",
     "python merge/test_launch.py",
@@ -134,7 +134,7 @@ def placement_problems(text):
 
 
 # Steps whose `shell:` is pinned. Any other REQUIRED step must set none.
-SHELL = {"sh hooks/test_install_src.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
+SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
 # Steps whose whole `if:` is pinned (the harness must stay off pull_request and on its scope flag).
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}",

@@ -350,6 +350,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
+      - name: install.sh checkout-detection suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh hooks/test_install_src.sh
+
       # This step and the skill test step below come last, so a red test in them skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
       # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
@@ -407,6 +411,12 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
+
+      - name: Install bin eol test, Windows PowerShell 5.1
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        timeout-minutes: 3
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either. gates-macos
@@ -619,7 +629,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows == 'true' || github.event_name != 'pull_request' }}
-    # Cut F moved the guard suite out. Expected about 190 s (install.sh 180 s, plus setup); 10 min leaves room.
+    # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -696,10 +706,19 @@ jobs:
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
-      - name: install.sh checkout-detection suite
+      - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
-        run: sh hooks/test_install_src.sh
+        run: sh hooks/test_install_windows.sh
+
+      # F1 and G1 run session_start.sh, which runs at every Windows session start. Each fetches with the hook's
+      # own 2 s bound (hooks/session_start.sh:15), so a slow runner may kill the fetch. A hang fails this step in 3 min,
+      # by name, not the job's 10 (debt install-checkout-flake).
+      - name: Session start freshness cases (caseF1, caseG1)
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        timeout-minutes: 3
+        run: sh hooks/test_install_src.sh caseF1 caseG1
 
   # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:

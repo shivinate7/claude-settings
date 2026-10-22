@@ -18,7 +18,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from decision_watch import invoke_model  # looked up at call time, so a test can replace it
+
+def invoke_model(*args, **kwargs):
+    """The model call. decision_watch loads on the first call, so a skipped path never pays for it.
+    A module-level name, so a test can replace it."""
+    from decision_watch import invoke_model as home
+    return home(*args, **kwargs)
+
 
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}

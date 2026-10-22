@@ -17,6 +17,8 @@ export type Snapshot = {
   agents: Agent[]
 }
 
+export type GitRead = Pick<Snapshot, 'branch' | 'isWorktree' | 'ahead' | 'behind' | 'changed'>
+
 export type TurnStat = {
   at: number
   durationMs: number
@@ -30,6 +32,8 @@ declare module 'claude-code' {
   interface PluginState {
     'desktop-statusline': {
       snap: Snapshot | null
+      git: GitRead | null
+      gitTry: { at: number; fails: number } | null
       warned: string[]
       lastTurn: TurnStat | null
       compactions: Compactions | null

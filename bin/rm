@@ -2,10 +2,12 @@
 # claude-settings-rm-shim
 # rm shim, ahead of the real rm on PATH (install.sh puts ~/.claude/bin first). Line 2 is the marker: the
 # search for the real rm skips every file whose line 2 is this line, so two copies never call each other.
-# CLAUDECODE unset: exec the real rm at once, with no python. CLAUDECODE set: a recursive call is refused
+# CLAUDECODE unset, or uname -s says MINGW, MSYS or CYGWIN (each python start costs two more processes
+# there): exec the real rm at once, with no python. CLAUDECODE set: a recursive call is refused
 # whole when an operand is /, home, the cwd or a parent of the cwd (symlinks resolved), read by
-# _rm_target_bad in hooks/guard_rm_var.py. No python3, or a helper that cannot load or run: warn once,
-# exec the real rm (decision rm-path-wrapper). Posix only; install.ps1 does not land this file.
+# _rm_target_bad in hooks/guard_rm_var.py. No usable python, or a helper that cannot load or run: warn once,
+# exec the real rm (decision rm-path-wrapper). install.ps1 does not land this file.
+# On MINGW, MSYS and CYGWIN the shim never refuses: it execs the real rm, and guard.py judges the command text instead.
 
 # Sets REAL to the first rm on PATH that is not a copy of this shim, else /bin/rm. No fork, no grep.
 find_real() {
@@ -34,12 +36,22 @@ _maybe=
 for _a in "$@"; do case $_a in -*[rR]*) _maybe=1 ;; esac; done
 [ -n "$_maybe" ] || exec "$REAL" "$@"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "rm shim: python3 not found, so this call is not judged; running the real rm" >&2
+case $(uname -s 2>/dev/null) in MINGW*|MSYS*|CYGWIN*) exec "$REAL" "$@" ;; esac
+
+# Python as the hook launchers in settings.json find it: python3, then python, never a WindowsApps (Store alias) path.
+PY=
+for _p in python3 python; do
+  _c=$(command -v "$_p" 2>/dev/null) || continue
+  case $_c in */[Ww]indows[Aa]pps/*) continue ;; esac
+  PY=$_c
+  break
+done
+if [ -z "$PY" ]; then
+  echo "rm shim: python not found, so this call is not judged; running the real rm" >&2
   exec "$REAL" "$@"
 fi
 
-PY=$(cat <<'PYEOF'
+"$PY" -I - "$0" "$@" <<'PYEOF'
 import os, sys
 
 me, args = os.path.realpath(sys.argv[1]), sys.argv[2:]
@@ -72,8 +84,5 @@ if bad:
         "of it, and no part of the call ran. Name a narrower folder, or ask the owner to do it.\n" % bad[0])
     sys.exit(3)
 PYEOF
-)
-
-python3 -I -c "$PY" "$0" "$@"
 [ $? -eq 3 ] && exit 1
 exec "$REAL" "$@"
