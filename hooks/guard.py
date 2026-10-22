@@ -1629,8 +1629,9 @@ def step_up_hit(tool: str, tool_input) -> str:
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU = 85.0, 15.0, 85.0
 LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
-LOAD_BUSY_REASON = ("the machine is busy (%s). Run this lane in the foreground, one at a time: an Agent call "
-                    "with run_in_background false. A background lane or a Workflow waits until the load drops.")
+LOAD_BUSY_REASON = "the machine is busy (%s). %s"
+LOAD_BUSY_FOREGROUND = "Run this lane in the foreground, one at a time: an Agent call with run_in_background false. "
+LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
 
 
@@ -1732,7 +1733,13 @@ def load_hit(tool: str, tool_input) -> tuple:
                         disk is not None and disk < LOAD_BUSY_DISK and "disk %.1f%% free" % disk,
                         cpu is not None and cpu > LOAD_BUSY_CPU and "CPU %.1f%% busy" % cpu) if t]
     if busy:
-        return LOAD_BUSY_REASON % ", ".join(busy), ", ".join(busy)
+        # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
+        waits = [t for t in busy if not t.startswith("disk")]
+        remedy = " and ".join((["wait until the load drops"] if waits else [])
+                              + (["free disk space"] if len(waits) < len(busy) else []))
+        text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
+                else LOAD_BUSY_FOREGROUND + "Or " + remedy)
+        return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
 
 

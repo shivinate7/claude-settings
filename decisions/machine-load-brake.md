@@ -8,7 +8,7 @@ Owner, 2026-10-21 (spec) and 2026-10-22 (rulings): a lane-start call reads the m
 - **Busy.** Memory over 85%, disk free under 15%, or CPU over 85%. A background Agent or Task call is refused: `run_in_background` true, or left out, because background is the default. Any Workflow is refused. A foreground Agent or Task (`run_in_background` false) is allowed.
 - **Full.** Memory over 95%, or disk free under 5%. Every lane call is refused, a foreground one too. CPU never makes the machine full.
 - **Not covered at busy.** `start_session` has no foreground form, and the rulings name only Agent, Task and Workflow. It is refused at full only.
-- **The refusal** names each reading that tripped it. At busy it says to run the lane in the foreground.
+- **The refusal** names each reading that tripped it. At busy, an Agent or Task call is told to run in the foreground, or to wait for the load to drop (memory, CPU) or free disk space (disk). A Workflow has no foreground form, so it gets only the wait or free-disk remedy.
 - **A read error counts as normal.** A reading that fails or cannot be read is unread, and one unread reading hides no other.
 - **Which calls read.** Agent, Task, Workflow and `start_session`, once each. Bash, PowerShell, Edit, Write and every other tool read no load.
 - **How it reads.** Windows: `GlobalMemoryStatusEx`, and `GetSystemTimes` twice, 200 ms apart, through ctypes. Mac: `kern.memorystatus_level` through ctypes, and the 1-minute load average per core. Disk on both: `shutil.disk_usage`. Linux reads disk and CPU (load average per core) and leaves memory unread. No platform starts a child process.
