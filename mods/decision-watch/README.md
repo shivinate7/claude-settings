@@ -32,7 +32,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 
 - The script path is `CLAUDE_CONFIG_DIR/hooks/decision_watch.py`. With no `CLAUDE_CONFIG_DIR`, the mod uses `USERPROFILE` or `HOME`, then `.claude`.
 - The background judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Each holds its own "already judged" cache. A background verdict does not mute `/dw`.
-- The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub.
+- The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub. It keeps that path until the mod reloads, and looks again after a run with it is rejected, times out, or exits non-zero with the file gone.
 
 ## /dw
 
