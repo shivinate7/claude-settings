@@ -220,6 +220,26 @@ def rubric_gaps(prompt):
     return [item for item, pats in RUBRIC.items() if not all(re.search(p, text, re.I) for p in pats)]
 
 
+# The hook prompt cannot point at decisions/, so it lists the premise kinds itself: a second copy of
+# the kinds table in decisions/premise-format.md. These cases keep the copy equal to the table.
+# PREMISE_FORMAT_UNDER_TEST points the test at another copy of the table, as SETTINGS_UNDER_TEST does.
+PREMISE_FORMAT = os.environ.get("PREMISE_FORMAT_UNDER_TEST") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "decisions", "premise-format.md")
+KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
+KIND_LIST = re.compile(r"\bsource kinds?:\s*([a-z, ]+?)\s*(?:[(.;]|$)")
+
+
+def table_kinds(text):
+    """The kinds of the premise table: the backticked first cell of each row, in table order."""
+    return KIND_ROW.findall(text)
+
+
+def prompt_kinds(prompt):
+    """The kinds the hook prompt lists after 'source kind:', in prompt order; [] when it lists none."""
+    found = KIND_LIST.search(" ".join(prompt.split()))
+    return [k for k in re.split(r"\s*,\s*|\s+or\s+", found.group(1)) if k] if found else []
+
+
 class QuestionReviewer(unittest.TestCase):
     def ask_hooks(self):
         return [h for e in pre_tool_entries() if covers(e, "AskUserQuestion") for h in e["hooks"]]
@@ -255,6 +275,25 @@ class QuestionReviewer(unittest.TestCase):
             with self.subTest(dropped=item):
                 rest = " ".join(v for k, v in SAMPLE.items() if k != item)
                 self.assertEqual(rubric_gaps(rest), [item])
+
+    def test_agent_hook_prompt_lists_the_kinds_of_the_premise_table(self):
+        with open(PREMISE_FORMAT, encoding="utf-8") as f:
+            table = table_kinds(f.read())
+        self.assertTrue(table, "no kind rows in %s" % PREMISE_FORMAT)
+        listed = prompt_kinds(self.agent_hook().get("prompt") or "")
+        self.assertTrue(listed, "the agent hook prompt lists no source kinds after 'source kind:'")
+        self.assertEqual(sorted(listed), sorted(table),
+                         "hook prompt kinds %s, premise table kinds %s: update the one that drifted" % (listed, table))
+
+    def test_the_kinds_readers_see_a_kind_added_or_dropped(self):
+        # Green on main by design: it tests the two readers, not settings.json.
+        row = "| `%s` | means | Weak |\n"
+        table = table_kinds("| Kind | Means |\n|---|---|\n" + row % "ruling" + row % "assumed")
+        self.assertEqual(table, ["ruling", "assumed"])
+        self.assertEqual(prompt_kinds("each with its source kind: ruling or assumed (see the table)"), table)
+        self.assertEqual(prompt_kinds("its source kind: ruling, measured, assumed."), ["ruling", "measured", "assumed"])
+        self.assertEqual(prompt_kinds("no list here"), [])
+        self.assertEqual(table_kinds("prose with `ruling` in it\n"), [])
 
     def test_no_hook_runs_question_outcome(self):
         with open(SETTINGS, encoding="utf-8") as f:
