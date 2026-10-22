@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act pass waits for its act
-PROMPT = re.compile(r"\s*override(?!\w)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
+PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 LOG_REASON_MAX = 300
 SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
@@ -82,17 +82,12 @@ def grant(session_id, prompt, at):
 
 
 def _log_reason(session_id, reason, at):
-    """Append the owner's reason as one guard.log line (the guard's tab format). Never raises: the
-    pass is already written. ponytail: no log lock; a racing write may interleave, add the guard's
-    lock if that is ever seen."""
-    try:
-        import shared_names  # lazy: a missing sibling must not stop the grant
-        fields = [at.astimezone().replace(tzinfo=None).isoformat(timespec="seconds"), "UserPromptSubmit",
-                  "override-reason", "owner-override-pass", reason[:LOG_REASON_MAX], session_id]
-        with open(os.path.join(shared_names.config_dir(), "guard.log"), "a", encoding="utf-8") as handle:
-            handle.write("\t".join(fields) + "\n")
-    except Exception:
-        pass
+    """Write the owner's reason as one guard.log line through the guard's own locked writer. A lone
+    surrogate cannot be encoded, so it becomes `?` before the write rather than losing the line."""
+    import guard_core  # lazy: only a grant that has a reason needs it
+    guard_core.set_log_session(session_id)
+    guard_core.record("UserPromptSubmit", "override-reason", "owner-override-pass",
+                      reason[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8"))
 
 
 def take(session_id, agent_id, at):
