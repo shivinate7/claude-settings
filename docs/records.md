@@ -115,7 +115,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`decisions/config-watch-fast-exit.md`](../decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`decisions/copy-mode-overwrites-no-backup.md`](../decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`decisions/cull-rules.md`](../decisions/cull-rules.md) |
-| `decision-watch-mod-limits` | The Stop-time decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
+| `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`decisions/decision-watch-mod-limits.md`](../decisions/decision-watch-mod-limits.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`decisions/default-branch-read-order.md`](../decisions/default-branch-read-order.md) |
 | `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`decisions/dependabot-security-only.md`](../decisions/dependabot-security-only.md) |
 | `design-skills` | Owner, 2026-10-10: three third-party skills apply to any repo with screens. | [`decisions/design-skills.md`](../decisions/design-skills.md) |
@@ -219,7 +219,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`debts/ci-wake-export-gh-repo-unread.md`](../debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`debts/ci-wake-gh-host-bare-repo.md`](../debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`debts/ci-wake-lists-runs-once.md`](../debts/ci-wake-lists-runs-once.md) |
-| `dw-stop-delivery-unproven` | The decision-watch mod has shown no Stop event in the desktop app. | [`debts/dw-stop-delivery-unproven.md`](../debts/dw-stop-delivery-unproven.md) |
 | `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`debts/explain-accessvbom.md`](../debts/explain-accessvbom.md) |
 | `ff-first-lane-not-a-tip` | `lane_tips` reads merge commits only. | [`debts/ff-first-lane-not-a-tip.md`](../debts/ff-first-lane-not-a-tip.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |

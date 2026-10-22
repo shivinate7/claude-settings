@@ -1,10 +1,14 @@
-// decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
+// decision-watch: runs the decision watch on each completed turn (hooks/decision_watch.py) with the session's
 // own model login, and writes the verdict to a log. A FLAG or UNKNOWN verdict shows in the session
 // with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
-// as a notice (decision decision-watch-mod-limits). It never blocks and never changes the Stop result.
+// as a notice (decision decision-watch-mod-limits). It never blocks and never changes the turn result.
 //
-// classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
-//               stop_hook_active is set.
+// turn.complete returns next(e) after at most SEEN_WAIT_MS (500 ms), for the "STOP seen" line. The lookup and
+//               the judging run in the background, one judge at a time. A subagent turn (agentId set) is skipped,
+//               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). The
+//               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
+//               handler never ran; turn.* events pass. The event carries no transcript path, so the judge
+//               finds it the way /dw does (deriveStop), from the session id read on each turn.
 // /dw           runs the same judgment on the latest turn and shows the result.
 //
 // The python script has two phases: --emit-prompt prints the prompt when a model call is due,
@@ -16,8 +20,9 @@
 //
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally.
 
-let lastStop; // the last classic.Stop input this session, for /dw
+let lastStop; // the last Stop-shaped input built from a main-loop turn, for /dw
 let busy = false; // true while a background judge runs
+let foundPy; // the python path pickPython found, kept for the module's life; cleared when a run with it is rejected
 
 // The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
 const UNKNOWN = "Decision watch: UNKNOWN, ";
@@ -40,7 +45,12 @@ export function register(on) {
   on("command.run", { command: "dw" }, async ($, e) => {
     const lines = [];
     try {
-      const stop = lastStop ?? (await deriveStop($));
+      let stop = lastStop;
+      if (!stop) {
+        const d = await deriveStop($);
+        if (!d.found) throw new Error("no turn seen yet and no transcript found for this session");
+        stop = d.stop;
+      }
       lines.push(`stop input: session ${stop.session_id}`);
       const out = await judge($, stop, "dw");
       lines.push(...out.trace, `RESULT: ${out.result}`, ...out.notices.map((n) => `NOTICE: ${n}`));
@@ -51,38 +61,42 @@ export function register(on) {
     return { text: lines.join("\n") };
   });
 
-  // Background judge. Waits at most STOP_WAIT_MS for one "STOP seen" line, then returns next(e).
-  // The judging is fire-and-forget, one judge at a time. A Stop that finds one running logs "SKIP busy".
-  on("classic.Stop", async ($, e, next) => {
-    lastStop = stopOf(e);
-    const note = e.stop_hook_active ? " (stop_hook_active, no judge)" : "";
-    try {
-      await within(log($, `STOP seen ${e.session_id}${note}`), STOP_WAIT_MS);
-    } catch {
-      // the log never holds a Stop
-    }
-    if (!e.stop_hook_active) {
-      if (busy) {
-        void log($, `SKIP busy ${e.session_id}`);
-      } else {
-        busy = true;
-        void shadow($, lastStop).finally(() => {
-          busy = false;
-        });
-      }
+  // Background judge. The lookup, the "STOP seen" line and the judge start run off the return path. The
+  // handler waits at most SEEN_WAIT_MS for that "STOP seen" line, then returns next(e). One judge at a time:
+  // a turn that finds one running logs "SKIP busy". A turn that is not judged logs a SKIP line.
+  on("turn.complete", async ($, e, next) => {
+    if (!e.agentId) {
+      const work = (async () => {
+        if (e.isAborted || e.reason !== "answer") {
+          void log($, `SKIP no full answer | reason ${e.reason}, isAborted ${e.isAborted}`);
+          return;
+        }
+        let d;
+        try {
+          d = await deadline(deriveStop($), LOOKUP_MS);
+        } catch (err) {
+          void log($, `SKIP no session | ${msg(err)}`);
+          return;
+        }
+        await log($, `STOP seen ${d.stop.session_id}`);
+        if (!d.found) {
+          void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
+          return;
+        }
+        lastStop = d.stop;
+        if (busy) {
+          void log($, `SKIP busy ${d.stop.session_id}`);
+        } else {
+          busy = true;
+          void shadow($, d.stop).finally(() => {
+            busy = false;
+          });
+        }
+      })().catch(() => {});
+      await within(work, SEEN_WAIT_MS);
     }
     return next(e);
   });
-}
-
-function stopOf(e) {
-  return {
-    session_id: e.session_id,
-    transcript_path: e.transcript_path,
-    cwd: e.cwd,
-    hook_event_name: "Stop",
-    stop_hook_active: false,
-  };
 }
 
 async function configDir($) {
@@ -92,13 +106,17 @@ async function configDir($) {
   return `${home}/.claude`;
 }
 
-// No Stop seen yet: rebuild transcript_path from the session id and cwd the way the app names it.
+// The one lookup for a turn's transcript, used by turn.complete and /dw: rebuild transcript_path from the
+// session id and cwd the way the app names it. found says whether the file is there.
 async function deriveStop($) {
+  // The id is read per turn, never kept: a /clear gives a new id with no session.start.
   const id = await $.session.id();
   const cwd = await $.session.cwd();
   const path = `${await configDir($)}/projects/${cwd.replace(/[^A-Za-z0-9]/g, "-")}/${id}.jsonl`;
-  if (!(await $.fs.exists(path))) throw new Error("no Stop seen yet and no transcript found for this session");
-  return { session_id: id, transcript_path: path, cwd, hook_event_name: "Stop", stop_hook_active: false };
+  return {
+    stop: { session_id: id, transcript_path: path, cwd, hook_event_name: "Stop", stop_hook_active: false },
+    found: await $.fs.exists(path),
+  };
 }
 
 // First python on PATH that is not the WindowsApps Store stub (settings.json's launcher does the same).
@@ -124,14 +142,33 @@ const stateDir = (cfg, who) => `${cfg}/decision-watch-${who}`;
 
 async function dwRun($, stop, extra, who) {
   const cfg = await configDir($);
-  const py = await pickPython($);
   const t0 = Date.now();
-  // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
-  const r = await deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
-    stdin: asciiJson(stop),
-    env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
-    timeoutMs: PY_MS,
-  }), PY_MS + 1000);
+  const spawn = (py) =>
+    // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
+    deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
+      stdin: asciiJson(stop),
+      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
+      timeoutMs: PY_MS,
+    }), PY_MS + 1000);
+  let r;
+  if (foundPy) {
+    const tried = foundPy;
+    try {
+      r = await spawn(tried);
+      // A non-zero exit from a file that is gone is a failed start too (the shell reports a missing file that way).
+      // A failed exists check counts as gone. The async wrapper turns a synchronous throw into a rejection, so r is kept.
+      if (r.exitCode !== 0 && !(await (async () => $.fs.exists(tried))().catch(() => false)) && foundPy === tried) foundPy = undefined;
+    } catch (err) {
+      // A rejected run (failed start or timeout) drops the cached path, so the next run looks again. This run is
+      // not repeated: a hung python would hold the slot twice as long. A python that exits non-zero resolves and keeps it.
+      if (foundPy === tried) foundPy = undefined;
+      throw err;
+    }
+  } else {
+    const py = await pickPython($);
+    r = await spawn(py);
+    foundPy = py;
+  }
   return { ...r, ms: Date.now() - t0 };
 }
 
@@ -255,7 +292,8 @@ const MAX_LOG_LINES = 500;
 const MAX_LINE = 2000;
 const TIME_LEN = 24; // length of an ISO timestamp, the start of each log line
 const LOG_WAIT_MS = 2000;
-const STOP_WAIT_MS = 500;
+const LOOKUP_MS = 500; // the transcript lookup, off the return path
+const SEEN_WAIT_MS = 500; // the most the handler waits for the STOP seen line
 const MODEL_MS = 50000;
 const PY_MS = 30000; // each python run (unmeasured; split mode calls no model); the mod's timer adds 1 s
 const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
