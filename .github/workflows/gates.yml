@@ -475,6 +475,10 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
 
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 hooks/test_guard_load_os.py
+
       - name: rm shim fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_rm_shim.py
@@ -705,6 +709,10 @@ jobs:
       # The guard suite runs in gates-windows-guard. No Guard mutation harness on Windows: it took 34.5 min
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
+
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python hooks/test_guard_load_os.py
 
       - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
