@@ -551,7 +551,7 @@
     },
     "output-never-hand-off-doable-step": {
       "mechanism": {
-        "kind": "judgment",
+        "kind": "unmechanized",
         "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, 1 Stop in 5, never blocks) samples it. A block that mixes shells has no code check."
       }
     },
