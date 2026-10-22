@@ -34,8 +34,8 @@ Short and plain are one goal. Never trade one for the other.
   word. Put that line inside the question box, and open it with `Problem:`. Then give the
   options.<!-- rule:style-question-states-problem -->
 - After the Problem line, give one to three `Based on:` lines inside the question box. Each
-  names one premise in plain words and its source kind: the user's message, a record, a file,
-  or a tool's output.<!-- rule:style-question-based-on -->
+  names one premise in plain words and its kind, as `premise-format` (a premise names its
+  source) sets.<!-- rule:style-question-based-on -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
