@@ -9,7 +9,7 @@ Run it from the repository root, on a real Windows or Mac host:
 On any other platform each case prints SKIP and the run passes. GUARD_UNDER_TEST points the run at
 another copy of the guard, as in hooks/test_guard.py.
 
-THE CLAIM. The load brake in hooks/guard.py judges a lane-start call from four readings. A reading
+THE CLAIM. The load brake in hooks/guard.py judges a lane-start call from three readings. A reading
 that is off by a wide margin brakes a healthy machine or lets a full one run, and the unit cases in
 hooks/test_guard.py cannot see it, because they replace the reader. Here the real reader runs and
 each reading is compared with the OS's own tool, taken a moment later, within a tolerance. The
@@ -29,8 +29,8 @@ returns a dict, and each reading is defined here:
                   Windows reference: Win32_PerfFormattedData_PerfOS_Processor, the _Total row.
                   Mac reference: the 1-minute load average from uptime, divided by hw.ncpu from
                   sysctl, times 100, capped at 100.
-  claude_procs    Windows only: the count of processes whose image name is claude.exe (any case).
-                  Reference: Get-Process -Name claude.
+
+The brake counts no claude process, so no reading here does.
 """
 
 import importlib.util
@@ -44,9 +44,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 
-# Points of percent, or processes, by which the reader and the OS tool may differ.
+# Points of percent by which the reader and the OS tool may differ.
 TOLERANCE = {
-    "win32": {"memory_pct": 5.0, "disk_free_pct": 1.5, "cpu_pct": 35.0, "claude_procs": 2},
+    "win32": {"memory_pct": 5.0, "disk_free_pct": 1.5, "cpu_pct": 35.0},
     "darwin": {"memory_pct": 8.0, "disk_free_pct": 1.5, "cpu_pct": 25.0},
 }
 # The CPU of a machine moves most between two reads, so a CPU case takes the closest of this many tries.
@@ -60,7 +60,6 @@ $cpu = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='
   memory_pct = 100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize
   disk_free_pct = 100 * $drive.Free / ($drive.Free + $drive.Used)
   cpu_pct = [double]$cpu
-  claude_procs = @(Get-Process -Name claude -ErrorAction SilentlyContinue).Count
 } | ConvertTo-Json -Compress
 """
 
@@ -138,7 +137,6 @@ CASES = [
     ("disk free on the home drive matches the OS tool", lambda: check_reading("disk_free_pct"),
      ("win32", "darwin")),
     ("CPU busy matches the OS tool", lambda: check_reading("cpu_pct", CPU_TRIES), ("win32", "darwin")),
-    ("the claude process count matches the OS tool", lambda: check_reading("claude_procs"), ("win32",)),
 ]
 
 

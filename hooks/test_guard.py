@@ -14214,28 +14214,31 @@ for _label, _check in (
 # =========================================================================== the machine-load brake
 FAMILY = "load-brake"
 # Batch 4, c14 (the machine-load brake). On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
-# the guard reads the machine's load once: memory, disk free on the home drive, CPU, and on Windows
-# the count of claude processes. The levels (placeholders, owner to tune):
-#   busy  memory over 85%, disk free under 15%, CPU over 85%, or over about 8 claude processes.
-#         One lane at a time: a lane call is refused while a lane is already running.
-#   full  memory over 95%, or disk free under 5%. A lane call is refused, even the first.
-# The refusal names the reading. A read that fails, or a reading left unread, counts as normal.
+# the guard reads the machine's load once: memory in use and disk free on the home drive, each a share of
+# this machine's capacity, and CPU as a second signal. It counts no claude process and no running lane.
+# The levels (placeholders, owner to tune):
+#   busy  memory over 85%, disk free under 15%, or CPU over 85%.
+#         One lane at a time: the guard refuses a lane that runs in the background and allows one that makes
+#         the caller wait. An Agent or Task call runs in the background when run_in_background is true or left
+#         out (the Agent input schema in the harness's claude-code.d.ts says "Agents run in the background by
+#         default"); run_in_background false is foreground, and it is allowed. Any Workflow is refused: it has
+#         no foreground form. The refusal says to run the lane in the foreground.
+#   full  memory over 95%, or disk free under 5%. Every lane call is refused, a foreground Agent too.
+#         CPU never makes the machine full.
+# The refusal names the reading that tripped it. A read that fails, or a reading left unread, counts as normal.
 # Every other tool reads no load. The read starts no child process and writes no file.
+# Not pinned: start_session at busy. It has no foreground form, and the rulings name Agent, Task and Workflow.
 #
 # THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
-# honored), patches the two functions below, and calls main() with the real stdin payload. The
+# honored), patches the function below, and calls main() with the real stdin payload. The
 # builder must honor this contract:
 #   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
 #                  no argument and does every OS read. It returns a dict with the keys memory_pct
 #                  (percent of physical memory IN USE), disk_free_pct (percent FREE on the home
-#                  drive), cpu_pct, claude_procs (a count of processes whose image name is claude
-#                  or claude.exe, Windows only). A missing key or a None is an unread reading, which
+#                  drive) and cpu_pct. A missing key or a None is an unread reading, which
 #                  counts as normal. read_load may raise: every reading then counts as normal.
-#   live_lanes(payload)  the same home. It takes the hook payload (a dict) and returns how many
-#                  lanes already run in this session. busy refuses a lane call when it is 1 or more.
-#                  The spec leaves the real source open (the hooks keep no list of running lanes
-#                  today); the source must start no child process and write no file.
-# The judge must call each by its bare name, so the probe's patch (set on every guard module that
+#                  It returns no claude_procs, and a claude_procs key in a reading changes nothing.
+# The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per lane-start call, and none on any other call.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
@@ -14274,7 +14277,7 @@ def listing():
                   for folder, _, names in os.walk(top) for n in names)
 
 
-out = {"reads": 0, "lane_calls": 0}
+out = {"reads": 0}
 try:
     loader = importlib.util.spec_from_file_location("guard_under_test", guard_path)
     g = importlib.util.module_from_spec(loader)
@@ -14307,11 +14310,6 @@ try:
                     raise OSError("fake read failure")
                 return dict(spec["reading"])
             put("read_load", read_load)
-        if "lanes" in spec:
-            def live_lanes(*args, **kwargs):
-                out["lane_calls"] += 1
-                return spec["lanes"]
-            put("live_lanes", live_lanes)
         if spec.get("patch_floor") == "deny":
             g.floor_hit = lambda tool, tool_input: "haiku"
         elif spec.get("patch_floor") == "read":
@@ -14337,8 +14335,15 @@ LB_LANE_INPUT = {
     "Workflow": {"script": _flow("sonnet")},
     "mcp__ccd_session__start_session": {"initiation": "user_asked", "prompt": "x", "model": "sonnet"},
 }
-LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0, "claude_procs": 3}
-LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0, "claude_procs": 20}
+LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0}
+LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0}
+# The tools that take run_in_background, and the three ways a call can say it: true, false, or left out.
+# Left out is background: the Agent input schema in the harness's claude-code.d.ts says "Agents run in
+# the background by default".
+LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
+LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
+         (False, "run_in_background false"))
+LB_FOREGROUND = re.compile(r"foreground", re.I)   # the busy refusal's remedy
 
 
 def lb_reading(**changes):
@@ -14346,9 +14351,18 @@ def lb_reading(**changes):
     return dict(LB_NORMAL, **changes)
 
 
+def lb_lane_input(tool, background=None):
+    """The input of a lane-start call. `background` is run_in_background: True, False, or None to
+    leave it out. Only Agent and Task take it."""
+    given = dict(LB_LANE_INPUT[tool])
+    if background is not None and tool in dict(LB_SPAWNS).values():
+        given["run_in_background"] = background
+    return given
+
+
 def lb_run(tool, spec, tool_input=None, event=None):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
-    and what the probe saw (reads, lane_calls, children, files, had_reader, reading...)."""
+    and what the probe saw (reads, children, files, had_reader, reading...)."""
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -14396,10 +14410,12 @@ def lb_names(word, *numbers, percent=True):
         r"(?<![\d.])(?:%s)(?!\d)(?!\.\d)%s" %("|".join(re.escape(n) for n in numbers), tail)))
 
 
-def lb_decision_check(tool, reading, lanes, want, names=(), reads=1):
-    """A lane-start call under a forced reading, with `lanes` lanes already running."""
+def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1):
+    """A lane-start call under a forced reading. `background` is the call's run_in_background:
+    True, False, or None to leave it out. `tool_input` replaces the whole input."""
     def check():
-        got, reason, side = lb_run(tool, {"mode": "judge", "reading": reading, "lanes": lanes})
+        given = lb_lane_input(tool, background) if tool_input is None else tool_input
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": reading}, given)
         if got == "error":
             return False, reason
         called = side.get("reads")
@@ -14418,26 +14434,24 @@ def lb_decision_check(tool, reading, lanes, want, names=(), reads=1):
 
 
 def lb_no_read_check(tool, tool_input=None, event=None):
-    """A call that is not a lane start, under the worst reading and three running lanes."""
+    """A call that is not a lane start, under the worst reading."""
     def check():
-        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH, "lanes": 3},
-                                   tool_input, event)
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event)
         if got == "error":
             return False, reason
         if got != "allow":
             return False, "%s, want allow: %s" % (got, reason[:90])
-        if side.get("reads") or side.get("lane_calls"):
-            return False, "the call read the load (%s read_load, %s live_lanes)" % (
-                side.get("reads"), side.get("lane_calls"))
+        if side.get("reads"):
+            return False, "the call read the load (%s read_load)" % side.get("reads")
         return True, "allow, no read"
     return check
 
 
-def lb_real_children_check(tool):
-    """A lane-start call with the real reader and the real lane count starts no child process,
-    whatever the machine reads and whatever the call is then judged."""
+def lb_real_children_check(tool, background=None):
+    """A lane-start call with the real reader starts no child process, whatever the machine reads
+    and whatever the call is then judged."""
     def check():
-        got, reason, side = lb_run(tool, {"mode": "judge"})
+        got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool, background))
         if got == "error":
             return False, reason
         if not side.get("had_reader"):
@@ -14481,15 +14495,16 @@ def lb_reader_shape(side):
     reading = side.get("reading")
     if not isinstance(reading, dict):
         return False, "read_load returned %r, want a dict" % (reading,)
-    for key in ("memory_pct", "disk_free_pct", "cpu_pct", "claude_procs"):
+    if "claude_procs" in reading:
+        return False, "read_load still returns claude_procs, the process count the owner dropped"
+    for key in ("memory_pct", "disk_free_pct", "cpu_pct"):
         value = reading.get(key)
         if value is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= (
-                100 if key != "claude_procs" else 10 ** 6):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
             return False, "%s is %r, want a number in range" % (key, value)
     if supported:
-        need = ("memory_pct", "disk_free_pct", "cpu_pct") + (("claude_procs",) if sys.platform == "win32" else ())
+        need = ("memory_pct", "disk_free_pct", "cpu_pct")
         unread = [key for key in need if reading.get(key) is None]
         if unread:
             return False, "read_load left %s unread on %s" % (", ".join(unread), sys.platform)
@@ -14515,8 +14530,9 @@ def lb_probe_patch_check():
 
 
 def lb_probe_reads_check():
-    got, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "lanes": 0,
-                                         "patch_floor": "read"})
+    # A Bash call, so that the brake's own read of a lane call does not add to the count.
+    got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_NORMAL, "patch_floor": "read"},
+                               {"command": "echo hi"})
     if got == "error":
         return False, reason
     return (got == "allow" and side["reads"] == 1 and not side["files"],
@@ -14538,46 +14554,64 @@ lb_add("probe control: a child process the probe starts is counted", lb_probe_ch
 lb_add("probe control: a patch on a guard function reaches the judge", lb_probe_patch_check)
 lb_add("probe control: a call to the patched read_load is counted", lb_probe_reads_check)
 
-for _short, _tool in LB_TOOLS:
-    _mem = lb_names("memory", "91.7", "91", "92")
-    lb_add("%s, memory 91.7%% with one lane running: refused, names the reading" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 1, "deny", _mem))
-    lb_add("%s, memory 91.7%% with two lanes running: refused" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 2, "deny"))
-    lb_add("%s, memory 91.7%% with no lane running: the first lane is allowed" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=91.7), 0, "allow"))
-    lb_add("%s, a normal reading with three lanes running: allowed" % _short,
-           lb_decision_check(_tool, LB_NORMAL, 3, "allow"))
-    lb_add("%s, memory 97.2%% with no lane running: full, refused, names the reading" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=97.2), 0, "deny",
-                             lb_names("memory", "97.2", "97")))
-    lb_add("%s, a read that raises with one lane running: allowed" % _short,
-           lb_decision_check(_tool, "raise", 1, "allow"))
+LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
+LB_MEM_FULL = lb_names("memory", "97.2", "97")
+LB_DISK_BUSY = lb_names("disk", "9.4", "9", "90.6", "91", "90")
+LB_DISK_FULL = lb_names("disk", "3.1", "3", "96.9", "97")
+LB_CPU_BUSY = lb_names("cpu", "93.4", "93")
 
-lb_add("Agent, disk 9.4% free with one lane running: busy, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), 1, "deny",
-                         lb_names("disk", "9.4", "9", "90.6", "91", "90")))
-lb_add("Agent, disk 9.4% free with no lane running: allowed",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), 0, "allow"))
-lb_add("Agent, disk 3.1% free with no lane running: full, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=3.1), 0, "deny",
-                         lb_names("disk", "3.1", "3", "96.9", "97")))
-lb_add("Agent, CPU 93.4% with one lane running: busy, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), 1, "deny", lb_names("cpu", "93.4", "93")))
-lb_add("Agent, CPU 99% with no lane running: CPU never fills the machine, allowed",
-       lb_decision_check("Agent", lb_reading(cpu_pct=99.0), 0, "allow"))
-lb_add("Agent, 14 claude processes with one lane running: busy, refused, names the count",
-       lb_decision_check("Agent", lb_reading(claude_procs=14), 1, "deny",
-                         lb_names("claude", "14", percent=False)))
-lb_add("Agent, 14 claude processes with no lane running: allowed",
-       lb_decision_check("Agent", lb_reading(claude_procs=14), 0, "allow"))
-lb_add("Agent, memory unread and the rest normal, with one lane running: allowed",
-       lb_decision_check("Agent", lb_reading(memory_pct=None), 1, "allow"))
-lb_add("Agent, an empty reading with one lane running: allowed",
-       lb_decision_check("Agent", {}, 1, "allow"))
+# Agent and Task: every way a call says run_in_background, at normal, busy and full.
+for _short, _tool in LB_SPAWNS:
+    for _bg, _say in LB_BG:
+        lb_add("%s, normal reading, %s: allowed" % (_short, _say),
+               lb_decision_check(_tool, LB_NORMAL, "allow", background=_bg))
+        if _bg is False:
+            lb_add("%s, memory 91.7%%, %s: busy, a foreground lane is allowed" % (_short, _say),
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
+        else:
+            lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, says run it in the foreground"
+                   % (_short, _say),
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_FOREGROUND,),
+                                     background=_bg))
+        lb_add("%s, memory 97.2%%, %s: full, refused, names the reading" % (_short, _say),
+               lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg))
+        lb_add("%s, a read that raises, %s: allowed" % (_short, _say),
+               lb_decision_check(_tool, "raise", "allow", background=_bg))
+
+# Workflow and start_session have no foreground form. Workflow is refused at busy; start_session at busy is not pinned.
+lb_add("Workflow, memory 91.7%: busy, refused, names the reading",
+       lb_decision_check("Workflow", lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY))
+lb_add("Workflow named, not scripted, memory 91.7%: busy, refused",
+       lb_decision_check("Workflow", lb_reading(memory_pct=91.7), "deny", tool_input={"name": "audit"}))
+for _short, _tool in (("Workflow", "Workflow"), ("start_session", "mcp__ccd_session__start_session")):
+    lb_add("%s, normal reading: allowed" % _short, lb_decision_check(_tool, LB_NORMAL, "allow"))
+    lb_add("%s, memory 97.2%%: full, refused, names the reading" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL))
+    lb_add("%s, a read that raises: allowed" % _short, lb_decision_check(_tool, "raise", "allow"))
+
+# The other readings, on Agent. Each trips on its own, and a foreground lane passes busy but not full.
+lb_add("Agent, disk 9.4% free, run_in_background left out: busy, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "deny", LB_DISK_BUSY + (LB_FOREGROUND,)))
+lb_add("Agent, disk 9.4% free, run_in_background false: busy, a foreground lane is allowed",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "allow", background=False))
+lb_add("Agent, disk 3.1% free, run_in_background false: full, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(disk_free_pct=3.1), "deny", LB_DISK_FULL, background=False))
+lb_add("Agent, CPU 93.4%, run_in_background true: busy, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "deny", LB_CPU_BUSY + (LB_FOREGROUND,),
+                         background=True))
+lb_add("Agent, CPU 93.4%, run_in_background false: busy, a foreground lane is allowed",
+       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "allow", background=False))
+lb_add("Agent, CPU 99%, run_in_background false: CPU never fills the machine, allowed",
+       lb_decision_check("Agent", lb_reading(cpu_pct=99.0), "allow", background=False))
+lb_add("Agent, 20 claude processes read, the rest normal: no process count, allowed",
+       lb_decision_check("Agent", lb_reading(claude_procs=20), "allow"))
+lb_add("Agent, memory unread and the rest normal, run_in_background left out: allowed",
+       lb_decision_check("Agent", lb_reading(memory_pct=None), "allow"))
+lb_add("Agent, an empty reading, run_in_background left out: allowed",
+       lb_decision_check("Agent", {}, "allow"))
 lb_add("Agent, memory unread but disk 3.1% free: one unread reading hides no other, refused",
-       lb_decision_check("Agent", lb_reading(memory_pct=None, disk_free_pct=3.1), 0, "deny",
-                         lb_names("disk", "3.1", "3", "96.9", "97")))
+       lb_decision_check("Agent", lb_reading(memory_pct=None, disk_free_pct=3.1), "deny", LB_DISK_FULL,
+                         background=False))
 
 lb_add("Bash reads no load under the worst reading", lb_no_read_check("Bash", {"command": "echo hi"}))
 lb_add("PowerShell reads no load under the worst reading",
@@ -14594,6 +14628,8 @@ lb_add("a SubagentStop reads no load under the worst reading",
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
            lb_real_children_check(_tool), real=True)
+lb_add("Agent run in the foreground with the real reader starts no child process",
+       lb_real_children_check("Agent", background=False), real=True)
 lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
 lb_add("the real reader returns readings in range, and on Windows and Mac reads memory, disk and CPU",
