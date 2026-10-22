@@ -172,6 +172,20 @@ function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
     } finally { $key.Close() }
 }
 
+$PostMergeMarker = '# claude-settings post-merge hook'
+
+# Link mode needs no hook, and a stale one of ours would copy files over the links after a merge.
+# Removes only a hook that carries our marker; any other post-merge hook stays untouched.
+# Returns 'removed' or 'not needed', for the install-log summary.
+function Remove-PostMergeHook {
+    $hookPath = Join-Path $CloneDir '.git\hooks\post-merge'
+    if (-not (Test-Path -LiteralPath $hookPath)) { return 'not needed' }
+    if (-not ((Get-Content -Raw -LiteralPath $hookPath) -match [regex]::Escape($PostMergeMarker))) { return 'not needed' }
+    Remove-Item -LiteralPath $hookPath -Force
+    Log "symlinks work; removed the post-merge hook at $hookPath"
+    return 'removed'
+}
+
 # Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
 # Returns 'installed' or 'skipped', for the install-log summary.
@@ -179,7 +193,7 @@ function Install-PostMergeHook {
     $hooksDir = Join-Path $CloneDir '.git\hooks'
     if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return 'skipped' }
     $hookPath = Join-Path $hooksDir 'post-merge'
-    $marker   = '# claude-settings post-merge hook'
+    $marker   = $PostMergeMarker
     if ((Test-Path $hookPath) -and -not ((Get-Content -Raw $hookPath) -match [regex]::Escape($marker))) {
         Log "a post-merge hook already exists at $hookPath and is not ours; left untouched. Re-run install.ps1 after pulls instead."
         return 'skipped'
@@ -753,8 +767,7 @@ $TargetJson = Join-Path $ClaudeDir 'settings.json'
 $item = Get-Item $TargetJson -ErrorAction SilentlyContinue
 if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson) {
     Log "$TargetJson already links to $SrcJson"
-    $HookMode = 'not needed'
-    if ($AgentCopied) { $HookMode = Install-PostMergeHook }
+    $HookMode = if ($AgentCopied) { Install-PostMergeHook } else { Remove-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
     Complete-Run $AgentFailed
     Exit-Install $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
@@ -773,7 +786,7 @@ if ($item -and -not $item.LinkType -and $FirstLocalRun) {
 $how = Install-File $SrcJson $TargetJson
 if ($how -eq 'linked') {
     Log "linked $TargetJson -> $SrcJson (git pull in the clone is now the whole update)"
-    Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode 'not needed'
+    Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode (Remove-PostMergeHook)
 } else {
     if ($how -eq 'copied') { Log "symlink not permitted (enable Windows Developer Mode, or run as admin); copied instead." }
     $HookMode = Install-PostMergeHook
