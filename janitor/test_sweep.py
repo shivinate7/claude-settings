@@ -836,12 +836,12 @@ class StaleAgentLockTests(unittest.TestCase):
             time.tzset()
 
     def test_unreadable_process_start_is_unknown_not_stale(self):
-        real = sys.modules["git_reads"]._process_start_ms
-        sys.modules["git_reads"]._process_start_ms = lambda pid: sys.modules["git_reads"].PROCESS_START_UNREADABLE
+        real = guard._process_start_ms
+        sys.modules["guard_core"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
         try:
             self.assertIsNone(sweep.stale_agent_lock_verdict(self.reasons["dead"]))
         finally:
-            sys.modules["git_reads"]._process_start_ms = real
+            sys.modules["guard_core"]._process_start_ms = real
 
     def test_unreadable_pushed_check_keeps(self):
         real = sweep.fully_pushed
@@ -1696,7 +1696,7 @@ class TombstoneTests(unittest.TestCase):
         self.assertIn("old-topic-2", branches)
         tip = run_vcs(root, "rev-parse", "old-topic-2").stdout.strip()
 
-        real_git = sys.modules["git_reads"]._git
+        real_git = guard._git
 
         def failing_git(where, *args):
             if args[:2] == ("branch", "-D"):
@@ -1705,11 +1705,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-restore-fail.jsonl")
         decision = {"name": "old-topic-2", "action": "reap", "reason": "ancestor"}
-        sys.modules["git_reads"]._git = failing_git
+        sys.modules["guard_core"]._git = failing_git
         try:
             sweep.reap_branch(root, "old-topic-2", decision, log_path)
         finally:
-            sys.modules["git_reads"]._git = real_git
+            sys.modules["guard_core"]._git = real_git
 
         self.assertIn("error", decision)
         self.assertIn("old-topic-2", sweep.list_local_branches(root))
@@ -1721,13 +1721,13 @@ class TombstoneTests(unittest.TestCase):
         self.assertTrue(any(e.get("branch") == "old-topic-2" for e in entries))
 
     def _reap_with_git_failing(self, name, failing_args, answer):
-        """Run reap_branch on an ancestor branch while git_reads._git answers `answer` for the
+        """Run reap_branch on an ancestor branch while guard._git answers `answer` for the
         call whose leading args are `failing_args`. Return (decision, log_path, root)."""
         root = os.path.join(ROOT, "tomb-gitfail-" + name)
         make_repo(root, {"f.txt": "x\n"})
         run_vcs(root, "checkout", "-q", "-b", name)
         run_vcs(root, "checkout", "-q", "main")
-        real_git = sys.modules["git_reads"]._git
+        real_git = guard._git
 
         def failing_git(where, *args):
             if args[:len(failing_args)] == failing_args:
@@ -1736,11 +1736,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-gitfail-%s.jsonl" % name)
         decision = {"name": name, "action": "reap", "reason": "ancestor"}
-        sys.modules["git_reads"]._git = failing_git
+        sys.modules["guard_core"]._git = failing_git
         try:
             sweep.reap_branch(root, name, decision, log_path)
         finally:
-            sys.modules["git_reads"]._git = real_git
+            sys.modules["guard_core"]._git = real_git
         return decision, log_path, root
 
     def test_a_failed_tombstone_write_stops_the_delete(self):
@@ -2072,13 +2072,13 @@ class WorktreePruneTests(unittest.TestCase):
     def test_a_failed_prune_leaves_the_registration_and_its_branch_kept(self):
         root, registration = self._stale("prune-fails")
         failed = subprocess.CompletedProcess([], 1, "", "fatal")
-        real = sys.modules["git_reads"]._git
-        sys.modules["git_reads"]._git = lambda where, *a: (failed if a == ("worktree", "prune")
+        real = guard._git
+        sys.modules["guard_core"]._git = lambda where, *a: (failed if a == ("worktree", "prune")
                                         else real(where, *a))
         try:
             result = sweep.sweep_repo(root, True, os.path.join(ROOT, "prune-fails.log"))
         finally:
-            sys.modules["git_reads"]._git = real
+            sys.modules["guard_core"]._git = real
         self.assertTrue(result["pruned"]["error"])
         self.assertTrue(os.path.isdir(registration))
         verdict = [b for b in result["branches"] if b["name"] == "lane-prune-fails"]
@@ -2089,13 +2089,13 @@ class WorktreePruneTests(unittest.TestCase):
         failed = subprocess.CompletedProcess([], 128, "", "fatal")
         for name, answer in (("none", None), ("failed", failed)):
             root, registration = self._stale("prune-blind-" + name)
-            real = sys.modules["git_reads"]._git
-            sys.modules["git_reads"]._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
+            real = guard._git
+            sys.modules["guard_core"]._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
                                             else real(where, *a))
             try:
                 found = sweep.prune_registrations(root, True)
             finally:
-                sys.modules["git_reads"]._git = real
+                sys.modules["guard_core"]._git = real
             self.assertIsNone(found["names"])
             self.assertTrue(os.path.isdir(registration))
 
@@ -2497,38 +2497,38 @@ class PreviewCacheTests(unittest.TestCase):
 
     def test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached(self):
         seen = []
-        real = sys.modules["git_reads"]._git
-        sys.modules["git_reads"]._git = lambda where, *args: seen.append((where, args))
+        real = sweep.guard._git
+        sys.modules["guard_core"]._git = lambda where, *args: seen.append((where, args))
         try:
             self.begin()
             for where in ("a", "a", "b"):
-                sys.modules["git_reads"]._git(where, "worktree", "list", "--porcelain")
-            sys.modules["git_reads"]._git("a", "status", "--porcelain")
-            sys.modules["git_reads"]._git("a", "status", "--porcelain")
+                sweep.guard._git(where, "worktree", "list", "--porcelain")
+            sweep.guard._git("a", "status", "--porcelain")
+            sweep.guard._git("a", "status", "--porcelain")
         finally:
             self.undo()
             self.undo = None
-            sys.modules["git_reads"]._git = real
+            sys.modules["guard_core"]._git = real
         self.assertEqual(len(seen), 4)
 
     def test_session_records_are_read_once_per_preview(self):
         seen = []
-        real = sys.modules["git_reads"].session_records
-        sys.modules["git_reads"].session_records = lambda: seen.append(1) or []
+        real = sweep.guard.session_records
+        sys.modules["guard_core"].session_records = lambda: seen.append(1) or []
         try:
             self.begin()
-            sys.modules["git_reads"].session_records()
-            sys.modules["git_reads"].session_records()
+            sweep.guard.session_records()
+            sweep.guard.session_records()
         finally:
             self.undo()
             self.undo = None
-            sys.modules["git_reads"].session_records = real
+            sys.modules["guard_core"].session_records = real
         self.assertEqual(len(seen), 1)
 
     def test_only_a_preview_caches_and_the_guard_reads_come_back_after(self):
         repo = os.path.join(ROOT, "cache-gate-repo")
         seen = []
-        real_git, real_records = sys.modules["git_reads"]._git, sys.modules["git_reads"].session_records
+        real_git, real_records = sweep.guard._git, sweep.guard.session_records
         with _Stub("_sweep_roots", lambda *a: seen.append(
                 (sweep._RUN is not None, sweep._POOL is not None)) or 0):
             for args in ([repo], ["--confirm", repo], ["--tier1", repo], ["--branches", repo]):
@@ -2537,8 +2537,8 @@ class PreviewCacheTests(unittest.TestCase):
         self.assertEqual(seen, [(True, on), (False, False), (False, False), (True, on)])
         self.assertIsNone(sweep._RUN)
         self.assertIsNone(sweep._POOL)
-        self.assertIs(sys.modules["git_reads"]._git, real_git)
-        self.assertIs(sys.modules["git_reads"].session_records, real_records)
+        self.assertIs(sweep.guard._git, real_git)
+        self.assertIs(sweep.guard.session_records, real_records)
 
 
 class ParallelPreviewTests(unittest.TestCase):
@@ -2883,7 +2883,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         commit = self.rev(repo, "HEAD")
         self.reap(repo, "lane-failed", commit, log)
         self.age_log(log, [91], now)
-        real = sys.modules["git_reads"]._git
+        real = sys.modules["guard_core"]._git
         failed = subprocess.CompletedProcess([], 1, "", "simulated failure")
 
         def failing_delete(where, *args):
@@ -2891,11 +2891,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return failed
             return real(where, *args)
 
-        sys.modules["git_reads"]._git = failing_delete
+        sys.modules["guard_core"]._git = failing_delete
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["git_reads"]._git = real
+            sys.modules["guard_core"]._git = real
 
         self.assertIn("error", decisions[0], "a failed drop must be reported")
         self.assertEqual(self.ref(repo, "lane-failed"), commit, "a failed drop must keep the ref")
@@ -2968,7 +2968,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         commit = self.rev(repo, "HEAD")
         self.reap(repo, "lane-read", commit, log)
         self.age_log(log, [91], now)
-        real = sys.modules["git_reads"]._git
+        real = sys.modules["guard_core"]._git
         failed = subprocess.CompletedProcess([], 128, "", "fatal: simulated")
 
         def failing_read(where, *args):
@@ -2976,11 +2976,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return failed
             return real(where, *args)
 
-        sys.modules["git_reads"]._git = failing_read
+        sys.modules["guard_core"]._git = failing_read
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["git_reads"]._git = real
+            sys.modules["guard_core"]._git = real
 
         self.assertIn("error", decisions[0], "a git failure (exit 128) must be reported")
         self.assertEqual(self.ref(repo, "lane-read"), commit,
@@ -3074,7 +3074,7 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.age_log(log, [91, 5], now)
         self.assertEqual(self.ref(repo, "lane-race"), young,
                          "fixture: the second reap must hold the ref")
-        real = sys.modules["git_reads"]._git
+        real = sys.modules["guard_core"]._git
         stale = subprocess.CompletedProcess([], 0, old + "\n", "")
 
         def read_says_old(where, *args):
@@ -3082,11 +3082,11 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 return stale
             return real(where, *args)
 
-        sys.modules["git_reads"]._git = read_says_old
+        sys.modules["guard_core"]._git = read_says_old
         try:
             decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
         finally:
-            sys.modules["git_reads"]._git = real
+            sys.modules["guard_core"]._git = real
 
         self.assertIn("error", decisions[0], "a refused delete must be reported")
         self.assertEqual(self.ref(repo, "lane-race"), young,
@@ -3192,7 +3192,7 @@ class AgentEndReapBatchTests(unittest.TestCase):
             mock.patch.object(sweep.subprocess, "run", self.fake_lsof),
             mock.patch.object(sweep, "list_all_pids", lambda: list(pids)),
             mock.patch.object(sweep, "_is_primary_checkout", lambda path: False),
-            mock.patch.object(sys.modules["git_reads"], "worktree_live_session", lambda path: False),
+            mock.patch.object(sys.modules["guard_core"], "worktree_live_session", lambda path: False),
             mock.patch.object(sweep, "is_orphan", lambda pid: True),
             mock.patch.object(sweep, "is_current_user_process",
                               lambda pid: pid != self.in_foreign),
@@ -5078,22 +5078,22 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.kept_and_logged(tree, ctl, out, "agent-h2")
 
     def test_h_keeps_a_tree_when_the_merged_read_fails_and_logs_it(self):
-        """Only the merged read (`git cherry <default branch> HEAD`, the read that decides a HEAD
-        the batched ancestry read does not hold) fails. The older rulings keep the tree as
-        unreadable, and the agent rule must not turn that keep into a removal: it is clean,
-        pushed, an agent tree, and idle 5 hours, so it goes in a second run that can read."""
+        """Only the merged read (`git merge-base --is-ancestor HEAD <default branch>`) fails. The
+        older rulings keep the tree as unreadable, and the agent rule must not turn that keep
+        into a removal: it is clean, pushed, an agent tree, and idle 5 hours, so it goes in a
+        second run that can read."""
         tree = self.agent("h5")
         sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
         fired = []
 
         def match(argv, cwd):
-            hit = "cherry" in argv and (_aimed_at(tree, argv, cwd) or sha in argv or "wt-h5" in argv)
+            hit = "merge-base" in argv and (_aimed_at(tree, argv, cwd) or sha in argv or "wt-h5" in argv)
             if hit:
                 fired.append(argv)
             return hit
 
         out = self.run_sweep(5, fail=match)
-        self.assertTrue(fired, "no `cherry` read was made for the tree. Report: "
+        self.assertTrue(fired, "no `merge-base` read was made for the tree. Report: "
                         + self.lines_about(out, "agent-h5"))
         self.assertKept(tree, out)
         self.assertLogged(out, "agent-h5")
@@ -5473,7 +5473,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
 
     def test_git_that_cannot_run_answers_none(self):
         root, _ = self._squash_lane("refs/remotes/origin/gone")
-        with mock.patch.object(sys.modules["git_reads"], "_git", return_value=None):
+        with mock.patch.object(sys.modules["guard_core"], "_git", return_value=None):
             self.assertIsNone(guard.resolve_default_base(root))
 
     def test_squash_merged_lane_is_removable_when_origin_head_dangles(self):
@@ -5501,22 +5501,22 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
 
     def test_unreadable_origin_head_verify_returns_none_not_local_main(self):
-        """A verify read that could not RUN (git_reads._git returns None) must not read as "does not
+        """A verify read that could not RUN (guard._git returns None) must not read as "does not
         exist". Only a git that answers "does not exist" (returncode != 0) may fall through to
         local main. An unreadable verify returns None, so the sweep keeps the lane."""
         root, _ = self._squash_lane("refs/remotes/origin/main")
         require(guard.resolve_default_base(root) == "origin/main",
                 "the unpatched base is not origin/main, so the case proves nothing")
-        real_git = sys.modules["git_reads"]._git
+        real_git = guard._git
         verify_calls = []
 
         def unreadable_verify(where, *args):
             if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
                 verify_calls.append(args)
-                return None  # git_reads._git could not run git
+                return None  # guard._git could not run git
             return real_git(where, *args)
 
-        with mock.patch.object(sys.modules["git_reads"], "_git", side_effect=unreadable_verify):
+        with mock.patch.object(sys.modules["guard_core"], "_git", side_effect=unreadable_verify):
             base = guard.resolve_default_base(root)
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
@@ -6573,449 +6573,6 @@ class SweepFinishesTests(unittest.TestCase):
         late = self.tree_reads_at_or_after(12.0)
         self.assertEqual(late, [], "a 25 s deadline read a tree at or past 12 s: %r" % (late,))
         self.assert_unjudged_trees_kept(results, judged)
-
-
-# --------------------------------------------------------------------------- fast sweep on big repos
-#
-# c16, janitor sweep fast on big repos. Every case below drives `sweep.main`, never `sweep_repo`
-# alone: `main` switches on the per-run caches a real run has, and a count taken without them
-# measures a harness. `--fast` is one more flag in the group that holds `--tier1` and `--branches`.
-#   1. The git reads that ask "is this branch in main?" are batched, in `--branches`, in `--fast`
-#      and in the default sweep: their number does not grow with the number of branches or
-#      worktrees. Only a branch the batch cannot prove gets a `git cherry`.
-#   2. `--fast` reaps a worktree only when its branch is already in main. It keeps every tree it
-#      cannot prove safe: dirty, locked, in a live session, unreadable, or the batch unreadable.
-#   3. Importing sweep.py loads no module of the guard family.
-
-# The git subcommands that ask whether a branch is in main. `rev-list` is here because a per-tree
-# `rev-list` is as good a proof as a per-tree `merge-base`.
-PROOF_COMMANDS = ("merge-base", "cherry", "for-each-ref", "branch", "show-ref", "log", "rev-list")
-REFUSED = "sweep.main refused its arguments (is there a --fast mode yet?): %s"
-# Reads a fast tree may cost, one each: is it the primary checkout, how long idle, is it dirty,
-# what is HEAD; plus one spare. The full sweep costs about 13 per tree.
-FAST_READS_PER_TREE = 6
-# 2 batch reads (the branch list, the merged list), 1 spare, and a `cherry` for each tree
-# the batch cannot prove.
-FAST_PROOF_CALLS = 3
-
-
-def _git_command(argv):
-    """The git subcommand in ARGV: the word after `-C <path>`, else the first word."""
-    i = argv.index("-C") + 2 if "-C" in argv else 1
-    return argv[i] if i < len(argv) else ""
-
-
-@contextlib.contextmanager
-def _git_children(calls, fail=None):
-    """Append the argv of every `git` child process to CALLS, however the code started it. `run`,
-    `call` and `check_output` all end in `Popen`, so this sees what a patch on `run` would miss. A
-    call that FAIL(argv, cwd) accepts runs a stub that answers exit 128 instead of git."""
-    real = subprocess.Popen
-    broken = [sys.executable, "-c",
-              "import sys; sys.stderr.write('fatal: injected read failure\\n'); sys.exit(128)"]
-
-    class Watching(real):
-        def __init__(self, args, *rest, **kwargs):
-            if isinstance(args, (list, tuple)) and args and str(args[0]) == "git":
-                argv = [str(x) for x in args]
-                calls.append(argv)
-                if fail and fail(argv, kwargs.get("cwd")):
-                    args = broken
-            super().__init__(args, *rest, **kwargs)
-
-    with mock.patch("subprocess.Popen", Watching):
-        yield
-
-
-def _removals_of(calls, path):
-    """The `git worktree remove` calls in CALLS that name PATH."""
-    return [c for c in calls if _git_command(c) == "worktree" and "remove" in c
-            and any(_norm_path(a) == _norm_path(path) for a in c[c.index("remove") + 1:])]
-
-
-def _run_main(root, flags, hours=0, fail=None):
-    """`sweep.main([root, *flags, ...])` with the clock HOURS ahead and every machine-wide read
-    stubbed. Returns (refused, results, calls). REFUSED is what argparse printed when `main` exited
-    on its own arguments, else None. RESULTS is what the report was given: one dict per repository.
-    CALLS is the argv of every git child process. The clock moves, so no file is touched and a
-    `git status` cannot rewrite an index and make a tree look active."""
-    calls, results, err, refused = [], [], io.StringIO(), None
-    clock = time.time
-
-    def capture(found, confirm, out=None):
-        results.extend(found)
-
-    env = {"JANITOR_RUN_LOG": os.path.join(ROOT, "fast-runs.jsonl")}
-    with mock.patch.dict(os.environ, env), _machine_quiet(), \
-            mock.patch("time.time", lambda: clock() + hours * 3600), \
-            mock.patch.object(sweep, "print_sweep_report", capture), \
-            mock.patch.object(sweep, "find_swept_listeners", return_value=[]), \
-            _process_table({}), _git_children(calls, fail), contextlib.redirect_stderr(err):
-        try:
-            sweep.main([root, "--restore-log", os.path.join(ROOT, "fast-restore.log")] + flags)
-        except SystemExit as stop:
-            refused = "exit %r: %s" % (stop.code, (err.getvalue().strip().splitlines() or [""])[-1])
-    return refused, results, calls
-
-
-def _fast_repo(name):
-    """A clone whose `origin/main` is the default branch the sweep compares against."""
-    root = os.path.join(ROOT, "fast-" + name)
-    make_repo(root, {"f.txt": "base\n"})
-    give_remote(root)
-    return root
-
-
-def _add_tree(root, name, state="merged"):
-    """A linked worktree of ROOT on branch `lane-<name>`. "merged": at main's tip, so its branch is
-    in main. "unmerged": one commit of its own, pushed. The full sweep removes such a tree once it
-    is idle 24 hours; `--fast` must not."""
-    path = "%s-%s" % (root, name)
-    made = run_vcs(root, "worktree", "add", "-q", path, "-b", "lane-" + name)
-    require(made.returncode == 0, "worktree add %r failed: %s" % (path, made.stderr.strip()))
-    if state == "unmerged":
-        write(os.path.join(path, name + ".txt"), "only on the lane\n")
-        run_vcs(path, "add", "-A")
-        require(run_vcs(path, *IDENT, "commit", "-q", "-m", name).returncode == 0,
-                "commit in %r failed" % path)
-        require(run_vcs(path, "push", "-q", "origin", "lane-" + name).returncode == 0,
-                "push of lane-%s failed" % name)
-    return path
-
-
-def _listed(root, path):
-    return any(_norm_path(e["path"]) == _norm_path(path) for e in sweep.parse_worktree_list(root) or [])
-
-
-class FastSweepTests(unittest.TestCase):
-    """`--fast --confirm`, unattended, one run for the class. Five trees and the primary checkout:
-    `merged` (its branch is in main), `unmerged`, `dirty`, `locked`, `live`. Every keep case also
-    needs `merged` removed in the same run, so a sweep that does nothing, or stops early, cannot
-    pass one. The trees are 30 hours idle, so no idle rule decides anything."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.root = _fast_repo("reap")
-        cls.merged = _add_tree(cls.root, "merged")
-        cls.unmerged = _add_tree(cls.root, "unmerged", "unmerged")
-        cls.dirty = _add_tree(cls.root, "dirty")
-        write(os.path.join(cls.dirty, "new.txt"), "uncommitted\n")
-        cls.locked = _add_tree(cls.root, "locked")
-        lock = run_vcs(cls.root, "worktree", "lock", cls.locked, "--reason", "held by lane-x")
-        require(lock.returncode == 0, "locking failed: %s" % lock.stderr.strip())
-        cls.live = _add_tree(cls.root, "live")
-        write_session("fast-live-case", os.getpid(), this_process_start_ms(), cls.live)
-        require(len(sweep.parse_worktree_list(cls.root)) == 6, "the fixture needs 6 worktrees")
-        cls.refused, cls.results, cls.calls = _run_main(cls.root, ["--fast", "--confirm"], 30)
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            os.remove(os.path.join(CFG, "sessions", "fast-live-case.json"))
-        except OSError:
-            pass
-
-    def setUp(self):
-        self.assertIsNone(self.refused, REFUSED % self.refused)
-
-    def assertMergedRemoved(self):
-        self.assertFalse(os.path.isdir(self.merged), "the merged tree is still there")
-        self.assertFalse(_listed(self.root, self.merged), "the merged tree is still registered")
-
-    def assertKept(self, path):
-        self.assertMergedRemoved()  # else the sweep did nothing, and a keep proves nothing
-        self.assertEqual(_removals_of(self.calls, path), [], "the sweep tried to remove it")
-        self.assertTrue(os.path.isdir(path), "the tree was removed")
-        self.assertTrue(_listed(self.root, path), "the tree was unregistered")
-
-    def test_removes_a_tree_whose_branch_is_in_main(self):
-        self.assertMergedRemoved()
-
-    def test_keeps_a_pushed_tree_whose_branch_is_not_in_main(self):
-        self.assertKept(self.unmerged)
-        self.assertIn("lane-unmerged", sweep.list_local_branches(self.root) or [])
-
-    def test_keeps_a_merged_tree_with_uncommitted_work(self):
-        self.assertKept(self.dirty)
-        self.assertTrue(os.path.isfile(os.path.join(self.dirty, "new.txt")))
-
-    def test_keeps_a_merged_tree_that_is_locked(self):
-        self.assertKept(self.locked)
-        entry = [e for e in sweep.parse_worktree_list(self.root)
-                 if _norm_path(e["path"]) == _norm_path(self.locked)][0]
-        self.assertIsNotNone(entry["locked_reason"], "the lock was dropped")
-
-    def test_keeps_a_merged_tree_a_live_session_stands_in(self):
-        self.assertKept(self.live)
-
-    def test_never_removes_the_primary_checkout(self):
-        self.assertMergedRemoved()
-        self.assertTrue(os.path.isdir(os.path.join(self.root, ".git")))
-        self.assertEqual(_removals_of(self.calls, self.root), [])
-
-
-class FastSweepUnreadableTests(unittest.TestCase):
-    """A tree `--fast` cannot prove safe is kept: less checking fails toward keeping, never toward
-    deleting."""
-
-    def test_a_tree_whose_own_state_cannot_be_read_is_kept(self):
-        root = _fast_repo("blind-tree")
-        blind, control = _add_tree(root, "blind"), _add_tree(root, "control")
-        refused, _results, calls = _run_main(
-            root, ["--fast", "--confirm"], 30, fail=lambda argv, cwd: _aimed_at(blind, argv, cwd))
-        self.assertIsNone(refused, REFUSED % refused)
-        self.assertFalse(os.path.isdir(control), "the readable control tree was not removed, so "
-                         "this keep proves nothing")
-        self.assertTrue(any(_aimed_at(blind, c, None) for c in calls), "the sweep never read the "
-                        "blind tree, so the keep proves nothing")
-        self.assertEqual(_removals_of(calls, blind), [])
-        self.assertTrue(os.path.isdir(blind))
-        self.assertTrue(_listed(root, blind))
-
-    def test_a_merged_read_that_fails_keeps_every_tree(self):
-        root = _fast_repo("blind-batch")
-        trees = [_add_tree(root, "a"), _add_tree(root, "b")]
-        refused, _results, calls = _run_main(
-            root, ["--fast", "--confirm"], 30,
-            fail=lambda argv, cwd: _git_command(argv) in PROOF_COMMANDS)
-        self.assertIsNone(refused, REFUSED % refused)
-        self.assertTrue(any(_git_command(c) in PROOF_COMMANDS for c in calls),
-                        "the sweep asked no merged question, so the keeps prove nothing")
-        for path in trees:
-            self.assertEqual(_removals_of(calls, path), [])
-            self.assertTrue(os.path.isdir(path), "%s was removed" % os.path.basename(path))
-            self.assertTrue(_listed(root, path))
-
-
-class FastSweepIdleKeepTests(unittest.TestCase):
-    """`--fast --confirm` with the clock at +0 hours: the merged tree is seconds old, so the 1 hour
-    idle keep is the only rule that can hold it. The cases above run 30 hours ahead, where that keep
-    never fires. One repository, two runs: the unattended run keeps the tree, then `--attended`
-    removes the SAME tree. That second run is the control: the tree is clean, unlocked, merged and
-    unlive, so the first keep can only be the idle rule."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.root = _fast_repo("idle")
-        cls.tree = _add_tree(cls.root, "young")
-        cls.refused, cls.results, cls.calls = _run_main(cls.root, ["--fast", "--confirm"])
-        cls.still_there = os.path.isdir(cls.tree) and _listed(cls.root, cls.tree)
-        cls.person_refused, cls.person_results, cls.person_calls = _run_main(
-            cls.root, ["--fast", "--attended", "--confirm"])
-
-    def decision_of(self, results):
-        self.assertEqual(len(results), 1)
-        found = [d for d in results[0]["worktrees"] if _norm_path(d["path"]) == _norm_path(self.tree)]
-        self.assertEqual(len(found), 1, "the sweep did not judge the tree: %r" % (results[0]["worktrees"],))
-        return found[0]
-
-    def test_keeps_a_merged_tree_idle_less_than_an_hour(self):
-        self.assertIsNone(self.refused, REFUSED % self.refused)
-        decision = self.decision_of(self.results)
-        self.assertEqual(decision["action"], "keep", decision)
-        self.assertTrue(decision["reason"].startswith("recently-active"), decision)
-        self.assertEqual(_removals_of(self.calls, self.tree), [], "the sweep tried to remove it")
-        self.assertTrue(self.still_there, "the tree was removed or unregistered")
-
-    def test_a_persons_run_removes_that_same_tree(self):
-        self.assertIsNone(self.person_refused, REFUSED % self.person_refused)
-        self.assertEqual(self.decision_of(self.person_results)["action"], "reap")
-        self.assertTrue(_removals_of(self.person_calls, self.tree), "no removal was tried")
-        self.assertFalse(os.path.isdir(self.tree), "the tree is still there")
-        self.assertFalse(_listed(self.root, self.tree), "the tree is still registered")
-
-
-class FastSweepNoRemoteBaseTests(unittest.TestCase):
-    """`--fast` refuses a repository whose default branch has no remote copy: a local `main` may hold
-    work no remote has, so "in main" proves no copy exists. The refusal must be the only thing that
-    holds the tree, so the same repository is swept again once it has a remote, and then the tree
-    goes."""
-
-    def test_refuses_a_repository_whose_default_branch_is_local_only(self):
-        root = os.path.join(ROOT, "fast-no-remote")
-        make_repo(root, {"f.txt": "base\n"})
-        tree = _add_tree(root, "merged")
-        base = sweep.git_reads.resolve_default_base(root)
-        require(base == "main", "the fixture needs a local-only default branch, got %r" % (base,))
-
-        refused, results, calls = _run_main(root, ["--fast", "--confirm"], 30)
-        self.assertIsNone(refused, REFUSED % refused)
-        self.assertEqual([r["refused"] for r in results], ["no-remote-default-base"])
-        self.assertEqual(results[0]["worktrees"], [], "a refused repository judged a tree")
-        self.assertEqual(_removals_of(calls, tree), [], "the sweep tried to remove it")
-        self.assertTrue(os.path.isdir(tree) and _listed(root, tree), "the tree was removed")
-
-        give_remote(root)
-        refused, results, calls = _run_main(root, ["--fast", "--confirm"], 30)
-        self.assertIsNone(refused, REFUSED % refused)
-        self.assertIsNone(results[0]["refused"], "a repository with a remote default base was refused")
-        self.assertFalse(os.path.isdir(tree), "with a remote the same tree is removed, so the "
-                         "refusal above was the only thing holding it")
-
-
-class _TreeCountRuns:
-    """One repository run in preview at two sizes: 2 merged trees, then 5, each beside one unmerged
-    tree. The verdicts come first, so a sweep that judged nothing cannot pass on a low count.
-    FLAGS says which sweep, HOURS how far ahead the clock runs."""
-
-    FLAGS, HOURS = [], 0
-
-    @classmethod
-    def setUpClass(cls):
-        cls.runs = {}
-        root = _fast_repo("count-" + cls.__name__)
-        merged = [_add_tree(root, "m%d" % i) for i in range(2)]
-        unmerged = _add_tree(root, "u", "unmerged")
-        cls.runs[2] = (list(merged), unmerged) + _run_main(root, cls.FLAGS, cls.HOURS)
-        merged += [_add_tree(root, "m%d" % i) for i in range(2, 5)]
-        cls.runs[5] = (list(merged), unmerged) + _run_main(root, cls.FLAGS, cls.HOURS)
-
-    def proof_calls(self):
-        """{size: the proof calls of that run}."""
-        found = {}
-        for n, (_m, _u, refused, _results, calls) in self.runs.items():
-            self.assertIsNone(refused, REFUSED % refused)
-            found[n] = [c for c in calls if _git_command(c) in PROOF_COMMANDS]
-        return found
-
-    def test_each_merged_tree_is_a_reap_and_the_unmerged_tree_a_keep(self):
-        for n, (merged, unmerged, refused, results, _calls) in self.runs.items():
-            self.assertIsNone(refused, REFUSED % refused)
-            self.assertEqual(len(results), 1)
-            verdict = {_norm_path(d["path"]): d["action"] for d in results[0]["worktrees"]}
-            self.assertEqual(sorted(verdict), sorted(_norm_path(p) for p in merged + [unmerged]),
-                             "%d merged trees: the sweep judged the wrong set" % n)
-            self.assertEqual({p for p, a in verdict.items() if a == "reap"},
-                             {_norm_path(p) for p in merged})
-
-    def test_merged_proof_calls_do_not_grow_with_the_tree_count(self):
-        proof = self.proof_calls()
-        self.assertEqual(len(proof[2]), len(proof[5]), "proof calls went from %d to %d when the "
-                         "merged trees went from 2 to 5" % (len(proof[2]), len(proof[5])))
-
-
-class FastSweepGitCallTests(_TreeCountRuns, unittest.TestCase):
-    """`--fast`, clock 30 hours ahead, so no idle rule decides anything."""
-
-    FLAGS, HOURS = ["--fast"], 30
-
-    def test_merged_proof_calls_stay_under_a_small_cap(self):
-        # `rev-list` is outside the cap: `prime_pushed` may run one per sweep to settle every
-        # tree's push state. The unmerged tree is the one the batch cannot prove, so it may cost
-        # its own `cherry`.
-        proof = [c for c in self.proof_calls()[5] if _git_command(c) != "rev-list"]
-        self.assertLessEqual(len(proof), FAST_PROOF_CALLS + 1, "proof calls for 6 trees: %r" % proof)
-
-    def test_the_other_reads_per_tree_stay_small(self):
-        total = {}
-        for n, (_m, _u, refused, _results, calls) in self.runs.items():
-            self.assertIsNone(refused, REFUSED % refused)
-            total[n] = len(calls)
-        per_tree = (total[5] - total[2]) / 3.0
-        self.assertLessEqual(per_tree, FAST_READS_PER_TREE, "git calls per extra tree: %.1f "
-                             "(%d for 3 trees, %d for 6)" % (per_tree, total[2], total[5]))
-
-
-class DefaultSweepGitCallTests(_TreeCountRuns, unittest.TestCase):
-    """The default sweep, the one SessionEnd launches today, unattended. The clock runs 2 hours
-    ahead: a merged tree passes the 1 hour idle keep, and the pushed unmerged tree is still kept
-    by the 24 hour one. No per-tree slope here: this sweep does real work on each tree."""
-
-    FLAGS, HOURS = [], 2
-
-
-def _import_branches(root, stream):
-    """Run `git fast-import` on STREAM: many branches in one call, where a fixture would otherwise
-    spend several git calls on each. The stream goes in as bytes, so Windows keeps its newlines."""
-    done = subprocess.run([VCS, "-C", root, "fast-import", "--quiet"], input=stream.encode("utf-8"),
-                          capture_output=True, timeout=60)
-    require(done.returncode == 0, "fast-import failed: %s" % done.stderr.decode("utf-8", "replace"))
-
-
-def _import_commit(branch, message, when, files):
-    """One fast-import commit on BRANCH, child of main's tip, adding FILES ({path: text})."""
-    out = "commit refs/heads/%s\ncommitter t <t@example.invalid> %d +0000\ndata %d\n%s\nfrom refs/heads/main\n" % (
-        branch, when, len(message), message)
-    for path, text in files.items():
-        out += "M 100644 inline %s\ndata %d\n%s\n" % (path, len(text), text)
-    return out + "\n"
-
-
-def _import_ancestors(root, names):
-    """Branches at main's current tip, so each is in main by ancestry."""
-    _import_branches(root, "".join("reset refs/heads/%s\nfrom refs/heads/main\n\n" % n for n in names))
-
-
-def _branch_repo(name, ancestors):
-    """A clone with ANCESTORS branches already in main and three fixed ones. `rebased-work`: its
-    patch is on main under another commit id, so only `git cherry` proves it. `pushed-work`: unique,
-    on the remote. `unmerged-work`: unique, nowhere else."""
-    root = _fast_repo(name)
-    _import_ancestors(root, ["anc-%d" % i for i in range(ancestors)])
-    _import_branches(root, "".join(
-        _import_commit(b, b, when, {b + ".txt": b + "\n"}) for b, when in (
-            ("rebased-work", 1700000100), ("pushed-work", 1700000200), ("unmerged-work", 1700000300))))
-    write(os.path.join(root, "rebased-work.txt"), "rebased-work\n")  # the same patch, on main
-    run_vcs(root, "add", "-A")
-    require(run_vcs(root, *IDENT, "commit", "-q", "-m", "same patch on main").returncode == 0, "commit")
-    require(run_vcs(root, "push", "-q", "origin", "main", "pushed-work").returncode == 0, "push")
-    cherry = run_vcs(root, "cherry", "origin/main", "rebased-work").stdout
-    require(cherry.strip() and not any(l.startswith("+") for l in cherry.splitlines()),
-            "rebased-work must read cherry-empty: %r" % cherry)
-    return root
-
-
-class BatchedBranchProofTests(unittest.TestCase):
-    """`--branches`, preview. One repository run with 2 branches already in main, then with 6. A
-    batched proof reads the branch list once and the merged list once, so the count of git calls is
-    the same at both sizes. Per branch it is `merge-base` twice (the decision, then the label)."""
-
-    EXPECT = {"rebased-work": ("reap", "cherry-empty"), "pushed-work": ("reap", "on-remote"),
-              "unmerged-work": ("keep", "only-copy"), "main": ("keep", "default-branch")}
-
-    @classmethod
-    def setUpClass(cls):
-        root = _branch_repo("branches", 2)
-        cls.runs = {2: _run_main(root, ["--branches"])}
-        _import_ancestors(root, ["anc-%d" % i for i in range(2, 6)])
-        cls.runs[6] = _run_main(root, ["--branches"])
-
-    def test_the_verdicts_hold_at_both_sizes(self):
-        for n, (refused, results, _calls) in self.runs.items():
-            self.assertIsNone(refused, "--branches refused: %s" % refused)
-            self.assertEqual(len(results), 1)
-            decided = {d["name"]: (d["action"], d["reason"]) for d in results[0]["branches"]}
-            for name in ["anc-%d" % i for i in range(n)]:
-                self.assertEqual(decided.get(name), ("reap", "ancestor"), name)
-            for name, verdict in self.EXPECT.items():
-                self.assertEqual(decided.get(name), verdict, "%s with %d ancestors" % (name, n))
-
-    def test_git_calls_do_not_grow_with_the_branch_count(self):
-        calls = {n: run[2] for n, run in self.runs.items()}
-        self.assertTrue(len(calls[2]) > 0, "no git call was recorded")
-        self.assertEqual(len(calls[6]), len(calls[2]), "git calls went from %d to %d when the "
-                         "branches in main went from 2 to 6" % (len(calls[2]), len(calls[6])))
-
-    def test_cherry_runs_only_for_a_branch_the_batch_cannot_prove(self):
-        # Three branches are not in main by ancestry: rebased-work, pushed-work, unmerged-work.
-        cherries = [c for c in self.runs[6][2] if _git_command(c) == "cherry"]
-        self.assertLessEqual(len(cherries), 3, "cherry ran %d times: %r" % (len(cherries), cherries))
-
-
-class NoGuardAtImportTests(unittest.TestCase):
-    """Importing sweep.py loads no module of the guard family: that import is the start-up cost of a
-    SessionEnd run on a big repository. A fresh interpreter answers, because this file imported
-    `guard` itself. The family comes from guard's own list, not a copy of it."""
-
-    def test_importing_sweep_loads_no_guard_module(self):
-        family = sorted({"guard", "guard_core", *guard._FAMILY_MODULES})
-        code = ("import json, sys\nsys.path.insert(0, %r)\nimport sweep\n"
-                "print(json.dumps(sorted(set(sys.modules) & set(%r))))" % (HERE, family))
-        done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
-                              timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1]), [],
-                         "importing sweep loaded these guard modules")
 
 
 if __name__ == "__main__":

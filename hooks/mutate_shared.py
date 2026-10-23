@@ -56,27 +56,20 @@ def guard_files(folder: str):
     return sorted(glob.glob(os.path.join(folder, "guard*.py")))
 
 
-def anchor_files(folder: str):
-    """Every file a guard mutant may be anchored in: the guard modules, then git_reads.py, which
-    holds the reads of the repository and of sessions that the guard and the janitor share."""
-    reads = os.path.join(folder, "git_reads.py")
-    return guard_files(folder) + ([reads] if os.path.exists(reads) else [])
-
-
 def guard_tree(dest: str) -> None:
-    """Copy every guard module and git_reads.py in HOOKS_DIR into `dest`, so a copied guard.py
-    finds its siblings beside it, never the real ones. shared_names.py goes too: guard_core.py and
+    """Copy every guard module in HOOKS_DIR into `dest`, so a copied guard.py finds its
+    siblings beside it, never the real ones. shared_names.py goes too: guard_core.py and
     config_watch.py import it, and a copy without it dies on that import."""
     os.makedirs(dest, exist_ok=True)
-    for path in anchor_files(HOOKS_DIR) + [os.path.join(HOOKS_DIR, "shared_names.py")]:
+    for path in guard_files(HOOKS_DIR) + [os.path.join(HOOKS_DIR, "shared_names.py")]:
         shutil.copy(path, dest)
 
 
 def find_anchor(folder: str, old: str):
-    """Return (path, text) of the one guard module or git_reads.py in `folder` that holds `old`
-    exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all."""
+    """Return (path, text) of the one guard module in `folder` that holds `old` exactly once.
+    Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all modules."""
     hits = []
-    for path in anchor_files(folder):
+    for path in guard_files(folder):
         # Universal newlines: a checkout may hold CRLF, and an anchor spells a line break "\n".
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
