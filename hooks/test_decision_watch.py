@@ -911,7 +911,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/question-outcome-check.md).
+# The one-year token file (decisions/reply-judge-samples-never-blocks.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this
@@ -1166,7 +1166,7 @@ def _timeout_run(argv, **kwargs):
 
 
 def case_invoke_model_return_shape_pinned():
-    # reply_judge and question_outcome call invoke_model: its (verdict | None, error | None) return must not move.
+    # reply_judge calls invoke_model: its (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
