@@ -5,29 +5,9 @@ copy.
 
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
 and its `content` blocks. last_reply returns the text of the last assistant reply.
-
-`safe_finding_text` makes a finding's text fit to print in a line a person or the model reads.
-That text is attacker-reachable: a value matched out of the file under lint can sit inside a
-message. `safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe` gives a
-tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
-approval. It is copied, not imported, so this module does not depend on hooks/guard.py.
 """
 import json
 import os
-import re
-
-FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-FINDING_MAX = 300
-FINDING_CUT_MARK = " [cut]"
-
-
-def safe_finding_text(text):
-    """Return `text` fit to print inside a finding's line: control characters cleared,
-    length capped with a marked cut. See the module docstring."""
-    clean = FINDING_CONTROL.sub(" ", text or "")
-    if len(clean) > FINDING_MAX:
-        return clean[:FINDING_MAX] + FINDING_CUT_MARK
-    return clean
 
 
 def read_transcript(path):

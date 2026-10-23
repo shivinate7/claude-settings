@@ -16,7 +16,7 @@ sends the writer back for another write, and it starts a process on every Write,
   exit 0. An installed `settings.json` copy may still call them, and a missing gate script fails closed and
   refuses every write (`gate-hooks-fail-closed`). Delete both once installs have refreshed (debt
   `ste-stubs-delete`, delete the two stub scripts).
-- The real safety gates stay fail-closed: `guard.py`, `question_outcome.py` and `rm_prompt_answer.py`
+- The real safety gates stay fail-closed: `guard.py` and `rm_prompt_answer.py`
   (`gate-hooks-fail-closed`).
 
 Unmeasured: how often a writer now meets an STE error first in CI instead of at the write.
