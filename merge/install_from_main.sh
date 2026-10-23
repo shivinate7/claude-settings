@@ -14,6 +14,8 @@
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
 # writes the files one at a time (a live reader can see a mix there).
+# A pin with tracked changes is never moved, switched or removed, nor is an old tree with them: the
+# run logs one line naming the pin and exits 1.
 # The run tests for link rights before it moves anything, so a host without them never loses the
 # pin path.
 # The run takes the install lock the installers take (install-hooks-whole): one
@@ -105,12 +107,19 @@ prune_trees() {
     [ "${#s}" = 12 ] && [ -z "${s//[0-9a-f]/}" ] || continue
     [ "$(canon "$w")" = "$(canon "$1")" ] && continue
     [ -n "$2" ] && [ "$(canon "$w")" = "$(canon "$2")" ] && continue
+    [ -z "$(git -C "$w" status --porcelain --untracked-files=no 2>/dev/null)" ] || continue   # never drop a tree with tracked changes
     git worktree remove -f -f "$w" >/dev/null 2>&1
   done
 }
 
 # Moves the pinned checkout to main's commit.
 move_pin() {
+  if [ -n "$(git -C "$pin" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    # Tracked changes in the pin are someone's work: move, switch and remove nothing. The log line
+    # names the pin and is not the helper's own start or end line, so the hook's reader sees it.
+    printf '%s claude-settings pin: %s has tracked changes, so it was not moved to main\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$pin" >> "$INSTALL_LOG"
+    fail "the pinned checkout $pin has tracked changes, so it was not moved; commit or discard them there (git -C \"$pin\" status), then run merge/install_from_main.sh"
+  fi
   if ! can_link; then switch_in_place; return; fi   # no link rights: leave the pin path as it is
   short=$(git rev-parse --short=12 "$commit")
   tree="$pin-$short"

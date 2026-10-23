@@ -198,14 +198,15 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 
 ## Details worth knowing but not part of setup
 
-* **Why local sessions never run stale.** `settings.json` carries a `SessionStart` hook that finds the
-  clone from the `@` pointer in `~/.claude/CLAUDE.md` (the pointer names the live pin, a worktree of the
-  clone). It fetches `origin/main` and moves local `main` to it, fast-forward only. A tree that holds
-  `main` is merged in place when it has no tracked change; a tree with one is left alone. It never
-  stashes, resets, switches or forces. Then it runs `merge/install_from_main.sh` from the clone, on
-  every platform, so the pin and the installed links follow local `main`
-  (`decisions/merge-reinstalls-from-main.md`). It exits at once in cloud sessions. It never blocks a
-  session. A failed fetch or move writes one line to the install log and the session goes on.
+* **Why local sessions never run stale.** `settings.json` carries a `SessionStart` hook. It exits at once
+  in cloud sessions, and otherwise hands its work to a detached child and exits 0, so it never blocks
+  a session. The child finds the clone from the `@` pointer in `~/.claude/CLAUDE.md` (the pointer names
+  the live pin, a worktree of the clone). It fetches `origin/main` and moves local `main` to it,
+  fast-forward only. A tree that holds `main` is merged in place when it has no tracked change;
+  otherwise the tree is left alone. The hook never stashes, resets or forces in your trees. When the
+  pin is not at local `main`, the child runs `merge/install_from_main.sh`, which switches only the pin
+  and never one with tracked changes (`decisions/merge-reinstalls-from-main.md`). A failed fetch,
+  move or skip writes one line to the install log, with git's own reason.
 * **Why subagents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
   tool from every subagent, so only the main conversation fans out. A nested child's completion
   notice can misroute. This stalls the subagent that launched it
