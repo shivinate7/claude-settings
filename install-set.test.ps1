@@ -125,7 +125,7 @@ function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git)
     [IO.File]::WriteAllText((Join-Path $Dir 'settings.json'), "{}`n", $Utf8)
     $lands = if ($Skills -gt 0) { "hooks`nskills`n" } else { "hooks`n" }
     [IO.File]::WriteAllText((Join-Path $Dir 'landed-dirs.txt'), $lands, $Utf8)
-    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' -or $_.Name -ceq 'shared_names.py' })) {
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' -or $_.Name -ceq 'shared_names.py' -or $_.Name -ceq 'git_reads.py' })) {
         Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Dir ('hooks\' + $f.Name))
     }
     Add-BuildLine $Dir $Build
@@ -416,11 +416,12 @@ $ps4e = Find-LogLines $log4 'end' $id4 $p4.Id
 Check 'log3: install.ps1 writes one start line naming its id and pid' ($ps4s.Count -eq 1) "start lines naming id '$id4' and pid $($p4.Id): $($ps4s.Count); log has $($log4.Count) line(s), last: '$($log4 | Select-Object -Last 1)'"
 Check 'log3: install.ps1 writes one end line naming its id and pid' ($ps4e.Count -eq 1) "end lines naming id '$id4' and pid $($p4.Id): $($ps4e.Count)"
 
-# names1: the set holds shared_names.py, which the guard imports, byte-equal to the flat copy. The set should be
-# whole (config-watch-fast-exit), though a flat copy would stand in. Same check for the set the post-merge hook lands (id from the hook run).
-function Test-NamesInSet([string]$Cfg, [string]$Id) {
-    $set  = Join-Path $Cfg "hooks\guard.d\$Id\shared_names.py"
-    $flat = Join-Path $Cfg 'hooks\shared_names.py'
+# names1: the set holds shared_names.py and git_reads.py, which the guard imports, each byte-equal to the flat copy.
+# The set should be whole (config-watch-fast-exit), though a flat copy would stand in. Same check for the set the
+# post-merge hook lands (id from the hook run).
+function Test-NamesInSet([string]$Cfg, [string]$Id, [string]$File = 'shared_names.py') {
+    $set  = Join-Path $Cfg "hooks\guard.d\$Id\$File"
+    $flat = Join-Path $Cfg "hooks\$File"
     if (-not $Id) { return 'no loaded id (precondition)' }
     if (-not (Test-Path -LiteralPath $set)) { return "missing: $set" }
     if (-not (Test-Path -LiteralPath $flat)) { return "flat copy missing: $flat" }
@@ -429,6 +430,8 @@ function Test-NamesInSet([string]$Cfg, [string]$Id) {
 }
 $n4 = Test-NamesInSet $Cfg4 $id4
 Check 'names1: install.ps1 lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4 -eq '') $n4
+$g4 = Test-NamesInSet $Cfg4 $id4 'git_reads.py'
+Check 'names1: install.ps1 lands git_reads.py in guard.d\<id>\, equal to the flat copy' ($g4 -eq '') $g4
 
 # The post-merge hook, run from bash so $! is the pid the hook's own $$ reports.
 $hook4 = Join-Path $C4 'hook4.sh'
@@ -447,6 +450,8 @@ Check 'log3: the post-merge hook writes one start line naming its id and pid' ($
 Check 'log3: the post-merge hook writes one end line naming its id and pid' ($hookPid -gt 0 -and $he.Count -eq 1) "end lines naming id '$id4h' and pid ${hookPid}: $($he.Count)"
 $n4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the install's)" } else { Test-NamesInSet $Cfg4 $id4h }
 Check 'names1: the post-merge hook lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4h -eq '') $n4h
+$g4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the install's)" } else { Test-NamesInSet $Cfg4 $id4h 'git_reads.py' }
+Check 'names1: the post-merge hook lands git_reads.py in guard.d\<id>\, equal to the flat copy' ($g4h -eq '') $g4h
 
 # ---- cleanup -------------------------------------------------------------------------------------
 try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($EnvSub, $false) } catch { }

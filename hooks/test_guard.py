@@ -462,12 +462,14 @@ def slash(path):
 
 
 def copy_guard_family(dest):
-    """guard.py, its guard_* siblings and shared_names.py (which guard_core.py imports) from
-    GUARD's folder into `dest`. A copy without shared_names.py crashes on import."""
+    """guard.py, its guard_* siblings, shared_names.py and git_reads.py (which guard_core.py imports)
+    from GUARD's folder into `dest`. A copy without either crashes on import. git_reads.py is copied
+    by name, so a folder that lacks it stops the fixture instead of building a guard that cannot load."""
     source = os.path.dirname(GUARD)
     for name in os.listdir(source):
         if (name.startswith("guard") and name.endswith(".py")) or name == "shared_names.py":
             shutil.copy(os.path.join(source, name), dest)
+    shutil.copy(os.path.join(source, "git_reads.py"), dest)
 
 
 def write(path, text):
@@ -11733,10 +11735,11 @@ def _load_guard_module():
     in the bug report does.
     """
     import importlib.util
-    # guard.py imports guard_core and the guard_<family> modules by name. A cached one would carry
-    # an earlier load's patches or copy into this one, so drop every guard_* module: each load gets
-    # modules of its own, as each load always got its own module.
-    for name in [n for n in sys.modules if n == "guard_core" or n.startswith("guard_")]:
+    # guard.py imports guard_core and the guard_<family> modules by name, and guard_core imports
+    # git_reads. A cached one would carry an earlier load's patches or copy into this one, so drop
+    # every guard_* module and git_reads: each load gets modules of its own, as each load always
+    # got its own module. The liveness cases patch git_reads and never restore it.
+    for name in [n for n in sys.modules if n in ("guard_core", "git_reads") or n.startswith("guard_")]:
         sys.modules.pop(name, None)
     spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
     module = importlib.util.module_from_spec(spec)
@@ -11965,17 +11968,17 @@ def session_is_live_case():
     problems = []
     record = {"pid": 4321, "startedAt": 1_000_000}
 
-    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000
+    sys.modules["git_reads"]._process_start_ms = lambda pid: 1_000_000
     live = guard.session_is_live(record)
     if live is not True:
         problems.append("live: got %r want True" % (live,))
 
-    sys.modules["guard_core"]._process_start_ms = lambda pid: None
+    sys.modules["git_reads"]._process_start_ms = lambda pid: None
     dead = guard.session_is_live(record)
     if dead is not False:
         problems.append("dead: got %r want False" % (dead,))
 
-    sys.modules["guard_core"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+    sys.modules["git_reads"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
     try:
         unreadable = guard.session_is_live(record)
     except Exception as e:
@@ -11999,8 +12002,8 @@ def worktree_live_session_unreadable_case():
     problems = []
     target = tempfile.mkdtemp(prefix="wt-live-unreadable-")
     try:
-        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": target}]
-        sys.modules["guard_core"].session_is_live = lambda record: None
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": target}]
+        sys.modules["git_reads"].session_is_live = lambda record: None
         got = guard.worktree_live_session(target)
         if got is not None:
             problems.append(
@@ -12035,8 +12038,8 @@ def worktree_live_session_two_spellings_case():
     other_spelling = tempfile.mkdtemp(prefix="wt-live-other-spelling-")
     real_identity = guard._path_identity
     try:
-        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
-        sys.modules["guard_core"].session_is_live = lambda record: True
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
         target_resolved = os.path.realpath(target)
         other_resolved = os.path.realpath(other_spelling)
         shared = ("same-underlying-file",)
@@ -12046,13 +12049,13 @@ def worktree_live_session_two_spellings_case():
                 return shared
             return real_identity(path)
 
-        sys.modules["guard_core"]._path_identity = fake_identity
+        sys.modules["git_reads"]._path_identity = fake_identity
         got = guard.worktree_live_session(target)
         if got is not True:
             problems.append(
                 "two spellings, one identity, live session: got %r want True" % (got,))
     finally:
-        sys.modules["guard_core"]._path_identity = real_identity
+        sys.modules["git_reads"]._path_identity = real_identity
         shutil.rmtree(target, ignore_errors=True)
         shutil.rmtree(other_spelling, ignore_errors=True)
 
@@ -12072,15 +12075,15 @@ def worktree_live_session_path_unresolvable_case():
     other_spelling = tempfile.mkdtemp(prefix="wt-live-other-unresolvable-")
     real_identity = guard._path_identity
     try:
-        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
-        sys.modules["guard_core"].session_is_live = lambda record: True  # must not even matter: identity is unresolvable
-        sys.modules["guard_core"]._path_identity = lambda path: None
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        sys.modules["git_reads"].session_is_live = lambda record: True  # must not even matter: identity is unresolvable
+        sys.modules["git_reads"]._path_identity = lambda path: None
         got = guard.worktree_live_session(target)
         if got is not None:
             problems.append(
                 "identity unresolvable, differing spellings: got %r want None, not False" % (got,))
     finally:
-        sys.modules["guard_core"]._path_identity = real_identity
+        sys.modules["git_reads"]._path_identity = real_identity
         shutil.rmtree(target, ignore_errors=True)
         shutil.rmtree(other_spelling, ignore_errors=True)
 
@@ -12104,7 +12107,7 @@ def session_is_live_backwards_clock_step_case():
     record = {"pid": 4321, "startedAt": 1_000_000}
 
     # actual is 5 minutes AFTER started: the ambiguous, must-not-be-confident-False direction.
-    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 + 300_000
+    sys.modules["git_reads"]._process_start_ms = lambda pid: 1_000_000 + 300_000
     implied_backwards = guard.session_is_live(record)
     if implied_backwards is not None:
         problems.append(
@@ -12112,14 +12115,14 @@ def session_is_live_backwards_clock_step_case():
                 implied_backwards,))
 
     # actual is 5 minutes BEFORE started: never produced by the same live process, stays False.
-    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 - 300_000
+    sys.modules["git_reads"]._process_start_ms = lambda pid: 1_000_000 - 300_000
     still_dead = guard.session_is_live(record)
     if still_dead is not False:
         problems.append(
             "actual far behind started: got %r want False (unchanged)" % (still_dead,))
 
     # within tolerance, either side: unaffected by the fix.
-    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 + 2_000
+    sys.modules["git_reads"]._process_start_ms = lambda pid: 1_000_000 + 2_000
     within = guard.session_is_live(record)
     if within is not True:
         problems.append("within tolerance: got %r want True (unaffected)" % (within,))
@@ -13032,7 +13035,8 @@ FAILCLOSED_CHECKS = []
 
 
 def _guard_copy(name, drop):
-    """A scratch folder with a copy of guard.py and every guard_* sibling, but for `drop`."""
+    """A scratch folder with a copy of guard.py, every guard_* sibling, shared_names.py and git_reads.py,
+    but for `drop`."""
     source = os.path.dirname(GUARD)
     folder = os.path.join(ROOT, "failclosed", name)
     os.makedirs(folder, exist_ok=True)
@@ -13041,6 +13045,8 @@ def _guard_copy(name, drop):
         if module + ".py" != drop:
             shutil.copy(os.path.join(source, module + ".py"), folder)
     shutil.copy(os.path.join(source, "shared_names.py"), folder)
+    if drop != "git_reads.py":  # guard_core.py imports it, so a copy needs it unless it is the one dropped
+        shutil.copy(os.path.join(source, "git_reads.py"), folder)
     return folder
 
 
@@ -13121,6 +13127,10 @@ for _module in FAILCLOSED_MODULES:
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing %s refuses a Bash call"
                              % _module, _check))
+# guard_core.py imports git_reads.py, which is no guard_* sibling, so FAILCLOSED_MODULES does not hold it.
+_check = fail_closed_case("git_reads")
+FAILCLOSED_CHECKS.append(_check)
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
 for _label, _check in (
     ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
 ):
@@ -13255,6 +13265,7 @@ def _reload_copy_stamped(name, first_line_for):
             good[entry] = (first_line_for(entry) or "") + handle.read()
         _put_whole(os.path.join(folder, entry), good[entry])
     shutil.copy(os.path.join(source, "shared_names.py"), folder)
+    shutil.copy(os.path.join(source, "git_reads.py"), folder)  # unstamped, like shared_names.py
     return folder, good
 
 

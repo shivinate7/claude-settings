@@ -10,7 +10,7 @@ unwired). The target must have the `.claude/worktrees/<name>` shape and must not
 
 A process is stopped only when all of these answer a confirmed yes:
 - its cwd sits inside the target worktree
-- no live session has a cwd inside the target (`guard.worktree_live_session`)
+- no live session has a cwd inside the target (`git_reads.worktree_live_session`)
 - the root of its in-worktree process tree is orphaned: climb from the process through each
   live parent whose cwd is also inside the target, then `sweep.is_orphan` on the last one.
   A live parent outside the target (a harness, a terminal) means keep.
@@ -47,7 +47,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
-import guard  # noqa: E402
+import git_reads  # noqa: E402
 import sweep  # noqa: E402
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -61,7 +61,7 @@ MAX_CLIMB = 64  # ponytail: fixed depth bound against a pid cycle, never a real 
 
 
 def log_path() -> str:
-    return os.path.join(guard.config_dir(), "state", "agent-end-payloads.jsonl")
+    return os.path.join(git_reads.config_dir(), "state", "agent-end-payloads.jsonl")
 
 
 @contextlib.contextmanager
@@ -136,7 +136,7 @@ def target_worktree(payload: dict):
         agent_id, cwd = payload.get("agent_id"), payload.get("cwd")
         if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not isinstance(cwd, str):
             return None
-        primary = guard.primary_checkout(cwd)
+        primary = git_reads.primary_checkout(cwd)
         if not primary:
             return None
         path = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)
@@ -193,7 +193,7 @@ def _decide(target: str):
         return "unreadable-subject", [], []
     if primary:
         return "primary-checkout", [], []
-    live = guard.worktree_live_session(target)
+    live = git_reads.worktree_live_session(target)
     if live is None:
         return "unreadable-subject", [], []
     if live:
