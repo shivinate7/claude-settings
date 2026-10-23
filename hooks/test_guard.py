@@ -14323,7 +14323,7 @@ FAMILY = "load-brake"
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, disk free on the
 # home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks, read twice, as a second
 # signal. It counts no claude process and no running lane. A GB here is 2**30 bytes, as df -k and PowerShell
-# 1GB give. The levels (owner ruling 2026-10-23 for disk; memory and CPU placeholders, owner to tune):
+# 1GB give. The levels (decision machine-load-brake; memory and CPU levels are placeholders):
 #   busy  memory over 85%, disk free under the smaller of 10% of the disk and 15 GB, or (CPU over 85% AND
 #         memory over 75%). An Agent or Task call passes busy only when run_in_background is absent or exactly
 #         false. Any other value (true, a string, null, a number) is refused. Any Workflow is refused. The refusal
