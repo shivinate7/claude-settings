@@ -6640,6 +6640,126 @@ class RepoDeadlineFloor(unittest.TestCase):
                                 f"merge.deadlineMinutes is {deadline}; the largest job cap is {max(caps)}, so it must be at least {max(caps) + 5}")
 
 
+# ------------------------------------------------------------------ CI time caps, review round 1
+def captured(fn):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        result = fn()
+    return result, out.getvalue()
+
+
+def floor_stop(env):
+    """load_config's refusal text for the env's base stamp.json, or None when the base config is accepted."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            merge.load_config(env.co, "main", ".github/stamp.json")
+        except merge.Stop as e:
+            return str(e)
+    return None
+
+
+def cap_workflow(cap_text):
+    """A one-job workflow: job `gates` with `timeout-minutes: <cap_text>`, written as the file holds it."""
+    return "\n".join([
+        "name: gates", "on: push", "jobs:",
+        "  gates:", "    runs-on: ubuntu-latest", f"    timeout-minutes: {cap_text}", "    steps:", "      - run: echo ok",
+    ]) + "\n"
+
+
+# Job gates has a literal 50 and job fresh an expression. Only the literal sets the floor, which is 55.
+MIXED_WORKFLOW = "\n".join([
+    "name: gates", "on: push", "jobs:",
+    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "  fresh:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+# Job gates has an expression cap (unknown) and job scope a literal 10.
+EXPR_AND_LITERAL_WORKFLOW = "\n".join([
+    "name: gates", "on: push", "jobs:",
+    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+    "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
+class CapReviewRound1(Env):
+    """Review round 1: the guard's read prints nothing (F1), caps come from the repo root (F3), and quoted or
+    expression caps are read as the merge tool reads them (F5)."""
+    def setUp(self):
+        super().setUp()
+        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+
+    def test_f1_head_read_writes_nothing_to_stdout_when_a_job_is_over_seventy_percent(self):
+        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        (verdict, detail), out = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "green", detail)
+        self.assertEqual(out, "", "head_read is the guard's read and must print nothing")
+
+    def test_f3_a_cancel_at_the_full_cap_is_a_timeout_when_run_from_a_subdirectory(self):
+        old = os.getcwd()
+        os.chdir(os.path.join(self.co, "docs", "decisions"))
+        self.addCleanup(os.chdir, old)
+        host = CapsHost(None, [check("gates", "cancel", 50)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertIn(RE_CAP, why)
+
+    def test_f5_a_double_quoted_cap_reads_as_its_number_for_the_warning(self):
+        push_base(self, {".github/workflows/gates.yml": cap_workflow('"50"')})
+        host = CapsHost(self.co, [check("gates", "pass", 40)], [run("success")])
+        _, out = captured(lambda: host.checks(7))
+        self.assertIn(CAP_LINE, out)
+
+    def test_f5_a_single_quoted_cap_reads_as_its_number_for_a_timeout(self):
+        push_base(self, {".github/workflows/gates.yml": cap_workflow("'50'")})
+        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertIn(RE_CAP, why)
+
+    def test_f5_an_expression_cap_is_unknown_so_it_gives_no_warning_and_no_timeout(self):
+        push_base(self, {".github/workflows/gates.yml": EXPR_AND_LITERAL_WORKFLOW})
+        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 9)], [run("success")])
+        _, out = captured(lambda: host.checks(7))
+        self.assertIn("job scope: 9 of 10 min", out, "the literal cap must still warn: the control proves the path is live")
+        self.assertNotIn("job gates", out)
+        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertNotIn(RE_CAP, why)
+
+
+class CapReviewFloor(Env):
+    """Review round 1: the floor is min(largest cap + 5, 360) (F2), and a quoted cap or an expression cap is read as
+    the merge tool reads it when it sets the floor (F5)."""
+    def test_f2_a_cap_of_356_or_360_floors_at_360_so_a_deadline_of_360_passes(self):
+        for cap in ("356", "360"):
+            with self.subTest(cap=cap):
+                push_base(self, {".github/stamp.json": stamp_text(360), ".github/workflows/gates.yml": cap_workflow(cap)})
+                self.assertIsNone(floor_stop(self), "a deadline of 360 must not stop a merge whose largest cap is " + cap)
+
+    def test_f2_a_cap_of_360_refuses_a_deadline_of_359(self):
+        push_base(self, {".github/stamp.json": stamp_text(359), ".github/workflows/gates.yml": cap_workflow("360")})
+        msg = floor_stop(self)
+        self.assertIsNotNone(msg, "the floor is 360 for a 360 cap, so 359 must stop")
+        self.assertIn("360", msg)
+
+    def test_f5_a_double_quoted_cap_sets_the_floor_like_a_plain_cap(self):
+        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": cap_workflow('"50"')})
+        self.assertIsNotNone(floor_stop(self), "a quoted 50 is a 50-minute cap, so the floor is 55 and 54 must stop")
+        push_base(self, {".github/stamp.json": stamp_text(55)})
+        self.assertIsNone(floor_stop(self))
+
+    def test_f5_an_expression_cap_sets_no_floor(self):
+        push_base(self, {".github/stamp.json": stamp_text(5), ".github/workflows/gates.yml": cap_workflow("${{ inputs.cap }}")})
+        self.assertIsNone(floor_stop(self))
+
+    def test_f5_the_literal_cap_sets_the_floor_beside_an_expression_cap(self):
+        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": MIXED_WORKFLOW})
+        msg = floor_stop(self)
+        self.assertIsNotNone(msg, "the literal 50 sets the floor at 55, so 54 must stop")
+        self.assertIn("55", msg)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
