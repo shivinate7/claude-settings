@@ -69,6 +69,11 @@ After a compaction: read this file, then the handoff, then `git fetch` and
 
 Bring each as one question with options and a pick, and keep working meanwhile.
 
+Owner's word, Oct 23: every question in this run goes to the advisor session advisor-1b
+(ListAgents, then SendMessage), from the start, before #564 lands its asking rule. Ask the
+owner nothing during the run. When the advisor replies "ask the owner", treat it as unanswered
+(below). Merges run under decision standing-merge-grant; they need no question.
+
 When the owner does not answer (owner's word, Oct 23): never wait. Park only the item that needs
 the answer, and keep going with every other lane and batch, in order. Ask the advisor first for
 anything it may answer (rule from #564); only the owner's calls wait for the owner. Each parked
