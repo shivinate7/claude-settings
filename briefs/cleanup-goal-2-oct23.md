@@ -11,7 +11,10 @@ rules (git-integration-branch-merge, roles-review-cap-three).
    your handoff. After every compaction, read it again before you act.
 2. Check each "checked at" fact against current main. A fact that no longer holds: re-plan
    that lane and say so in the report. A lane whose work is already on main: skip it, say so.
-3. If #564 is not merged yet: let it finish under its own rules first.
+3. If #564 (the last goal-1 batch) is still open, you take it over; the goal-1 session has
+   stopped. Drive it to merge under its own rules: merge on green (owner's word, Oct 23: merge
+   #564 when its CI is green), or drop and fix per the red-run rule. Meanwhile build batch 2 and
+   batch 3 lanes as drafts. Batch 1 branches from main only after #564 merges.
 4. Confirm the live settings match main: `git -C <pin> rev-parse HEAD` against
    `git rev-parse origin/main`. If they differ, the session-start auto-pull is still broken
    (batch 2 fixes it): run `git -C <clone> fetch origin main:main`, then
