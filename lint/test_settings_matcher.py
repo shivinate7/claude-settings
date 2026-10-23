@@ -276,12 +276,17 @@ class QuestionReviewer(unittest.TestCase):
                 rest = " ".join(v for k, v in SAMPLE.items() if k != item)
                 self.assertEqual(rubric_gaps(rest), [item])
 
-    def test_agent_hook_prompt_lists_the_kinds_of_the_premise_table(self):
+    def test_agent_hook_prompt_lists_source_kinds(self):
+        listed = prompt_kinds(self.agent_hook().get("prompt") or "")
+        self.assertTrue(listed, "the agent hook prompt lists no source kinds after 'source kind:'")
+
+    @unittest.skipUnless(os.path.exists(PREMISE_FORMAT),
+                         "decisions/premise-format.md is not on this branch; this case runs once its lane lands")
+    def test_agent_hook_prompt_kinds_equal_the_premise_table(self):
         with open(PREMISE_FORMAT, encoding="utf-8") as f:
             table = table_kinds(f.read())
         self.assertTrue(table, "no kind rows in %s" % PREMISE_FORMAT)
         listed = prompt_kinds(self.agent_hook().get("prompt") or "")
-        self.assertTrue(listed, "the agent hook prompt lists no source kinds after 'source kind:'")
         self.assertEqual(sorted(listed), sorted(table),
                          "hook prompt kinds %s, premise table kinds %s: update the one that drifted" % (listed, table))
 
