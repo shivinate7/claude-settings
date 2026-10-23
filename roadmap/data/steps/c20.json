@@ -1,10 +1,10 @@
 {
   "ask": "Widen the gloss rule, claude-settings. In CLAUDE.md, rule speak-cite-id-plus-gloss (line 89) covers only records. Rewrite it in place so it covers any id the owner would have to look up: decision and debt ids, roadmap step ids, lane numbers, PR and issue numbers, commit hashes, rule anchors and hook or script names. Each one gets a short plain name beside it the first time it appears in a reply or report, like 'PR #542, the hook load batch'. Add to the same rule: a numbered id carries no order, so state the work order in words. Keep it to one rule, no new prose section. Update its row in lint/rule_mechanisms.json and the compliance-check probe (skills/compliance-check/probes.md, 'Speak plainly') so the check covers the wider scope. Report the before and after rule text and the word change.",
-  "note": "Checked at 5553dc6: CLAUDE.md line 89, rule speak-cite-id-plus-gloss, covers only records (decisions, debts), so roadmap steps, lanes, PR numbers, commit hashes and hook names slip past it. It binds Claude Code sessions only; the advisor got the same rule through its project instructions on Oct 21. Your ruling, Oct 21: widen it to every id you would have to look up, and say the work order separately, since step numbers are filing order. Next batch, which also deletes branch batch-map on origin (it adds nothing over main).",
+  "note": "Done: landed in #560, merged Oct 22. Checked at 5553dc6: CLAUDE.md line 89, rule speak-cite-id-plus-gloss, covers only records (decisions, debts), so roadmap steps, lanes, PR numbers, commit hashes and hook names slip past it. It binds Claude Code sessions only; the advisor got the same rule through its project instructions on Oct 21. Your ruling, Oct 21: widen it to every id you would have to look up, and say the work order separately, since step numbers are filing order. Next batch, which also deletes branch batch-map on origin (it adds nothing over main).",
   "order": 103,
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "title": "Every id comes with a plain name",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-23T03:10:00Z",
   "why": "Your gripe, Oct 21: the advisor answered in bare roadmap step ids (c18, c19) with no name, so you had to ask what they were. You want this never to happen again, in any session."
 }

@@ -1,10 +1,10 @@
 {
   "ask": "Standard lint in CI, claude-settings. Add a [tool.ruff] config with select = [\"F\", \"E9\"] and the vendored skills/impeccable excluded. Fix the 12 findings (11 unused imports, 1 f-string). Add ruff check and ShellCheck (on the 18 *.sh files, at severity warning) as steps in .github/workflows/gates.yml, failing the PR. Fix what ShellCheck flags or suppress with a one-line reason. Do not add a format step, a pre-commit hook or any Claude Code hook. Report the files changed and the four size numbers.",
-  "note": "Checked at 5553dc6: no Ruff, Black, ShellCheck or pre-commit config; 124 Python files outside the vendored impeccable skill, 18 shell scripts, 45 custom checks in lint/. Ruff's bug rules (F) find 12 issues: 11 unused imports and 1 f-string, so the code is already clean of real bugs. Advisor pick: checks run in CI or at commit, never on every edit (the same principle as c15). So ruff check (F and E9) and ShellCheck go in gates.yml; no format-on-edit hook; a repo-wide ruff format waits until after o2, which moves files anyway. Not checked: the chat's ShellCheck findings (7 quoted ~ paths, 2 unguarded cd). Next batch.",
+  "note": "Done: landed in #561 (ruff and ShellCheck in CI), merged Oct 22. Checked at 5553dc6: no Ruff, Black, ShellCheck or pre-commit config; 124 Python files outside the vendored impeccable skill, 18 shell scripts, 45 custom checks in lint/. Ruff's bug rules (F) find 12 issues: 11 unused imports and 1 f-string, so the code is already clean of real bugs. Advisor pick: checks run in CI or at commit, never on every edit (the same principle as c15). So ruff check (F and E9) and ShellCheck go in gates.yml; no format-on-edit hook; a repo-wide ruff format waits until after o2, which moves files anyway. Not checked: the chat's ShellCheck findings (7 quoted ~ paths, 2 unguarded cd). Next batch.",
   "order": 105,
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "title": "Standard code lint in CI only, never on each edit",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-23T03:10:00Z",
   "why": "Oct 21: a claude.ai chat audited claude-settings and suggested Ruff (Python lint and format) in CI, ShellCheck, and a hook that formats each edited .py file. You asked for a take, framed as processing improvements."
 }

@@ -11,10 +11,23 @@ rules (git-integration-branch-merge, roles-review-cap-three).
    your handoff. After every compaction, read it again before you act.
 2. Check each "checked at" fact against current main. A fact that no longer holds: re-plan
    that lane and say so in the report. A lane whose work is already on main: skip it, say so.
-3. If #564 (the last goal-1 batch) is still open, you take it over; the goal-1 session has
-   stopped. Drive it to merge under its own rules: merge on green (owner's word, Oct 23: merge
-   #564 when its CI is green), or drop and fix per the red-run rule. Meanwhile build batch 2 and
-   batch 3 lanes as drafts. Batch 1 branches from main only after #564 merges.
+3. Take over #564 (the last goal-1 batch, branch batch-oct22d). The goal-1 session stopped
+   on Oct 23 and handed it off. Its handoff: C:\Users\ShivamSemwal\.claude\handoffs\
+   c5d76e85-6c75-4e9a-a61d-bb3938b4991b.md; read it first. State then: red at 54a99bf, only the
+   `gates` job failing (a duplicate question-hook row in the hook catalog). Cause per that
+   session: the question-reviewer lane; the STE-removal lane carries that lane's work. It left
+   four local reverts in the batch checkout, not pushed: three drop STE removal, one drops the
+   question reviewer; with them the duplicate-row test passed locally. The generated records page
+   was still stale, cause not found.
+   - Confirm the cause from the failing job's log, not from the handoff.
+   - Follow the red-run rule: push the drop of the failing lane and the lanes that depend on it,
+     run CI once, and merge the rest on green (owner's word, Oct 23: merge #564 when its CI is
+     green). Find and fix the stale records page cause, or say why it is not a lane's.
+   - The dropped lanes are fixed in their own lanes and join batch 3. The janitor lane's test
+     fix at 599de54 still needs review; it also joins batch 3.
+   - Meanwhile build batch 2 and batch 3 lanes as drafts. Batch 1 branches from main only
+     after #564 merges.
+   - #556 (memory monitor) merges only on the owner's word. Leave it.
 4. Confirm the live settings match main: `git -C <pin> rev-parse HEAD` against
    `git rev-parse origin/main`. If they differ, the session-start auto-pull is still broken
    (batch 2 fixes it): run `git -C <clone> fetch origin main:main`, then

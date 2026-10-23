@@ -1,9 +1,10 @@
 {
   "ask": "One rule in CLAUDE.md, amended into an existing rule if one fits rather than a new section: any tracking, logging, monitoring or measuring a session adds must (1) read on demand, at the moment the answer is needed, inside a process that is already running, not on a timer or on every tool call; (2) start no new long-lived process and no extra python or bash where avoidable; (3) state its cost in its record (process starts, files written, how often it runs); and (4) carry a test that proves that cost (for example, zero child processes on its path). A log or file it writes needs a named reader, or it is not written.",
-  "note": "Filed Oct 21 from your gripe, during the load brake design (c14, machine-load brake), which is its first user. Pairs with your no-measuring-steps ruling. Can ride with the guard-rule batch (c10, c23), which already edits CLAUDE.md's rule text.",
+  "note": "Done: landed in #560, merged Oct 22. Filed Oct 21 from your gripe, during the load brake design (c14, machine-load brake), which is its first user. Pairs with your no-measuring-steps ruling. Can ride with the guard-rule batch (c10, c23), which already edits CLAUDE.md's rule text.",
   "order": 108,
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "title": "Watching costs less than what it watches",
-  "why": "Your gripe, Oct 21: Claude's own tracking, logging and measuring has sometimes cost more than the problem it was meant to solve."
+  "why": "Your gripe, Oct 21: Claude's own tracking, logging and measuring has sometimes cost more than the problem it was meant to solve.",
+  "updatedAt": "2026-10-23T03:10:00Z"
 }
