@@ -14425,6 +14425,8 @@ def under_fake(read, fake):
         calls[counter] += 1
         if calls[counter] > 100:
             raise RuntimeError("the fake host gave more than 100 tick reads")
+        if fake.get("raise_first") and calls[counter] == 1:
+            raise OSError("fake first tick read failed")
         return samples[min(calls[counter] - 1, len(samples) - 1)]
 
     def host_statistics(host, flavor, info, count):
@@ -14466,18 +14468,34 @@ def under_fake(read, fake):
 
 
 # Why the real CPU read came back unread. read_load turns an exception into None, the same as a zero tick
-# change, so this calls _read_cpu once more, unwrapped. It runs only after an unread CPU reading.
-def cpu_cause(holder):
-    reader = getattr(holder, "_read_cpu", None)
-    if reader is None:
-        return "unknown, guard.py has no _read_cpu to read again"
-    try:
-        value = reader()
-    except Exception as exc:
-        return "exception raised: %s: %s" % (type(exc).__name__, str(exc)[:80])
-    if value is None:
+# change, so the probe wraps _read_cpu before read_load and keeps what read_load's own call did. A second
+# call would read the ticks again, and a first-read raise could then pass as no exception.
+def record_cpu(holder):
+    first = {}
+    real = getattr(holder, "_read_cpu", None)
+    if real is None:
+        return first
+
+    def wrapped():
+        try:
+            value = real()
+        except Exception as exc:
+            first["raised"] = "%s: %s" % (type(exc).__name__, str(exc)[:80])
+            raise
+        first["value"] = value
+        return value
+    holder._read_cpu = wrapped
+    return first
+
+
+def cpu_cause(first):
+    if "raised" in first:
+        return "exception raised: %s" % first["raised"]
+    if "value" not in first:
+        return "unknown, read_load never reached _read_cpu"
+    if first["value"] is None:
         return "zero tick change, no exception: the tick total did not move in the sample window"
-    return "unread on the first read, %.1f%% on a second read, no exception" % value
+    return "unknown, the first read returned %.1f%%" % first["value"]
 
 
 out = {"reads": 0}
@@ -14504,13 +14522,14 @@ try:
         if not holders:
             out["missing"] = True
         else:
+            first = record_cpu(holders[0])
             try:
                 if "fake" in spec:
                     out["reading"] = under_fake(holders[0].read_load, spec["fake"])
                 else:
                     out["reading"] = holders[0].read_load()
-                    if out["reading"].get("cpu_pct") is None:
-                        out["cpu_cause"] = cpu_cause(holders[0])
+                if out["reading"].get("cpu_pct") is None:
+                    out["cpu_cause"] = cpu_cause(first)
             except Exception as exc:
                 out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
     else:
@@ -14567,12 +14586,15 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, ticks=None):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, ticks=None,
+            raise_first=False):
     """A fake host for THE FAKE HOST: `busy` the CPU share from ticks, `load` the 1-minute load average,
     `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on the disk.
-    `ticks` gives the tick samples in order, as (user, system, idle, nice), in place of the busy share."""
+    `ticks` gives the tick samples in order, as (user, system, idle, nice), in place of the busy share.
+    `raise_first` makes the first tick read raise OSError."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "ticks": ticks}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "ticks": ticks,
+            "raise_first": raise_first}
 
 
 # Tick samples as (user, system, idle, nice). LB_TICKS_HALF is 50% busy over the 1000 ticks after LB_TICKS_A.
@@ -15015,10 +15037,32 @@ def lb_flat_ticks(side):
 
 
 # Two equal samples, then a rise: the reader reads on past the zero change, and does not return None.
-lb_add("CPU on darwin: two equal tick samples, then a rise to 50% busy, reads cpu_pct 50, not unread",
-       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_cpu_share(50.0)))
-lb_add("CPU on linux: two equal /proc/stat samples, then a rise to 50% busy, reads cpu_pct 50, not unread",
-       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_cpu_share(50.0)))
+# The rise ends the loop at the third tick read: the first sample, the equal repeat, the rise. A reader that
+# reads on past the rise still reads 50, so only the count of tick reads pins the stop.
+LB_RISE_READS = 3
+
+
+def lb_rise_check(want):
+    """The rise to `want` percent busy, read in exactly LB_RISE_READS tick reads."""
+    share = lb_cpu_share(want)
+
+    def check(side):
+        ok, note = share(side.get("reading") or {})
+        if not ok:
+            return False, note
+        reads = side.get("tick_reads")
+        if reads != LB_RISE_READS:
+            return False, "the reader made %s tick reads, want %d: it must stop at the rise" % (reads, LB_RISE_READS)
+        return True, "%s, %d tick reads" % (note, reads)
+    return check
+
+
+lb_add("CPU on darwin: two equal tick samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
+       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
+                      side_check=True))
+lb_add("CPU on linux: two equal /proc/stat samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
+       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
+                      side_check=True))
 # Every sample equal: the reader stops at its bound, and the unread CPU still fails open.
 lb_add("CPU on darwin: every tick sample equal reads cpu_pct None after the bound of six tick reads",
        lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A]), lb_flat_ticks, side_check=True))
@@ -15027,6 +15071,29 @@ lb_add("CPU on linux: every /proc/stat sample equal reads cpu_pct None after the
 lb_add("Agent, every tick sample equal, memory 80%, run_in_background true: unread CPU counts as normal, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
                          fake=lb_fake("darwin", memory=80, ticks=[LB_TICKS_A])))
+
+
+def lb_cause_check(cause):
+    """An unread CPU whose first tick read raised: the note starts with `cause`, and the reader made one
+    tick read, since the raise ends the read."""
+    def check(side):
+        if (side.get("reading") or {}).get("cpu_pct") is not None:
+            return False, "cpu_pct read with the first tick read raising, want unread"
+        note = side.get("cpu_cause") or ""
+        if not note.startswith(cause):
+            return False, "the note is %r, want it to start with %r" % (note[:100], cause)
+        if side.get("tick_reads") != 1:
+            return False, "the reader made %s tick reads, want 1 after the raise" % side.get("tick_reads")
+        return True, note[:100]
+    return check
+
+
+lb_add("CPU on darwin: the first tick read raises, the unread CPU's note names the exception, one tick read",
+       lb_reader_fake(lb_fake("darwin", raise_first=True), lb_cause_check("exception raised: OSError"),
+                      side_check=True))
+lb_add("CPU on linux: the first /proc/stat read raises, the unread CPU's note names the exception, one tick read",
+       lb_reader_fake(lb_fake("linux", raise_first=True), lb_cause_check("exception raised: OSError"),
+                      side_check=True))
 
 # CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
 # memory 80% is refused.
