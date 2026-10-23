@@ -6639,7 +6639,7 @@ class RepoDeadlineFloor(unittest.TestCase):
                                 f"merge.deadlineMinutes is {deadline}; the largest job cap is {max(caps)}, so it must be at least {max(caps) + 5}")
 
 
-# ------------------------------------------------------------------ CI time caps, review round 1
+# ------------------------------------------------------------------ CI time caps: guard read, root caps, quoted caps
 def captured(fn):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -6671,7 +6671,7 @@ EXPR_AND_LITERAL_WORKFLOW = "\n".join([
 
 
 class CapReviewRound1(Env):
-    """Review round 1: the guard's read prints nothing (F1), caps come from the repo root (F3), and quoted or
+    """The guard's read prints nothing (F1), caps come from the repo root (F3), and quoted or
     expression caps are read as the merge tool reads them (F5)."""
     def setUp(self):
         super().setUp()
@@ -6746,7 +6746,7 @@ def fix_line(floor):
 
 
 class CapReviewFloor(Env):
-    """Recovery rule and review round 1: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
+    """Recovery rule: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
     is read as the merge tool reads it when it sets the floor (F5)."""
     def test_f2_a_cap_of_356_waits_the_clamped_floor_of_360_at_a_deadline_of_360(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/gates.yml": cap_workflow("356")})
