@@ -118,10 +118,30 @@ then reinstalls whatever local main holds, nothing moves local main, and all out
 
 - janitor-fast-sweep (c16): dropped from #564, red on test_decision_watch judge_isolation,
   fixed in its own lane. Check the fix, then join.
-- merge-wait-covers-ci (c34 on the roadmap): set merge.deadlineMinutes in .github/stamp.json to
-  the largest job timeout-minutes plus 5; extend the check that validates stamp.json so it fails
-  when the wait is below the largest job timeout (red on main, green after). Run the report-gate
-  timing test that failed once 20 times on main; fix the cause if it fails, never add a retry.
+- ci-time-caps (c34 and c39 on the roadmap). Owner gripe, Oct 23: CI that is new, or that just
+  gained tests, keeps timing out and failing. Cause, checked at 1842e56: skill ci-hygiene step 5
+  sets each job's cap at about 2x its slowest green run, but a new job has no green run, and a
+  growing suite outgrows its cap with no warning. The only signal is a timeout that looks like a
+  test failure (Oct 17: two gates runs cancelled at 18 min with every step green; Oct 22: the macOS
+  cap raised from 25 to 50 min, and #562's merge wait ran out while CI was green).
+  1. New job: skill ci-hygiene says a job with fewer than 5 green runs takes a provisional cap of
+     60 minutes, marked "provisional" in a comment; after 5 green runs, set it to about 2x the
+     slowest, from the measured times.
+  2. Warn before the cap fires: when the merge tool reads a run, it prints one line for each job
+     whose time was over 70% of its cap ("job X: 31 of 36 min; raise the cap from measured runs,
+     or split its slowest suite"). It reads the run it already reads; no new call on any other
+     path, no log.
+  3. A timeout is not a test failure: when a job ends by its cap with every finished step green,
+     the merge tool says so in its verdict, and the red-run rule treats it as "re-cap or split",
+     not as a reason to drop the lane.
+  4. The merge wait follows the caps: merge.deadlineMinutes in .github/stamp.json is the largest
+     job timeout-minutes plus 5; extend the check that validates stamp.json so it fails when the
+     wait is below the largest cap (red on main, green after).
+  5. Run the report-gate timing test that failed once 20 times on main; fix the cause if it
+     fails, never add a retry.
+  Tests: a fixture run with a job at 80% of its cap prints the line, at 50% prints nothing; a
+  timed-out job with all steps green gets the timeout verdict; red on main. The ci-hygiene skill
+  is used by every repo, so this reaches banchi, q_max, home-app and home too.
 - ste-lint-import-path (c35): actions/ste-lint/run.sh line 131 runs `python3 -c` in the linted
   repo's root, so a json.py or ste_emit.py there runs as code. Move that summary into a script
   file in $EMIT_DIR, like HUNK_MAP_PY and SPLIT_PY. No -I, no -P. Test in
