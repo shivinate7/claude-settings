@@ -125,10 +125,28 @@ python3 "$LINTER" --no-color --format json --fail-on never \
 
 if [ "$SCOPE" = "all" ]; then
   # Report-mode audit: whole-file findings, never fails the build.
-  # A single Python statement, semicolon-joined and on one physical line, so the
-  # YAML block scalar's own indentation never lands inside the Python source (an
-  # indented top-level statement is a Python syntax error).
-  python3 -c 'import json, sys; from ste_emit import emit; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]; o = open(sys.argv[3], "w"); emit(d["findings"], o); print("ste-lint: audit, %d error(s), %d warning(s), not gated" % (s["error"], s["warning"]), file=o)' "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
+  # A script file in $EMIT_DIR, not `python3 -c`: -c puts the linted repo's root first on
+  # sys.path, so a planted json.py or ste_emit.py there would run.
+  AUDIT_PY="$EMIT_DIR/ste_audit.py"
+  cat > "$AUDIT_PY" <<'PYEOF'
+import json, sys
+from ste_emit import emit
+d = json.load(open(sys.argv[1]))
+s = d["summary"]
+excluded = int(sys.argv[2])
+print("### STE lint")
+print()
+print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"]))
+print()
+print("| File | Line | Rule | Message |")
+print("| --- | --- | --- | --- |")
+for f in d["findings"][:50]:
+    print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " ")))
+with open(sys.argv[3], "w") as o:
+    emit(d["findings"], o)
+    print("ste-lint: audit, %d error(s), %d warning(s), not gated" % (s["error"], s["warning"]), file=o)
+PYEOF
+  python3 "$AUDIT_PY" "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
   cat "$LOG_OUT"
   exit 0
 fi

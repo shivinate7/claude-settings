@@ -8,10 +8,10 @@ it guards (CLAUDE.md: trust a guard only once it goes red on the defect). It is 
 one known-bad input per wrong verdict: a mutant the suite did not catch must read "survived",
 and a red suite that never names the case must read "wrong_cause", never "killed".
 
-The second half pins the guard-family copy: `guard_tree` copies every hooks/guard*.py, and
-`apply_mutant` lands a find-string in the one copied file that holds it (zero matches is STALE,
-two or more is an error), so a guard split into sibling modules is still mutated in the right
-file. `build_scaffold` in janitor/mutate_sweep.py gets the same pin: a sibling is written into the
+The second half pins the guard-family copy: `guard_tree` copies every hooks/guard*.py, shared_names.py
+and git_reads.py, and `apply_mutant` lands a find-string in the one copied file that holds it
+(zero matches is STALE, two or more is an error), so a guard split into sibling modules, or into
+git_reads.py, is still mutated in the right file. `build_scaffold` in janitor/mutate_sweep.py gets the same pin: a sibling is written into the
 scaffold's hooks/ folder, and a mutant aimed at a sibling lands there.
 """
 import contextlib
@@ -95,6 +95,7 @@ class GuardTreeTests(unittest.TestCase):
             "test_guard.py": "beta-anchor\n",
             "mutate_guard.py": "beta-anchor\n",
             "shared_names.py": "NAMES\n",
+            "git_reads.py": "reads-anchor\n",
         })
         patcher = mock.patch.object(mutate_shared, "HOOKS_DIR", self.src, create=True)
         patcher.start()
@@ -102,8 +103,18 @@ class GuardTreeTests(unittest.TestCase):
 
     def test_guard_tree_copies_every_guard_module_and_shared_names_and_nothing_else(self):
         mutate_shared.guard_tree(self.dest)
-        self.assertEqual(sorted(os.listdir(self.dest)), ["guard.py", "guard_x.py", "shared_names.py"])
+        self.assertEqual(sorted(os.listdir(self.dest)),
+                         ["git_reads.py", "guard.py", "guard_x.py", "shared_names.py"])
         self.assertEqual(read_file(self.dest, "guard_x.py"), "beta-anchor\n")
+
+    def test_a_mutant_anchored_in_git_reads_mutates_git_reads(self):
+        # The git and session reads the guard once held now live in git_reads.py, and the guard
+        # mutants anchored on them must still land: a mutant no module holds reads STALE.
+        mutate_shared.guard_tree(self.dest)
+        where = mutate_shared.apply_mutant(self.dest, "reads-anchor", "BROKEN")
+        self.assertEqual(os.path.basename(where), "git_reads.py")
+        self.assertEqual(read_file(self.dest, "git_reads.py"), "BROKEN\n")
+        self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
 
     def test_one_match_in_a_sibling_mutates_the_sibling(self):
         mutate_shared.guard_tree(self.dest)
@@ -186,6 +197,12 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
     def test_scaffold_carries_shared_names_so_the_copied_guard_imports(self):
         mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
         self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "shared_names.py")))
+
+    def test_scaffold_carries_git_reads_so_the_copied_sweep_and_guard_import(self):
+        # sweep.py and guard_core.py import it. A scaffold without it fails every mutant on the
+        # import, so every mutant reads killed for a cause that is not the mutation.
+        mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
+        self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "git_reads.py")))
 
 
 if __name__ == "__main__":

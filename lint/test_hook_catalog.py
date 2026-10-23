@@ -144,7 +144,7 @@ TABLE_PATH = re.compile(r"`([\w./-]+\.(?:py|sh|mjs|js))`")
 LABEL = re.compile(r"^(\S+)(?: matcher=(\S+))?(?: if=(.+))?$")
 
 sys.path.insert(0, HERE)
-from test_settings_matcher import SETTINGS, judge_hooks  # noqa: E402  one home for settings.json and the judge walk
+from test_settings_matcher import SETTINGS, JUDGE_TYPES, judge_hooks  # noqa: E402  one home for settings.json, the judge walk and its hook types
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 
 
@@ -335,7 +335,7 @@ class RealRepo(unittest.TestCase):
             if hook.get("type") == "command":
                 key = command_script(hook) or "inline: " + inline_label(event, matcher, cond)
                 want[(key, event, matcher, cond)] += 1
-            elif hook.get("type") == "prompt":
+            elif hook.get("type") in JUDGE_TYPES:
                 want[(first_sentence(hook.get("prompt", "")), event, matcher, cond)] += 1
         self.assertTrue(want, "no registration found, so the scan proves nothing")
         got = collections.Counter(
@@ -344,7 +344,7 @@ class RealRepo(unittest.TestCase):
         missing, extra = want - got, got - want
         problems = ["missing row: %r" % (k,) for k in missing] + ["stale row: %r" % (k,) for k in extra]
         self.assertFalse(problems, "\n".join(problems))
-        # Each prompt judge has a judge row keyed by its first sentence.
+        # Each judge hook (prompt or agent) has a judge row keyed by its first sentence.
         # Named failure: a judge row that lost its key, so the page hides which judge runs.
         judge_page = page_rows(self.page())
         problems, seen = [], 0

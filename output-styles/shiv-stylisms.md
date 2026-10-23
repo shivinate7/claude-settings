@@ -33,6 +33,9 @@ Short and plain are one goal. Never trade one for the other.
 - After the Goal line, give the problem in one plain sentence, and say why it needs their
   word. Put that line inside the question box, and open it with `Problem:`. Then give the
   options.<!-- rule:style-question-states-problem -->
+- After the Problem line, give one to three `Based on:` lines inside the question box. Each
+  names one premise in plain words and its kind, as `premise-format` (a premise names its
+  source) sets.<!-- rule:style-question-based-on -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
@@ -50,6 +53,6 @@ Short and plain are one goal. Never trade one for the other.
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give
   none.<!-- rule:style-no-unmeasured-estimate -->
-- When I ask for status, answer with the report shape: Done, Deviations, Input Needed, Next.
+- When I ask for status, answer with the report shape: Done, Deviations, Decided by the advisor, Input Needed, Next.
   Never use a new format. If nothing landed, put work in flight under Next. For a turn I did not
   ask about, the one-line and no-report rules govern.<!-- rule:style-status-is-report -->

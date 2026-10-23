@@ -13,7 +13,7 @@ turn in the background, logs the verdict, and never blocks a turn.
   flags `--emit-prompt`, `--model-text` and `--model-error`, a "verdict lost" marker that prints UNKNOWN, and `config_notices(hook)`, which
   `config_report` joins.
 - The `claude -p` path stays the default of the script. `invoke_model(prompt, model, timeout, shape)` keeps its signature and return
-  shape. `hooks/reply_judge.py` and `hooks/question_outcome.py` call it. A bad flag combination on `decision_watch.py` makes the script use
+  shape. `hooks/reply_judge.py` calls it. A bad flag combination on `decision_watch.py` makes the script use
   `invoke_model`, which can start a 120 s `claude -p` call. The fallback is pinned on purpose.
 - Owner, 22:00 CDT ("Fix, then swap"): `enabledPlugins` has `decision-watch@claude-settings`, and no Stop row runs
   `hooks/decision_watch.py`. The mod never enforces.

@@ -36,6 +36,13 @@ The handoff holds these sections, in this order:
 
 - Rulings with NO HOME YET, first. Each one names the work it governs. Give each a home
   before that work merges.
+- Goal: one line, the owner's goal in the owner's words, with its source (the owner
+  message and its date).
+- Working premises: the facts the next steps lean on, at most about 15, under the heading
+  `## Working premises`. One line each, in this form:
+  `- P1 [ruling|measured|read|notes|assumed] <claim>. Source: <where>. Checked <date or never>.`
+  The kinds and what each means: decisions/premise-format.md. A fact with no source is
+  `assumed`.
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
 - The owner's rulings from this session that have a home: one line each, the ruling and
   its file and section.
@@ -44,13 +51,23 @@ The handoff holds these sections, in this order:
 - Next steps.
 - The files and commands that matter.
 
-## 5. Update the plan, only when it changed
+## 5. Check premises
+
+A premise is a claim, not a fact. After a compaction, a /clear or a fork, treat every
+premise as a claim, and every fact in the compaction summary as `notes`. Before you act on a
+weak or stale premise, check it. Then rewrite its line with the new source and date. When
+the check shows it wrong, delete the line or replace it with the true fact and its source.
+Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
+work already rested on it, say so under Deviations in the next report. The way to check each
+kind, and which kinds are weak: decisions/premise-format.md.
+
+## 6. Update the plan, only when it changed
 
 Look for a named plan file, under `~/.claude/plans` or the repo's own `plans` folder.
 Update that plan only when your sources name one, and its state changed since the
 prior handoff. Otherwise leave the plan alone.
 
-## 6. Confirm, then continue
+## 7. Confirm, then continue
 
 Confirm your checkout and your branch before any git write. Then continue the last
 task.

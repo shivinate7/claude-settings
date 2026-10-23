@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Reads ~/.claude/guard.log: one tab-separated line per guard verdict, written by
 hooks/guard_core.py record(). Nobody read it, so a rule that never fires, or fires too often, went unseen.
-Prints per-rule deny/ask/noted counts (a `fixed` STE gate rewrite counts as noted; an `override`
+Prints per-rule deny/ask/noted counts (a `fixed` rewrite line, written by the removed STE gate, counts as noted; an `override`
 line, a refusal an owner override pass lifted, adds an override column), denies per day,
 other verdicts verbatim, bad-line count.
 --days all reads the whole log. --all-rules lists every rule id the guard and the gates can emit
 (rule_audit.emitted_rule_ids, the one home), 0 counts included, with the date of each rule's
 first line in the whole log, whatever --days says, or "never". A line of any decision counts as
-fired; a combined STE line (`STE007,STE008`) credits each code; an id only the log holds keeps its row.
+fired; a combined STE line (`STE007,STE008`) credits each code; an id only the log holds keeps its row,
+and so does every whole STE code with a first line in the log (no hook writes one now).
 A line ends in the hook's session_id as a sixth field; a five-field line, or "-", is "unknown
 session". --session <id> keeps one session's lines. --by-session adds counts per session."""
 import argparse
@@ -25,12 +26,12 @@ from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override pass lifted: counted, and a key only when present
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
-COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the STE gate writes for several codes found at once
+COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE gate wrote for several codes found at once
 UNKNOWN = "unknown session"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session")
 COMBINED_CODE = re.compile(r"STE\d+")
-WHOLE_CODE = re.compile(r"STE\d{3}")  # every ste_lint.RULES code is STE and three digits
+WHOLE_CODE = re.compile(r"STE\d{3}")  # a whole STE code: STE and three digits
 
 
 def codes(rule):
@@ -90,7 +91,7 @@ def summarize(lines, days, now, session=None):
         if session is not None and label != session:
             continue
         if decision == "fixed":
-            decision = "noted"  # an STE gate rewrite: counted as a note, its STE codes are its rule
+            decision = "noted"  # an old STE gate rewrite line: counted as a note, its STE codes are its rule
         if decision not in COUNTED + (OVERRIDE,):
             out["other"].append(row.line)
             continue
@@ -113,7 +114,7 @@ def all_rules(s, ids):
             mine = by_rule.setdefault(code, dict.fromkeys(COUNTED, 0))
             for k, n in c.items():
                 mine[k] = mine.get(k, 0) + n
-    for rule_id in ids:
+    for rule_id in list(ids) + [r for r in s["first"] if WHOLE_CODE.fullmatch(r)]:
         by_rule.setdefault(rule_id, dict.fromkeys(COUNTED, 0))
     for rule_id, c in by_rule.items():
         c[FIRST] = s["first"].get(rule_id, "never")

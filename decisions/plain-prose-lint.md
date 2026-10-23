@@ -10,20 +10,20 @@ Owner: a lint rule either blocks or does not exist. A rule nobody can see is not
 STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-only and has no mechanism. Neither raises a finding (owner ruling 2026-09-23).
 
 - A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may block. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
-- Errors stay for five codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat),
-  STE013 (double negative), STE020 (label length: a button, label or aria-label is capped at 4 words, owner ruling) and STE021 (bad escape: a UI escape is line-level and names a rule and a reason, owner ruling).
-- STE020 reads its label tags from the per-repo config key `label_tags`. The default is `button` and `label` (owner ruling, undated).
+- Errors stay for three codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat) and
+  STE013 (double negative). CI's STE lint fails the step on them on changed lines. No hook runs the lint
+  on a write (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`).
+- STE020 (label length) and STE021 (bad UI escape) are dropped (owner, 2026-10-22 10:10 CDT). The
+  icon-and-label rule and design review carry label length. A UI escape is `ste-disable-line CODE: reason`
+  or `ste-disable-next-line CODE: reason` in a comment. Any other escape suppresses nothing.
 - Six codes are advisory and never block: STE003 (nominalization), STE007 (Latin abbreviation), STE008
   (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that"). The nudge is
   temporary: STE moves into agent briefs as a writing standard and leaves `CLAUDE.md` (note `ste-into-agent-briefs`).
 - Autofix covers STE011 only, and only a fixed bloat phrase. A borderline STE011 row has no fix and still
   errors, as does a bloat phrase in ALL CAPS.
 - STE001 reads one key, `max_words`, set to 30. Mode decides only whether STE015 runs.
-- `lint/ste_gate.py` prints one note line per advisory code: the first finding and the count of more. The
-  write goes ahead. A denied write shows no note. `lint/md_sweep.py` never blocks on an advisory finding.
-  `actions/ste-lint` reports one as a `::warning` and never fails the step.
-- The `NOTE` string of both gates names what blocks: a sentence over 30 words, bloat, double negative.
-- Rule `output-write-in-ste` has its row in `lint/rule_mechanisms.json` at `test_ste011_bloat_blocks`.
+- `actions/ste-lint` reports an advisory finding as a `::warning` and never fails the step.
+- Rule `output-write-in-ste` has a `ci` row in `lint/rule_mechanisms.json`, at the `STE lint` step of `gates.yml`.
 - No renames. q_max and banchi pin `actions/ste-lint` by SHA, so every code, file and key keeps its name.
 - `agents/*.md` keep their STE wording. Agent briefs are the future home of the writing standard.
 

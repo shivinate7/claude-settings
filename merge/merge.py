@@ -11,7 +11,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, contextlib, json, math, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -518,6 +518,7 @@ class Host:
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
+        self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
 
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
@@ -588,18 +589,33 @@ class Host:
                        "The tool never merges with nothing to wait for. Name the checks.")
         return names
 
-    def checks(self, n):
-        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], self.cwd)
+    def checks(self, n, warn=True):
+        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code.
+        The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
+        A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
+        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped."""
+        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link,startedAt,completedAt"], self.cwd)
         try:
             rows = json.loads(out)
         except ValueError:
             if "no checks reported" in out:
                 return {}
             raise Stop("gh pr checks failed: " + out)
+        try:
+            flow = workflow_dir(self.cwd)
+            caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
+        except (OSError, ValueError):  # the warning is advice: with no readable workflow there is no cap to judge against
+            caps = {}
         got = {}
         for d in rows:
-            got.setdefault(d["name"], []).append((d["bucket"], d.get("link") or ""))
+            bucket, link, cap, used = d["bucket"], d.get("link") or "", caps.get(d["name"]), job_minutes(d)
+            if cap and used is not None:
+                if bucket == "cancel" and used >= cap:
+                    bucket = f"timed out at its {cap}-minute cap; re-cap or split"
+                elif warn and used > 0.7 * cap and (d["name"], link) not in self.warned:
+                    self.warned.add((d["name"], link))
+                    say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
+            got.setdefault(d["name"], []).append((bucket, link))
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
@@ -720,7 +736,7 @@ class Host:
     def head_state(self, n):
         """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits."""
         try:
-            got = self.checks(n)
+            got = self.checks(n, warn=False)
             red, pending, ignored = self.classify(got, self.required_names(), self.ignore)
         except Stop as e:
             return f"unknown ({e})"
@@ -739,7 +755,7 @@ class Host:
         try:
             with shared_deadline(SH_TIMEOUT):
                 info = self.pr(n)
-                got = self.checks(n)
+                got = self.checks(n, warn=False)
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
@@ -1132,6 +1148,59 @@ def host_default_branch(root):
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the default branch cannot be read from gh: {e}")
 
+def job_minutes(row):
+    """Minutes a `gh pr checks` row ran, from startedAt to completedAt. None when either is missing or the job has not finished (gh gives a pending one the zero time)."""
+    try:
+        a, b = (datetime.datetime.fromisoformat(row[k].replace("Z", "+00:00")) for k in ("startedAt", "completedAt"))
+    except (KeyError, AttributeError, ValueError):
+        return None
+    return (b - a).total_seconds() / 60 if b > a else None
+
+def workflow_dir(start):
+    """The `.github/workflows` of the checkout that holds `start` (the working directory when None): the nearest one up the tree, so a run from a subfolder reads the repo root's.
+    The search stops at the checkout's root (the first folder holding .git), so a nested checkout never reads its parent's caps."""
+    d = pathlib.Path(start or ".").resolve()
+    for p in (d, *d.parents):
+        if (q := p / ".github" / "workflows").is_dir():
+            return q
+        if (p / ".git").exists():
+            return None
+    return None
+
+def job_caps(texts):
+    """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
+    only a job's own keys count, at four spaces under a two-space job id under `jobs:`. A step's cap, a comment, a block scalar
+    and a quoted string are deeper or start with another character. A quoted number counts. An expression (`${{ ... }}`) is unknown: the job has no cap."""
+    caps = {}
+    for text in texts:
+        in_jobs, job, jobs = False, None, []
+        for line in text.splitlines():
+            if re.match(r"[^\s#]", line):
+                in_jobs, job = line.startswith("jobs:"), None
+            elif in_jobs and (m := re.match(r"^ {2}([\w-]+):\s*(?:#.*)?$", line)):
+                job = {"ids": [m.group(1)], "cap": None}
+                jobs.append(job)
+            elif job and (m := re.match(r"^ {4}name:\s*(.+?)\s*$", line)):
+                job["ids"].append(m.group(1).strip("'\""))
+            elif job and (m := re.match(r"^ {4}timeout-minutes:\s*['\"]?(\d+)['\"]?\s*(?:#.*)?$", line)):
+                job["cap"] = int(m.group(1))
+        for i, cap in ((i, j["cap"]) for j in jobs if j["cap"] for i in j["ids"]):
+            caps[i] = max(cap, caps.get(i, 0))  # one id in two files: the larger cap, so neither the floor nor the warning runs short
+    return caps
+
+def base_job_caps(root, ref):
+    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
+    c, listed = git(root, "ls-tree", "-r", "--name-only", ref, "--", ".github/workflows")
+    if c:
+        raise Stop(f"cannot read {ref} to look for .github/workflows: {listed}")
+    texts = []
+    for f in (f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))):
+        c, text = git(root, "show", f"{ref}:{f}")
+        if c:
+            raise Stop(f"cannot read {f} on {ref}: {text}")
+        texts.append(text)
+    return job_caps(texts)
+
 def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
@@ -1164,6 +1233,13 @@ def load_config(root, base, path):
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
+    caps = base_job_caps(root, ref)
+    floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
+    if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
+        # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
+        m["deadlineMinutes"] = floor
+        say(f"merge: the largest job timeout-minutes in .github/workflows is {max(caps.values())}, so the wait is {floor} minutes, not {dm}. "
+            f"raise merge.deadlineMinutes in {path} to at least {floor}")
     ne = lambda v: isinstance(v, str) and v.strip()
     # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
     # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.

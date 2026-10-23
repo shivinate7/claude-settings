@@ -19,9 +19,7 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   nothing, writes nothing, and runs no check.
 - Failed checks, each one stdout line:
   1. A `crash` decision line (rule guard-crash) from the previous day.
-  2. An STE-fallback line whose matched field ends fallback=crash, from the previous day.
-  3. An STE-unchecked line from the previous day. A read that could not run is unknown.
-  4. guard.log exists but cannot be read. The line says unknown.
+  2. guard.log exists but cannot be read. The line says unknown.
   No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
 - Each line: plain text, at most 240 characters, names what failed, and names the reader
   command by its ABSOLUTE path, built from the hook's own folder: <hook folder>/../lint/
@@ -72,14 +70,6 @@ def healthy_log():
 
 def guard_crash(stamp):
     return row(stamp, "crash", "guard-crash", "guard_core: ImportError: boom", "", "-")
-
-
-def ste_fallback_crash(stamp):
-    return row(stamp, "noted", "STE-fallback", "notes.md fallback=crash", "Write")
-
-
-def ste_unchecked(stamp):
-    return row(stamp, "noted", "STE-unchecked", "notes.md unchecked", "Write")
 
 
 def reader_path(hook_folder):
@@ -221,18 +211,6 @@ class CheckTests(NoteCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("crash", lines[0].lower())
 
-    def test_ste_fallback_crash_from_yesterday_is_one_failure(self):
-        self.write_log(healthy_log() + [ste_fallback_crash(CRASH_AT)])
-        lines = self.failure_lines(self.run_note(MORNING))
-        self.assertEqual(len(lines), 1)
-        self.assertIn("crash", lines[0].lower())
-
-    def test_ste_unchecked_from_yesterday_is_one_failure(self):
-        self.write_log(healthy_log() + [ste_unchecked(CRASH_AT)])
-        lines = self.failure_lines(self.run_note(MORNING))
-        self.assertEqual(len(lines), 1)
-        self.assertIn("unchecked", lines[0].lower())
-
     def test_a_day_of_high_but_steady_denies_prints_nothing(self):
         self.write_log(steady("env-file", 500, HISTORY) + steady("waiter", 300, HISTORY))
         self.assert_silent(self.run_note(MORNING))
@@ -247,13 +225,6 @@ class CheckTests(NoteCase):
     def test_steady_rules_and_a_new_small_rule_do_not_fail(self):
         self.write_log(healthy_log() + steady("cite-by-id", 3, [YESTERDAY]))
         self.assert_silent(self.run_note(MORNING))
-
-    def test_each_failure_gets_its_own_line(self):
-        self.write_log(healthy_log() + [guard_crash(CRASH_AT), ste_unchecked(CRASH_AT)])
-        lines = self.failure_lines(self.run_note(MORNING))
-        self.assertEqual(len(lines), 2)
-        self.assertTrue(any("crash" in line.lower() for line in lines))
-        self.assertTrue(any("unchecked" in line.lower() for line in lines))
 
     def test_failure_line_is_one_plain_short_line_that_names_the_reader(self):
         self.write_log(healthy_log() + [guard_crash(CRASH_AT)])
@@ -278,11 +249,13 @@ class ReaderPathTests(NoteCase):
         for source in (NOTE, os.path.join(ROOT, "hooks", "local_time.py"),
                        os.path.join(ROOT, "hooks", "guard_core.py"),
                        os.path.join(ROOT, "hooks", "shared_names.py"),
+                       os.path.join(ROOT, "hooks", "git_reads.py"),
                        os.path.join(ROOT, "lint", "guard_log_report.py")):
             self.require_file(source)
         layout = self.scratch("layout")
         for part in (("hooks", "daily_note.py"), ("hooks", "local_time.py"),
-                     ("hooks", "guard_core.py"), ("hooks", "shared_names.py"), ("lint", "guard_log_report.py")):
+                     ("hooks", "guard_core.py"), ("hooks", "shared_names.py"), ("hooks", "git_reads.py"),
+                     ("lint", "guard_log_report.py")):
             os.makedirs(os.path.join(layout, part[0]), exist_ok=True)
             source = os.path.join(ROOT, *part)
             shutil.copyfile(source, os.path.join(layout, *part))

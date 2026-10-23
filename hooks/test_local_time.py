@@ -456,8 +456,9 @@ def case_override_takes_words():
 
 # None of these starts with the word `override` as a word of its own, so none grants a pass and none
 # writes a log line. The word as a plural, a past participle or an -ing form is a different word. So is
-# a name that only begins with it: a hyphenated flag, a call, a possessive. The notice forms are the
-# tags question_outcome.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
+# a name that only begins with it: a hyphenated flag, a call, a possessive.
+# Each of these holds the word `override`, and none of them is the whole prompt. The notice forms are
+# the tags shared_names.MACHINE_TAGS lists: text a tool or an agent wrote, never the owner.
 OV_NO_GRANT = [
     ("a word at the end of a message", "please override"),
     ("the word inside a sentence", "please don't override this"),

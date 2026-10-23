@@ -273,6 +273,44 @@ def case_ordinary_turn():
     check("ordinary_turn: model never called", spy.calls == 0)
 
 
+# --------------------------------------------------------------------------- peer reply mid-turn
+# A cross-session reply is type user, origin.kind peer, isMeta true. It lands mid-turn, so it is
+# never the owner's last message. Both readers here must walk past it to the owner's own line.
+
+def peer_record(body, ts):
+    return {
+        "type": "user",
+        "isMeta": True,
+        "timestamp": ts,
+        "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
+                   "name": "advisor-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                   "body": body},
+        "message": {"role": "user", "content": "Another Claude session sent a message:\n"
+                    '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
+                    'from-name="advisor-cf" from-mode="bypass">%s</cross-session-message>' % body},
+    }
+
+
+def case_last_human_reader_skips_a_peer_record():
+    t1 = "2026-09-22T10:00:05.000Z"
+    t2 = "2026-09-22T10:00:09.000Z"
+    records = [
+        human_record("rename the gate", T0),
+        assistant_record(text="Asking the advisor."),
+        peer_record("Answer: yes, rename it.", t1),
+        assistant_record(text="Renamed."),
+    ]
+    idx, stamp = dw.last_human_index_and_stamp(records)
+    check("peer reply: last_human_index_and_stamp finds the owner's line, not the peer's",
+          (idx, stamp) == (0, T0), repr((idx, stamp)))
+    check("peer reply: last_human_stamp (shared reader) returns the owner's stamp",
+          dw.last_human_stamp(records) == T0, repr(dw.last_human_stamp(records)))
+    # Pin (green before the fix): a later owner line still wins over an earlier peer reply.
+    later = records + [human_record("thanks, now the next one", t2)]
+    check("peer reply: a later owner line is still the last human",
+          dw.last_human_index_and_stamp(later) == (4, t2), repr(dw.last_human_index_and_stamp(later)))
+
+
 # --------------------------------------------------------------------------- case 6
 # git status fails (not a git work tree at all): UNKNOWN, never silent, never a flag.
 
@@ -610,12 +648,19 @@ def case_judge_isolation_copies_credentials():
     creds_path = os.path.join(fake_home_config, dw.CREDENTIALS_FILENAME)
     write(creds_path, '{"fake": "credential-content"}')
 
-    real_config_dir = dw.guard.config_dir
-    sys.modules["guard_core"].config_dir = lambda: fake_home_config
+    # _judge_isolation calls guard.config_dir(). guard resolves that name through git_reads, so the
+    # patch goes on the guard module itself and is removed after.
+    guard_module = dw.guard
+    had_own = "config_dir" in vars(guard_module)
+    real_config_dir = guard_module.config_dir
+    guard_module.config_dir = lambda: fake_home_config
     try:
         judge_cwd, judge_env = dw._judge_isolation()
     finally:
-        sys.modules["guard_core"].config_dir = real_config_dir
+        if had_own:
+            guard_module.config_dir = real_config_dir
+        else:
+            del guard_module.config_dir
 
     try:
         copied = os.path.join(judge_env["CLAUDE_CONFIG_DIR"], dw.CREDENTIALS_FILENAME)
@@ -911,7 +956,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/question-outcome-check.md).
+# The one-year token file (decisions/reply-judge-samples-never-blocks.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this
@@ -1166,7 +1211,7 @@ def _timeout_run(argv, **kwargs):
 
 
 def case_invoke_model_return_shape_pinned():
-    # reply_judge and question_outcome call invoke_model: its (verdict | None, error | None) return must not move.
+    # reply_judge calls invoke_model: its (verdict | None, error | None) return must not move.
     with scratch_config("invoke_signature"):
         ok = _invoke_with(_envelope(ALLOW_JSON))
         bad = _invoke_with(_timeout_run)
@@ -1622,6 +1667,7 @@ def main():
     case_outbound_alone_no_disk_change()
     case_missing_transcript()
     case_ordinary_turn()
+    case_last_human_reader_skips_a_peer_record()
     case_not_a_repo()
     case_model_failure()
     case_incident_cap_same_session()

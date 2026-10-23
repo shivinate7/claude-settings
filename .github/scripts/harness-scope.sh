@@ -22,7 +22,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/mutate_shared.py|settings.json) on="$on $W $R $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/mutate_shared.py|settings.json) on="$on $W $R $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $X $S code guard " ;;
       hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
@@ -31,7 +31,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/test_mutate_shared.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
-      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/ste_gate.py|lint/report_gate.py|lint/md_sweep.py|lint/ruling_census.py|lint/test_gates.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
+      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_gate.py|lint/ruling_census.py|lint/test_gates.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
       # bin/claude-janitor: test_install_src reads it.
       bin/claude-janitor) on="$on $W $S $R $X code guard sweep " ;;

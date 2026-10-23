@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error.
+"""At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Decided by the advisor, Input Needed, Next, in order. Fails open on any error.
 
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.
 
 Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
 after the last human message, block once unless the reply ends with one blockquote holding
-the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
+the bold labels Done, Deviations, Decided by the advisor, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report. When
 stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
 
@@ -21,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, tool_uses  # noqa: E402
+from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -55,14 +55,14 @@ LANDING_TOOLS = {
     "mcp__github__push_files",
     "mcp__github__create_or_update_file",
 }
-LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
+LABEL_ORDER = ["Done", "Deviations", "Decided by the advisor", "Input Needed", "Next"]
 LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
 BLOCK_REASON_HEAD = (
     "Report-shape gate: this turn landed a commit, push, or merge, so the reply must end "
-    "with the report. One blockquote, bold labels Done, Deviations, Input Needed, Next in "
+    "with the report. One blockquote, bold labels Done, Deviations, Decided by the advisor, Input Needed, Next in "
     "that order, drop a label that does not apply, no code fence, nothing after it."
 )
 BLOCK_REASON_TAIL = (
@@ -322,7 +322,6 @@ def main():
     if not turn_landed(after):
         return
 
-    from ste_gate import last_reply
     text = last_reply(hook)
     shape_ok = report_shape_ok(text)
     reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]

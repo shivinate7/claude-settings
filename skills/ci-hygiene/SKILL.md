@@ -32,7 +32,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    state in the group (`format('{0}-{1}', github.ref, github.event.pull_request.draft)`). A draft
    run skips every job (step 11), so it must never cancel a ready run. Runners with a low
    concurrency cap, such as hosted macOS, queue first.
-5. **Cap each job's time.** Set `timeout-minutes` on each job at about 2x its slowest green run.
+5. **Cap each job's time.** A job with fewer than 5 green runs takes a provisional cap of 60
+   minutes, marked `# provisional` in a comment. The owner may set another provisional cap.
+   After 5 green runs, set the cap at about 2x the slowest, from measured times. Keep
+   `merge.deadlineMinutes` in `.github/stamp.json` at least the largest cap plus 5. The merge
+   tool warns when a job passes 70% of its cap. A timeout stays red, labelled "re-cap or split".
    Give a network step, such as a browser install, its own short cap.
    When a job nears its cap, split the slowest suite's subject by family into its own job. Give
    the measured CI time before and after.

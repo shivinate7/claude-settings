@@ -4,7 +4,8 @@
 Modes:
 - --post-compact: After compaction, sets the session's flag that its handoff is not read.
 - --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
-  file is that handoff. Never denies the read.
+  file is that handoff. Never denies the read. A payload with `agent_id` (the hook
+  fired inside a subagent) clears nothing: only the session's own Read counts.
 - --stop: At Stop, while the session's flag that its handoff is not read is set and the
   handoff exists, blocks once per turn and names the handoff path.
 
@@ -57,6 +58,8 @@ def main():
             with open(flag, "w", encoding="utf-8") as f:
                 f.write("1")
         elif "--pre-read" in args:
+            if payload.get("agent_id"):
+                return 0
             fp = (payload.get("tool_input") or {}).get("file_path")
             if isinstance(fp, str) and fp and names_handoff(fp, sid) and os.path.isfile(flag):
                 os.remove(flag)

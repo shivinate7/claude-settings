@@ -11,7 +11,7 @@ One file per debt, named by a slug of 32 characters or fewer. Each file has four
 - **Decision.** The decision that names the gap, by slug plus a short gloss. Use the slug now. If the repo numbers decisions, add the number at merge. Never cite it by path. If no decision exists, write `none`.
 - **Retire.** What closes the gap, and the check that shows it closed.
 
-An owner ruling a debt holds goes under an H2 `## Ruling` in its file. The question judge reads that section. A ruling under any other heading, or in `notes.md`, is not read. Put such a ruling in a debt, or in its decision.
+An owner ruling a debt holds goes under an H2 `## Ruling` in its file. No hook reads that section for a question now. A ruling under any other heading, or in `notes.md`, is not read either. Put such a ruling in a debt, or in its decision.
 
 A finding becomes a debt only when Claude is likely to hit it in normal work. Any other finding is one line in `notes.md`, with no red test and no decision edit (owner ruling 2026-10-17 11:56 CDT).
 
