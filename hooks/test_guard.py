@@ -14906,6 +14906,11 @@ lb_add("Agent, 3.1 GB free of 926 GB, run_in_background false: full, refused, na
 lb_add("disk 926 GB, 119 GB free, run_in_background true: not busy, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
                          fake=lb_fake("darwin", disk_total=926.0, disk_free=119.0)))
+# The 15 GB cap pins here: 50 GB is under 10% of 926 GB (92.6 GB) but not under 15 GB, so a share-only busy
+# line would refuse it.
+lb_add("disk 926 GB, 50 GB free, run_in_background true: not busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", disk_total=926.0, disk_free=50.0)))
 lb_add("disk 926 GB, 10 GB free, run_in_background true: busy, refused, names disk 10.0 GB free of 926 GB",
        lb_decision_check("Agent", None, "deny", (lb_gb(10.0, 926), LB_FREE_DISK), background=True,
                          lacks=(LB_FOREGROUND,), fake=lb_fake("darwin", disk_total=926.0, disk_free=10.0)))
