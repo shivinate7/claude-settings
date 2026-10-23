@@ -6,9 +6,12 @@ Run it from the repository root:
     python hooks/test_wrappers.py
 
 Contract, from decision gate-hooks-fail-closed:
-- The four gate entries (PreToolUse guard, ste_gate, question_outcome; PermissionRequest
-  rm_prompt_answer) carry no `onFailure`: a timeout under load must not refuse every call.
+- Every handler of the four gates (PreToolUse guard, ste_gate, question_outcome; PermissionRequest
+  rm_prompt_answer) carries no `onFailure`: a timeout under load must not refuse every call.
+  A gate may split into several handlers, one per `if` rule; each handler is held to every line below.
 - A gate whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
+  A handler that exits 0 there fails the suite, and a case runs that mutant to show it.
+- ste_gate runs only behind `if` handlers, so its shell starts for a Markdown or UI file only.
 - A gate whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
   and both installers, so the reader installs Python 3 before running either one.
 - A gate whose script exists runs it: stdin reaches the script, its stdout comes back, and its
@@ -89,11 +92,22 @@ def command_of(h):
     return h.get("command") or ""
 
 
-def gate_entry(settings, script):
-    """The one entry in the gate's event whose command runs the script, or None."""
+def gate_entries(settings, script):
+    """Every handler in the gate's event whose command runs the script: one per `if` rule when split."""
     needle = "/%s\"" % script  # the commands read "$g" = "${CLAUDE_CONFIG_DIR...}/hooks/guard.py"
-    hits = [h for ev, h in hook_entries(settings) if ev == GATES[script] and needle in command_of(h)]
-    return hits[0] if len(hits) == 1 else None
+    return [h for ev, h in hook_entries(settings) if ev == GATES[script] and needle in command_of(h)]
+
+
+def each_handler(script, run):
+    """Run `run(h) -> (ok, note)` on every handler of the gate. No handler, or one bad handler, fails."""
+    hits = gate_entries(load(), script)
+    if not hits:
+        return False, "no %s entry for %s" % (GATES[script], script)
+    for h in hits:
+        ok, note = run(h)
+        if not ok:
+            return False, note
+    return True, "%d handler(s): %s" % (len(hits), note)
 
 
 def entries_running(settings, script):
@@ -119,30 +133,23 @@ def remedy_ok(r, reason):
 
 def case_on_failure(script):
     def check():
-        h = gate_entry(load(), script)
-        if h is None:
-            return False, "no single %s entry for %s" % (GATES[script], script)
-        got = h.get("onFailure")
-        return got is None, "onFailure is %r" % got
+        return each_handler(script, lambda h: (h.get("onFailure") is None, "onFailure is %r" % h.get("onFailure")))
     return check
+
+
+def missing_script_run(h):
+    with tempfile.TemporaryDirectory() as cfg:
+        return run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": os.environ.get("PATH", "")})
 
 
 def case_missing_script(script):
     def check():
-        h = gate_entry(load(), script)
-        if h is None:
-            return False, "no single entry for %s" % script
-        with tempfile.TemporaryDirectory() as cfg:
-            r = run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": os.environ.get("PATH", "")})
-        return remedy_ok(r, "script missing")
+        return each_handler(script, lambda h: remedy_ok(missing_script_run(h), "script missing"))
     return check
 
 
 def case_no_python(script):
-    def check():
-        h = gate_entry(load(), script)
-        if h is None:
-            return False, "no single entry for %s" % script
+    def run(h):
         with tempfile.TemporaryDirectory() as cfg, tempfile.TemporaryDirectory() as empty:
             for s in GATES:  # every gate script exists, so the only failure left is python
                 path = os.path.join(cfg, s)
@@ -150,14 +157,29 @@ def case_no_python(script):
                 open(path, "w").close()
             r = run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": empty})
         return remedy_ok(r, "Python")
-    return check
+    return lambda: each_handler(script, run)
+
+
+def check_ste_gate_runs_only_behind_if():
+    hits = gate_entries(load(), "lint/ste_gate.py")
+    bare = [command_of(h)[:30] for h in hits if "if" not in h]
+    return bool(hits) and not bare, "%d ste_gate handler(s), %d with no `if`" % (len(hits), len(bare))
+
+
+def check_fail_open_filtered_handler_is_caught():
+    """A filtered handler whose missing-script branch exits 0 must fail remedy_ok, or the case proves nothing."""
+    hits = gate_entries(load(), "lint/ste_gate.py")
+    if not hits:
+        return False, "no ste_gate entry"
+    mutant = dict(hits[0], command=command_of(hits[0]).replace(">&2; exit 2; }", ">&2; exit 0; }", 1))
+    if command_of(mutant) == command_of(hits[0]):
+        return False, "the missing-script branch changed shape: update this mutant"
+    ok, note = remedy_ok(missing_script_run(mutant), "script missing")
+    return not ok, "mutant (exit 0 on a missing script) passed remedy_ok: %s" % note
 
 
 def case_exec_runs_script(script, code):
-    def check():
-        h = gate_entry(load(), script)
-        if h is None:
-            return False, "no single %s entry for %s" % (GATES[script], script)
+    def run(h):
         with tempfile.TemporaryDirectory() as cfg:
             path = os.path.join(cfg, script)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -172,7 +194,7 @@ def case_exec_runs_script(script, code):
         ok = r.returncode == code and r.stdout.strip() == want
         return ok, "exit %d want %d; stdout %r want %r; stderr %s" % (
             r.returncode, code, r.stdout.strip()[:120], want, r.stderr.strip()[:120])
-    return check
+    return lambda: each_handler(script, run)
 
 
 def case_advisory_exit0(h):
@@ -300,7 +322,7 @@ def check_alias_only_gates():
         ok, note = remedy_ok(r, "Python")
         if not ok or "ALIAS" in r.stdout:
             bad.append("%s: %s, stdout %r" % (i, note, r.stdout.strip()[:40]))
-    return (not bad and len(gates) == len(GATES)), "gates checked %d; wrong: %s" % (len(gates), bad)
+    return (not bad and {s for _i, s, _h in gates} == set(GATES)), "gates checked %d; wrong: %s" % (len(gates), bad)
 
 
 def check_alias_only_advisory():
@@ -584,6 +606,9 @@ def build_cases():
         if ev in ADVISORY_EVENTS and command_of(h):
             cases.append(("advisory %s exits 0 when script missing: %s" % (ev, command_of(h)[:60]),
                           case_advisory_exit0(h)))
+    cases.append(("ste_gate runs only behind `if` handlers", check_ste_gate_runs_only_behind_if))
+    cases.append(("a filtered handler that exits 0 on a missing script fails the missing-script check",
+                  check_fail_open_filtered_handler_is_caught))
     cases.append(("launcher selection: python wrappers found, includes every GATE", check_launcher_selection))
     for i, s, h in launcher_wrappers():
         cases.append(("launcher control %s: real python alone runs REAL" % i, case_launcher(h, s, False)))
