@@ -3,7 +3,8 @@ Asserts the gated finding reaches the job log and the ::error annotation, both e
 that an advisory finding is a ::warning that never fails the step, the changed-lines scope, the diff range, the exclude split, and annotation escaping.
 Also asserts bin/ste-changed matches the step on the same diff: scope, findings, verdict, exit code.
 Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude` input, never this repo's file.
-Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory."""
+Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory.
+Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo never runs on import, and the summary still prints."""
 import os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -450,4 +451,30 @@ for label, change, base, want in [
     check("exit parity, %s: both exit %d" % (label, want),
           s_rc == want and c_rc == want and parts(s_out) == parts(c_out),
           s_out + "\n--- command ---\n" + c_out)
+
+
+# Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
+# ste_emit.py there must not run when the step imports its helpers. A package wins over a module of the
+# same name, so each shape gets its own run. Each planted file writes its own marker when imported.
+def shadow_run(scope, json_path):
+    with tempfile.TemporaryDirectory() as outer:
+        marks, summary = os.path.join(outer, "marks"), os.path.join(outer, "sum")
+        os.mkdir(marks)
+        planted = {}
+        for path in (json_path, "ste_emit.py"):
+            marker = os.path.join(marks, path.replace("/", "_") + ".marker")
+            planted[path] = "open(%r, 'w').close()\n" % marker
+        rc, out = run(scope, base={**BASE_FILES, **planted}, GITHUB_STEP_SUMMARY=summary)
+        text = open(summary, encoding="utf-8").read() if os.path.exists(summary) else ""
+        return sorted(os.listdir(marks)), text, out
+
+
+for scope in ("all", "changed"):
+    for json_path in ("json.py", "json/__init__.py"):
+        written, text, out = shadow_run(scope, json_path)
+        label = "SCOPE %s, planted %s" % (scope, json_path)
+        check("%s: no planted file runs on import" % label, written == [],
+              out + "\nmarkers written: %s" % written)
+        check("%s: the summary still prints" % label,
+              "### STE lint" in text and "Files checked:" in text, out + "\nsummary file:\n" + text)
 sys.exit(1 if failed else 0)
