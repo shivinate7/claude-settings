@@ -69,8 +69,10 @@ After a compaction: read this file, then the handoff, then `git fetch` and
 
 Bring each as one question with options and a pick, and keep working meanwhile.
 
-Owner's word, Oct 23: every question in this run goes to the advisor session advisor-1b
-(ListAgents, then SendMessage), from the start, before #564 lands its asking rule. Ask the
+Owner's word, Oct 23: every question in this run goes to the advisor session (ListAgents, then
+SendMessage to the session named "advisor-" plus a short suffix; advisor-1b on Oct 23; a restart
+gives it a new suffix), from the start, before #564 lands its asking rule. No advisor session
+listed: wait 10 minutes, look again, and if still none, treat the question as unanswered. Ask the
 owner nothing during the run. When the advisor replies "ask the owner", treat it as unanswered
 (below). Merges run under decision standing-merge-grant; they need no question.
 
