@@ -1375,6 +1375,7 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
+    shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
 
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
     session_end_text = (

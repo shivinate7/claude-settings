@@ -77,7 +77,10 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
-import temp_sweep  # noqa: E402  (the Windows temp-folder step, janitor/temp_sweep.py)
+try:
+    import temp_sweep  # the Windows temp-folder step (janitor/temp_sweep.py)
+except ImportError:  # guard.py imports this file for its sim-boot refusal; a missing step must not break it
+    temp_sweep = None
 
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)
@@ -1838,11 +1841,13 @@ def _on_windows():
 
 def temp_tier(confirm):
     """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
-    without CONFIRM). Windows only. Returns the number of folders it could not remove."""
-    if not _on_windows():
+    without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
+    failures: folders it could not remove or folders it could not read."""
+    if temp_sweep is None or not _on_windows():
         return 0
     print("")
     print("== session temp folders ==")
+    temp_sweep.past_deadline = _past_deadline
     return temp_sweep.run(confirm)
 
 
@@ -3259,7 +3264,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
     if not _past_deadline():
         print_sim_report(sim_tier(args.confirm), args.confirm)
     if not _past_deadline():
-        temp_tier(args.confirm)
+        return 1 if temp_tier(args.confirm) else 0
     return 0
 
 
