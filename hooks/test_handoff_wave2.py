@@ -35,7 +35,8 @@ Part 2, hooks/reread_check.py (new file):
                  Clears the flag when the path names this session's handoff, in any spelling:
                  full path, forward slashes (Windows only), 8.3 short name (Windows only),
                  long name, or `~/.claude/...`. It never denies the read: exit 0 and no deny or
-                 block in stdout.
+                 block in stdout. A payload with `agent_id` (the hook fired inside a subagent)
+                 clears nothing: only the session's own Read counts.
   --stop         (Stop; session_id, stop_hook_active, cwd). With the flag set, stop_hook_active
                  false, and the handoff file present, prints {"decision": "block", "reason": ...},
                  and the reason names the handoff path. Otherwise exits 0 and blocks nothing.
@@ -68,7 +69,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_precompact_handoff import put, transcript_line, write_transcript  # noqa: E402
+from test_precompact_handoff import (  # noqa: E402
+    HANDOFF_WITH_PREMISES, ids_in, put, transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -313,10 +315,12 @@ class Case(object):
             "session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
             "cwd": self.proj})
 
-    def read(self, sid, file_path):
-        return self.run(READ_CHECK, "--pre-read", {
+    def read(self, sid, file_path, extra=None):
+        payload = {
             "session_id": sid, "hook_event_name": "PreToolUse", "tool_name": "Read",
-            "tool_input": {"file_path": file_path}, "cwd": self.proj})
+            "tool_input": {"file_path": file_path}, "cwd": self.proj}
+        payload.update(extra or {})
+        return self.run(READ_CHECK, "--pre-read", payload)
 
     def stop(self, sid, active=False):
         return self.run(READ_CHECK, "--stop", {
@@ -469,6 +473,26 @@ def case_reorient_none_says_so():
             check("reorient %s, no handoff at all: exits 0 and says no handoff" % source,
                   proc.returncode == 0 and "no handoff" in proc.stdout.lower(),
                   "rc=%r stdout: %r" % (proc.returncode, tail(proc.stdout, 300)))
+        finally:
+            c.cleanup()
+
+
+def case_cleared_reorient_lists_every_old_premise():
+    """After /clear or a fork, the old handoff's premises came from another session, so the
+    message lists every one of them, a ruling too. Clear goes by pointer, fork by newest."""
+    for source, by_pointer in (("clear", True), ("fork", False)):
+        c = Case("clr_prem_" + source)
+        try:
+            c.link("old-1", c.proj, age=10)
+            put(c.handoff("old-1"), HANDOFF_WITH_PREMISES)
+            if by_pointer:
+                c.session_end("old-1", "clear")
+            out = c.reorient("new-1", source).stdout
+            check("reorient %s: live control, names the old handoff" % source,
+                  c.handoff("old-1") in out, "stdout: %r" % tail(out, 300))
+            ids = ids_in(out)
+            check("reorient %s: lists every premise id of the old handoff (P1 to P5)" % source,
+                  {"P1", "P2", "P3", "P4", "P5"} <= ids, "listed: %r" % sorted(ids))
         finally:
             c.cleanup()
 
@@ -670,6 +694,30 @@ def case_read_of_other_file_keeps_flag():
         stop = c.stop("o-1")
         check("reads of other files keep the flag: the next Stop blocks and names the handoff",
               blocks(c, stop, "o-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+    finally:
+        c.cleanup()
+
+
+def case_subagent_read_keeps_flag():
+    """A Read inside a subagent carries agent_id. It must not clear the main session's flag:
+    the subagent is not the session that has to re-read its handoff. The session's own Read,
+    after the subagent's, still clears it (positive twin, same session)."""
+    check("subagent read keeps flag: live control, a flagged session blocks", live_ok())
+    c = Case("subread")
+    try:
+        c.seed_handoff("sub-1")
+        c.post_compact("sub-1")
+        inside = {"agent_id": "agent-abc123", "agent_type": "question-reviewer"}
+        for label in ("full path", "tilde"):
+            rd = c.read("sub-1", spell(c, "sub-1", label), extra=inside)
+            check("subagent read by %s: the read is not denied" % label, read_allowed(rd),
+                  "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
+        stop = c.stop("sub-1")
+        check("subagent reads of the handoff keep the flag: the next Stop blocks",
+              blocks(c, stop, "sub-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+        c.read("sub-1", c.handoff("sub-1"))
+        check("the session's own Read after them clears the flag: the next Stop passes",
+              passes(c.stop("sub-1")), "")
     finally:
         c.cleanup()
 
@@ -995,6 +1043,7 @@ def main() -> int:
     case_reorient_ignores_pointer_for_other_dir()
     case_reorient_no_pointer_names_newest_handoff_same_dir()
     case_reorient_none_says_so()
+    case_cleared_reorient_lists_every_old_premise()
     case_reorient_matches_either_spelling_of_proj()
     case_safe_stop_entry_pinned()
     case_clear_pointer_without_handoff_names_none()
@@ -1010,6 +1059,7 @@ def main() -> int:
     case_read_by_8dot3_spelling_clears_flag()
     case_read_of_handoff_clears_flag()
     case_read_of_other_file_keeps_flag()
+    case_subagent_read_keeps_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()

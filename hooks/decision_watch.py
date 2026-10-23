@@ -9,7 +9,7 @@ file diff cannot make: whether an approval for this exact change is visible in t
 
 THE CHEAP PATH, FIRST. `changed_paths` reads this turn's dirty files from `git status
 --porcelain` against HEAD, scoped by mtime against the last human message the same way
-`lint/md_sweep.py` already does (see `decisions/predicate-is-the-act.md`: a shape list of
+the old markdown sweep did (see `decisions/predicate-is-the-act.md`: a shape list of
 write commands can only grow, so this hook reads the filesystem's own act instead of
 parsing Bash text). `looks_protected` then asks, per file, whether the name or location
 marks it a decision, a gate, a CLAUDE.md, or a settings file. Settings files use
@@ -98,7 +98,7 @@ from shared_names import STATE_DIR_NAME  # noqa: E402  stdlib only
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
 # (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
-from _transcript import last_human_epoch, head_moved_since  # noqa: E402
+from _transcript import last_human_epoch, head_moved_since, is_last_human  # noqa: E402
 
 # THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it
 # caps each python run itself (PY_MS there), so no Stop row timeout bounds it now. In split
@@ -164,27 +164,8 @@ def _safe_why(text):
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from lint/md_sweep.py, not imported, so each Stop hook
-# stays readable as one file (rule building-allow-list-is-the-constant does not govern this copy:
-# a transcript helper is no permit list).
-
-def is_last_human(rec):
-    if rec.get("type") != "user":
-        return False
-    if rec.get("isSidechain"):
-        return False
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list):
-        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-        has_tool_result = any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-        )
-        return has_text and not has_tool_result
-    return False
-
+# is_last_human is imported from lint/_transcript.py, the one home. read_transcript below is an
+# older copy.
 
 def read_transcript(path):
     records = []
@@ -278,9 +259,8 @@ def chat_text_after(records, idx, limit=6000):
 
 # ------------------------------------------------------------------ this turn's changed files
 #
-# Same primitive lint/md_sweep.py already validated for this exact question ("what did this
-# turn write"): git's own dirty-file list, scoped by mtime against the last human message.
-# See decisions/predicate-is-the-act.md. Unlike md_sweep, a git failure here (including "not
+# git's own dirty-file list, scoped by mtime against the last human message.
+# See decisions/predicate-is-the-act.md. A git failure here (including "not
 # a git work tree at all") is read as UNKNOWN rather than falling back to a plain walk: this
 # hook's job is a security read, not a lint, and an unscoped walk over a non-repo directory
 # is not an honest substitute for "what did this turn change".
@@ -329,7 +309,7 @@ def changed_this_turn(cwd, baseline):
     """Return ([relative paths], is_untracked) changed this turn, or (None, None) on failure.
 
     `baseline`, the last human message's epoch seconds, scopes the dirty set to this turn by
-    mtime, same as lint/md_sweep.py. A missing baseline (no timestamp on the last human
+    mtime. A missing baseline (no timestamp on the last human
     record) skips the mtime filter rather than reporting UNKNOWN: every dirty file is then in
     scope, a broader net, never a narrower one, which is the same bias this hook's whole
     triage stage already takes.
@@ -616,7 +596,7 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
 # path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See decisions/question-outcome-check.md.
+# scrubs the token from any error text it returns. See decisions/reply-judge-samples-never-blocks.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
@@ -1163,8 +1143,7 @@ def config_notices(hook):
         if merges:
             try:
                 import report_gate  # lint/report_gate.py, same-repo sibling package
-                from ste_gate import last_reply  # lint/ste_gate.py
-                merges = already_named(merges, report_gate.block_text(last_reply(hook)))
+                merges = already_named(merges, report_gate.block_text(reader.last_reply(hook)))
             except Exception:
                 # Cannot tell whether the report already named the merge: still name it.
                 pass

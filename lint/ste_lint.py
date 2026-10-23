@@ -35,7 +35,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a linked install: the real folder holds ui_suffixes.py
-from ui_suffixes import UI_SUFFIXES  # noqa: E402  (one home: lint/ste_gate.py reads it without loading this file)
+from ui_suffixes import UI_SUFFIXES  # noqa: E402
 
 __version__ = "1.0.0"
 
@@ -114,21 +114,6 @@ _rule(
     "The conjunction 'that' is missing.",
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
-)
-_rule(
-    "STE020", "label-length", "error", "[4.1]",
-    "The button, label or aria-label holds more than 4 words.",
-    "Front-end copy only. The text of a <button> or a <label>, and each aria-label\n"
-    "value, holds 4 words at most. Words are counted on whitespace, after markup\n"
-    "and {expressions} are removed. A label that is only an expression is skipped.\n"
-    "The config key label_tags names the tags. The default is button and label.",
-)
-_rule(
-    "STE021", "bad-escape", "error", "[GR]",
-    "A UI escape comment does not name a rule and a reason.",
-    "Front-end copy only. An escape is 'ste-disable-line STE020: reason' or\n"
-    "'ste-disable-next-line STE020: reason', inside a comment. There is no\n"
-    "file-level escape for UI files.",
 )
 
 # --------------------------------------------------------------------------
@@ -395,8 +380,6 @@ class Finding:
 # Configuration
 # --------------------------------------------------------------------------
 
-LABEL_TAGS_DEFAULT = ("button", "label")
-
 DEFAULT_CONFIG = {
     "mode": "auto",
     "max_words": 30,
@@ -407,8 +390,6 @@ DEFAULT_CONFIG = {
     "exclude": [],
     # Off for a repository with no folder at this path: see `find_decisions_dir`.
     "decisions_dir": "docs/decisions",
-    # The tags whose text the STE020 label cap reads, in UI files.
-    "label_tags": list(LABEL_TAGS_DEFAULT),
 }
 
 
@@ -1181,54 +1162,36 @@ def source_prose_paragraphs(path: str, text: str) -> Optional[List[Paragraph]]:
 # --------------------------------------------------------------------------
 
 UI_ATTRS = {"aria-label", "title", "placeholder", "alt", "label"}
-# A button, label or aria-label is capped at 4 words (plain-prose-lint). A repo can
-# name other tags under the config key "label_tags" (see DEFAULT_CONFIG).
-LABEL_TAGS = LABEL_TAGS_DEFAULT
-LABEL_MAX_WORDS = 4
 # Rules that do not fit short UI text. See `Linter.check_ui`.
 UI_SKIP = {"STE008", "STE015"}
 # Text inside these tags is code, not copy, the same as a Markdown code span.
 UI_CODE_TAGS = {"script", "style", "code", "kbd", "pre", "samp"}
-# Text inside these tags is a control's value, not a label's own words.
-UI_NOCOUNT_TAGS = {"select", "option", "optgroup", "datalist", "textarea"}
 # A tag in this set does not end the sentence around it: "Click <b>here</b> now".
 UI_INLINE_TAGS = {"a", "abbr", "b", "bdi", "bdo", "cite", "data", "dfn", "em", "i",
                   "mark", "q", "s", "small", "span", "strong", "sub", "sup", "time", "u"}
-# A UI escape is line-level, and names a rule and a reason (plain-prose-lint).
+# A UI escape is line-level, and names a rule and a reason. Any other escape suppresses nothing.
 UI_DISABLE = re.compile(r"ste-disable-(file|next-line|line)\b([^\n]*)")
 UI_DISABLE_OK = re.compile(r"^\s+(STE\d{3}(?:\s*,\s*STE\d{3})*)\s*:\s*\w")
 MUSTACHE = re.compile(r"\{\{.*?\}\}", re.S)
 
 
 class _UICopy:
-    """Collect the copy of one UI file as Paragraphs, plus the label-cap findings.
+    """Collect the copy of one UI file as Paragraphs."""
 
-    `label_tags` is compared exactly for JSX. With `fold_case`, for .html and
-    .vue, it is compared without case, because html.parser lowercases names.
-    """
-
-    def __init__(self, label_tags=LABEL_TAGS, fold_case=False):
-        self.fold = fold_case
-        self.label_tags = {t.lower() for t in label_tags} if fold_case else set(label_tags)
+    def __init__(self):
         self.paragraphs: List[Paragraph] = []
         self.run: List[Segment] = []
-        self.labels: List[Tuple[int, int, str]] = []   # (line, col, text) over the cap
-        self.open: List[list] = []                     # [tag, words, first line, first col]
         self.comments: List[Tuple[int, str]] = []      # (line, text) of each comment line
         self.code = 0
-        self.nocount = 0
 
     def snapshot(self):
-        return (len(self.paragraphs), list(self.run), len(self.labels),
-                [list(o) for o in self.open], len(self.comments), self.code, self.nocount)
+        return (len(self.paragraphs), list(self.run), len(self.comments), self.code)
 
     def restore(self, snap):
         del self.paragraphs[snap[0]:]
         self.run[:] = snap[1]
-        del self.labels[snap[2]:]
-        self.open[:] = snap[3]
-        del self.comments[snap[4]:]
-        self.code, self.nocount = snap[5], snap[6]
+        del self.comments[snap[2]:]
+        self.code = snap[3]
 
     def boundary(self):
         _flush_run(self.paragraphs, self.run, "prose")
@@ -1237,8 +1200,8 @@ class _UICopy:
         for i, line in enumerate(raw.split("\n")):
             self.comments.append((lineno + i, line))
 
-    def text(self, lineno: int, col: int, raw: str, count: bool = True):
-        """Add a text node. It can run over several lines. `count` feeds the label cap."""
+    def text(self, lineno: int, col: int, raw: str):
+        """Add a text node. It can run over several lines."""
         if self.code:
             return
         for i, line in enumerate(raw.split("\n")):
@@ -1249,14 +1212,10 @@ class _UICopy:
             masker = Masker(body)
             self.run.append(Segment(lineno + i, masker.text, "prose", "descriptive",
                                     prefix, masker))
-            for entry in (self.open if count and not self.nocount else ()):
-                if entry[2] is None:
-                    entry[2], entry[3] = lineno + i, prefix
-                entry[1].extend(body.split())
 
     def expr(self, lineno: int, col: int):
         """An {expression} in a text node. It counts as one word for STE001, and a
-        phrase rule never matches across it. The label cap ignores it."""
+        phrase rule never matches across it."""
         if not self.code:
             self.run.append(Segment(lineno, NUL, "prose", "descriptive", col, Masker("")))
 
@@ -1264,39 +1223,21 @@ class _UICopy:
         if name not in UI_ATTRS or self.code:
             return
         saved, self.run = self.run, []
-        self.text(lineno, col, value, count=False)
+        self.text(lineno, col, value)
         self.boundary()
         self.run = saved
-        if name == "aria-label":
-            self._cap(lineno, col, value.split())
 
     def start(self, tag: str):
         if tag not in UI_INLINE_TAGS:
             self.boundary()
         if tag in UI_CODE_TAGS:
             self.code += 1
-        if tag in UI_NOCOUNT_TAGS:
-            self.nocount += 1
-        if (tag.lower() if self.fold else tag) in self.label_tags:
-            self.open.append([tag, [], None, None])
 
     def end(self, tag: str):
         if tag not in UI_INLINE_TAGS:
             self.boundary()
         if tag in UI_CODE_TAGS and self.code:
             self.code -= 1
-        if tag in UI_NOCOUNT_TAGS and self.nocount:
-            self.nocount -= 1
-        for index in range(len(self.open) - 1, -1, -1):
-            if self.open[index][0] == tag:
-                entry = self.open.pop(index)
-                if entry[2] is not None:
-                    self._cap(entry[2], entry[3], entry[1])
-                break
-
-    def _cap(self, lineno: int, col: int, words: List[str]):
-        if len(words) > LABEL_MAX_WORDS:
-            self.labels.append((lineno, col, " ".join(words)))
 
 
 class _HTMLCopy(HTMLParser):
@@ -1560,10 +1501,10 @@ def _jsx_copy(text: str, copy: _UICopy) -> None:
     js(0, None)
 
 
-def ui_copy(path: str, text: str, label_tags=LABEL_TAGS) -> _UICopy:
+def ui_copy(path: str, text: str) -> _UICopy:
     """Return the collected copy of a .tsx, .jsx, .html or .vue file."""
     ext = os.path.splitext(path)[1].lower()
-    copy = _UICopy(label_tags, fold_case=ext not in (".tsx", ".jsx"))
+    copy = _UICopy()
     if ext in (".tsx", ".jsx"):
         _jsx_copy(text, copy)
     else:
@@ -1583,34 +1524,22 @@ def ui_copy(path: str, text: str, label_tags=LABEL_TAGS) -> _UICopy:
     return copy
 
 
-def ui_units(path: str, text: str) -> List[Tuple[str, set]]:
-    """Return (text, lines) for each copy unit of a UI file: a text block, an
-    attribute value, a comment line. The write gate scopes an edit with it."""
-    copy = ui_copy(path, text)
-    units = [(" ".join(seg.text for seg in p.segments), {seg.lineno for seg in p.segments})
-             for p in copy.paragraphs]
-    units += [("\x00comment " + line.strip(), {lineno}) for lineno, line in copy.comments]
-    return units
-
-
-def ui_suppressions(copy: _UICopy) -> Tuple[Dict[int, Optional[List[str]]], List[Tuple[int, str]]]:
+def ui_suppressions(copy: _UICopy) -> Dict[int, Optional[List[str]]]:
     """Read `ste-disable-line` and `ste-disable-next-line` from the comments only.
 
-    Each escape names a rule and a reason (plain-prose-lint), as in
-    `ste-disable-line STE020: brand name`. Return the suppressed lines, and
-    the (line, directive) of each escape that is not valid.
+    Each escape names a rule and a reason, as in `ste-disable-line STE011: brand name`.
+    Return the suppressed lines. An escape with no rule or reason, or a file-level one,
+    suppresses nothing.
     """
     suppressed: Dict[int, Optional[List[str]]] = {}
-    bad: List[Tuple[int, str]] = []
     for lineno, line in copy.comments:
         for match in UI_DISABLE.finditer(line):
             ok = UI_DISABLE_OK.match(match.group(2))
             if match.group(1) == "file" or not ok:
-                bad.append((lineno, match.group(0).strip()[:120]))
                 continue
             target = lineno + (match.group(1) == "next-line")
             suppressed[target] = _codes_from(ok.group(1))
-    return suppressed, bad
+    return suppressed
 
 
 # --------------------------------------------------------------------------
@@ -1760,31 +1689,12 @@ class Linter:
         contraction: UI style guides ask for "Don't" and "Can't", so the rule
         would go red on copy that is correct. STE015, condition order: it runs
         only in procedural mode, which Markdown headings and list items select,
-        and UI copy has neither. STE020, the label cap, runs here only.
+        and UI copy has neither.
         """
-        copy = ui_copy(path, text, self.config.get("label_tags") or LABEL_TAGS)
+        copy = ui_copy(path, text)
         findings = [f for f in self._check_paragraphs(copy.paragraphs)
                     if f.code not in UI_SKIP]
-        if "STE020" in self.enabled:
-            for line, col, label in copy.labels:
-                findings.append(Finding(
-                    path="", line=line, col=col + 1, code="STE020",
-                    severity=RULES["STE020"].severity,
-                    message="The label holds %d words. The limit is %d."
-                    % (len(label.split()), LABEL_MAX_WORDS),
-                    suggestion="Cut the words that carry no meaning.",
-                    excerpt=label[:120]))
-        suppressed, bad = ui_suppressions(copy)
-        findings = self._filter(findings, suppressed, None)
-        if "STE021" in self.enabled:
-            for line, directive in bad:
-                findings.append(Finding(
-                    path="", line=line, col=1, code="STE021",
-                    severity=RULES["STE021"].severity,
-                    message="The escape %r does not name a rule and a reason." % directive,
-                    suggestion="Write 'ste-disable-line STE020: reason' or "
-                               "'ste-disable-next-line STE020: reason'.",
-                    excerpt=directive))
+        findings = self._filter(findings, ui_suppressions(copy), None)
         for finding in findings:
             finding.path = path
         return sorted(findings, key=lambda f: (f.line, f.col, f.code))

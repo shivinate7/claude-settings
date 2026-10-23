@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's subagent-model-floor never sees those calls.
 """
-import json, os, re, unittest
+import ast, json, os, re, subprocess, sys, tempfile, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -142,7 +142,7 @@ class JudgeModelIds(unittest.TestCase):
 # AskUserQuestion check keep their own calls. The Stop rows are pinned by script name, not by index.
 DECISION_WATCH_PLUGIN = "decision-watch@claude-settings"
 STOP_SCRIPTS_AFTER_SWAP = sorted([
-    "stall_watch.py", "report_gate.py", "md_sweep.py", "config_watch.py", "ruling_home.py",
+    "stall_watch.py", "report_gate.py", "config_watch.py", "ruling_home.py",
     "precompact_handoff.py", "reply_judge.py", "feedback_gate.py", "reread_check.py",
 ])
 
@@ -181,12 +181,229 @@ class DecisionWatchSwap(unittest.TestCase):
         names = [n for c in command_rows(self.settings["hooks"]["Stop"]) for n in script_names(c)]
         self.assertIn("reply_judge.py", names)
 
-    def test_ask_user_question_rows_stay(self):
-        entries = [e for e in self.settings["hooks"]["PreToolUse"] if e.get("matcher") == "AskUserQuestion"]
-        hooks = [h for e in entries for h in e.get("hooks", [])]
-        self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "AskUserQuestion prompt judge missing")
-        names = [n for c in command_rows(entries) for n in script_names(c)]
-        self.assertIn("question_outcome.py", names)
+
+# The question reviewer: ONE agent hook on PreToolUse AskUserQuestion, model
+# pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
+# hooks/question_outcome.py. A failed or timed-out agent hook lets the question through, so no code
+# gate backs the rubric: the prompt text is the only home of it, and these cases pin that text.
+# An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
+# hooks beside it carry `continueOnBlock`, which is not one of them.
+AGENT_HOOK_KEYS = {"type", "prompt", "if", "timeout", "model", "statusMessage", "once"}
+OPUS_PREFIX = "claude-opus-"
+# Each rubric item the prompt must name, with the patterns that must all match the prompt. The prompt is
+# whitespace-folded and matched without case, except the three labels, which match as written.
+GOAL, PROBLEM, BASED = "(?-i:Goal:)", "(?-i:Problem:)", "(?-i:Based on:)"
+RUBRIC = {
+    "Goal line first": [GOAL, GOAL + r".{0,100}\bfirst\b|\bfirst\b.{0,100}" + GOAL],
+    "Problem line": [PROBLEM],
+    "option says gain and lose": [r"\bgains?\b", r"\blos(?:e|es|ing|s)\b"],
+    "recommendation": [r"\brecommend"],
+    "no unexplained ids": [r"\bunexplained\b.{0,40}\b(?:ids?|names?|identifiers?)\b"
+                           r"|\b(?:ids?|identifiers?)\b.{0,80}\b(?:(?:un)?explain\w*|(?:un)?gloss\w*|plain)\b"],
+    "Based on: lines with source kind": [BASED, r"\bsource[- ]kind\b|\bkind of source\b"
+                                                r"|\bsource\b.{0,60}\bkind\b|\bkind\b.{0,60}\bsource\b"],
+}
+# One sentence per item: a prompt that meets the rubric, and the mutants the check must see.
+SAMPLE = {
+    "Goal line first": "The box opens with a Goal: line first.",
+    "Problem line": "Then a Problem: line.",
+    "option says gain and lose": "Each option says what the owner would gain and lose.",
+    "recommendation": "The box carries a recommendation.",
+    "no unexplained ids": "Reject unexplained ids.",
+    "Based on: lines with source kind": "Premises show as Based on: lines, each with its source kind.",
+}
+
+
+def rubric_gaps(prompt):
+    """The rubric items the prompt does not name, in RUBRIC order."""
+    text = " ".join(prompt.split())
+    return [item for item, pats in RUBRIC.items() if not all(re.search(p, text, re.I) for p in pats)]
+
+
+# The hook prompt cannot point at decisions/, so it lists the premise kinds itself: a second copy of
+# the kinds table in decisions/premise-format.md. These cases keep the copy equal to the table.
+# PREMISE_FORMAT_UNDER_TEST points the test at another copy of the table, as SETTINGS_UNDER_TEST does.
+PREMISE_FORMAT = os.environ.get("PREMISE_FORMAT_UNDER_TEST") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "decisions", "premise-format.md")
+KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
+KIND_LIST = re.compile(r"\bsource kinds?:\s*([a-z, ]+?)\s*(?:[(.;]|$)")
+
+
+def table_kinds(text):
+    """The kinds of the premise table: the backticked first cell of each row, in table order."""
+    return KIND_ROW.findall(text)
+
+
+def prompt_kinds(prompt):
+    """The kinds the hook prompt lists after 'source kind:', in prompt order; [] when it lists none."""
+    found = KIND_LIST.search(" ".join(prompt.split()))
+    return [k for k in re.split(r"\s*,\s*|\s+or\s+", found.group(1)) if k] if found else []
+
+
+class QuestionReviewer(unittest.TestCase):
+    def ask_hooks(self):
+        return [h for e in pre_tool_entries() if covers(e, "AskUserQuestion") for h in e["hooks"]]
+
+    def agent_hook(self):
+        agents = [h for h in self.ask_hooks() if h.get("type") == "agent"]
+        self.assertEqual(len(agents), 1, "want one agent hook on AskUserQuestion, found %d" % len(agents))
+        return agents[0]
+
+    def test_ask_user_question_runs_one_hook_and_it_is_an_agent(self):
+        types = [h.get("type") for h in self.ask_hooks()]
+        self.assertEqual(types, ["agent"], "AskUserQuestion hooks are %s, want one agent hook" % types)
+
+    def test_agent_hook_pins_an_opus_id(self):
+        model = self.agent_hook().get("model")
+        self.assertTrue(isinstance(model, str) and model.startswith(OPUS_PREFIX),
+                        "agent hook model is %r, want a full id starting %s" % (model, OPUS_PREFIX))
+
+    def test_agent_hook_uses_only_agent_hook_keys(self):
+        extra = sorted(set(self.agent_hook()) - AGENT_HOOK_KEYS)
+        self.assertEqual(extra, [], "keys outside the agent-hook schema: %s" % extra)
+
+    def test_agent_hook_prompt_names_every_rubric_item(self):
+        gaps = rubric_gaps(self.agent_hook().get("prompt") or "")
+        self.assertEqual(gaps, [], "the agent hook prompt does not name: %s" % gaps)
+
+    def test_the_rubric_check_sees_each_missing_item(self):
+        # Green on main by design: it tests the check, not settings.json.
+        self.assertEqual(set(SAMPLE), set(RUBRIC), "SAMPLE and RUBRIC name different items")
+        self.assertEqual(rubric_gaps(" ".join(SAMPLE.values())), [])
+        self.assertEqual(rubric_gaps(""), list(RUBRIC))
+        for item in RUBRIC:
+            with self.subTest(dropped=item):
+                rest = " ".join(v for k, v in SAMPLE.items() if k != item)
+                self.assertEqual(rubric_gaps(rest), [item])
+
+    def test_agent_hook_prompt_lists_the_kinds_of_the_premise_table(self):
+        with open(PREMISE_FORMAT, encoding="utf-8") as f:
+            table = table_kinds(f.read())
+        self.assertTrue(table, "no kind rows in %s" % PREMISE_FORMAT)
+        listed = prompt_kinds(self.agent_hook().get("prompt") or "")
+        self.assertTrue(listed, "the agent hook prompt lists no source kinds after 'source kind:'")
+        self.assertEqual(sorted(listed), sorted(table),
+                         "hook prompt kinds %s, premise table kinds %s: update the one that drifted" % (listed, table))
+
+    def test_the_kinds_readers_see_a_kind_added_or_dropped(self):
+        # Green on main by design: it tests the two readers, not settings.json.
+        row = "| `%s` | means | Weak |\n"
+        table = table_kinds("| Kind | Means |\n|---|---|\n" + row % "ruling" + row % "assumed")
+        self.assertEqual(table, ["ruling", "assumed"])
+        self.assertEqual(prompt_kinds("each with its source kind: ruling or assumed (see the table)"), table)
+        self.assertEqual(prompt_kinds("its source kind: ruling, measured, assumed."), ["ruling", "measured", "assumed"])
+        self.assertEqual(prompt_kinds("no list here"), [])
+        self.assertEqual(table_kinds("prose with `ruling` in it\n"), [])
+
+    def test_no_hook_runs_question_outcome(self):
+        with open(SETTINGS, encoding="utf-8") as f:
+            events = json.load(f)["hooks"]
+        found = sorted(ev for ev, entries in events.items() if "question_outcome" in json.dumps(entries))
+        self.assertEqual(found, [], "a hook still names question_outcome under: %s" % found)
+
+    def test_question_outcome_script_is_gone(self):
+        script = os.path.join(os.path.dirname(SETTINGS), "hooks", "question_outcome.py")
+        self.assertFalse(os.path.exists(script), "hooks/question_outcome.py still exists")
+
+
+# The STE write gate and the markdown sweep are not wired in settings.json.
+# CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
+class SteHooksRemoved(unittest.TestCase):
+    def test_no_hook_runs_the_removed_scripts(self):
+        with open(SETTINGS, encoding="utf-8") as f:
+            events = json.load(f)["hooks"]
+        for script in ("ste_gate.py", "md_sweep.py"):
+            with self.subTest(script=script):
+                wired = ["%s %s" % (event, entry.get("matcher", "*"))
+                         for event, entries in events.items() for entry in entries
+                         if script in [n for c in command_rows([entry]) for n in script_names(c)]]
+                self.assertEqual(wired, [], "%s is still wired in settings.json" % script)
+
+    def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
+        # The two command gates stay: hooks/test_wrappers.py pins that each one fails closed. The question
+        # check is one agent hook, so it is matched by type and by its matcher, not by a script name.
+        with open(SETTINGS, encoding="utf-8") as f:
+            pre = json.load(f)["hooks"]["PreToolUse"]
+        names = [n for c in command_rows(pre) for n in script_names(c)]
+        self.assertIn("guard.py", names)
+        agent_entries = [e for e in pre if any(h.get("type") == "agent" for h in e.get("hooks", []))]
+        covered = [e for e in agent_entries if "AskUserQuestion" in e.get("matcher", "").split("|")]
+        self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
+
+
+# An installed settings.json copy still calls lint/ste_gate.py and lint/md_sweep.py until its owner
+# refreshes it, and a missing hook script fails closed: every write is refused. So both files stay as
+# stubs. Each one only exits 0 and imports nothing from the repo, so a repo change cannot break it.
+LINT = os.path.dirname(os.path.abspath(__file__))
+STUBS = ("ste_gate.py", "md_sweep.py")
+STUB_INPUTS = {
+    "empty": b"",
+    "write payload": json.dumps({"tool_name": "Write", "tool_input": {
+        "file_path": "notes.md", "content": "It is important to note that the file was written."}}).encode(),
+    "edit payload": json.dumps({"tool_name": "Edit", "tool_input": {
+        "file_path": "notes.md", "old_string": "a", "new_string": "b"}}).encode(),
+    "not json": b"{not json at all",
+    "binary": bytes(range(256)) * 8,
+    "long line": b"x" * 200000,
+}
+
+
+def imported_modules(path):
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            names.add(("." * node.level) + (node.module or "").split(".")[0])
+    return names
+
+
+class SteStubsExitZero(unittest.TestCase):
+    def run_stub(self, folder, name, data, args=()):
+        return subprocess.run([sys.executable, "-I", os.path.join(folder, name), *args],
+                              input=data, capture_output=True, cwd=folder, timeout=60)
+
+    def test_each_stub_exists(self):
+        for name in STUBS:
+            with self.subTest(stub=name):
+                self.assertTrue(os.path.isfile(os.path.join(LINT, name)),
+                                "%s is gone: an installed settings.json copy would refuse every write" % name)
+
+    def test_each_stub_only_exits_0_on_any_input_and_prints_nothing(self):
+        for name in STUBS:
+            for label, data in STUB_INPUTS.items():
+                with self.subTest(stub=name, stdin=label):
+                    got = self.run_stub(LINT, name, data)
+                    self.assertEqual((got.returncode, got.stdout), (0, b""), got.stderr[-300:])
+
+    def test_each_stub_exits_0_with_arguments_and_with_stdin_closed(self):
+        for name in STUBS:
+            with self.subTest(stub=name, case="arguments"):
+                self.assertEqual(self.run_stub(LINT, name, b"", ("--check", "notes.md", "-x")).returncode, 0)
+            with self.subTest(stub=name, case="stdin closed"):
+                got = subprocess.run([sys.executable, "-I", os.path.join(LINT, name)],
+                                     stdin=subprocess.DEVNULL, capture_output=True, cwd=LINT, timeout=60)
+                self.assertEqual(got.returncode, 0, got.stderr[-300:])
+
+    def test_each_stub_imports_nothing_from_the_repo(self):
+        for name in STUBS:
+            with self.subTest(stub=name):
+                path = os.path.join(LINT, name)
+                self.assertTrue(os.path.isfile(path), "%s is missing" % name)
+                self.assertEqual(sorted(imported_modules(path) - set(sys.stdlib_module_names)), [])
+
+    def test_each_stub_runs_alone_in_an_empty_folder(self):
+        # A stub that reads a repo file or a repo module fails here, where only the stub exists.
+        for name in STUBS:
+            with self.subTest(stub=name), tempfile.TemporaryDirectory() as folder:
+                self.assertTrue(os.path.isfile(os.path.join(LINT, name)), "%s is missing" % name)
+                with open(os.path.join(LINT, name), "rb") as src, open(os.path.join(folder, name), "wb") as dst:
+                    dst.write(src.read())
+                for label in ("empty", "write payload"):
+                    got = self.run_stub(folder, name, STUB_INPUTS[label])
+                    self.assertEqual((got.returncode, got.stdout), (0, b""), (label, got.stderr[-300:]))
 
 
 # The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
