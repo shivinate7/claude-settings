@@ -6452,8 +6452,9 @@ class HostDefaultBranchRateRetry(unittest.TestCase):
 # The merge tool warns when a job has used over 70% of its cap. The job times come from the `gh pr checks`
 # read the tool already makes (startedAt and completedAt are added to its --json fields). A job's cap is read
 # from the workflow files on disk. A job ended by its cap is a check cancelled after its full cap of minutes.
-# That verdict is "re-cap or split", not a test failure. load_config refuses merge.deadlineMinutes below the
-# largest job timeout-minutes in the base's workflows, plus 5, and a provisional 60-minute cap counts.
+# That verdict is "re-cap or split", not a test failure. When merge.deadlineMinutes is below the floor, load_config
+# waits the floor and prints one fix line. The floor is the largest job timeout-minutes in the base's workflows,
+# plus 5, clamped at 360. A provisional 60-minute cap counts.
 # CapsHost fails the test on any gh call other than the three the merge tool already makes.
 from datetime import datetime, timedelta, timezone
 
