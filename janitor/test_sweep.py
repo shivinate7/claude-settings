@@ -507,6 +507,40 @@ def temp_set_age(path, hours_ago):
     os.utime(path, (stamp, stamp))
 
 
+def temp_dead_pid():
+    """A pid whose process has already run to its end, so no live process holds it."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=30)
+    return child.pid
+
+
+def temp_make_link(link, target):
+    """A symlink at LINK to the folder TARGET; on Windows a junction when no symlink is allowed.
+    Returns None on success, else the reason no link could be made."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return None
+    except OSError as exc:
+        if not sys.platform.startswith("win"):
+            return "os.symlink failed: %s" % exc
+        why = "os.symlink failed: %s" % exc
+    done = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, text=True)
+    if done.returncode != 0:
+        return "%s; mklink /J failed: %s" % (why, (done.stdout + done.stderr).strip())
+    return None
+
+
+def temp_remove_link(link):
+    """Removes the link itself, never its target: unlink for a symlink, rmdir for a junction."""
+    try:
+        os.unlink(link)
+    except OSError:
+        try:
+            os.rmdir(link)
+        except OSError:
+            pass
+
+
 class TempSweepTests(unittest.TestCase):
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="janitor_temp_sweep_")
@@ -536,11 +570,13 @@ class TempSweepTests(unittest.TestCase):
             temp_set_age(folder, folder_hours)
         return folder
 
-    def run_step(self, *flags):
+    def run_step(self, *flags, temp=None):
         env = dict(os.environ)
         env.update(LOCALAPPDATA=self.localappdata, TEMP=os.path.join(self.localappdata, "Temp"),
                    TMP=os.path.join(self.localappdata, "Temp"), HOME=self.home,
                    USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg)
+        if temp is not None:
+            env.update(TEMP=temp, TMP=temp)
         return subprocess.run([sys.executable, TEMP_SWEEP_PATH, *flags], cwd=self.base, env=env,
                               capture_output=True, text=True, timeout=60)
 
@@ -628,6 +664,62 @@ class TempSweepTests(unittest.TestCase):
         proc = self.run_step("--confirm")
         self.check_removed(folder, "the transcript decides: an idle 25-hour transcript removes its "
                                    "folder, whatever the folder's own mtime says", proc)
+        self.check_exit(proc)
+
+    def write_session_record(self, session, pid, started_ms):
+        """sessions/<id>.json in the config folder, as a running session writes it."""
+        write(os.path.join(self.cfg, "sessions", session + ".json"),
+              json.dumps({"pid": pid, "startedAt": started_ms, "cwd": self.base}))
+
+    def test_a_live_session_pid_keeps_its_idle_folder(self):
+        live_id, dead_id, control_id = temp_session_id(20), temp_session_id(21), temp_session_id(22)
+        live = self.make_session(live_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
+        dead = self.make_session(dead_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
+        control = self.make_session(control_id, transcript_hours=TEMP_IDLE_HOURS)
+        self.write_session_record(live_id, os.getpid(), this_process_start_ms())
+        self.write_session_record(dead_id, temp_dead_pid(), 0)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session with no sessions record "
+                                    "must be removed in this run", proc)
+        self.check_kept(live, "a session whose transcript is idle 25 hours but whose pid is live must "
+                              "be kept", proc)
+        self.check_removed(dead, "a session whose transcript is idle 25 hours and whose pid is dead "
+                                 "must be removed", proc)
+        self.check_exit(proc)
+
+    def test_a_link_inside_a_removed_folder_leaves_its_target_intact(self):
+        outside = os.path.join(self.base, "outside")  # not under Temp\claude
+        kept = os.path.join(outside, "keep.txt")
+        write(kept, "outside the temp claude root")
+        folder = self.make_session(temp_session_id(23), transcript_hours=TEMP_IDLE_HOURS,
+                                   folder_hours=TEMP_IDLE_HOURS)
+        link = os.path.join(folder, "nested", "link-out")
+        reason = temp_make_link(link, outside)
+        if reason is not None:
+            self.skipTest("cannot make a link inside the session folder on this machine: %s" % reason)
+        self.addCleanup(temp_remove_link, link)
+        control = self.make_session(temp_session_id(24), transcript_hours=TEMP_IDLE_HOURS)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session must be removed in "
+                                    "this run", proc)
+        self.assertTrue(os.path.isfile(kept), "a link inside an idle session folder was followed: "
+                                              "its target file %s is gone" % kept)
+        with open(kept, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "outside the temp claude root",
+                             "a link inside an idle session folder changed its target's contents")
+        self.check_removed(folder, "the idle session folder must be removed even with a link in it", proc)
+        self.check_exit(proc)
+
+    def test_temp_names_the_root_when_it_differs_from_localappdata(self):
+        temp = os.path.join(self.base, "TEMP-set")
+        control = self.make_session(temp_session_id(25), transcript_hours=TEMP_IDLE_HOURS,
+                                    root=os.path.join(temp, "claude"))
+        kept = self.make_session(temp_session_id(26), transcript_hours=TEMP_IDLE_HOURS)  # LOCALAPPDATA
+        proc = self.run_step("--confirm", temp=temp)
+        self.check_removed(control, "TEMP is set: TEMP\\claude is the root, so an idle session there "
+                                    "must be removed", proc)
+        self.check_kept(kept, "TEMP is set: LOCALAPPDATA\\Temp\\claude is not the root, so it must be "
+                              "kept", proc)
         self.check_exit(proc)
 
 
