@@ -355,7 +355,8 @@ repo has numbered records, or needs a non-default method, deadline, required che
 
 1. Do steps 1 to 5 of the engine checklist above, so the config reads your tree correctly.
 2. Add the `merge` block. Read `method` from the repo's merge history. Set
-   `deadlineMinutes` to a bit more than your slowest required check.
+   `deadlineMinutes` to at least the largest job cap in any workflow file plus 5. The merge
+   tool waits that long anyway and names the fix.
 3. Set `requiredChecks`. For a branch with protection, use `"protection"`. Otherwise name the
    checks in a list.
 4. Add each command that must run after the merge to `afterMerge`, such as a sync of a

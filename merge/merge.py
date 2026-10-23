@@ -1157,9 +1157,15 @@ def job_minutes(row):
     return (b - a).total_seconds() / 60 if b > a else None
 
 def workflow_dir(start):
-    """The `.github/workflows` of the checkout that holds `start` (the working directory when None): the nearest one up the tree, so a run from a subfolder reads the repo root's."""
+    """The `.github/workflows` of the checkout that holds `start` (the working directory when None): the nearest one up the tree, so a run from a subfolder reads the repo root's.
+    The search stops at the checkout's root (the first folder holding .git), so a nested checkout never reads its parent's caps."""
     d = pathlib.Path(start or ".").resolve()
-    return next((q for p in (d, *d.parents) if (q := p / ".github" / "workflows").is_dir()), None)
+    for p in (d, *d.parents):
+        if (q := p / ".github" / "workflows").is_dir():
+            return q
+        if (p / ".git").exists():
+            return None
+    return None
 
 def job_caps(texts):
     """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
@@ -1178,7 +1184,8 @@ def job_caps(texts):
                 job["ids"].append(m.group(1).strip("'\""))
             elif job and (m := re.match(r"^ {4}timeout-minutes:\s*['\"]?(\d+)['\"]?\s*(?:#.*)?$", line)):
                 job["cap"] = int(m.group(1))
-        caps.update({i: j["cap"] for j in jobs if j["cap"] for i in j["ids"]})
+        for i, cap in ((i, j["cap"]) for j in jobs if j["cap"] for i in j["ids"]):
+            caps[i] = max(cap, caps.get(i, 0))  # one id in two files: the larger cap, so neither the floor nor the warning runs short
     return caps
 
 def base_job_caps(root, ref):
@@ -1229,8 +1236,10 @@ def load_config(root, base, path):
     caps = base_job_caps(root, ref)
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
-        raise Stop(f"{path} on {ref}: merge.deadlineMinutes is {dm}, but the largest job timeout-minutes in .github/workflows is {max(caps.values())}. "
-                   f"Set merge.deadlineMinutes to at least {floor}.")
+        # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
+        m["deadlineMinutes"] = floor
+        say(f"merge: the largest job timeout-minutes in .github/workflows is {max(caps.values())}, so the wait is {floor} minutes, not {dm}. "
+            f"raise merge.deadlineMinutes in {path} to at least {floor}")
     ne = lambda v: isinstance(v, str) and v.strip()
     # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
     # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.
