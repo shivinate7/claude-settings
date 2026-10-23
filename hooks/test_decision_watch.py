@@ -610,12 +610,19 @@ def case_judge_isolation_copies_credentials():
     creds_path = os.path.join(fake_home_config, dw.CREDENTIALS_FILENAME)
     write(creds_path, '{"fake": "credential-content"}')
 
-    real_config_dir = dw.guard.config_dir
-    sys.modules["guard_core"].config_dir = lambda: fake_home_config
+    # _judge_isolation calls guard.config_dir(). guard resolves that name through git_reads, so the
+    # patch goes on the guard module itself and is removed after.
+    guard_module = dw.guard
+    had_own = "config_dir" in vars(guard_module)
+    real_config_dir = guard_module.config_dir
+    guard_module.config_dir = lambda: fake_home_config
     try:
         judge_cwd, judge_env = dw._judge_isolation()
     finally:
-        sys.modules["guard_core"].config_dir = real_config_dir
+        if had_own:
+            guard_module.config_dir = real_config_dir
+        else:
+            del guard_module.config_dir
 
     try:
         copied = os.path.join(judge_env["CLAUDE_CONFIG_DIR"], dw.CREDENTIALS_FILENAME)
