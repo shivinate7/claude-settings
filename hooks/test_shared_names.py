@@ -12,8 +12,7 @@ config watch's fast exit can read it before the guard loads. The guard's modules
 very objects, and `config_watch.py` holds no literal copy of a watched name.
 
 It also holds `MACHINE_TAGS`, the tags that mark a prompt as a notice. `local_time.py` reads it
-from here, so its UserPromptSubmit path loads no guard module. `question_outcome` re-exports the
-same object, and no other file holds a literal copy.
+from here, so its UserPromptSubmit path loads no guard module. No other file holds a literal copy.
 """
 
 import ast
@@ -32,7 +31,7 @@ sys.path.insert(0, HERE)
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 WATCHED = tuple(name.lstrip("/") for name in FROZEN_FILES)
-MACHINE_TAGS = ("<system-reminder>", "<task-notification>")  # pinned from hooks/question_outcome.py
+MACHINE_TAGS = ("<system-reminder>", "<task-notification>")  # pinned; shared_names.py holds the one copy
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
 # What local_time may load beyond the standard library: itself, shared_names, and the light
@@ -157,12 +156,9 @@ def case_machine_tags_pinned_and_shared():
     got = getattr(shared, "MACHINE_TAGS", None)
     if got != MACHINE_TAGS:
         return False, "shared_names.MACHINE_TAGS=%r" % (got,)
-    qo = importlib.import_module("question_outcome")
-    wrong = [m for m in ("question_outcome", "local_time")
-             if hasattr(sys.modules.get(m) or importlib.import_module(m), "MACHINE_TAGS")
-             and (sys.modules.get(m) or importlib.import_module(m)).MACHINE_TAGS is not got]
-    return not wrong, "importers holding another object: %s (question_outcome has it: %s)" % (
-        wrong or "none", hasattr(qo, "MACHINE_TAGS"))
+    local_time = importlib.import_module("local_time")
+    wrong = ["local_time"] if hasattr(local_time, "MACHINE_TAGS") and local_time.MACHINE_TAGS is not got else []
+    return not wrong, "importers holding another object: %s" % (wrong or "none")
 
 
 def case_no_literal_machine_tags_elsewhere():
@@ -199,7 +195,7 @@ def case_local_time_loads_no_guard_module():
 
 
 def case_local_time_output_unchanged():
-    """Pinned against the output before local_time stopped importing question_outcome."""
+    """Pinned local_time output for a tagged, a plain, an fb and an override prompt."""
     with tempfile.TemporaryDirectory() as cfg:
         outs = [_run_local_time(cfg, p, s).stdout for p, s in (
             ("<system-reminder>fb x", "s1"), ("<task-notification>fb y", "s1"),

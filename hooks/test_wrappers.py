@@ -6,8 +6,8 @@ Run it from the repository root:
     python hooks/test_wrappers.py
 
 Contract, from decision gate-hooks-fail-closed:
-- The four gate entries (PreToolUse guard, ste_gate, question_outcome; PermissionRequest
-  rm_prompt_answer) carry no `onFailure`: a timeout under load must not refuse every call.
+- The two gate entries (PreToolUse guard; PermissionRequest rm_prompt_answer) carry no `onFailure`:
+  a timeout under load must not refuse every call.
 - A gate whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
 - A gate whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
   and both installers, so the reader installs Python 3 before running either one.
@@ -59,8 +59,6 @@ SH = shutil.which("sh")
 # gate script -> the event whose entry must run it
 GATES = {
     "hooks/guard.py": "PreToolUse",
-    "lint/ste_gate.py": "PreToolUse",
-    "hooks/question_outcome.py": "PreToolUse",
     "hooks/rm_prompt_answer.py": "PermissionRequest",
 }
 # scripts in the advisory class: they never deny
@@ -420,8 +418,15 @@ def missing_sibling_case():
     guard_core goes to guard.log. The payload is a command the guard refuses when it can judge."""
     scratch = tempfile.mkdtemp(prefix="guard-nosib-")
     cfg = os.path.join(scratch, "cfg")
+    # guard.py imports git_reads, shared_names and the other folder modules it reaches; guard_core.py
+    # is the one module this case leaves out
+    siblings = sorted(
+        name for name in os.listdir(HERE)
+        if name.endswith(".py") and name not in ("guard.py", "guard_core.py", "test_wrappers.py"))
     try:
         shutil.copy(GUARD_PY, os.path.join(scratch, "guard.py"))
+        for name in siblings:
+            shutil.copy(os.path.join(HERE, name), os.path.join(scratch, name))
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": DENIED_COMMAND},
                               "cwd": scratch})
         run = subprocess.run([sys.executable, os.path.join(scratch, "guard.py")], input=payload,

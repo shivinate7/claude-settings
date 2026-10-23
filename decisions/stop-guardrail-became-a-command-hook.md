@@ -11,7 +11,7 @@ script `hooks/decision_watch.py`, which takes the same Stop JSON with no permiss
 as below.
 
 - **The gate is an ACTUAL on-disk change to a protected path.** `git status` against HEAD, scoped to this
-  turn by mtime the way `lint/md_sweep.py` does it, gives the files this turn touched. A broad keyword net
+  turn by mtime, gives the files this turn touched. A broad keyword net
   over each path decides whether a file looks protected, plus `guard.is_settings_file`. When nothing
   looks protected, the hook prints nothing and never spawns a model. Otherwise the judge gets the diff, or
   the new file's text, and the chat text. An outbound `SendMessage` or `Task` can enrich the evidence once
