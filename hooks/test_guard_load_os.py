@@ -22,13 +22,16 @@ returns a dict, and each reading is defined here:
   memory_pct      percent of physical memory IN USE.
                   Windows reference: Win32_OperatingSystem, 100 * (total - free) / total.
                   Mac reference: memory_pressure, 100 - "System-wide memory free percentage".
-  disk_free_pct   percent FREE on the drive that holds the home folder.
-                  Windows reference: Get-PSDrive, Free / (Free + Used).
-                  Mac reference: df -k on the home folder, Available / 1K-blocks.
-  cpu_pct         percent of CPU busy. Secondary: it only ever makes the machine busy.
+  disk_free_gb    GB FREE on the drive that holds the home folder, 2**30 bytes to the GB.
+                  Windows reference: Get-PSDrive, Free / 1GB.
+                  Mac reference: df -k on the home folder, Available / 1048576 (KiB to GiB).
+  disk_total_gb   GB of the drive that holds the home folder, in the same unit.
+                  Windows reference: Get-PSDrive, (Free + Used) / 1GB.
+                  Mac reference: df -k on the home folder, 1K-blocks / 1048576.
+  cpu_pct         percent of CPU busy. Secondary: it only ever makes the machine busy. The brake reads
+                  the CPU ticks, not the load average, so each reference is the OS's own busy share.
                   Windows reference: Win32_PerfFormattedData_PerfOS_Processor, the _Total row.
-                  Mac reference: the 1-minute load average from uptime, divided by hw.ncpu from
-                  sysctl, times 100, capped at 100.
+                  Mac reference: top -l 2 -n 0, the second "CPU usage" sample, 100 minus its idle share.
 
 The brake counts no claude process, so no reading here does.
 """
@@ -44,10 +47,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 
-# Points of percent by which the reader and the OS tool may differ.
+# Per reading, the points of percent (or GB, for the disk) by which the reader and the OS tool may differ.
 TOLERANCE = {
-    "win32": {"memory_pct": 5.0, "disk_free_pct": 1.5, "cpu_pct": 35.0},
-    "darwin": {"memory_pct": 8.0, "disk_free_pct": 1.5, "cpu_pct": 25.0},
+    "win32": {"memory_pct": 5.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0, "cpu_pct": 35.0},
+    "darwin": {"memory_pct": 8.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0, "cpu_pct": 25.0},
 }
 # The CPU of a machine moves most between two reads, so a CPU case takes the closest of this many tries.
 CPU_TRIES = 3
@@ -58,7 +61,8 @@ $drive = Get-PSDrive -Name $env:LB_DRIVE
 $cpu = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime
 [pscustomobject]@{
   memory_pct = 100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize
-  disk_free_pct = 100 * $drive.Free / ($drive.Free + $drive.Used)
+  disk_free_gb = $drive.Free / 1GB
+  disk_total_gb = ($drive.Free + $drive.Used) / 1GB
   cpu_pct = [double]$cpu
 } | ConvertTo-Json -Compress
 """
@@ -83,12 +87,14 @@ def mac_reference():
     pressure = run("memory_pressure")
     free = re.search(r"System-wide memory free percentage:\s*(\d+)%", pressure)
     df = run("df", "-k", os.path.expanduser("~")).strip().splitlines()[-1].split()
-    load = re.search(r"load averages?:\s*([\d.]+)", run("uptime"))
-    cores = int(run("sysctl", "-n", "hw.ncpu").strip())
+    # top -l 2 takes two samples a second apart. The second is the current busy share.
+    busy = re.findall(r"CPU usage:\s*[\d.]+% user,\s*[\d.]+% sys,\s*([\d.]+)% idle",
+                      run("top", "-l", "2", "-n", "0"))
     return {
         "memory_pct": 100 - int(free.group(1)),
-        "disk_free_pct": 100 * int(df[3]) / int(df[1]),
-        "cpu_pct": min(100.0, 100 * float(load.group(1)) / cores),
+        "disk_free_gb": int(df[3]) / 1048576,
+        "disk_total_gb": int(df[1]) / 1048576,
+        "cpu_pct": 100.0 - float(busy[-1]),
     }
 
 
@@ -134,7 +140,9 @@ def check_reading(key, tries=1):
 
 CASES = [
     ("memory in use matches the OS tool", lambda: check_reading("memory_pct"), ("win32", "darwin")),
-    ("disk free on the home drive matches the OS tool", lambda: check_reading("disk_free_pct"),
+    ("disk free on the home drive matches the OS tool", lambda: check_reading("disk_free_gb"),
+     ("win32", "darwin")),
+    ("disk size on the home drive matches the OS tool", lambda: check_reading("disk_total_gb"),
      ("win32", "darwin")),
     ("CPU busy matches the OS tool", lambda: check_reading("cpu_pct", CPU_TRIES), ("win32", "darwin")),
 ]
