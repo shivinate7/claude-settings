@@ -14319,38 +14319,50 @@ for _label, _check in (
 
 # =========================================================================== the machine-load brake
 FAMILY = "load-brake"
-# Batch 4, c14 (the machine-load brake). On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
-# the guard reads the machine's load once: memory in use and disk free on the home drive, each a share of
-# this machine's capacity, and CPU as a second signal. It counts no claude process and no running lane.
-# The levels (placeholders, owner to tune):
-#   busy  memory over 85%, disk free under 15%, or CPU over 85%.
-#         One lane at a time: the guard refuses a lane that runs in the background and allows one that makes
-#         the caller wait. An Agent or Task call runs in the background when run_in_background is true or left
-#         out (the Agent input schema in the harness's claude-code.d.ts says "Agents run in the background by
-#         default"); run_in_background false is foreground, and it is allowed. Any Workflow is refused: it has
-#         no foreground form. The refusal says to run the lane in the foreground.
-#   full  memory over 95%, or disk free under 5%. Every lane call is refused, a foreground Agent too.
-#         CPU never makes the machine full.
+# The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# the guard reads the machine's load once: memory in use as a share of this machine's memory, disk free on the
+# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks, read twice, as a second
+# signal. It counts no claude process and no running lane. A GB here is 2**30 bytes, as df -k and PowerShell
+# 1GB give. The levels (decision machine-load-brake; memory and CPU levels are placeholders):
+#   busy  memory over 85%, disk free under the smaller of 10% of the disk and 15 GB, or (CPU over 85% AND
+#         memory over 75%). An Agent or Task call passes busy only when run_in_background is absent or exactly
+#         false. Any other value (true, a string, null, a number) is refused. Any Workflow is refused. The refusal
+#         says to wait for the load to drop, or to start the lane as an Agent call that leaves run_in_background
+#         out or sets it false. A disk reading names free disk space instead.
+#   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
+#         an Agent or Task call too. CPU never makes the machine full.
 # The refusal names the reading that tripped it. A read that fails, or a reading left unread, counts as normal.
 # Every other tool reads no load. The read starts no child process and writes no file.
-# Not pinned: start_session at busy. It has no foreground form, and the rulings name Agent, Task and Workflow.
+# Not pinned: start_session at busy.
 #
 # THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
 # honored), patches the function below, and calls main() with the real stdin payload. The
 # builder must honor this contract:
 #   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
 #                  no argument and does every OS read. It returns a dict with the keys memory_pct
-#                  (percent of physical memory IN USE), disk_free_pct (percent FREE on the home
-#                  drive) and cpu_pct. A missing key or a None is an unread reading, which
-#                  counts as normal. read_load may raise: every reading then counts as normal.
-#                  It returns no claude_procs, and a claude_procs key in a reading changes nothing.
+#                  (percent of physical memory IN USE), disk_free_gb and disk_total_gb (GB FREE and GB
+#                  TOTAL on the home drive, never clamped to 0-100) and cpu_pct (percent CPU busy). A
+#                  missing key or a None is an unread reading, which counts as normal. read_load may
+#                  raise: every reading then counts as normal. It returns no claude_procs, and a
+#                  claude_procs key in a reading changes nothing.
+#                  The OS sources, all faked by THE FAKE HOST: darwin reads the Mach CPU ticks through
+#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read twice) and memory
+#                  through sysctlbyname; linux reads /proc/stat twice; both read the disk through
+#                  shutil.disk_usage on the home folder and never the load average.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per lane-start call, and none on any other call.
+# THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
+# call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg and
+# os.cpu_count (15), time.sleep (a no-op), shutil.disk_usage, and the /proc/stat file (builtins.open and
+# io.open). Each source is restored before the judge runs. Tick samples: a base sample, then one that adds
+# the case's busy share, so the two reads differ by that share.
+# A fake case must start no child process; the probe counts them and the case checks the count.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 LB_PROBE = r"""
-import importlib.machinery, importlib.util, json, os, subprocess, sys
+import importlib.machinery, importlib.util, io, json, os, subprocess, sys, types
+from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
 real_popen = subprocess.Popen
@@ -14383,6 +14395,54 @@ def listing():
                   for folder, _, names in os.walk(top) for n in names)
 
 
+GB = 2 ** 30
+
+
+# Run `read` with every OS source faked, then restore each one: the platform, the Mach ticks and
+# memory level (darwin), the load average, the CPU count, the sleep, the disk and /proc/stat.
+def under_fake(read, fake):
+    real_open = open
+    busy = int(fake["busy"])
+    samples = [(1000, 0, 9000, 0), (1000 + busy * 10, 0, 9000 + (100 - busy) * 10, 0)]   # (user, system, idle, nice)
+    calls = {"ticks": 0, "stat": 0}
+
+    def host_statistics(host, flavor, info, count):
+        user, system, idle, nice = samples[min(calls["ticks"], 1)]
+        calls["ticks"] += 1
+        target = getattr(info, "_obj", info)
+        for index, value in enumerate((user, system, idle, nice)):
+            target[index] = value
+        return 0
+
+    def sysctlbyname(name, oldp, oldlenp, newp, newlen):
+        getattr(oldp, "_obj", oldp).value = 100 - int(fake["memory"])
+        return 0
+
+    def cdll(*args, **kwargs):
+        return types.SimpleNamespace(mach_host_self=lambda: 1, host_statistics=host_statistics,
+                                     sysctlbyname=sysctlbyname)
+
+    def stat_open(file, *args, **kwargs):
+        if str(file) == "/proc/stat":
+            user, system, idle, nice = samples[min(calls["stat"], 1)]
+            calls["stat"] += 1
+            return io.StringIO("cpu  %d %d %d %d 0 0 0 0 0 0\n" % (user, nice, system, idle))
+        return real_open(file, *args, **kwargs)
+
+    total, free = int(fake["disk_total_gb"] * GB), int(fake["disk_free_gb"] * GB)
+    usage = types.SimpleNamespace(total=total, used=total - free, free=free)
+    load = fake["load"]
+    with mock.patch.object(sys, "platform", fake["platform"]), \
+            mock.patch("ctypes.CDLL", cdll), \
+            mock.patch("ctypes.cdll", types.SimpleNamespace(LoadLibrary=cdll)), \
+            mock.patch("os.getloadavg", lambda: (load, load, load), create=True), \
+            mock.patch("os.cpu_count", lambda: 15), \
+            mock.patch("time.sleep", lambda seconds: None), \
+            mock.patch("shutil.disk_usage", lambda path: usage), \
+            mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
+        return read()
+
+
 out = {"reads": 0}
 try:
     # The loader is named, so a GUARD_UNDER_TEST copy with a .bak suffix loads like guard.py does.
@@ -14408,10 +14468,15 @@ try:
             out["missing"] = True
         else:
             try:
-                out["reading"] = holders[0].read_load()
+                if "fake" in spec:
+                    out["reading"] = under_fake(holders[0].read_load, spec["fake"])
+                else:
+                    out["reading"] = holders[0].read_load()
             except Exception as exc:
                 out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
     else:
+        if "fake" in spec and holders:
+            spec["reading"] = under_fake(holders[0].read_load, spec["fake"])
         if "reading" in spec:
             def read_load():
                 out["reads"] += 1
@@ -14446,15 +14511,28 @@ LB_LANE_INPUT = {
     "Workflow": {"script": _flow("sonnet")},
     "mcp__ccd_session__start_session": {"initiation": "user_asked", "prompt": "x", "model": "sonnet"},
 }
-LB_NORMAL = {"memory_pct": 40.0, "disk_free_pct": 60.0, "cpu_pct": 10.0}
-LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_pct": 1.0, "cpu_pct": 99.0}
-# The tools that take run_in_background, and the three ways a call can say it: true, false, or left out.
-# Left out is background: the Agent input schema in the harness's claude-code.d.ts says "Agents run in
-# the background by default".
+LB_NORMAL = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0, "cpu_pct": 10.0}
+LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_gb": 1.0, "disk_total_gb": 926.0, "cpu_pct": 99.0}
+# The tools that take run_in_background. At busy, only an absent or exactly false value passes.
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
          (False, "run_in_background false"))
-LB_FOREGROUND = re.compile(r"foreground", re.I)   # the busy refusal's remedy
+LB_REMEDY = re.compile(re.escape("Wait until the load drops, or start this lane as an Agent call that leaves "
+                                 "run_in_background out or sets it false."), re.I)
+LB_FREE_DISK = re.compile(r"free disk space", re.I)   # the disk reading's remedy
+LB_FOREGROUND = re.compile(r"foreground", re.I)   # a busy refusal of an Agent or Task call never says this
+
+
+def lb_gb(free, total):
+    """A disk reading as a refusal words it: free GB to one place, total GB to a whole number."""
+    return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
+
+
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+    """A fake host for THE FAKE HOST: `busy` the CPU share from ticks, `load` the 1-minute load average,
+    `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on the disk."""
+    return {"platform": platform, "busy": busy, "load": load, "memory": memory,
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
 
 
 def lb_reading(**changes):
@@ -14469,6 +14547,11 @@ def lb_lane_input(tool, background=None):
     if background is not None and tool in dict(LB_SPAWNS).values():
         given["run_in_background"] = background
     return given
+
+
+def lb_spawn_input(tool, value):
+    """A spawn call whose run_in_background is `value` exactly as given: a string, null or a number included."""
+    return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
 def lb_run(tool, spec, tool_input=None, event=None):
@@ -14521,15 +14604,21 @@ def lb_names(word, *numbers, percent=True):
         r"(?<![\d.])(?:%s)(?!\d)(?!\.\d)%s" %("|".join(re.escape(n) for n in numbers), tail)))
 
 
-def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1):
-    """A lane-start call under a forced reading. `background` is the call's run_in_background:
-    True, False, or None to leave it out. `tool_input` replaces the whole input."""
+def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
+                      fake=None):
+    """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
+    is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
+    None to leave it out. `tool_input` replaces the whole input."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
-        got, reason, side = lb_run(tool, {"mode": "judge", "reading": reading}, given)
+        spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
+        got, reason, side = lb_run(tool, spec, given)
         if got == "error":
             return False, reason
         called = side.get("reads")
+        if fake and side["children"]:
+            return False, "%d child process(es) started under the fake host: %s" % (
+                len(side["children"]), side["children"][:3])
         if got != want:
             return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
         if called != reads:
@@ -14540,6 +14629,9 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
             if not pattern.search(reason):
                 return False, "the reason does not name the reading (%s): %s" % (
                     pattern.pattern[:30], reason[:100])
+        for pattern in lacks:
+            if pattern.search(reason):
+                return False, "the reason matches %r, which it must not: %s" % (pattern.pattern[:30], reason[:100])
         return True, "%s, the reader ran %d time" % (got, called)
     return check
 
@@ -14585,6 +14677,44 @@ def lb_reader(spec_check):
     return check
 
 
+def lb_reader_fake(fake, spec_check):
+    """The real read_load under THE FAKE HOST, called alone. `spec_check(reading)` returns (ok, note). The
+    read must start no child process and write no file, and must not raise."""
+    def check():
+        got, reason, side = lb_run(None, {"mode": "reader", "fake": fake}, tool_input={})
+        if got == "error":
+            return False, reason
+        if side.get("missing"):
+            return False, "no read_load function in guard.py or a guard_*.py module"
+        if side.get("raised"):
+            return False, "read_load raised under the fake host: %s" % side["raised"]
+        if side["children"]:
+            return False, "read_load started %d child process(es): %s" % (len(side["children"]), side["children"][:3])
+        if side["files"]:
+            return False, "read_load wrote %d file(s): %s" % (len(side["files"]), side["files"][:2])
+        return spec_check(side.get("reading") or {})
+    return check
+
+
+def lb_gb_unclamped(reading):
+    """A 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119, not a value clamped to 100."""
+    total, free = reading.get("disk_total_gb"), reading.get("disk_free_gb")
+    if total is None or free is None:
+        return False, "read_load left disk_free_gb or disk_total_gb unset: %r" % (reading,)
+    ok = abs(total - 926.0) < 0.01 and abs(free - 119.0) < 0.01
+    return ok, "disk_free_gb %s, disk_total_gb %s, want 119 and 926" % (free, total)
+
+
+def lb_cpu_share(want):
+    """The CPU reading, from the tick sample on a fake host, is `want` percent busy to one point."""
+    def check(reading):
+        cpu = reading.get("cpu_pct")
+        if cpu is None:
+            return False, "cpu_pct unread"
+        return abs(cpu - want) <= 1.0, "cpu_pct %.1f, want %.1f" % (cpu, want)
+    return check
+
+
 def lb_reader_children(side):
     if side["children"]:
         return False, "read_load started %d child process(es): %s" % (len(side["children"]), side["children"][:3])
@@ -14608,19 +14738,28 @@ def lb_reader_shape(side):
         return False, "read_load returned %r, want a dict" % (reading,)
     if "claude_procs" in reading:
         return False, "read_load still returns claude_procs, the process count the owner dropped"
-    for key in ("memory_pct", "disk_free_pct", "cpu_pct"):
+    for key in ("memory_pct", "cpu_pct"):
         value = reading.get(key)
         if value is None:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
             return False, "%s is %r, want a number in range" % (key, value)
+    for key in ("disk_free_gb", "disk_total_gb"):
+        value = reading.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            return False, "%s is %r, want a number of GB" % (key, value)
     if supported:
-        need = ("memory_pct", "disk_free_pct", "cpu_pct")
+        need = ("memory_pct", "disk_free_gb", "disk_total_gb", "cpu_pct")
         unread = [key for key in need if reading.get(key) is None]
         if unread:
             return False, "read_load left %s unread on %s" % (", ".join(unread), sys.platform)
-        if not (reading["memory_pct"] > 0 and reading["disk_free_pct"] > 0):
-            return False, "memory_pct and disk_free_pct read 0: %r" % (reading,)
+        if not (reading["memory_pct"] > 0 and reading["disk_free_gb"] > 0):
+            return False, "memory_pct and disk_free_gb read 0: %r" % (reading,)
+        if reading["disk_free_gb"] > reading["disk_total_gb"]:
+            return False, "disk_free_gb %r is over disk_total_gb %r" % (
+                reading["disk_free_gb"], reading["disk_total_gb"])
     return True, "%s" % {k: reading[k] for k in sorted(reading)}
 
 
@@ -14656,7 +14795,7 @@ LB_STAND_IN = '''import json, sys
 
 
 def read_load():
-    return {"memory_pct": 99.0, "disk_free_pct": 60.0, "cpu_pct": 99.0}
+    return {"memory_pct": 99.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0, "cpu_pct": 99.0}
 
 
 def main():
@@ -14713,29 +14852,31 @@ lb_add("neutral default: a lane call in another family's case meets a neutral lo
 
 LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
 LB_MEM_FULL = lb_names("memory", "97.2", "97")
-LB_DISK_BUSY = lb_names("disk", "9.4", "9", "90.6", "91", "90")
-LB_DISK_FULL = lb_names("disk", "3.1", "3", "96.9", "97")
-LB_CPU_BUSY = lb_names("cpu", "93.4", "93")
+LB_MEM90 = lb_names("memory", "90.0", "90")
+LB_MEM80 = lb_names("memory", "80.0", "80")
+LB_CPU94 = lb_names("cpu", "94.0", "94")
+LB_CPU90 = lb_names("cpu", "90.0", "90")
 
-# Agent and Task: every way a call says run_in_background, at normal, busy and full.
+# Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only a value
+# other than absent or false is refused.
 for _short, _tool in LB_SPAWNS:
     for _bg, _say in LB_BG:
         lb_add("%s, normal reading, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, LB_NORMAL, "allow", background=_bg))
-        if _bg is False:
-            lb_add("%s, memory 91.7%%, %s: busy, a foreground lane is allowed" % (_short, _say),
-                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
-        else:
-            lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, says run it in the foreground"
+        if _bg is True:
+            lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, gives the wait or Agent-call remedy"
                    % (_short, _say),
-                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_FOREGROUND,),
-                                     background=_bg))
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_REMEDY,),
+                                     background=_bg, lacks=(LB_FOREGROUND,)))
+        else:
+            lb_add("%s, memory 91.7%%, %s: busy, allowed" % (_short, _say),
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
         lb_add("%s, memory 97.2%%, %s: full, refused, names the reading" % (_short, _say),
                lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg))
         lb_add("%s, a read that raises, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, "raise", "allow", background=_bg))
 
-# Workflow and start_session have no foreground form. Workflow is refused at busy; start_session at busy is not pinned.
+# Workflow is refused at busy. start_session at busy is not pinned.
 lb_add("Workflow, memory 91.7%: busy, refused, names the reading",
        lb_decision_check("Workflow", lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY))
 lb_add("Workflow named, not scripted, memory 91.7%: busy, refused",
@@ -14746,29 +14887,104 @@ for _short, _tool in (("Workflow", "Workflow"), ("start_session", "mcp__ccd_sess
            lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL))
     lb_add("%s, a read that raises: allowed" % _short, lb_decision_check(_tool, "raise", "allow"))
 
-# The other readings, on Agent. Each trips on its own, and a foreground lane passes busy but not full.
-lb_add("Agent, disk 9.4% free, run_in_background left out: busy, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "deny", LB_DISK_BUSY + (LB_FOREGROUND,)))
-lb_add("Agent, disk 9.4% free, run_in_background false: busy, a foreground lane is allowed",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=9.4), "allow", background=False))
-lb_add("Agent, disk 3.1% free, run_in_background false: full, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(disk_free_pct=3.1), "deny", LB_DISK_FULL, background=False))
-lb_add("Agent, CPU 93.4%, run_in_background true: busy, refused, names the reading",
-       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "deny", LB_CPU_BUSY + (LB_FOREGROUND,),
-                         background=True))
-lb_add("Agent, CPU 93.4%, run_in_background false: busy, a foreground lane is allowed",
+# The other readings, on Agent. Each trips on its own, and an absent or false run_in_background passes busy
+# but not full.
+lb_add("Agent, 9.4 GB free of 926 GB, run_in_background left out: busy, allowed",
+       lb_decision_check("Agent", lb_reading(disk_free_gb=9.4, disk_total_gb=926.0), "allow"))
+lb_add("Agent, 9.4 GB free of 926 GB, run_in_background true: busy, refused, names the reading and free disk space",
+       lb_decision_check("Agent", lb_reading(disk_free_gb=9.4, disk_total_gb=926.0), "deny",
+                         (lb_gb(9.4, 926), LB_FREE_DISK), background=True, lacks=(LB_FOREGROUND,)))
+lb_add("Agent, 9.4 GB free of 926 GB, run_in_background false: busy, allowed",
+       lb_decision_check("Agent", lb_reading(disk_free_gb=9.4, disk_total_gb=926.0), "allow", background=False))
+lb_add("Agent, 3.1 GB free of 926 GB, run_in_background false: full, refused, names the reading",
+       lb_decision_check("Agent", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny", (lb_gb(3.1, 926),),
+                         background=False))
+
+# THE DISK LINE, on the real reader under THE FAKE HOST. Busy is free under the smaller of 10% of the disk and
+# 15 GB; full is free under the smaller of 5% and 5 GB. A share rule would brake the 926 GB disk with 119 GB
+# free (12.85%) and the 100 GB disk with 12 GB free (12%), which this line lets run.
+lb_add("disk 926 GB, 119 GB free, run_in_background true: not busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", disk_total=926.0, disk_free=119.0)))
+# The 15 GB cap pins here: 50 GB is under 10% of 926 GB (92.6 GB) but not under 15 GB, so a share-only busy
+# line would refuse it.
+lb_add("disk 926 GB, 50 GB free, run_in_background true: not busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", disk_total=926.0, disk_free=50.0)))
+lb_add("disk 926 GB, 10 GB free, run_in_background true: busy, refused, names disk 10.0 GB free of 926 GB",
+       lb_decision_check("Agent", None, "deny", (lb_gb(10.0, 926), LB_FREE_DISK), background=True,
+                         lacks=(LB_FOREGROUND,), fake=lb_fake("darwin", disk_total=926.0, disk_free=10.0)))
+lb_add("disk 926 GB, 10 GB free, run_in_background false: busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=False,
+                         fake=lb_fake("darwin", disk_total=926.0, disk_free=10.0)))
+lb_add("disk 926 GB, 3 GB free, run_in_background true: full, refused, names disk 3.0 GB free of 926 GB",
+       lb_decision_check("Agent", None, "deny", (lb_gb(3.0, 926),), background=True,
+                         fake=lb_fake("darwin", disk_total=926.0, disk_free=3.0)))
+lb_add("disk 100 GB, 9 GB free, run_in_background true: busy, refused, names disk 9.0 GB free of 100 GB",
+       lb_decision_check("Agent", None, "deny", (lb_gb(9.0, 100), LB_FREE_DISK), background=True,
+                         lacks=(LB_FOREGROUND,), fake=lb_fake("darwin", disk_total=100.0, disk_free=9.0)))
+lb_add("disk 100 GB, 12 GB free, run_in_background true: not busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", disk_total=100.0, disk_free=12.0)))
+lb_add("disk GB not clamped: a 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119",
+       lb_reader_fake(lb_fake("darwin", disk_total=926.0, disk_free=119.0), lb_gb_unclamped))
+lb_add("Agent, CPU 93.4%, run_in_background true: CPU alone is not busy, allowed",
+       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "allow", background=True))
+lb_add("Agent, CPU 93.4%, run_in_background false: allowed",
        lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "allow", background=False))
 lb_add("Agent, CPU 99%, run_in_background false: CPU never fills the machine, allowed",
        lb_decision_check("Agent", lb_reading(cpu_pct=99.0), "allow", background=False))
+
+# CPU from ticks on darwin, under THE FAKE HOST: a high load average with low tick use is not busy, and ticks
+# at 90% with memory at 80% are busy. Memory 80% is above the 75% that CPU needs, and below the 85% that
+# memory alone needs, so only the CPU reading can trip busy.
+lb_add("Agent, load 107 and CPU ticks 50% busy, memory 80%, run_in_background true: CPU not busy, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", busy=50.0, load=107.0, memory=80)))
+lb_add("Agent, load 1.0 and CPU ticks 90% busy, memory 80%, run_in_background true: busy, refused, names CPU and memory",
+       lb_decision_check("Agent", None, "deny", LB_CPU90 + LB_MEM80, background=True, lacks=(LB_FOREGROUND,),
+                         fake=lb_fake("darwin", busy=90.0, load=1.0, memory=80)))
+# CPU on linux, from /proc/stat read twice. The reader has no memory on linux, so only the value is pinned.
+lb_add("CPU on linux: /proc/stat 50% busy with load 107 reads cpu_pct 50, not the load average",
+       lb_reader_fake(lb_fake("linux", busy=50.0, load=107.0), lb_cpu_share(50.0)))
+lb_add("CPU on linux: /proc/stat 90% busy with load 1.0 reads cpu_pct 90",
+       lb_reader_fake(lb_fake("linux", busy=90.0, load=1.0), lb_cpu_share(90.0)))
+
+# CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
+# memory 80% is refused.
+for _short, _tool in LB_SPAWNS:
+    lb_add("%s, memory 90%%, run_in_background left out: busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow"))
+    lb_add("%s, memory 90%%, run_in_background true: busy, refused, names the memory" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
+                             background=True, lacks=(LB_FOREGROUND,)))
+    lb_add("%s, memory 90%%, run_in_background false: busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow", background=False))
+    for _label, _value in (('the string "true"', "true"), ("null", None), ("the number 1", 1)):
+        lb_add("%s, memory 90%%, run_in_background %s: busy, refused, names the memory" % (_short, _label),
+               lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
+                                 tool_input=lb_spawn_input(_tool, _value), lacks=(LB_FOREGROUND,)))
+    lb_add("%s, CPU 94%%, memory 70%%, disk 50%% free, run_in_background true: CPU alone is not busy, allowed"
+           % _short,
+           lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=70.0, disk_free_gb=463.0, disk_total_gb=926.0),
+                             "allow", background=True))
+    lb_add("%s, CPU 94%%, memory 80%%, run_in_background true: busy, refused, names CPU and memory" % _short,
+           lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=80.0), "deny", LB_CPU94 + LB_MEM80,
+                             background=True))
+lb_add("Workflow, CPU 94%, memory 70%, disk 463 of 926 GB free: CPU alone is not busy, allowed",
+       lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=70.0, disk_free_gb=463.0,
+                                                disk_total_gb=926.0), "allow"))
+lb_add("Workflow, CPU 94%, memory 80%: busy, refused, names CPU and memory",
+       lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=80.0), "deny", LB_CPU94 + LB_MEM80))
 lb_add("Agent, 20 claude processes read, the rest normal: no process count, allowed",
        lb_decision_check("Agent", lb_reading(claude_procs=20), "allow"))
 lb_add("Agent, memory unread and the rest normal, run_in_background left out: allowed",
        lb_decision_check("Agent", lb_reading(memory_pct=None), "allow"))
 lb_add("Agent, an empty reading, run_in_background left out: allowed",
        lb_decision_check("Agent", {}, "allow"))
-lb_add("Agent, memory unread but disk 3.1% free: one unread reading hides no other, refused",
-       lb_decision_check("Agent", lb_reading(memory_pct=None, disk_free_pct=3.1), "deny", LB_DISK_FULL,
-                         background=False))
+lb_add("Agent, memory unread but disk 3.1 GB free of 926 GB: one unread reading hides no other, refused",
+       lb_decision_check("Agent", lb_reading(memory_pct=None, disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (lb_gb(3.1, 926),), background=False))
 
 lb_add("Bash reads no load under the worst reading", lb_no_read_check("Bash", {"command": "echo hi"}))
 lb_add("PowerShell reads no load under the worst reading",
@@ -14785,7 +15001,7 @@ lb_add("a SubagentStop reads no load under the worst reading",
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
            lb_real_children_check(_tool), real=True)
-lb_add("Agent run in the foreground with the real reader starts no child process",
+lb_add("Agent with run_in_background false, the real reader, starts no child process",
        lb_real_children_check("Agent", background=False), real=True)
 lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)

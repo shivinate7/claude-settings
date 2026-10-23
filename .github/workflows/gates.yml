@@ -421,6 +421,11 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
+      - name: Memory monitor test, Windows PowerShell 5.1
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/mem-monitor.test.ps1
+
       - name: Install bin eol test, Windows PowerShell 5.1
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: powershell
@@ -825,7 +830,9 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
     # About 550 s on push (the sweep mutation harness takes about 150 s: runs 37650386161, 37606531387).
-    timeout-minutes: 20
+    # Provisional cap, owner 2026-10-23: run 39916456134 hit the old 20-minute cap with no step red.
+    # Set it to about 2x the slowest of 5 green runs once the ci-time-caps lane lands.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
