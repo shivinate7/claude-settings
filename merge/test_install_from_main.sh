@@ -15,7 +15,7 @@
 # stubs, except cases 8 and 9, which run the real install.sh. Each stub writes a marker file into
 # its own folder, so a case can see which tree ran it. HOME and CLAUDE_CONFIG_DIR point into the
 # temp dir, so the real ~/.claude is never touched. INSTALL_FROM_MAIN_UNDER_TEST lets a case point
-# at another copy of the script. Cases 22 to 26 run the SessionStart hook command that settings.json
+# at another copy of the script. Cases 22 to 27 run the SessionStart hook command that settings.json
 # carries; HOOK_SETTINGS_UNDER_TEST lets a case point at another settings file.
 
 set -u
@@ -910,8 +910,8 @@ sys.stdout.buffer.write(hits[0].encode("utf-8"))
 
 # A bare origin, and a clone holding one commit. The pinned checkout <clone>-live is detached and
 # locked, as install.sh makes it, at c0. Then origin's main moves to c1. $2 says where main is:
-# trunk (the clone's checkout is on trunk, so main is free) or main (the clone's own checkout is on
-# main). The clone holds the real merge/install_from_main.sh, a stub install.sh that appends the
+# trunk (the clone's checkout is on trunk, so main is free), main (the clone's own checkout is on
+# main), or linked (a linked worktree <dir>/linked holds main). The clone holds the real merge/install_from_main.sh, a stub install.sh that appends the
 # commit it ran from to $HOME/ran-install.txt, and a stub install.ps1. The config dir's CLAUDE.md
 # points at the pin.
 hook_fixture() {
@@ -936,7 +936,10 @@ EOF
   git -C "$d/clone" remote add origin "$d/origin.git"
   git -C "$d/clone" push -q origin main
   c0=$(git -C "$d/clone" rev-parse main)
-  if [ "${2:-trunk}" = trunk ]; then git -C "$d/clone" switch -q -c trunk; fi
+  case "${2:-trunk}" in
+    trunk) git -C "$d/clone" switch -q -c trunk ;;
+    linked) git -C "$d/clone" switch -q -c trunk && git -C "$d/clone" worktree add -q "$d/linked" main ;;
+  esac
   git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$c0"
   printf '@%s/CLAUDE.md\n' "$d/clone-live" > "$d/home/.claude-cfg/CLAUDE.md"
   git clone -q "$d/origin.git" "$d/pusher"
@@ -1074,7 +1077,23 @@ case26() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26"
+# ---- Case 27: main checked out in a clean linked worktree -> that tree fast-forwards and the pin ends at origin/main ----
+case27() {
+  name="case27: SessionStart hook with main checked out in a clean linked worktree fast-forwards that worktree and moves the pin to origin/main"
+  d="$work/case27"; hook_fixture "$d" linked
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/linked" rev-parse HEAD)" = "$c1" ] \
+    || why="$why; the linked worktree is at $(git -C "$d/linked" rev-parse HEAD), want origin/main $c1"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c1" ] \
+    || why="$why; the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" = "$c1" ] \
+    || why="$why; the installer did not run from the pin at $c1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
