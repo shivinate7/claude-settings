@@ -59,6 +59,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/md_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
@@ -233,6 +242,16 @@
             "type": "command",
             "command": "case \"$(uname -s 2>/dev/null)\" in MINGW*) exit 0;; esac; g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "timeout": 20
           }
         ]
       },

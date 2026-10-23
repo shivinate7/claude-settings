@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for ste_lint.apply_fixes, the STE auto-fix (decision ste-gate-fixes-not-nags).
+"""Tests for the STE auto-fix in lint/ste_gate.py (decision ste-gate-fixes-not-nags, the gate fixes first).
+
+The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
+PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
 
 The fixer keeps only the fixed bloat phrases of STE011, minus eight rows. The three rows the
 decision plain-prose-lint names (in between, in terms of, it would appear that) are not in the
@@ -7,18 +10,25 @@ table, and five borderline rows (in a timely manner, along the lines of, close d
 importance, except when) stay errors with no fix. No Latin (STE007), contraction (STE008) or
 nominalization (STE003) fix exists, and no fix changes the case of the text it swaps. The sentence
 budget is one number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs,
-condition order and omitted "that" are advisory warnings: reported, never a rewrite.
+condition order and omitted "that" are advisory warnings: reported, never a deny, never a rewrite.
 
     python lint/test_ste_autofix.py -v
 """
+import glob
+import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
+from test_gates import STE_GATE, run_gate, setUpModule, tearDownModule  # noqa: E402,F401  (the helper and the module isolation hooks; no TestCase is collected)
 
 # 38 words: STE001 against the one budget of 30.
 LONG = ("The operators on each shift must record every valve position, every pressure reading, "
@@ -29,6 +39,15 @@ SHRINKS_TO_LIMIT = ("The operators on each shift must record every valve positio
                     "every alarm, and every handover note in the shared log in order to help the next crew today now.")
 # 33 words with one "in order to": the fix makes it 31 words, so STE001 stays.
 SHRINKS_PAST_LIMIT = SHRINKS_TO_LIMIT[:-1] + " again."
+
+
+def parse(run):
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout) if run.stdout.strip() else {}
+
+
+def hso(run):
+    return parse(run).get("hookSpecificOutput", {})
 
 
 class FixtureCountTests(unittest.TestCase):
@@ -286,6 +305,239 @@ class FixerSafetyTests(unittest.TestCase):
         self.assertEqual(ste_lint.apply_fixes(text)[0], text)
 
 
+# ------------------------------------------------------------------ gate cases
+
+class _GateCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _path(self, name):
+        return os.path.join(self.tmp.name, name)
+
+    def _write(self, name, text):
+        with open(self._path(name), "w", encoding="utf-8") as f:
+            f.write(text)
+        return self._path(name)
+
+    def _pre(self, tool, tool_input, gate=STE_GATE):
+        hook = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
+        return run_gate(gate, hook)
+
+
+class GateFixTests(_GateCase):
+    """ste_gate.py on a PreToolUse Write or Edit of a Markdown file."""
+
+    # (a) fixable errors only -> rewritten input, no deny
+
+    def test_01_fixable_only_write_is_rewritten_not_denied(self):
+        target = self._path("notes.md")
+        run = self._pre("Write", {"file_path": target,
+                                  "content": "We close the valve in order to stop the pump, prior to the shift.\n"})
+        out = hso(run)
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertEqual(out.get("updatedInput"),
+                         {"file_path": target, "content": "We close the valve to stop the pump, before the shift.\n"})
+
+    def test_02_rewrite_grants_no_allow(self):
+        # Docs: "allow" auto-approves, and "defer" makes the hook ignore updatedInput. The docs do
+        # not say "allow" is required with updatedInput, so the rewrite must not add one.
+        target = self._path("notes.md")
+        out = hso(self._pre("Write", {"file_path": target,
+                                      "content": "We close the valve in order to stop the pump.\n"}))
+        self.assertIsNotNone(out.get("updatedInput"), "the rewrite is missing")
+        self.assertNotIn(out.get("permissionDecision"), ("allow", "defer"))
+
+    def test_03_fixable_plus_unfixable_denies_with_remaining_only(self):
+        target = self._path("mixed.md")
+        content = "We close the valve in order to stop the pump.\n\n" + LONG + "\n"
+        run = self._pre("Write", {"file_path": target, "content": content})
+        out = hso(run)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        reason = out["permissionDecisionReason"]
+        self.assertIn("STE001", reason)
+        self.assertIn("operators on each shift", reason, "the sentence is not named")
+        self.assertIn("38", reason, "the word count is missing")
+        self.assertRegex(reason, r"\b30\b", "the limit is missing")
+        self.assertIn("split", reason.lower(), "no split point is suggested")
+        self.assertNotIn("STE011", reason, "a fixed bloat phrase is still reported")
+
+    def test_04_denial_shows_at_most_five_findings(self):
+        target = self._path("many.md")
+        content = "\n\n".join([LONG] * 7) + "\n"
+        out = hso(self._pre("Write", {"file_path": target, "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        findings = [ln for ln in out["permissionDecisionReason"].splitlines()
+                    if re.match(r"line \d+: STE001", ln)]
+        self.assertTrue(0 < len(findings) <= 5, "showed %d findings" % len(findings))
+
+    def test_05_clean_text_no_output(self):
+        run = self._pre("Write", {"file_path": self._path("ok.md"),
+                                  "content": "The pump runs at low speed.\n"})
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_06_write_fixes_only_the_changed_block(self):
+        disk = "Close it in order to stop.\n\nOld block: prior to this, it is fine.\n"
+        target = self._write("blocks.md", disk)
+        content = disk + "\nNew block: close it in order to stop, prior to the shift.\n"
+        out = hso(self._pre("Write", {"file_path": target, "content": content}))
+        self.assertEqual(out.get("updatedInput", {}).get("content"),
+                         disk + "\nNew block: close it to stop, before the shift.\n")
+
+    def test_07_edit_fixes_only_new_string(self):
+        disk = "Close it in order to stop.\n\nOld block: prior to this, it is fine.\n"
+        target = self._write("edit.md", disk)
+        out = hso(self._pre("Edit", {"file_path": target,
+                                     "old_string": "Old block: prior to this, it is fine.\n",
+                                     "new_string": "New block: close it in order to stop, prior to the shift.\n"}))
+        self.assertEqual(out.get("updatedInput"), {
+            "file_path": target,
+            "old_string": "Old block: prior to this, it is fine.\n",
+            "new_string": "New block: close it to stop, before the shift.\n",
+        })
+
+    def test_08_edit_not_on_disk_lints_whole_text_and_fixes_it(self):
+        target = self._write("unreplayable.md", "Clean text.\n")
+        out = hso(self._pre("Edit", {"file_path": target,
+                                     "old_string": "Nowhere on disk.\n",
+                                     "new_string": "We close it in order to stop, prior to the shift.\n"}))
+        self.assertEqual(out.get("updatedInput"), {
+            "file_path": target,
+            "old_string": "Nowhere on disk.\n",
+            "new_string": "We close it to stop, before the shift.\n",
+        })
+
+    def test_09_edit_not_on_disk_remaining_error_denied(self):
+        target = self._write("unreplayable2.md", "Clean text.\n")
+        out = hso(self._pre("Edit", {"file_path": target,
+                                     "old_string": "Nowhere on disk.\n",
+                                     "new_string": LONG + "\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE001", out["permissionDecisionReason"])
+
+    def test_10_output_names_the_fixed_code_without_a_deny(self):
+        # One line that names what was fixed, and no deny.
+        run = self._pre("Write", {"file_path": self._path("named.md"),
+                                  "content": "We close the valve in order to stop the pump.\n"})
+        self.assertNotEqual(hso(run).get("permissionDecision"), "deny")
+        self.assertIn("STE011", run.stdout)
+
+    def _crash_gate(self):
+        # A copy of the gate whose apply_fixes writes a marker and then raises.
+        d = os.path.join(self.tmp.name, "gate")
+        os.makedirs(d)
+        for src in glob.glob(os.path.join(HERE, "*.py")):
+            if not os.path.basename(src).startswith("test_"):
+                shutil.copy(src, d)
+        marker = self._path("fixer-ran.txt")
+        with open(os.path.join(d, "ste_lint.py"), "a", encoding="utf-8") as f:
+            f.write("\n\ndef apply_fixes(text):\n    open(%r, 'w').close()\n"
+                    "    raise RuntimeError('fixer crash')\n" % marker)
+        return os.path.join(d, "ste_gate.py"), marker
+
+    def test_11_fixer_crash_falls_back_to_deny_and_exits_zero(self):
+        # Ruling (decisions/gate-hooks-fail-closed.md): a crash does not refuse. The gate skips
+        # the rewrite, keeps today's behaviour (deny on the lint errors), exits 0, never 2.
+        gate, marker = self._crash_gate()
+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                              "tool_input": {"file_path": self._path("crash.md"),
+                                             "content": "We close the valve in order to stop the pump.\n"}})
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(os.path.exists(marker), "the fixer never ran")
+        out = hso(run)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+    def test_11b_fixer_crash_on_clean_text_allows(self):
+        gate, marker = self._crash_gate()
+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                              "tool_input": {"file_path": self._path("clean.md"),
+                                             "content": "The pump runs at low speed.\n"}})
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(os.path.exists(marker), "the fixer never ran")
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_12_fence_only_write_no_output(self):
+        run = self._pre("Write", {"file_path": self._path("fence.md"),
+                                  "content": "```sh\nrun in order to here\n```\n"})
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_13_fix_then_lint_lets_a_sentence_the_fix_shrinks_under_the_limit_pass(self):
+        # 32 words as written, 30 once "in order to" becomes "to". Lint-before-fix would deny it.
+        target = self._path("shrink.md")
+        out = hso(self._pre("Write", {"file_path": target, "content": SHRINKS_TO_LIMIT + "\n"}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("updatedInput", out)
+
+    def test_13b_fix_then_lint_still_denies_a_sentence_the_fix_leaves_over_the_limit(self):
+        # 33 words as written, 31 after the fix: STE001 stays, and the reason reports the fixed count.
+        out = hso(self._pre("Write", {"file_path": self._path("shrink2.md"),
+                                      "content": SHRINKS_PAST_LIMIT + "\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        reason = out["permissionDecisionReason"]
+        self.assertIn("STE001", reason)
+        self.assertNotIn("STE011", reason)
+
+    # Advisory text: the gate neither denies nor rewrites it. The text stays
+    # exactly as the writer wrote it.
+
+    def test_14_latin_vs_cf_via_neither_denied_nor_rewritten(self):
+        content = "Compare Option A vs. Option B.\n\nSee cf. section 4.\n\nSend it via email.\n"
+        out = hso(self._pre("Write", {"file_path": self._path("latin.md"), "content": content}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    def test_15_would_neither_denied_nor_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("would.md"),
+                                      "content": "They'd finished the work.\n"}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    # Unsafe bloat deletions stay unfixed, and STE011 stays an error: the write is denied.
+
+    def test_16_unsafe_deletions_and_majority_denied_not_rewritten(self):
+        content = ("In conclusion, the plan works.\n\nThe majority of the valves are open.\n\n"
+                   "We will check it.\n")
+        out = hso(self._pre("Write", {"file_path": self._path("bloat.md"), "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+
+class RemovedFixesGateTests(_GateCase):
+    """The gate returns no updatedInput for any text whose only fix was removed."""
+
+    def _assert_not_rewritten(self, text):
+        out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
+        self.assertNotIn("updatedInput", out)
+        return out
+
+    def test_g01_debt_examples_not_rewritten_by_write(self):
+        for rid, text in DEBT_EXAMPLES:
+            with self.subTest(example=rid):
+                self._assert_not_rewritten(text)
+
+    def test_g02_debt_examples_not_rewritten_by_edit(self):
+        target = self._write("e.md", "Intro.\n")
+        for rid, text in DEBT_EXAMPLES:
+            with self.subTest(example=rid):
+                out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                             "new_string": text}))
+                self.assertNotIn("updatedInput", out)
+
+    def test_g03_latin_contraction_nominalization_text_is_advisory_only(self):
+        # Neither a rewrite nor a deny: STE007, STE008 and STE003 are warnings now.
+        families = (("latin", LATIN_SAMPLES), ("contraction", CONTRACTION_SAMPLES),
+                    ("nominalization", NOMINALIZATION_SAMPLES))
+        for name, rows in families:
+            with self.subTest(family=name):
+                out = self._assert_not_rewritten("\n".join(t for _, t in rows))
+                self.assertNotEqual(out.get("permissionDecision"), "deny")
+
+
 # ------------------------------------------------------------------ eight STE011 rows without a fix
 
 # Five borderline rows: the phrase is still an error, and no
@@ -298,7 +550,7 @@ BORDERLINE_BLOAT = [
     ("except_when", "Do not run it except when the gauge reads zero.\n"),
 ]
 # The three debt phrases (orchestrator's call 3): out of the STE011 table, so the linter says
-# nothing and the fixer leaves them.
+# nothing and the gate neither denies nor rewrites.
 DROPPED_BLOAT = [row for row in DEBT_EXAMPLES
                  if row[0] in ("in_between", "in_terms_of", "it_would_appear_that")]
 
@@ -307,7 +559,7 @@ def _findings(text):
     return ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)
 
 
-class BorderlineBloatTests(unittest.TestCase):
+class BorderlineBloatTests(_GateCase):
     """The five borderline rows stay STE011 errors and are never rewritten."""
 
     def test_o01_still_an_error_in_the_linter(self):
@@ -323,15 +575,48 @@ class BorderlineBloatTests(unittest.TestCase):
             with self.subTest(phrase=rid):
                 self.assertEqual(ste_lint.apply_fixes(text)[0], text)
 
+    def test_o03_write_is_denied_for_the_phrase_and_never_rewritten(self):
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("STE011", out["permissionDecisionReason"])
+                self.assertNotIn("updatedInput", out)
 
-class DroppedBloatTests(unittest.TestCase):
-    """The three debt phrases are not rules any more: no finding, no rewrite."""
+    def test_o04_edit_is_denied_for_the_phrase_and_never_rewritten(self):
+        target = self._write("e.md", "Intro.\n")
+        for rid, text in BORDERLINE_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                             "new_string": text}))
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("STE011", out["permissionDecisionReason"])
+                self.assertNotIn("updatedInput", out)
+
+
+class DroppedBloatTests(_GateCase):
+    """The three debt phrases are not rules any more: no finding, no deny, no rewrite."""
 
     def test_o05_the_linter_reports_no_ste011(self):
         for rid, text in DROPPED_BLOAT:
             with self.subTest(phrase=rid):
                 self.assertEqual([f.code for f in _findings(text) if f.code == "STE011"], [])
 
+    def test_o06_write_is_neither_denied_nor_rewritten(self):
+        for rid, text in DROPPED_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Write", {"file_path": self._path("t.md"), "content": text}))
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
+
+    def test_o07_edit_is_neither_denied_nor_rewritten(self):
+        target = self._write("e.md", "Intro.\n")
+        for rid, text in DROPPED_BLOAT:
+            with self.subTest(phrase=rid):
+                out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                             "new_string": text}))
+                self.assertNotEqual(out.get("permissionDecision"), "deny", out)
+                self.assertNotIn("updatedInput", out)
 
     def test_o08_the_kept_rows_still_get_their_fix(self):
         # Guard: green before and after. Dropping eight rows must not drop the rest.
@@ -341,7 +626,28 @@ class DroppedBloatTests(unittest.TestCase):
                          "Close it to stop the pump.\n")
 
 
-# ------------------------------------------------------------------ fixer edge cases
+# ------------------------------------------------------------------ UI files: no rewrite
+
+class UiFileTests(_GateCase):
+    """UI files keep today's behaviour: the gate denies, and never rewrites the input."""
+
+    def test_u01_tsx_contraction_not_rewritten(self):
+        # STE008 does not apply to UI copy, so this is clean today.
+        run = self._pre("Write", {"file_path": self._path("Page.tsx"),
+                                  "content": "export const P = () => <p>Don't</p>;\n"})
+        self.assertNotIn("updatedInput", hso(run))
+
+    def test_u02_tsx_bloat_denied_and_not_rewritten(self):
+        # STE007 is a warning now, so the UI sample is a kept error: STE011.
+        run = self._pre("Write", {"file_path": self._path("Help.tsx"),
+                                  "content": "export const H = () => <p>Prior to use, read it.</p>;\n"})
+        out = hso(run)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+
+# ------------------------------------------------------------------ fixer and gate edge cases
 # Each name starts with its finding number. test_r1_guard_* cases hold a failure class the fix
 # must not break. Each fixture holds a kept bloat phrase, so the check still has a fix to refuse.
 
@@ -451,7 +757,91 @@ for _aid, _text in AMBIGUOUS_FORMS:
     setattr(ReviewRound1FixerTests, "test_r1_f4_ambiguous_" + _aid, _ambiguous_case(_text))
 
 
-# ------------------------------------------------------------------ more fixer edge cases
+class ReviewRound1GateTests(_GateCase):
+    """ste_gate.py, through PreToolUse: the rewrite must match what the file will hold."""
+
+    def _copy_gate(self, appended):
+        # A copy of the gate with `appended` added to the copied ste_lint.py, the seam
+        # _crash_gate uses. The appended apply_fixes overrides the real one.
+        d = os.path.join(self.tmp.name, "gate-%d" % len(appended))
+        os.makedirs(d)
+        for src in glob.glob(os.path.join(HERE, "*.py")):
+            if not os.path.basename(src).startswith("test_"):
+                shutil.copy(src, d)
+        with open(os.path.join(d, "ste_lint.py"), "a", encoding="utf-8") as f:
+            f.write(appended)
+        return os.path.join(d, "ste_gate.py")
+
+    # F3 an Edit that lands inside a code span or a fence is not rewritten inside it
+    def test_r1_f3b_gate_edit_mid_inline_code_not_rewritten(self):
+        target = self._write("span.md", "Run `x` and `close it in order to stop` now.\n")
+        new = "in order to start` now.\n"
+        out = hso(self._pre("Edit", {"file_path": target,
+                                     "old_string": "in order to stop` now.\n", "new_string": new}))
+        self.assertIn(out.get("updatedInput", {}).get("new_string"), (None, new))
+
+    def test_r1_f3_gate_edit_fence_not_rewritten(self):
+        target = self._write("fence.md", "Intro.\n")
+        out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                     "new_string": "````\n```\nrun in order to prior to here\n```\n````\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    # F4 an ambiguous contraction is neither denied nor rewritten (STE008 is a warning now);
+    # front matter is never rewritten.
+    def test_r1_f4_gate_its_been_neither_denied_nor_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("its.md"),
+                                      "content": "It's been tested.\n"}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_f4_gate_front_matter_write_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("fm.md"),
+                                      "content": "---\ntags: [a, in order to b]\n---\n\nText.\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_f4_gate_front_matter_edit_not_rewritten(self):
+        target = self._write("fm2.md", "---\ntags: [a]\n---\n\nText.\n")
+        out = hso(self._pre("Edit", {"file_path": target, "old_string": "tags: [a]\n",
+                                     "new_string": "tags: [a, in order to b]\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    # F5 a fix that removes text a later edit needs: no rewrite for the chain
+    def test_r1_f5_multiedit_chain_no_rewrite(self):
+        target = self._write("chain.md", "Old A\n")
+        out = hso(self._pre("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We close it in order to stop.\n"},
+            {"old_string": "We close it in order to stop.\n", "new_string": "We close it in order to start.\n"},
+        ]}))
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_guard_multiedit_independent_edits_rewritten(self):
+        target = self._write("indep.md", "Old A\n\nOld B\n")
+        out = hso(self._pre("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We close it in order to stop.\n"},
+            {"old_string": "Old B\n", "new_string": "We close it in order to start.\n"},
+        ]}))
+        self.assertEqual(out.get("updatedInput"), {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We close it to stop.\n"},
+            {"old_string": "Old B\n", "new_string": "We close it to start.\n"},
+        ]})
+
+    # F6 a fixer over its time limit: plain lint, exit 0, no rewrite. Seam: the builder adds
+    # the env var STE_FIXER_LIMIT_S (seconds) to ste_gate.py. Today nothing reads it.
+    def test_r1_f6_slow_fixer_falls_back_to_plain_lint(self):
+        gate = self._copy_gate("\n\ndef apply_fixes(text):\n    import time\n    time.sleep(4)\n"
+                               "    return text.replace(\"in order to\", \"to\"), 0\n")
+        with mock.patch.dict(os.environ, {"STE_FIXER_LIMIT_S": "1"}):
+            run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": self._path("slow.md"),
+                                                 "content": "We close it in order to stop.\n"}})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = hso(run)
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+
+
+# ------------------------------------------------------------------ more fixer and gate edge cases
 # Names start with the finding number. test_r2_guard_* cases hold a failure class the fix must keep.
 
 # F1: an adverb between the form and a perfect verb. No contraction is fixed, so the text
@@ -522,6 +912,121 @@ for _adv in ADVERBS:
             _pin_unchanged("There's %s been a way.\n" % _adv))
 setattr(ReviewRound2FixerTests, "test_r2_guard_had_its", _pin_unchanged("It's had a fault.\n"))
 setattr(ReviewRound2FixerTests, "test_r2_guard_had_theres", _pin_unchanged("There's had a fault.\n"))
+
+
+class ReviewRound2GateTests(_GateCase):
+    """ste_gate.py, second set."""
+
+    def _gate_copy_env(self):
+        env = dict(os.environ)
+        env.pop("STE_FIXER_MAX_BYTES", None)
+        return env
+
+    # F1 the gate neither rewrites nor denies an adverb-perfect form (STE008 is a warning now)
+    def test_r2_f1_gate_its_not_been_neither_denied_nor_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("adv1.md"),
+                                      "content": "It's not been tested.\n"}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    def test_r2_f1_gate_theres_always_been_neither_denied_nor_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("adv2.md"),
+                                      "content": "There's always been a way.\n"}))
+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    # F6 size ceiling: over STE_FIXER_MAX_BYTES the fixer is skipped and plain lint decides
+    def test_r2_f6_size_ceiling_skips_fixer(self):
+        with mock.patch.dict(os.environ, {"STE_FIXER_MAX_BYTES": "5"}):
+            out = hso(self._pre("Write", {"file_path": self._path("ceil.md"),
+                                          "content": "We close it in order to stop.\n"}))
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+        # Default ceiling, env unset: a payload just over 262144 bytes skips the fixer.
+        big = "a. " * 87380 + "We close it in order to stop.\n"
+        self.assertGreater(len(big.encode("utf-8")), 262144)
+        run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": self._path("big.md"), "content": big}},
+                       env=self._gate_copy_env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = hso(run)
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+
+    def test_r2_guard_under_size_ceiling_still_fixed(self):
+        with mock.patch.dict(os.environ, {"STE_FIXER_MAX_BYTES": "100"}):
+            out = hso(self._pre("Write", {"file_path": self._path("under.md"),
+                                          "content": "We close it in order to stop.\n"}))
+        self.assertEqual(out.get("updatedInput", {}).get("content"), "We close it to stop.\n")
+
+    # F7 the deny text quotes the writer's own sentence, not the fixed text
+    def test_r2_f7_deny_quotes_writers_sentence(self):
+        content = "Prior to this, " + " ".join(["word"] * 40) + ".\n"
+        out = hso(self._pre("Write", {"file_path": self._path("quote.md"), "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        reason = out["permissionDecisionReason"]
+        self.assertIn("Prior to", reason)
+        self.assertNotIn("Before this", reason)
+
+
+# ------------------------------------------------------------------ raw UTF-8 on stdin
+# ste_gate.py reads the hook JSON with json.load(sys.stdin), which uses the locale
+# codec. A Windows pipe is cp1252 without PYTHONUTF8, so raw UTF-8 bytes turn into mojibake.
+# run_gate sends ASCII-escaped JSON, so the existing tests never see raw bytes. These send
+# raw UTF-8 bytes into a child with the UTF-8 env vars removed and PYTHONUTF8=0.
+
+class ReviewRound3RawStdinTests(_GateCase):
+
+    def _run_raw(self, obj):
+        raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        env = dict(os.environ)
+        for key in ("PYTHONUTF8", "PYTHONIOENCODING", "PYTHONLEGACYWINDOWSSTDIO"):
+            env.pop(key, None)
+        env["PYTHONUTF8"] = "0"
+        env["LC_ALL"] = "C"
+        return subprocess.run([sys.executable, STE_GATE], input=raw, capture_output=True,
+                              timeout=15, env=env)
+
+    # Accented, CJK and emoji text, with CRLF, through the gate's raw stdin: exact bytes.
+    def test_r3_blocker_raw_utf8_stdin_write_byte_exact(self):
+        content = "We use it prior to café 日本語 😀 here.\r\nWe close it in order to stop.\r\n"
+        run = self._run_raw({"hook_event_name": "PreToolUse", "tool_name": "Write",
+                             "tool_input": {"file_path": self._path("utf.md"), "content": content}})
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        out = json.loads(run.stdout.decode("utf-8"))  # the printed JSON reads back as UTF-8
+        updated = out.get("hookSpecificOutput", {}).get("updatedInput", {})
+        self.assertEqual(updated.get("content"),
+                         "We use it before café 日本語 😀 here.\r\nWe close it to stop.\r\n")
+
+    def test_r3_blocker_raw_utf8_stdin_edit_byte_exact(self):
+        target = self._path("utf-edit.md")
+        with open(target, "wb") as f:
+            f.write("Intro café.\r\n".encode("utf-8"))
+        run = self._run_raw({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                             "tool_input": {"file_path": target, "old_string": "Intro café.\r\n",
+                                            "new_string": "We use it prior to café 日本語 😀 here.\r\n"}})
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        out = json.loads(run.stdout.decode("utf-8"))
+        updated = out.get("hookSpecificOutput", {}).get("updatedInput", {})
+        self.assertEqual(updated.get("new_string"),
+                         "We use it before café 日本語 😀 here.\r\n")
+
+    def test_r3_guard_invalid_utf8_byte_does_not_crash(self):
+        # A lone 0xE9 is not UTF-8. The gate must fall back: exit 0, no traceback, never exit 2.
+        raw = (b'{"hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": '
+               b'{"file_path": "bad.md", "content": "We close it in order to stop \xe9 here.\\n"}}')
+        env = dict(os.environ)
+        for key in ("PYTHONUTF8", "PYTHONIOENCODING", "PYTHONLEGACYWINDOWSSTDIO"):
+            env.pop(key, None)
+        env["PYTHONUTF8"] = "0"
+        env["LC_ALL"] = "C"
+        run = subprocess.run([sys.executable, STE_GATE], input=raw, capture_output=True,
+                             timeout=15, env=env)
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        self.assertNotIn(b"Traceback", run.stderr)
 
 
 if __name__ == "__main__":

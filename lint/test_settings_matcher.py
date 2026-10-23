@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's subagent-model-floor never sees those calls.
 """
-import ast, json, os, re, subprocess, sys, tempfile, unittest
+import json, os, re, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -142,7 +142,7 @@ class JudgeModelIds(unittest.TestCase):
 # AskUserQuestion check keep their own calls. The Stop rows are pinned by script name, not by index.
 DECISION_WATCH_PLUGIN = "decision-watch@claude-settings"
 STOP_SCRIPTS_AFTER_SWAP = sorted([
-    "stall_watch.py", "report_gate.py", "config_watch.py", "ruling_home.py",
+    "stall_watch.py", "report_gate.py", "md_sweep.py", "config_watch.py", "ruling_home.py",
     "precompact_handoff.py", "reply_judge.py", "feedback_gate.py", "reread_check.py",
 ])
 
@@ -304,103 +304,6 @@ class QuestionReviewer(unittest.TestCase):
     def test_question_outcome_script_is_gone(self):
         script = os.path.join(os.path.dirname(SETTINGS), "hooks", "question_outcome.py")
         self.assertFalse(os.path.exists(script), "hooks/question_outcome.py still exists")
-
-
-# The STE write gate and the markdown sweep are not wired in settings.json.
-# CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
-class SteHooksRemoved(unittest.TestCase):
-    def test_no_hook_runs_the_removed_scripts(self):
-        with open(SETTINGS, encoding="utf-8") as f:
-            events = json.load(f)["hooks"]
-        for script in ("ste_gate.py", "md_sweep.py"):
-            with self.subTest(script=script):
-                wired = ["%s %s" % (event, entry.get("matcher", "*"))
-                         for event, entries in events.items() for entry in entries
-                         if script in [n for c in command_rows([entry]) for n in script_names(c)]]
-                self.assertEqual(wired, [], "%s is still wired in settings.json" % script)
-
-    def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
-        # The three real gates stay: hooks/test_wrappers.py pins that each one fails closed.
-        with open(SETTINGS, encoding="utf-8") as f:
-            names = [n for c in command_rows(json.load(f)["hooks"]["PreToolUse"]) for n in script_names(c)]
-        for script in ("guard.py", "question_outcome.py"):
-            with self.subTest(script=script):
-                self.assertIn(script, names)
-
-
-# An installed settings.json copy still calls lint/ste_gate.py and lint/md_sweep.py until its owner
-# refreshes it, and a missing hook script fails closed: every write is refused. So both files stay as
-# stubs. Each one only exits 0 and imports nothing from the repo, so a repo change cannot break it.
-LINT = os.path.dirname(os.path.abspath(__file__))
-STUBS = ("ste_gate.py", "md_sweep.py")
-STUB_INPUTS = {
-    "empty": b"",
-    "write payload": json.dumps({"tool_name": "Write", "tool_input": {
-        "file_path": "notes.md", "content": "It is important to note that the file was written."}}).encode(),
-    "edit payload": json.dumps({"tool_name": "Edit", "tool_input": {
-        "file_path": "notes.md", "old_string": "a", "new_string": "b"}}).encode(),
-    "not json": b"{not json at all",
-    "binary": bytes(range(256)) * 8,
-    "long line": b"x" * 200000,
-}
-
-
-def imported_modules(path):
-    with open(path, encoding="utf-8") as f:
-        tree = ast.parse(f.read())
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            names.add(("." * node.level) + (node.module or "").split(".")[0])
-    return names
-
-
-class SteStubsExitZero(unittest.TestCase):
-    def run_stub(self, folder, name, data, args=()):
-        return subprocess.run([sys.executable, "-I", os.path.join(folder, name), *args],
-                              input=data, capture_output=True, cwd=folder, timeout=60)
-
-    def test_each_stub_exists(self):
-        for name in STUBS:
-            with self.subTest(stub=name):
-                self.assertTrue(os.path.isfile(os.path.join(LINT, name)),
-                                "%s is gone: an installed settings.json copy would refuse every write" % name)
-
-    def test_each_stub_only_exits_0_on_any_input_and_prints_nothing(self):
-        for name in STUBS:
-            for label, data in STUB_INPUTS.items():
-                with self.subTest(stub=name, stdin=label):
-                    got = self.run_stub(LINT, name, data)
-                    self.assertEqual((got.returncode, got.stdout), (0, b""), got.stderr[-300:])
-
-    def test_each_stub_exits_0_with_arguments_and_with_stdin_closed(self):
-        for name in STUBS:
-            with self.subTest(stub=name, case="arguments"):
-                self.assertEqual(self.run_stub(LINT, name, b"", ("--check", "notes.md", "-x")).returncode, 0)
-            with self.subTest(stub=name, case="stdin closed"):
-                got = subprocess.run([sys.executable, "-I", os.path.join(LINT, name)],
-                                     stdin=subprocess.DEVNULL, capture_output=True, cwd=LINT, timeout=60)
-                self.assertEqual(got.returncode, 0, got.stderr[-300:])
-
-    def test_each_stub_imports_nothing_from_the_repo(self):
-        for name in STUBS:
-            with self.subTest(stub=name):
-                path = os.path.join(LINT, name)
-                self.assertTrue(os.path.isfile(path), "%s is missing" % name)
-                self.assertEqual(sorted(imported_modules(path) - set(sys.stdlib_module_names)), [])
-
-    def test_each_stub_runs_alone_in_an_empty_folder(self):
-        # A stub that reads a repo file or a repo module fails here, where only the stub exists.
-        for name in STUBS:
-            with self.subTest(stub=name), tempfile.TemporaryDirectory() as folder:
-                self.assertTrue(os.path.isfile(os.path.join(LINT, name)), "%s is missing" % name)
-                with open(os.path.join(LINT, name), "rb") as src, open(os.path.join(folder, name), "wb") as dst:
-                    dst.write(src.read())
-                for label in ("empty", "write payload"):
-                    got = self.run_stub(folder, name, STUB_INPUTS[label])
-                    self.assertEqual((got.returncode, got.stdout), (0, b""), (label, got.stderr[-300:]))
 
 
 # The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool

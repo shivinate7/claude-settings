@@ -13,6 +13,8 @@ Checks, each over the window. Each failure is one stdout line of at most 240 cha
 names the reader, lint/guard_log_report.py, by its absolute path beside this hook's folder, so the
 path holds from any working folder.
 - a `crash` line: a guard hook crashed.
+- an `STE-fallback` line whose matched field ends fallback=crash.
+- an `STE-unchecked` line: the lint could not run, so those writes are unknown, not clear.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
 There is no volume check: denies grew with use, and a count check fired on 6 of 14 real days.
 A line's day is the date its timestamp is written with: guard.log holds Central wall time.
@@ -61,6 +63,14 @@ def failures(lines, window):
     crashes = [r for r in rows if r.decision == "crash"]
     if crashes:
         out.append("%d guard crash line(s), %s: a guard hook crashed. %s" % (len(crashes), span, tail))
+    fallbacks = [r for r in rows if r.rule == "STE-fallback" and r.matched.endswith("fallback=crash")]
+    if fallbacks:
+        out.append("%d STE-fallback line(s) ended fallback=crash, %s. %s"
+                   % (len(fallbacks), span, tail))
+    unchecked = [r for r in rows if r.rule == "STE-unchecked"]
+    if unchecked:
+        out.append("%d STE-unchecked line(s), %s: lint could not run, writes unknown. %s"
+                   % (len(unchecked), span, tail))
     return out
 
 

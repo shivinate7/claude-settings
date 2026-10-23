@@ -305,6 +305,7 @@ Write-Fixture 'CLAUDE.md' '# nogap fixture'
 Write-Fixture 'settings.json' '{}'
 Write-Fixture 'landed-dirs.txt' (($Landed -join "`n") + "`n")
 Write-Fixture 'agents\builder.md' '# builder'
+Write-Fixture 'lint\ste_gate.py' '# gate'
 Write-Fixture 'lint\ste_lint.py' '# lint'
 # The hook files in two versions, A and B. Each file is the repo's commented INSTALL_ID placeholder,
 # a label line, then padding, so a version is large: a copy of it takes long enough for the reader

@@ -9,7 +9,7 @@ file diff cannot make: whether an approval for this exact change is visible in t
 
 THE CHEAP PATH, FIRST. `changed_paths` reads this turn's dirty files from `git status
 --porcelain` against HEAD, scoped by mtime against the last human message the same way
-the old markdown sweep did (see `decisions/predicate-is-the-act.md`: a shape list of
+`lint/md_sweep.py` already does (see `decisions/predicate-is-the-act.md`: a shape list of
 write commands can only grow, so this hook reads the filesystem's own act instead of
 parsing Bash text). `looks_protected` then asks, per file, whether the name or location
 marks it a decision, a gate, a CLAUDE.md, or a settings file. Settings files use
@@ -259,8 +259,9 @@ def chat_text_after(records, idx, limit=6000):
 
 # ------------------------------------------------------------------ this turn's changed files
 #
-# git's own dirty-file list, scoped by mtime against the last human message.
-# See decisions/predicate-is-the-act.md. A git failure here (including "not
+# Same primitive lint/md_sweep.py already validated for this exact question ("what did this
+# turn write"): git's own dirty-file list, scoped by mtime against the last human message.
+# See decisions/predicate-is-the-act.md. Unlike md_sweep, a git failure here (including "not
 # a git work tree at all") is read as UNKNOWN rather than falling back to a plain walk: this
 # hook's job is a security read, not a lint, and an unscoped walk over a non-repo directory
 # is not an honest substitute for "what did this turn change".
@@ -309,7 +310,7 @@ def changed_this_turn(cwd, baseline):
     """Return ([relative paths], is_untracked) changed this turn, or (None, None) on failure.
 
     `baseline`, the last human message's epoch seconds, scopes the dirty set to this turn by
-    mtime. A missing baseline (no timestamp on the last human
+    mtime, same as lint/md_sweep.py. A missing baseline (no timestamp on the last human
     record) skips the mtime filter rather than reporting UNKNOWN: every dirty file is then in
     scope, a broader net, never a narrower one, which is the same bias this hook's whole
     triage stage already takes.
@@ -1143,7 +1144,8 @@ def config_notices(hook):
         if merges:
             try:
                 import report_gate  # lint/report_gate.py, same-repo sibling package
-                merges = already_named(merges, report_gate.block_text(reader.last_reply(hook)))
+                from ste_gate import last_reply  # lint/ste_gate.py
+                merges = already_named(merges, report_gate.block_text(last_reply(hook)))
             except Exception:
                 # Cannot tell whether the report already named the merge: still name it.
                 pass

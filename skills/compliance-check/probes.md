@@ -17,8 +17,8 @@ For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the
 file arguments. Its git diff reads this repo's tree, so it cannot target a child.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
-`check_landed_dirs.py`, `check_unknown_reads_contract.py`. `report_gate.py`
-is a hook: it already runs in the child's sessions. `ruling_census.py` reads
+`check_landed_dirs.py`, `check_unknown_reads_contract.py`. `md_sweep.py`, `ste_gate.py` and
+`report_gate.py` are hooks: they already run in the child's sessions. `ruling_census.py` reads
 session transcripts, not a repo.
 
 ## Probes per group
