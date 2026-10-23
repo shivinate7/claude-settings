@@ -6448,6 +6448,198 @@ class HostDefaultBranchRateRetry(unittest.TestCase):
             merge.host_default_branch("/repo")
         self.assertEqual((len(calls), pauses), (1, []))
 
+# ------------------------------------------------------------------ CI time caps
+# The merge tool warns when a job has used over 70% of its cap. The job times come from the `gh pr checks`
+# read the tool already makes (startedAt and completedAt are added to its --json fields). A job's cap is read
+# from the workflow files on disk. A job ended by its cap is a check cancelled after its full cap of minutes.
+# That verdict is "re-cap or split", not a test failure. load_config refuses merge.deadlineMinutes below the
+# largest job timeout-minutes in the base's workflows, plus 5, and a provisional 60-minute cap counts.
+# CapsHost fails the test on any gh call other than the three the merge tool already makes.
+from datetime import datetime, timedelta, timezone
+
+HEAD_SHA = "a" * 40
+START = datetime(2026, 10, 22, 10, 0, 0, tzinfo=timezone.utc)
+CAP_LINE = "job gates: 40 of 50 min; raise the cap from measured runs, or split its slowest suite"
+RE_CAP = "re-cap or split"
+REPO = pathlib.Path(HERE).parent
+
+GATES_WORKFLOW = "\n".join([
+    "name: gates", "on: push", "jobs:",
+    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+# A new job with the provisional 60-minute cap (fewer than 5 green runs). The floor is then 65.
+PROVISIONAL_WORKFLOW = "\n".join([
+    "name: gates", "on: push", "jobs:",
+    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "  fresh:", "    runs-on: ubuntu-latest",
+    "    # provisional: fewer than 5 green runs", "    timeout-minutes: 60", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+# Max job cap in this file is 50. Traps that a naive scan would read as caps: a step cap of 90, a
+# block-scalar line of 99, a comment of 120, a quoted string holding "# timeout-minutes: 130", and a lone quote.
+TRAPS_WORKFLOW = "\n".join([
+    "name: gates", "on: push", "jobs:",
+    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:",
+    "      - run: echo it's fine",
+    "      - run: |", "          echo \"timeout-minutes: 99\"", "          # timeout-minutes: 120",
+    "      - run: \"echo # timeout-minutes: 130\"",
+    "      - name: slow step", "        timeout-minutes: 90", "        run: echo ok",
+]) + "\n"
+
+SYNC_WORKFLOW = "\n".join([
+    "name: sync", "on: push", "jobs:",
+    "  sync:", "    runs-on: ubuntu-latest", "    timeout-minutes: 60", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
+def at(minutes):
+    return (START + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def check(name, bucket, minutes):
+    """One row of `gh pr checks --json name,bucket,link,startedAt,completedAt`: the job ran from START for `minutes`."""
+    return {"name": name, "bucket": bucket, "link": "https://github.com/shivinate7/claude-settings/actions/runs/100/job/200",
+            "startedAt": at(0), "completedAt": at(minutes)}
+
+
+def run(conclusion):
+    return {"name": "gates", "status": "completed", "conclusion": conclusion, "databaseId": 100}
+
+
+def stamp_text(deadline):
+    return json.dumps({"defaultBranch": "main", "merge": {"method": "merge", "deadlineMinutes": deadline}}) + "\n"
+
+
+def push_base(env, files):
+    """Commit `files` (path -> text or bytes) on origin's main from the other clone, then fast-forward env.co to it."""
+    o = env.other
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    for path, data in files.items():
+        full = os.path.join(o, *path.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as f:
+            f.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+    sh(o, "git", "add", "-A")
+    sh(o, "git", "commit", "-q", "-m", "base files")
+    sh(o, "git", "push", "-q", "origin", "main")
+    sh(env.co, "git", "pull", "-q", "--ff-only", "origin", "main")
+
+
+class CapsHost(merge.Host):
+    """A real Host whose only seam is `gh`. It serves fixture JSON for the three calls the merge tool already makes
+    (pr view, pr checks, run list), and answers pr checks with only the fields its --json asks for. Any other gh call fails."""
+    def __init__(self, cwd, checks, runs):
+        super().__init__(required=["gates"], base="main", minute=60, pause=lambda s: None, cwd=cwd)
+        self.fixture = {"checks": checks, "runs": runs}
+
+    def gh(self, args, cwd=None):
+        key = tuple(args[:2])
+        if key == ("pr", "view"):
+            return 0, json.dumps({"headRefOid": HEAD_SHA, "headRefName": "feat", "baseRefName": "main", "state": "OPEN",
+                                  "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "body": ""})
+        if key == ("pr", "checks"):
+            want = args[args.index("--json") + 1].split(",")
+            return 0, json.dumps([{k: row[k] for k in want if k in row} for row in self.fixture["checks"]])
+        if key == ("run", "list"):
+            return 0, json.dumps(self.fixture["runs"])
+        raise AssertionError(f"unexpected gh call: {args}")
+
+
+class JobCapWarning(Env):
+    """Case a (the 70% line) and case b (the timeout verdict), through a real Host with fixture gh output."""
+    def setUp(self):
+        super().setUp()
+        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+
+    def read(self, host, fn):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = fn(host)
+        return result, out.getvalue()
+
+    def test_a_checks_read_prints_one_line_for_a_job_at_80_percent_and_none_at_50(self):
+        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        _, out = self.read(host, lambda h: h.checks(7))
+        hits = [l for l in out.splitlines() if "job gates:" in l]
+        self.assertEqual(len(hits), 1, out)
+        self.assertIn(CAP_LINE, hits[0], out)
+        self.assertNotIn("job scope", out)
+
+    def test_a_wait_over_a_green_run_prints_the_line_and_still_merges(self):
+        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        (ok, why), out = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
+        self.assertTrue(ok, why)
+        self.assertIn(CAP_LINE, out)
+
+    def test_a_cancel_at_the_full_cap_is_a_timeout_not_a_test_failure(self):
+        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertIn(RE_CAP, why)
+
+    def test_a_cancel_sooner_than_the_cap_is_not_a_timeout(self):
+        host = CapsHost(self.co, [check("gates", "cancel", 2)], [run("cancelled")])
+        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertNotIn(RE_CAP, why)
+
+
+class StampDeadlineFloor(Env):
+    """load_config's check on merge.deadlineMinutes: at least the largest job timeout-minutes in the base's workflows, plus 5."""
+    def stop_text(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                merge.load_config(self.co, "main", ".github/stamp.json")
+            except merge.Stop as e:
+                return str(e)
+        return None
+
+    def test_a_deadline_under_the_largest_cap_plus_five_stops_with_a_line_naming_the_file(self):
+        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        msg = self.stop_text()
+        self.assertIsNotNone(msg, "a deadline of 54 under a 50-minute job cap must stop the merge")
+        self.assertIn(".github/stamp.json", msg)
+        self.assertIn("deadlineMinutes", msg)
+        self.assertIn("55", msg)
+
+    def test_a_deadline_at_the_largest_cap_plus_five_passes(self):
+        push_base(self, {".github/stamp.json": stamp_text(55), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        self.assertIsNone(self.stop_text())
+
+    def test_the_floor_is_the_largest_job_cap_in_any_file_and_ignores_steps_comments_and_strings(self):
+        push_base(self, {".github/stamp.json": stamp_text(64), ".github/workflows/gates.yml": TRAPS_WORKFLOW,
+                         ".github/workflows/sync.yml": SYNC_WORKFLOW})
+        self.assertIsNotNone(self.stop_text(), "a deadline of 64 under a 60-minute job cap in sync.yml must stop the merge")
+        push_base(self, {".github/stamp.json": stamp_text(65)})
+        self.assertIsNone(self.stop_text(), "65 is the floor: the traps (99, 120, 130, step cap 90) must not raise it")
+
+    def test_a_provisional_sixty_minute_cap_sets_the_floor_at_sixty_five(self):
+        push_base(self, {".github/stamp.json": stamp_text(55), ".github/workflows/gates.yml": PROVISIONAL_WORKFLOW})
+        msg = self.stop_text()
+        self.assertIsNotNone(msg, "a deadline of 55 under a provisional 60-minute cap must stop the merge")
+        self.assertIn("65", msg)
+        push_base(self, {".github/stamp.json": stamp_text(65)})
+        self.assertIsNone(self.stop_text())
+
+    def test_a_repo_with_no_workflow_has_no_floor(self):
+        push_base(self, {".github/stamp.json": stamp_text(5)})
+        self.assertIsNone(self.stop_text())
+
+
+class RepoDeadlineFloor(unittest.TestCase):
+    """The repo's own merge.deadlineMinutes against the job caps in its own workflow files. Red while the wait is below the floor."""
+    def test_the_repos_deadline_is_at_least_the_largest_job_cap_plus_five(self):
+        deadline = json.loads((REPO / ".github" / "stamp.json").read_bytes())["merge"]["deadlineMinutes"]
+        caps = [int(m.group(1)) for p in sorted((REPO / ".github" / "workflows").glob("*.yml"))
+                for m in re.finditer(rb"^ {4}timeout-minutes: *(\d+)\r?$", p.read_bytes(), re.M)]
+        self.assertTrue(caps, "no job timeout-minutes found under .github/workflows")
+        self.assertGreaterEqual(deadline, max(caps) + 5,
+                                f"merge.deadlineMinutes is {deadline}; the largest job cap is {max(caps)}, so it must be at least {max(caps) + 5}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
