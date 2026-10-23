@@ -7,8 +7,9 @@ Spec: decisions/windows-temp-sweep.md.
 The transcript is `<config dir>/projects/<project>/<session id>.jsonl`. Its mtime decides, never the
 folder's own mtime. No transcript, an unreadable one, or a future mtime means keep. A session whose
 process is live (`<config dir>/sessions/*.json`) keeps its folder, and so does any folder when the
-sessions folder cannot be read. The step touches only direct children of `<Temp>/claude/<project>/`;
-a link is never followed or removed. `<Temp>` is TEMP, else LOCALAPPDATA/Temp.
+sessions folder or the session reader (hooks/guard_core.py) cannot be read. The step touches only
+direct children of `<Temp>/claude/<project>/`; a link is never followed or removed.
+`<Temp>` is TEMP, else LOCALAPPDATA/Temp.
 
 The Windows-only gate is the caller's, not this file's: the gates run this suite on Linux and macOS
 with fixture folders.
@@ -24,7 +25,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
-import guard_core  # noqa: E402
+from shared_names import config_dir  # noqa: E402  the one home of the config dir, no guard module
 
 IDLE_SECONDS = 24 * 3600
 past_deadline = lambda: False  # noqa: E731  (the machine-wide sweep sets its own clock check)
@@ -44,11 +45,17 @@ def temp_claude_root():
 
 def live_session_ids():
     """The ids of sessions whose process is live or cannot be told apart from live, or None when
-    the sessions folder cannot be read. A record names its session by `sessionId`, else by its
-    file name."""
-    folder = os.path.join(guard_core.config_dir(), "sessions")
+    the sessions folder or the session reader cannot be read. A record names its session by
+    `sessionId`, else by its file name."""
+    folder = os.path.join(config_dir(), "sessions")
     if not os.path.isdir(folder):
         return set()
+    try:
+        # Loaded here, not at module load: sweep.py imports this file, and importing sweep.py
+        # must load no guard module (its start-up cost lands on every SessionEnd run).
+        import guard_core
+    except Exception:  # a missing or half-copied guard_core: keep every folder
+        return None
     try:
         names = os.listdir(folder)
     except OSError:
@@ -79,9 +86,9 @@ def idle_sessions(errors, now=None):
         return
     live = live_session_ids()
     if live is None:
-        errors.append("could not read the sessions folder; nothing removed")
+        errors.append("could not read the live sessions; nothing removed")
         return
-    transcripts = os.path.join(guard_core.config_dir(), "projects")
+    transcripts = os.path.join(config_dir(), "projects")
     try:
         projects = sorted(os.listdir(root))
     except OSError as exc:
