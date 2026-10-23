@@ -1625,15 +1625,19 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
-# use and disk free on the home drive are shares of this machine's capacity; CPU is a second signal. Busy
-# (memory over 85%, disk free under 15%, or CPU over 85% with memory over 75%) refuses a Workflow and an
+# use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
+# size; CPU, from CPU ticks, is a second signal. Busy (memory over 85%, disk free under the smaller of 10% of the
+# disk and 15 GB, or CPU over 85% with memory over 75%) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under 5%) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
+# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
-LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU, LOAD_BUSY_CPU_MEMORY = 85.0, 15.0, 85.0, 75.0
-LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
+LOAD_BUSY_MEMORY, LOAD_BUSY_CPU, LOAD_BUSY_CPU_MEMORY = 85.0, 85.0, 75.0
+LOAD_FULL_MEMORY = 95.0
+LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
+LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
+GIB = 2 ** 30
 LOAD_BUSY_REASON = "the machine is busy (%s). %s"
 LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
@@ -1669,13 +1673,15 @@ def _read_memory():
 
 
 def _read_disk():
+    """(GB free, GB total) of the drive that holds the home folder, 2**30 bytes to the GB."""
     import shutil
     usage = shutil.disk_usage(os.path.expanduser("~"))
-    return 100.0 * usage.free / usage.total
+    return usage.free / GIB, usage.total / GIB
 
 
 def _read_cpu():
-    """Percent of CPU busy: two Windows system-time reads 200 ms apart, else the 1-minute load average per core."""
+    """Percent of CPU busy from the OS's CPU ticks, read twice 200 ms apart: Windows GetSystemTimes, Mac Mach
+    host_statistics, Linux /proc/stat. Never the load average, which counts waiting work and not busy cores."""
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -1692,21 +1698,46 @@ def _read_cpu():
         idle_b, kernel_b, user_b = ticks()
         total = (kernel_b - kernel_a) + (user_b - user_a)   # the kernel time holds the idle time
         return 100.0 * (total - (idle_b - idle_a)) / total if total > 0 else None
-    if hasattr(os, "getloadavg"):
-        return 100.0 * os.getloadavg()[0] / (os.cpu_count() or 1)
-    return None
+    if sys.platform == "darwin":
+        import ctypes
+        libsystem = ctypes.CDLL("/usr/lib/libSystem.dylib")
+        libsystem.mach_host_self.restype = ctypes.c_uint32
+
+        def ticks():
+            info, count = (ctypes.c_uint32 * 4)(), ctypes.c_uint32(4)   # user, system, idle, nice
+            if libsystem.host_statistics(libsystem.mach_host_self(), 3, ctypes.byref(info),   # HOST_CPU_LOAD_INFO
+                                         ctypes.byref(count)) != 0:
+                raise OSError("host_statistics failed")
+            return sum(info), info[2]
+    elif sys.platform.startswith("linux"):
+        def ticks():
+            with open("/proc/stat") as stat:
+                fields = [int(n) for n in stat.readline().split()[1:9]]   # user nice system idle iowait irq softirq steal
+            return sum(fields), fields[3] + fields[4]
+    else:
+        return None
+    total_a, idle_a = ticks()
+    time.sleep(0.2)
+    total_b, idle_b = ticks()
+    total = total_b - total_a
+    return 100.0 * (total - (idle_b - idle_a)) / total if total > 0 else None
 
 
 def read_load() -> dict:
-    """The three readings as percents (memory_pct and cpu_pct busy, disk_free_pct free). No child process
-    and no file. A reading that fails or cannot be read is None, and one failure hides no other."""
+    """The readings: memory_pct and cpu_pct (percent in use, percent busy, clamped to 0-100) and disk_free_gb
+    and disk_total_gb (GB, not clamped). No child process and no file. A reading that fails or cannot be read
+    is None, and one failure hides no other."""
     out = {}
-    for key, read in (("memory_pct", _read_memory), ("disk_free_pct", _read_disk), ("cpu_pct", _read_cpu)):
+    for key, read in (("memory_pct", _read_memory), ("cpu_pct", _read_cpu)):
         try:
             value = read()
             out[key] = None if value is None else min(100.0, max(0.0, float(value)))
         except Exception:
             out[key] = None
+    try:
+        out["disk_free_gb"], out["disk_total_gb"] = _read_disk()
+    except Exception:
+        out["disk_free_gb"] = out["disk_total_gb"] = None
     return out
 
 
@@ -1726,9 +1757,15 @@ def load_hit(tool: str, tool_input) -> tuple:
         v = reading.get(key)
         return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
 
-    memory, disk, cpu = value("memory_pct"), value("disk_free_pct"), value("cpu_pct")
+    memory, cpu = value("memory_pct"), value("cpu_pct")
+    disk, disk_total = value("disk_free_gb"), value("disk_total_gb")
+    disk_text = None if disk is None or disk_total is None else "disk %.1f GB free of %.0f GB" % (disk, disk_total)
+
+    def disk_under(share, gb):
+        return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
+
     full = [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
-                        disk is not None and disk < LOAD_FULL_DISK and "disk %.1f%% free" % disk) if t]
+                        disk_under(LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB) and disk_text) if t]
     if full:
         return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
@@ -1740,7 +1777,7 @@ def load_hit(tool: str, tool_input) -> tuple:
     cpu_busy = cpu is not None and memory is not None and cpu > LOAD_BUSY_CPU and memory > LOAD_BUSY_CPU_MEMORY
     memory_busy = memory is not None and (memory > LOAD_BUSY_MEMORY or cpu_busy)
     busy = [t for t in (memory_busy and "memory %.1f%% in use" % memory,
-                        disk is not None and disk < LOAD_BUSY_DISK and "disk %.1f%% free" % disk,
+                        disk_under(LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB) and disk_text,
                         cpu_busy and "CPU %.1f%% busy" % cpu) if t]
     if busy:
         # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
