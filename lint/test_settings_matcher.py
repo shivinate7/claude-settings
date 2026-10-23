@@ -320,12 +320,15 @@ class SteHooksRemoved(unittest.TestCase):
                 self.assertEqual(wired, [], "%s is still wired in settings.json" % script)
 
     def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
-        # The three real gates stay: hooks/test_wrappers.py pins that each one fails closed.
+        # The two command gates stay: hooks/test_wrappers.py pins that each one fails closed. The question
+        # check is one agent hook, so it is matched by type and by its matcher, not by a script name.
         with open(SETTINGS, encoding="utf-8") as f:
-            names = [n for c in command_rows(json.load(f)["hooks"]["PreToolUse"]) for n in script_names(c)]
-        for script in ("guard.py", "question_outcome.py"):
-            with self.subTest(script=script):
-                self.assertIn(script, names)
+            pre = json.load(f)["hooks"]["PreToolUse"]
+        names = [n for c in command_rows(pre) for n in script_names(c)]
+        self.assertIn("guard.py", names)
+        agent_entries = [e for e in pre if any(h.get("type") == "agent" for h in e.get("hooks", []))]
+        covered = [e for e in agent_entries if "AskUserQuestion" in e.get("matcher", "").split("|")]
+        self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
 
 
 # An installed settings.json copy still calls lint/ste_gate.py and lint/md_sweep.py until its owner
