@@ -285,17 +285,12 @@ def generator(root, *args, cwd=None, flag_root=False, env=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-# Text markers the SessionStart refresh must keep: the remote exit, the fast-forward-only move of
-# main, and the pin helper it runs. It must not contain stash, reset, switch, checkout, --force or a
-# force refspec. Behaviour is pinned by the cases in merge/test_install_from_main.sh; no case runs
-# those words, so this text lint is the only guard on them.
-SESSION_REFRESH_MUST = (
-    '[ -n "$CLAUDE_CODE_REMOTE" ] && exit 0',
-    'refs/remotes/origin/main:refs/heads/main',
-    'merge -q --ff-only origin/main',
-    'merge/install_from_main.sh',
+MAIN_SESSION_REFRESH = (
+    '[ -n "$CLAUDE_CODE_REMOTE" ] && exit 0; d=$(sed -n "s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p" "${CLAUDE_CONFIG_DI'
+    'R:-$HOME/.claude}/CLAUDE.md" | head -n1); case "$d" in "~"/*) d="$HOME${d#\\~}";; esac; [ -n "$d" ] &'
+    '& [ -d "$d/.git" ] && git -C "$d" pull -q --ff-only >/dev/null 2>&1; [ -f "$d/install.sh" ] && comma'
+    'nd -v bash >/dev/null 2>&1 && case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) bash "$d/install.sh" >/dev/null 2>&1;; esac; exit 0'
 )
-SESSION_REFRESH_MUST_NOT = ("stash", "reset", "switch", "checkout", "--force", "+refs/")
 
 
 # ---- real repo -------------------------------------------------------------------------------
@@ -438,17 +433,13 @@ class RealRepo(unittest.TestCase):
         self.assertEqual(committed, out.replace("\r\n", "\n"),
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
-    def test_r9_session_start_refresh_has_its_text_markers(self):
-        # A text lint, not a behaviour test. The refresh stays inline: a move into a script gates
-        # recovery on an install.
-        commands = [hook.get("command", "") for event, matcher, _cond, hook in registrations()
+    def test_r9_session_start_refresh_command_is_byte_identical_to_main(self):
+        # The refresh stays inline. A move into a script gates recovery on an install.
+        # Equal as the JSON decodes, which is the exact text the harness runs.
+        commands = [hook.get("command") for event, matcher, _cond, hook in registrations()
                     if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
-        refresh = [c for c in commands if "CLAUDE.md" in c]
-        self.assertEqual(len(refresh), 1, "want one SessionStart startup|resume refresh that reads CLAUDE.md, found %d" % len(refresh))
-        missing = [m for m in SESSION_REFRESH_MUST if m not in refresh[0]]
-        found = [m for m in SESSION_REFRESH_MUST_NOT if m in refresh[0]]
-        self.assertFalse(missing, "the SessionStart refresh lost: %s" % ", ".join(missing))
-        self.assertFalse(found, "the SessionStart refresh now has: %s" % ", ".join(found))
+        self.assertIn(MAIN_SESSION_REFRESH, commands,
+                      "no SessionStart startup|resume command is byte-identical to the refresh on origin/main")
 
 
 # ---- fixtures: the generator on temp trees ----------------------------------------------------
