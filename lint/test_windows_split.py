@@ -36,6 +36,7 @@ REQUIRED = [
     "python hooks/test_precompact_handoff.py",
     "python hooks/test_decision_watch.py",
     "python hooks/test_prose_judge.py",
+    "python hooks/test_question_outcome.py",
     "python hooks/test_rm_prompt_answer.py",
     "python hooks/test_agent_brief.py",
     "python hooks/test_wrappers.py",

@@ -6,8 +6,8 @@ Run it from the repository root:
     python hooks/test_wrappers.py
 
 Contract, from decision gate-hooks-fail-closed:
-- The three gate entries (PreToolUse guard, ste_gate; PermissionRequest rm_prompt_answer) carry
-  no `onFailure`: a timeout under load must not refuse every call.
+- The four gate entries (PreToolUse guard, ste_gate, question_outcome; PermissionRequest
+  rm_prompt_answer) carry no `onFailure`: a timeout under load must not refuse every call.
 - A gate whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
 - A gate whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
   and both installers, so the reader installs Python 3 before running either one.
@@ -60,6 +60,7 @@ SH = shutil.which("sh")
 GATES = {
     "hooks/guard.py": "PreToolUse",
     "lint/ste_gate.py": "PreToolUse",
+    "hooks/question_outcome.py": "PreToolUse",
     "hooks/rm_prompt_answer.py": "PermissionRequest",
 }
 # scripts in the advisory class: they never deny

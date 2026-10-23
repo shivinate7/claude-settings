@@ -32,7 +32,7 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     closes capture.
   - While closed, only the opener is captured; every other prompt is dropped.
   - A notice is never captured: a prompt that starts with `<task-notification>` or
-    `<system-reminder>` (shared_names.MACHINE_TAGS). A notice is not judged, does not close
+    `<system-reminder>` (question_outcome.MACHINE_TAGS). A notice is not judged, does not close
     capture, and is not an owner message. A tag quoted mid-message is owner text.
   - Quiet time: an open capture closes when the last captured owner message is more than 10
     minutes old. The prompt after that gap is not captured, and makes no judge call. The gap runs

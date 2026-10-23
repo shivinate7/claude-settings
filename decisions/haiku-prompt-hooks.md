@@ -4,10 +4,11 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 ## The ruling
 
-**Prompt hooks judge rules that no script can parse.** Each blocks the call when it finds a breach (owner ruling 2026-10-07). A prompt hook cannot warn: it answers `ok` and shows nothing, or blocks with a reason. A block returns its reason to the session and the turn goes on (`continueOnBlock`). `settings.json` holds two (counted from its `type: prompt` entries). The AskUserQuestion judge is an Opus agent hook, `question-reviewer-agent-hook`.
+**Prompt hooks judge rules that no script can parse.** Each blocks the call when it finds a breach (owner ruling 2026-10-07). A prompt hook cannot warn: it answers `ok` and shows nothing, or blocks with a reason. A block returns its reason to the session and the turn goes on (`continueOnBlock`). `settings.json` holds three (counted from its `type: prompt` entries).
 
 | Hook on | Rules it judges |
 |---|---|
+| `AskUserQuestion` | `style-option-says-effect`, `style-question-states-problem`, `output-bring-decisions-as-question` |
 | `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `subagent-model-cap` |
 | `SendMessage` | `parallelism-no-mid-task-talk` |
 
@@ -16,7 +17,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 - The rules that these hooks read stay `unmechanized` in `lint/rule_mechanisms.json` until a hook catches a real defect.
 - A hook that cries wolf is spent (`verification-cry-wolf-guard-is-spent`). Remove one that blocks good input. The trial review of 2026-10-17 11:33 CDT: the blocking judges stay.
 
-**The owner prefers Haiku at `xhigh`** (owner ruling 2026-10-12), but a prompt hook takes no effort field, so a judge that needs it is a command hook that calls Haiku through `decision_watch.invoke_model`. The two prompt judges move to Haiku at `xhigh`, and this record changes in place, when one of these happens:
+**The owner prefers Haiku at `xhigh`** (owner ruling 2026-10-12), but a prompt hook takes no effort field, so a judge that needs it is a command hook that calls Haiku through `decision_watch.invoke_model`. The three prompt judges move to Haiku at `xhigh`, and this record changes in place, when one of these happens:
 
 - Claude Code adds an effort field to prompt hooks.
 - A mod judge has its own model call that takes an effort level.

@@ -32,7 +32,7 @@ Orchestrator's call, not an owner word:
 - Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
 - Owner, 2026-10-18 16:25 CDT: the role and model guards (`subagent-model-cap`, `subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards).
 - Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps a subagent inside its own worktree (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop).
-- Orchestrator's call, because no pass check reaches them: the missing-module deny in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (`ste_gate`, `sendmessage_state`, the prompt judges, the question reviewer agent hook).
+- Orchestrator's call, because no pass check reaches them: the missing-module deny in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (`ste_gate`, `question_outcome`, `sendmessage_state`, the prompt judges).
 
 Why: the owner needs a way to force through a refusal that blocks real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
 
