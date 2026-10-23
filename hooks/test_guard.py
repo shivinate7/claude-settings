@@ -14332,7 +14332,7 @@ for _label, _check in (
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, disk free on the
-# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks, read twice, as a second
+# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks (Windows reads twice, Mac and Linux up to six times), as a second
 # signal. It counts no claude process and no running lane. A GB here is 2**30 bytes, as df -k and PowerShell
 # 1GB give. The levels (decision machine-load-brake; memory and CPU levels are placeholders):
 #   busy  memory over 85%, disk free under the smaller of 10% of the disk and 15 GB, or (CPU over 85% AND
@@ -14357,8 +14357,8 @@ FAMILY = "load-brake"
 #                  raise: every reading then counts as normal. It returns no claude_procs, and a
 #                  claude_procs key in a reading changes nothing.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads the Mach CPU ticks through
-#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read twice) and memory
-#                  through sysctlbyname; linux reads /proc/stat twice; both read the disk through
+#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read up to six times) and memory
+#                  through sysctlbyname; linux reads /proc/stat up to six times; both read the disk through
 #                  shutil.disk_usage on the home folder and never the load average.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
@@ -15017,7 +15017,7 @@ lb_add("Agent, load 107 and CPU ticks 50% busy, memory 80%, run_in_background tr
 lb_add("Agent, load 1.0 and CPU ticks 90% busy, memory 80%, run_in_background true: busy, refused, names CPU and memory",
        lb_decision_check("Agent", None, "deny", LB_CPU90 + LB_MEM80, background=True, lacks=(LB_FOREGROUND,),
                          fake=lb_fake("darwin", busy=90.0, load=1.0, memory=80)))
-# CPU on linux, from /proc/stat read twice. The reader has no memory on linux, so only the value is pinned.
+# CPU on linux, from /proc/stat read up to six times. The reader has no memory on linux, so only the value is pinned.
 lb_add("CPU on linux: /proc/stat 50% busy with load 107 reads cpu_pct 50, not the load average",
        lb_reader_fake(lb_fake("linux", busy=50.0, load=107.0), lb_cpu_share(50.0)))
 lb_add("CPU on linux: /proc/stat 90% busy with load 1.0 reads cpu_pct 90",
