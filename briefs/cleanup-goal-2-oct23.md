@@ -167,17 +167,27 @@ then reinstalls whatever local main holds, nothing moves local main, and all out
   2. Warn before the cap fires: when the merge tool reads a run, it prints one line for each job
      whose time was over 70% of its cap ("job X: 31 of 36 min; raise the cap from measured runs,
      or split its slowest suite"). It reads the run it already reads; no new call on any other
-     path, no log.
-  3. A timeout is not a test failure: when a job ends by its cap with every finished step green,
-     the merge tool says so in its verdict, and the red-run rule treats it as "re-cap or split",
-     not as a reason to drop the lane.
+     path, no log. Advisor ruling, Oct 23: add startedAt and completedAt to the fields of the
+     `gh pr checks` call merge.py already makes; read each job's cap from the workflow files on
+     disk. No `gh run view` call.
+  3. A timeout is not a test failure: when a job ends by its cap, the merge tool says so in its
+     verdict, and the red-run rule treats it as "re-cap or split", not as a reason to drop the
+     lane. Advisor ruling, Oct 23: a job ended by its cap is one whose check is cancelled and
+     whose completedAt minus startedAt is at least its cap (a concurrency cancel ends sooner).
+     Step data is not read: on the Oct 17 timed-out gates job (run 39074284633) every step reads
+     success, so "every finished step green" adds nothing.
   4. The merge wait follows the caps: merge.deadlineMinutes in .github/stamp.json is the largest
      job timeout-minutes plus 5; extend the check that validates stamp.json so it fails when the
      wait is below the largest cap (red on main, green after).
   5. Run the report-gate timing test that failed once 20 times on main; fix the cause if it
-     fails, never add a retry.
+     fails, never add a retry. Advisor ruling, Oct 23: no record names the test, so run all six
+     wall-clock bounds in lint/test_gates.py (the report-gate fixture file): test_114 in
+     UICopyRoundTwoTests, test_27 and test_28 in SteGateLogTests, test_09 in MdSweepLogTests,
+     and the two lock-error tests in GuardLogAppendRaceTests. Run the whole file 20 times, under
+     load, since the failure came in a full run and not alone. If none fails, say so and change
+     nothing.
   Tests: a fixture run with a job at 80% of its cap prints the line, at 50% prints nothing; a
-  timed-out job with all steps green gets the timeout verdict; red on main. The ci-hygiene skill
+  job cancelled at its cap gets the timeout verdict, one cancelled sooner does not; red on main. The ci-hygiene skill
   is used by every repo, so this reaches banchi, q_max, home-app and home too.
 - ste-lint-import-path (c35): actions/ste-lint/run.sh line 131 runs `python3 -c` in the linted
   repo's root, so a json.py or ste_emit.py there runs as code. Move that summary into a script
