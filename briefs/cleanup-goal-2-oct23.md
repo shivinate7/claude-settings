@@ -135,8 +135,17 @@ then reinstalls whatever local main holds, nothing moves local main, and all out
 /dev/null. Incident, Oct 22: the owner's Mac pin was 174 commits behind origin/main.
 
 - Find the clone from the pin with `git rev-parse --git-common-dir`.
-- Fetch origin main and move local main fast-forward only, never force. If main is checked out
-  in any worktree, do not touch that worktree: skip the move and log it.
+- Fetch origin main and move local main fast-forward only, never force. Advisor ruling, Oct 23
+  (replaces "if main is checked out in any worktree, skip"; read literally it skipped on every
+  normal clone, since the clone's own checkout holds main): do what merge.py's ff_main and
+  launch.py already do. No worktree holds main: `git fetch origin main:main`. A worktree holds
+  main (the clone's own checkout or a linked one): fast-forward it there with
+  `git -C <that tree> merge --ff-only origin/main`, only when it is on main and has no tracked
+  changes (`git status --porcelain --untracked-files=no` is empty). Untracked files do not block
+  it; git itself refuses the fast-forward when one would be overwritten. Tracked changes, or a
+  refused fast-forward: leave that tree as it is and write one line to the install log. Never
+  stash, reset, switch or force. The pin still follows local main
+  (decision merge-reinstalls-from-main, unchanged).
 - Run merge/install_from_main.sh from the clone (decision merge-reinstalls-from-main: only that
   script moves the pin).
 - Keep: exit at once when CLAUDE_CODE_REMOTE is set; never block the session; a failed step never
@@ -147,9 +156,14 @@ then reinstalls whatever local main holds, nothing moves local main, and all out
   near merge-reinstalls-from-main), README.md ("Why local sessions never run stale": rewrite in
   place), lint/test_hook_catalog.py (re-point the pinned hook text), hooks/test_guard.py (the
   guard allows the new commands).
+- Windows has the same fault (the hook's MINGW branch runs nothing, and the .git test fails on
+  the pin), so this lane fixes Windows too; install_from_main.sh already runs install.ps1 there.
 - Proof: test first, red on today's hook: a temp clone with a -live worktree, origin ahead; after
-  the hook runs, the pin is at origin/main. Second case: main checked out in the clone; the hook
-  leaves it and logs one line. Builder makes both green. Reviewer reads the diff.
+  the hook runs, the pin is at origin/main. Second case: main checked out in the clone, no tracked
+  changes, an untracked file present, origin ahead; the hook fast-forwards it and the pin is at
+  origin/main. Third case: main checked out with a tracked change; the hook leaves that tree and
+  its change as they were, logs one line, and the pin stays at local main. Builder makes all
+  green. Reviewer reads the diff.
 
 ## Batch 3. Small lanes (each a few lines; one integration PR)
 
