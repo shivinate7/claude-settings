@@ -620,6 +620,65 @@ class TempSweepTests(unittest.TestCase):
         self.check_exit(proc)
 
 
+# ----------------------------------------------------- the temp-folder step's wiring in sweep.main
+#
+# `sweep.main` calls the temp-folder step once per full run, after the simulator tier, with the
+# run's confirm flag. Off Windows the step must not run. Here the step is a recorder and every
+# tier that reads the real machine is stubbed, so no case touches a real temp
+# folder, process, or run log. `reached` is the positive control: the run got past the simulator
+# tier, so an empty recording means the step did not run, not that the run ended early.
+
+class TempSweepWiringTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="janitor_temp_wiring_")
+        self.repo = os.path.join(self.base, "repo")
+        self.log = os.path.join(self.base, "restore.log")
+        subprocess.run([VCS, "init", self.repo], check=True, capture_output=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def run_main(self, windows, *flags):
+        """Real `sweep.main` on the fixture repo. Returns (confirm flags the step saw, reached)."""
+        seen = []
+
+        def record(confirm):
+            seen.append(confirm)
+            return 0
+
+        env = {"HOME": self.base, "USERPROFILE": self.base,
+               "JANITOR_RUN_LOG": os.path.join(self.base, "run.log")}
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, env))
+            stack.enter_context(mock.patch.object(sweep, "_on_windows", return_value=windows))
+            stack.enter_context(mock.patch.object(sweep.temp_sweep, "run", record))
+            stack.enter_context(mock.patch.object(sweep, "find_dead_rooted", return_value=[]))
+            stack.enter_context(mock.patch.object(sweep, "find_loose_processes", return_value=[]))
+            stack.enter_context(mock.patch.object(sweep, "reap_listener"))
+            sim = stack.enter_context(mock.patch.object(sweep, "sim_tier", return_value=[]))
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = sweep.main(["--restore-log", self.log, *flags, self.repo])
+        self.assertEqual(code, 0, "the sweep exited %r" % (code,))
+        return seen, sim.called
+
+    def test_windows_runs_the_step_once_without_confirm(self):
+        seen, reached = self.run_main(True)
+        self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
+        self.assertEqual(seen, [False], "on Windows a preview run must call the temp step once, "
+                                        "with confirm False; it saw %r" % (seen,))
+
+    def test_not_windows_never_runs_the_step(self):
+        seen, reached = self.run_main(False)
+        self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
+        self.assertEqual(seen, [], "off Windows the temp step must not run; it saw %r" % (seen,))
+
+    def test_confirm_passes_true_to_the_step(self):
+        seen, reached = self.run_main(True, "--confirm")
+        self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
+        self.assertEqual(seen, [True], "on Windows a --confirm run must call the temp step with "
+                                       "confirm True; it saw %r" % (seen,))
+
+
 # --------------------------------------------------------------------------- the anchor arm
 
 
