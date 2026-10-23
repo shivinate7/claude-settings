@@ -514,19 +514,20 @@ def temp_dead_pid():
     return child.pid
 
 
-def temp_make_link(link, target):
-    """A symlink at LINK to the folder TARGET; on Windows a junction when no symlink is allowed.
-    Returns None on success, else the reason no link could be made."""
-    try:
-        os.symlink(target, link, target_is_directory=True)
-        return None
-    except OSError as exc:
-        if not sys.platform.startswith("win"):
+def temp_make_link(link, target, junction=False):
+    """A symlink at LINK to the folder TARGET, or with JUNCTION a Windows junction. Returns None on
+    success, else the reason no such link could be made here."""
+    if not junction:
+        try:
+            os.symlink(target, link, target_is_directory=True)
+            return None
+        except OSError as exc:
             return "os.symlink failed: %s" % exc
-        why = "os.symlink failed: %s" % exc
+    if not sys.platform.startswith("win"):
+        return "junctions exist only on Windows"
     done = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, text=True)
     if done.returncode != 0:
-        return "%s; mklink /J failed: %s" % (why, (done.stdout + done.stderr).strip())
+        return "mklink /J failed: %s" % (done.stdout + done.stderr).strip()
     return None
 
 
@@ -693,11 +694,17 @@ class TempSweepTests(unittest.TestCase):
         write(kept, "outside the temp claude root")
         folder = self.make_session(temp_session_id(23), transcript_hours=TEMP_IDLE_HOURS,
                                    folder_hours=TEMP_IDLE_HOURS)
-        link = os.path.join(folder, "nested", "link-out")
-        reason = temp_make_link(link, outside)
-        if reason is not None:
-            self.skipTest("cannot make a link inside the session folder on this machine: %s" % reason)
-        self.addCleanup(temp_remove_link, link)
+        reasons = []
+        for name, junction in (("link-out", False), ("junction-out", True)):
+            link = os.path.join(folder, "nested", name)
+            reason = temp_make_link(link, outside, junction=junction)
+            if reason is not None:
+                reasons.append(reason)
+                continue
+            self.addCleanup(temp_remove_link, link)
+        if len(reasons) == 2:
+            self.skipTest("cannot make a symlink or a junction inside the session folder here: %s"
+                          % "; ".join(reasons))
         control = self.make_session(temp_session_id(24), transcript_hours=TEMP_IDLE_HOURS)
         proc = self.run_step("--confirm")
         self.check_removed(control, "positive control: an idle 25-hour session must be removed in "
