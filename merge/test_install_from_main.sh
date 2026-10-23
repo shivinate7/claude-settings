@@ -978,7 +978,8 @@ settle() {
 # Runs the hook command as the harness does: sh -c, in cwd $1, with HOME and CLAUDE_CONFIG_DIR in
 # the fixture and its Linux uname first on PATH. $2 = remote sets CLAUDE_CODE_REMOTE. Sets cmd, hrc,
 # hout and hook_secs (the hook's own wall-clock time, before any detached work is waited for).
-# Returns 1 when settings.json has no such command.
+# Returns 1 when settings.json has no such command. $3 = nowait skips the settle wait, so a second
+# run can start while the first is still detached.
 run_hook() {
   cmd=$(hook_command) || cmd=""
   [ -n "$cmd" ] || return 1
@@ -995,7 +996,7 @@ run_hook() {
   t1=$(clock)
   hook_secs=$(python3 -c 'import sys; print("%.3f" % (float(sys.argv[2]) - float(sys.argv[1])))' "$t0" "$t1")
   hout=$(cat "$work/hook.out" "$work/hook.err")
-  settle "$1/home/.claude-cfg/claude-settings-install.log"
+  [ "${3:-}" = nowait ] || settle "$1/home/.claude-cfg/claude-settings-install.log"
   return 0
 }
 
@@ -1202,7 +1203,112 @@ case31() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31"
+# Waits, up to 30 s, until the checkout at $1 has HEAD $2: a detached child may still be moving it.
+waitfor_head() {
+  i=0
+  while [ "$i" -lt 60 ]; do
+    [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$2" ] && return 0
+    sleep 0.5; i=$((i + 1))
+  done
+  return 1
+}
+
+# ---- Case 32: two runs back to back; the second loses the ref-lock race -> no fetch failure logged ----
+case32() {
+  name="case32: two hook runs back to back, the second losing the ref-lock race, log no fetch failure, and pin and main end at origin/main with one install"
+  d="$work/case32"; hook_fixture "$d" trunk ahead
+  # The first fetch to reach its ref update holds the ref lock for 4 s (a reference-transaction hook).
+  printf '#!/bin/sh\n[ "$1" = prepared ] || exit 0\ncat > /dev/null\n[ -f "$HOME/slow-refs" ] || exit 0\nrm -f "$HOME/slow-refs"\nsleep 4\n' \
+    > "$d/clone/.git/hooks/reference-transaction"
+  chmod +x "$d/clone/.git/hooks/reference-transaction"
+  : > "$d/home/slow-refs"
+  run_hook "$d" "" nowait || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  first_hrc=$hrc
+  run_hook "$d" "" nowait || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  waitfor_head "$d/clone-live" "$c1"
+  settle "$d/home/.claude-cfg/claude-settings-install.log"
+  why=""
+  [ "$first_hrc" -eq 0 ] && [ "$hrc" -eq 0 ] || why="$why; a hook exited non-zero: $first_hrc, $hrc"
+  [ "$(git -C "$d/clone" rev-parse main)" = "$c1" ] || why="$why; local main is $(git -C "$d/clone" rev-parse main), want $c1"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c1" ] || why="$why; the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
+  if printf '%s\n' "$skip" | grep -q "fetch of origin/main failed"; then
+    why="$why; the log reports a fetch failure for a lost ref-lock race: [$skip]"
+  fi
+  installs=$(grep -c . "$d/home/ran-install.txt" 2>/dev/null)
+  [ "${installs:-0}" -eq 1 ] || why="$why; want one install, got ${installs:-0}"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 33: a half-populated tree at main's commit is not reused; the pin ends on a complete tree ----
+case33() {
+  name="case33: a half-populated <clone>-live-<sha> at main's commit is repaired or replaced, not reused; the pin ends on a complete tree at origin/main"
+  d="$work/case33"; hook_fixture "$d" trunk ahead
+  # The tree a kill leaves behind: at main's commit, with one tracked file missing.
+  git -C "$d/clone" fetch -q origin main
+  short=$(printf '%s' "$c1" | cut -c1-12)
+  git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live-$short" "$c1"
+  rm -f "$d/clone-live-$short/install.sh"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  waitfor_head "$d/clone-live" "$c1"
+  settle "$d/home/.claude-cfg/claude-settings-install.log"
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c1" ] || why="$why; the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  incomplete=$(git -C "$d/clone-live" status --porcelain --untracked-files=no)
+  [ -z "$incomplete" ] || why="$why; the pinned tree is incomplete: [$incomplete]"
+  [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" = "$c1" ] \
+    || why="$why; the installer did not run from a complete pin at $c1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 34: nothing moves -> the install log is unchanged, no installer starts, at most one fetch ----
+case34() {
+  name="case34: when nothing moves the hook writes nothing to the install log, starts no installer, and runs at most one fetch"
+  d="$work/case34"; hook_fixture "$d" main same
+  # A git that counts its fetches and then runs the real git.
+  real=$(command -v git)
+  cat > "$d/shim/git" <<EOF
+#!/bin/sh
+case " \$* " in *" fetch "*) echo fetch >> "\$HOME/git-fetches.txt" ;; esac
+exec "$real" "\$@"
+EOF
+  chmod +x "$d/shim/git"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  log="$d/home/.claude-cfg/claude-settings-install.log"
+  [ ! -s "$log" ] || why="$why; the install log was written: [$(cat "$log")]"
+  [ ! -e "$d/home/ran-install.txt" ] || why="$why; the installer ran"
+  # Exactly one fetch: the count also shows the counting shim reached the hook at all.
+  fetches=$(grep -c . "$d/home/git-fetches.txt" 2>/dev/null)
+  [ "${fetches:-0}" -eq 1 ] || why="$why; the hook ran ${fetches:-0} fetches, want exactly 1"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 35: a stale tree in the way makes the pin move fail -> one log line with the helper's reason ----
+case35() {
+  name="case35: a failed pin move logs one line with the helper's own reason, not only end exit=1"
+  d="$work/case35"; hook_fixture "$d" trunk ahead
+  short=$(printf '%s' "$c1" | cut -c1-12)
+  mkdir -p "$d/clone-live-$short"
+  printf 'stale\n' > "$d/clone-live-$short/junk.txt"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pinned checkout moved"
+  [ "$(cat "$d/clone-live-$short/junk.txt" 2>/dev/null)" = "stale" ] || why="$why; the stale tree changed"
+  skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
+  n=$(printf '%s\n' "$skip" | grep -c .)
+  if [ "$n" -ne 1 ]; then
+    why="$why; want one log line for the failed move, got $n: [$skip]"
+  elif ! printf '%s\n' "$skip" | grep -q "in the way"; then
+    why="$why; the log line has no helper reason: [$skip]"
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
