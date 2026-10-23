@@ -15,7 +15,8 @@
 # stubs, except cases 8 and 9, which run the real install.sh. Each stub writes a marker file into
 # its own folder, so a case can see which tree ran it. HOME and CLAUDE_CONFIG_DIR point into the
 # temp dir, so the real ~/.claude is never touched. INSTALL_FROM_MAIN_UNDER_TEST lets a case point
-# at another copy of the script.
+# at another copy of the script. Cases 22 to 24 run the SessionStart hook command that settings.json
+# carries; HOOK_SETTINGS_UNDER_TEST lets a case point at another settings file.
 
 set -u
 
@@ -892,7 +893,130 @@ case21() {
   fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21"
+# ---- SessionStart hook (settings.json): the pull that keeps the live pin at main ---------------
+# The hook command as settings.json carries it: the one SessionStart command that reads CLAUDE.md.
+# Printed with no trailing newline, so no carriage return rides along on Windows.
+HOOK_SETTINGS="${HOOK_SETTINGS_UNDER_TEST:-$REPO_ROOT/settings.json}"
+hook_command() {
+  python3 -c '
+import json, sys
+hits = [h["command"] for e in json.load(sys.stdin)["hooks"]["SessionStart"]
+        for h in e["hooks"] if "CLAUDE.md" in h.get("command", "")]
+if len(hits) != 1:
+    sys.exit("want one SessionStart command that reads CLAUDE.md, found %d" % len(hits))
+sys.stdout.buffer.write(hits[0].encode("utf-8"))
+' < "$HOOK_SETTINGS"
+}
+
+# A bare origin, and a clone whose primary checkout is on trunk, so main is free. The pinned
+# checkout <clone>-live is detached and locked, as install.sh makes it, at c0. Then origin's main
+# moves to c1. $2 = linked: main is checked out in a linked worktree <dir>/linked instead. The clone
+# holds the real merge/install_from_main.sh and a stub install.sh, which appends the commit it ran
+# from to $HOME/ran-install.txt. The config dir's CLAUDE.md points at the pin.
+hook_fixture() {
+  d="$1"
+  make_shim "$d/shim"
+  mkdir -p "$d/home/.claude-cfg"
+  git init -q --bare -b main "$d/origin.git"
+  git init -q -b main "$d/clone"
+  git -C "$d/clone" config core.autocrlf false
+  git -C "$d/clone" config user.email t@example.com
+  git -C "$d/clone" config user.name t
+  mkdir -p "$d/clone/merge"
+  cp "$REPO_ROOT/merge/install_from_main.sh" "$d/clone/merge/install_from_main.sh"
+  cat > "$d/clone/install.sh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$(git -C "$(dirname "$0")" rev-parse HEAD)" >> "$HOME/ran-install.txt"
+EOF
+  git -C "$d/clone" add -A
+  git -C "$d/clone" commit -q -m init
+  git -C "$d/clone" remote add origin "$d/origin.git"
+  git -C "$d/clone" push -q origin main
+  c0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" switch -q -c trunk
+  if [ "${2:-}" = linked ]; then git -C "$d/clone" worktree add -q "$d/linked" main; fi
+  git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$c0"
+  printf '@%s/CLAUDE.md\n' "$d/clone-live" > "$d/home/.claude-cfg/CLAUDE.md"
+  git clone -q "$d/origin.git" "$d/pusher"
+  git -C "$d/pusher" config user.email t@example.com
+  git -C "$d/pusher" config user.name t
+  git -C "$d/pusher" commit -q --allow-empty -m next
+  git -C "$d/pusher" push -q origin main
+  c1=$(git -C "$d/pusher" rev-parse HEAD)
+}
+
+# Runs the hook command as the harness does: sh -c, in cwd $1, with HOME and CLAUDE_CONFIG_DIR in
+# the fixture and its Linux uname first on PATH. $2 = remote sets CLAUDE_CODE_REMOTE. Sets cmd, hrc
+# and hout. Returns 1 when settings.json has no such command.
+run_hook() {
+  cmd=$(hook_command) || cmd=""
+  [ -n "$cmd" ] || return 1
+  (
+    cd "$1" || exit 1
+    unset CLAUDE_CODE_REMOTE
+    if [ "${2:-}" = remote ]; then CLAUDE_CODE_REMOTE=1; export CLAUDE_CODE_REMOTE; fi
+    HOME="$1/home"; CLAUDE_CONFIG_DIR="$1/home/.claude-cfg"; PATH="$1/shim:$PATH"
+    export HOME CLAUDE_CONFIG_DIR PATH
+    sh -c "$cmd"
+  ) > "$work/hook.out" 2> "$work/hook.err"
+  hrc=$?
+  hout=$(cat "$work/hook.out" "$work/hook.err")
+}
+
+# ---- Case 22: origin ahead -> local main and the pin move to origin/main, then the install runs from the pin ----
+case22() {
+  name="case22: SessionStart hook with origin ahead moves local main and the pinned checkout to origin/main, then the installer runs from the pin"
+  d="$work/case22"; hook_fixture "$d"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone" rev-parse main)" = "$c1" ] \
+    || why="$why; local main is $(git -C "$d/clone" rev-parse main), want origin/main $c1"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c1" ] \
+    || why="$why; the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" = "$c1" ] \
+    || why="$why; the installer did not run from the pin at $c1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 23: main checked out in a worktree -> that worktree and main stay, one skip line is logged ----
+case23() {
+  name="case23: SessionStart hook with main checked out in a linked worktree leaves that worktree and main alone and logs one line"
+  d="$work/case23"; hook_fixture "$d" linked
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone" rev-parse main)" = "$c0" ] \
+    || why="$why; main moved to $(git -C "$d/clone" rev-parse main)"
+  [ "$(git -C "$d/linked" rev-parse HEAD)" = "$c0" ] \
+    || why="$why; the linked worktree moved to $(git -C "$d/linked" rev-parse HEAD)"
+  # The helper's own start and end lines do not count: only the skip line is the hook's to write.
+  skip=$(grep -v 'install_from_main.sh:' "$d/home/.claude-cfg/claude-settings-install.log" 2>/dev/null)
+  n=$(printf '%s\n' "$skip" | grep -c .)
+  if [ "$n" -ne 1 ]; then
+    why="$why; want one skip line in the install log, got $n: [$skip]"
+  elif ! printf '%s\n' "$skip" | grep -q main; then
+    why="$why; the skip line does not name main: [$skip]"
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 24: CLAUDE_CODE_REMOTE set -> exit 0 with no fetch, no move, no install, no log ----
+case24() {
+  name="case24: SessionStart hook with CLAUDE_CODE_REMOTE set exits 0 with no fetch, no move, no install and no log"
+  d="$work/case24"; hook_fixture "$d"
+  run_hook "$d" remote || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/main)" = "$c0" ] || why="$why; origin/main was fetched"
+  [ "$(git -C "$d/clone" rev-parse main)" = "$c0" ] || why="$why; main moved"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pinned checkout moved"
+  [ ! -e "$d/home/ran-install.txt" ] || why="$why; the installer ran"
+  [ ! -e "$d/home/.claude-cfg/claude-settings-install.log" ] || why="$why; the install log was written"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
