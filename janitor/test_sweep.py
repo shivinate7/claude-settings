@@ -462,12 +462,23 @@ def build_main_fixture():
             "rebased-work still carries a `+` against origin/main: %r" % cherry.stdout)
 
 
+# The Windows temp-folder step as shipped. TempStepCanaryTests calls it to prove its canary can go red.
+REAL_TEMP_RUN = sweep.temp_sweep.run
+_TEMP_STEP_STUB = None
+
+
 def setUpModule():
+    global _TEMP_STEP_STUB
     os.environ["CLAUDE_CONFIG_DIR"] = CFG
     build_main_fixture()
+    # The step reads the real %LOCALAPPDATA%\Temp\claude. The full-mode `--confirm` cases here reach it
+    # on Windows, so it is stubbed for the whole module. A case about the step patches it itself.
+    _TEMP_STEP_STUB = mock.patch.object(sweep.temp_sweep, "run", return_value=0)
+    _TEMP_STEP_STUB.start()
 
 
 def tearDownModule():
+    _TEMP_STEP_STUB.stop()
     shutil.rmtree(ROOT, ignore_errors=True)
 
 
@@ -628,6 +639,19 @@ class TempSweepTests(unittest.TestCase):
 # folder, process, or run log. `reached` is the positive control: the run got past the simulator
 # tier, so an empty recording means the step did not run, not that the run ended early.
 
+@contextlib.contextmanager
+def machine_tiers_stubbed(base):
+    """Stubs the full-mode tiers that read the real machine, and points HOME and the run log into
+    `base`. Yields the simulator-tier stub, so a case can prove its run reached that tier."""
+    env = {"HOME": base, "USERPROFILE": base, "JANITOR_RUN_LOG": os.path.join(base, "run.log")}
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, env))
+        stack.enter_context(mock.patch.object(sweep, "find_dead_rooted", return_value=[]))
+        stack.enter_context(mock.patch.object(sweep, "find_loose_processes", return_value=[]))
+        stack.enter_context(mock.patch.object(sweep, "reap_listener"))
+        yield stack.enter_context(mock.patch.object(sweep, "sim_tier", return_value=[]))
+
+
 class TempSweepWiringTests(unittest.TestCase):
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="janitor_temp_wiring_")
@@ -646,16 +670,10 @@ class TempSweepWiringTests(unittest.TestCase):
             seen.append(confirm)
             return 0
 
-        env = {"HOME": self.base, "USERPROFILE": self.base,
-               "JANITOR_RUN_LOG": os.path.join(self.base, "run.log")}
         with contextlib.ExitStack() as stack:
-            stack.enter_context(mock.patch.dict(os.environ, env))
             stack.enter_context(mock.patch.object(sweep, "_on_windows", return_value=windows))
             stack.enter_context(mock.patch.object(sweep.temp_sweep, "run", record))
-            stack.enter_context(mock.patch.object(sweep, "find_dead_rooted", return_value=[]))
-            stack.enter_context(mock.patch.object(sweep, "find_loose_processes", return_value=[]))
-            stack.enter_context(mock.patch.object(sweep, "reap_listener"))
-            sim = stack.enter_context(mock.patch.object(sweep, "sim_tier", return_value=[]))
+            sim = stack.enter_context(machine_tiers_stubbed(self.base))
             with contextlib.redirect_stdout(io.StringIO()):
                 code = sweep.main(["--restore-log", self.log, *flags, self.repo])
         self.assertEqual(code, 0, "the sweep exited %r" % (code,))
@@ -677,6 +695,43 @@ class TempSweepWiringTests(unittest.TestCase):
         self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
         self.assertEqual(seen, [True], "on Windows a --confirm run must call the temp step with "
                                        "confirm True; it saw %r" % (seen,))
+
+
+class TempStepCanaryTests(unittest.TestCase):
+    """A canary folder under a fake real-temp root (TEMP) survives a full `--confirm` run on Windows.
+    Only the setUpModule stub keeps it there. The positive control shows the real step would remove it."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="janitor_canary_")
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.temp = os.path.join(self.base, "Temp")
+        self.cfg = os.path.join(self.base, "cfg")
+        session = temp_session_id(7)
+        self.canary = os.path.join(self.temp, "claude", TEMP_SWEEP_PROJECT, session)
+        write(os.path.join(self.canary, "scratch.txt"), "canary")
+        transcript = os.path.join(self.cfg, "projects", TEMP_SWEEP_PROJECT, session + ".jsonl")
+        write(transcript, '{"type": "user"}\n')
+        temp_set_age(transcript, TEMP_IDLE_HOURS)
+        env = mock.patch.dict(os.environ, {"TEMP": self.temp, "LOCALAPPDATA": self.base,
+                                           "CLAUDE_CONFIG_DIR": self.cfg})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_the_real_step_removes_the_canary(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            REAL_TEMP_RUN(True)
+        self.assertFalse(os.path.exists(self.canary),
+                         "the real step did not remove the canary, so the next case proves nothing")
+
+    def test_a_full_confirm_run_on_windows_leaves_the_canary(self):
+        repo = os.path.join(self.base, "repo")
+        subprocess.run([VCS, "init", repo], check=True, capture_output=True)
+        with mock.patch.object(sweep, "_on_windows", return_value=True), \
+                machine_tiers_stubbed(self.base), contextlib.redirect_stdout(io.StringIO()):
+            code = sweep.main(["--confirm", "--restore-log", os.path.join(self.base, "restore.log"), repo])
+        self.assertEqual(code, 0, "the sweep exited %r" % (code,))
+        self.assertTrue(os.path.isdir(self.canary),
+                        "a full --confirm run on Windows removed the canary under the real-temp root")
 
 
 # --------------------------------------------------------------------------- the anchor arm
