@@ -99,10 +99,10 @@ named in that file. Merge only when you say so, or under a repo grant, per CLAUD
 
 Once merged:
 
-* Local (symlink mode): `settings.json` carries a `SessionStart` hook that moves local `main`
-  and the live pin to `origin/main` at each session start. It works in a detached child, so the
-  session that starts it can load before the move ends. The new file is certain to be live from
-  the next session.
+* Local (symlink mode): at each session start, a `SessionStart` hook in `settings.json`
+  fast-forwards local `main` and the live pin to `origin/main` when it can. It works in a
+  detached child, so the session that starts it can load before the move ends. A session that
+  starts after the child ends sees the move.
 * Local (copy mode, Windows without Developer Mode): the `post-merge` git hook copies the
   changed files after your next `git pull` on `main`, and re-runs `install.ps1` itself if
   `install.ps1` changed.
@@ -201,8 +201,8 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 
 * **How local sessions catch up with main.** `settings.json` carries a `SessionStart` hook. It exits at once
   in cloud sessions, and otherwise hands its work to a detached child and exits 0, so it never blocks
-  a session. The session that starts it can load before the child ends; the next session sees the
-  move. The child finds the clone from the `@` pointer in `~/.claude/CLAUDE.md` (the pointer names
+  a session. The session that starts it can load before the child ends; a session that starts
+  after the child ends sees the move. The child finds the clone from the `@` pointer in `~/.claude/CLAUDE.md` (the pointer names
   the live pin, a worktree of the clone). One child runs at a time: it holds a lock directory in
   `~/.claude`, and a start that finds the lock exits quietly. A lock a killed child left is cleared
   once it is stale. The child fetches `origin/main` and moves local `main` to it,
@@ -211,11 +211,11 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   pin is not at local `main`, the child runs `merge/install_from_main.sh`, which switches only the pin
   and never one with tracked changes (`decisions/merge-reinstalls-from-main.md`). A failed fetch,
   move, skip or pin install writes one line to the install log, with its own reason.
-  Cost, per session start or resume: one detached child and one network fetch. A local
+  Cost, per session start or resume: one detached child and at most one network fetch. A local
   `git fetch .` runs only when `main` moves by ref because no tree holds it. The helper and the
   installer start only when the pin is not at local `main`. Files written: the lock directory, made
-  and removed each time; install-log lines only on a failure, plus the helper's start and end lines
-  when it runs. The install log's reader is the owner; no hook reads it. Case 34 of
+  and removed each time; install-log lines only on a failure, plus the start and end lines of the
+  helper and of the installer when they run. The install log's reader is the owner; no hook reads it. Case 34 of
   `merge/test_install_from_main.sh` proves the no-move cost: no log line, no installer, one fetch.
 * **Why subagents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
   tool from every subagent, so only the main conversation fans out. A nested child's completion
