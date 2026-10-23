@@ -6588,45 +6588,43 @@ class JobCapWarning(Env):
 
 
 class StampDeadlineFloor(Env):
-    """load_config's check on merge.deadlineMinutes: at least the largest job timeout-minutes in the base's workflows, plus 5."""
-    def stop_text(self):
-        with contextlib.redirect_stdout(io.StringIO()):
-            try:
-                merge.load_config(self.co, "main", ".github/stamp.json")
-            except merge.Stop as e:
-                return str(e)
-        return None
+    """Recovery rule: a deadline under the floor does not stop the merge. The merge waits max(deadlineMinutes, floor)
+    and prints one line naming the fix. The floor is the largest job timeout-minutes plus 5, clamped at 360."""
+    def test_a_deadline_under_the_largest_cap_plus_five_waits_the_floor_and_names_the_fix(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {55}, out)
+        self.assertEqual(out.count(fix_line(55)), 1, out)
 
-    def test_a_deadline_under_the_largest_cap_plus_five_stops_with_a_line_naming_the_file(self):
-        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": GATES_WORKFLOW})
-        msg = self.stop_text()
-        self.assertIsNotNone(msg, "a deadline of 54 under a 50-minute job cap must stop the merge")
-        self.assertIn(".github/stamp.json", msg)
-        self.assertIn("deadlineMinutes", msg)
-        self.assertIn("55", msg)
-
-    def test_a_deadline_at_the_largest_cap_plus_five_passes(self):
-        push_base(self, {".github/stamp.json": stamp_text(55), ".github/workflows/gates.yml": GATES_WORKFLOW})
-        self.assertIsNone(self.stop_text())
+    def test_a_deadline_at_the_largest_cap_plus_five_waits_itself_and_names_nothing(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {55}, out)
+        self.assertNotIn("raise merge.deadlineMinutes", out)
 
     def test_the_floor_is_the_largest_job_cap_in_any_file_and_ignores_steps_comments_and_strings(self):
-        push_base(self, {".github/stamp.json": stamp_text(64), ".github/workflows/gates.yml": TRAPS_WORKFLOW,
+        push_base(self, {".github/stamp.json": merge_stamp_text(64), ".github/workflows/gates.yml": TRAPS_WORKFLOW,
                          ".github/workflows/sync.yml": SYNC_WORKFLOW})
-        self.assertIsNotNone(self.stop_text(), "a deadline of 64 under a 60-minute job cap in sync.yml must stop the merge")
-        push_base(self, {".github/stamp.json": stamp_text(65)})
-        self.assertIsNone(self.stop_text(), "65 is the floor: the traps (99, 120, 130, step cap 90) must not raise it")
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {65}, "the traps (99, 120, 130, step cap 90) must not raise the floor")
+        self.assertEqual(out.count(fix_line(65)), 1, out)
 
     def test_a_provisional_sixty_minute_cap_sets_the_floor_at_sixty_five(self):
-        push_base(self, {".github/stamp.json": stamp_text(55), ".github/workflows/gates.yml": PROVISIONAL_WORKFLOW})
-        msg = self.stop_text()
-        self.assertIsNotNone(msg, "a deadline of 55 under a provisional 60-minute cap must stop the merge")
-        self.assertIn("65", msg)
-        push_base(self, {".github/stamp.json": stamp_text(65)})
-        self.assertIsNone(self.stop_text())
+        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/gates.yml": PROVISIONAL_WORKFLOW})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {65}, out)
+        self.assertEqual(out.count(fix_line(65)), 1, out)
 
     def test_a_repo_with_no_workflow_has_no_floor(self):
-        push_base(self, {".github/stamp.json": stamp_text(5)})
-        self.assertIsNone(self.stop_text())
+        push_base(self, {".github/stamp.json": merge_stamp_text(5)})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {5}, out)
+        self.assertNotIn("raise merge.deadlineMinutes", out)
 
 
 class RepoDeadlineFloor(unittest.TestCase):
@@ -6646,16 +6644,6 @@ def captured(fn):
     with contextlib.redirect_stdout(out):
         result = fn()
     return result, out.getvalue()
-
-
-def floor_stop(env):
-    """load_config's refusal text for the env's base stamp.json, or None when the base config is accepted."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        try:
-            merge.load_config(env.co, "main", ".github/stamp.json")
-        except merge.Stop as e:
-            return str(e)
-    return None
 
 
 def cap_workflow(cap_text):
@@ -6728,36 +6716,104 @@ class CapReviewRound1(Env):
         self.assertNotIn(RE_CAP, why)
 
 
-class CapReviewFloor(Env):
-    """Review round 1: the floor is min(largest cap + 5, 360) (F2), and a quoted cap or an expression cap is read as
-    the merge tool reads it when it sets the floor (F5)."""
-    def test_f2_a_cap_of_356_or_360_floors_at_360_so_a_deadline_of_360_passes(self):
-        for cap in ("356", "360"):
-            with self.subTest(cap=cap):
-                push_base(self, {".github/stamp.json": stamp_text(360), ".github/workflows/gates.yml": cap_workflow(cap)})
-                self.assertIsNone(floor_stop(self), "a deadline of 360 must not stop a merge whose largest cap is " + cap)
+def merge_stamp_text(deadline):
+    """A base stamp.json as this suite's CONFIG, with the given merge.deadlineMinutes, so a merge can run through it."""
+    merge_block = {"method": "merge", "deadlineMinutes": deadline, "afterMerge": [], "deleteBranch": True}
+    return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
-    def test_f2_a_cap_of_360_refuses_a_deadline_of_359(self):
-        push_base(self, {".github/stamp.json": stamp_text(359), ".github/workflows/gates.yml": cap_workflow("360")})
-        msg = floor_stop(self)
-        self.assertIsNotNone(msg, "the floor is 360 for a 360 cap, so 359 must stop")
-        self.assertIn("360", msg)
+
+class DeadlineRecorder(FakeHost):
+    """FakeHost that records the deadline each wait is given."""
+    def __init__(self, root, other, branch="feat"):
+        super().__init__(root, other, branch)
+        self.deadlines = []
+
+    def wait_checks(self, n, sha, d, prior=None):
+        self.deadlines.append(d)
+        return super().wait_checks(n, sha, d, prior)
+
+
+def confirmed_wait(env):
+    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each wait was given)."""
+    host = DeadlineRecorder(env.co, env.other)
+    rc, out = env.run_merge("7", "--confirm", host=host)
+    return rc, out, host.deadlines
+
+
+def fix_line(floor):
+    return f"raise merge.deadlineMinutes in .github/stamp.json to at least {floor}"
+
+
+class CapReviewFloor(Env):
+    """Recovery rule and review round 1: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
+    is read as the merge tool reads it when it sets the floor (F5)."""
+    def test_f2_a_cap_of_356_waits_the_clamped_floor_of_360_at_a_deadline_of_360(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/gates.yml": cap_workflow("356")})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {360}, out)
+        self.assertNotIn("raise merge.deadlineMinutes", out)
+
+    def test_f2_a_cap_of_360_waits_the_clamped_floor_of_360_at_a_deadline_of_359(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(359), ".github/workflows/gates.yml": cap_workflow("360")})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {360}, out)
+        self.assertEqual(out.count(fix_line(360)), 1, out)
 
     def test_f5_a_double_quoted_cap_sets_the_floor_like_a_plain_cap(self):
-        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": cap_workflow('"50"')})
-        self.assertIsNotNone(floor_stop(self), "a quoted 50 is a 50-minute cap, so the floor is 55 and 54 must stop")
-        push_base(self, {".github/stamp.json": stamp_text(55)})
-        self.assertIsNone(floor_stop(self))
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": cap_workflow('"50"')})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {55}, out)
+        self.assertEqual(out.count(fix_line(55)), 1, out)
 
     def test_f5_an_expression_cap_sets_no_floor(self):
-        push_base(self, {".github/stamp.json": stamp_text(5), ".github/workflows/gates.yml": cap_workflow("${{ inputs.cap }}")})
-        self.assertIsNone(floor_stop(self))
+        push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/gates.yml": cap_workflow("${{ inputs.cap }}")})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {5}, out)
+        self.assertNotIn("raise merge.deadlineMinutes", out)
 
     def test_f5_the_literal_cap_sets_the_floor_beside_an_expression_cap(self):
-        push_base(self, {".github/stamp.json": stamp_text(54), ".github/workflows/gates.yml": MIXED_WORKFLOW})
-        msg = floor_stop(self)
-        self.assertIsNotNone(msg, "the literal 50 sets the floor at 55, so 54 must stop")
-        self.assertIn("55", msg)
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": MIXED_WORKFLOW})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {55}, out)
+        self.assertEqual(out.count(fix_line(55)), 1, out)
+
+
+class DuplicateJobIds(Env):
+    """F8: one job id in two workflow files keeps the larger cap, for the floor and for the warning."""
+    def test_f8_the_floor_keeps_the_larger_of_two_caps_for_one_job_id(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(104),
+                         ".github/workflows/a.yml": cap_workflow("100"),
+                         ".github/workflows/b.yml": cap_workflow("10")})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {105}, out)
+        self.assertEqual(out.count(fix_line(105)), 1, out)
+
+    def test_f8_the_warning_keeps_the_larger_of_two_caps_for_one_job_id(self):
+        push_base(self, {".github/workflows/a.yml": cap_workflow("100"), ".github/workflows/b.yml": cap_workflow("10")})
+        host = CapsHost(self.co, [check("gates", "pass", 60)], [run("success")])
+        _, out = captured(lambda: host.checks(7))
+        self.assertNotIn("job gates", out, "60 of 100 is under 70 percent: the smaller cap of 10 must not be the one kept")
+
+
+class NestedCheckout(Env):
+    """F9: a folder holding .git ends the search for workflows. A nested checkout with none reads none, not the parent's."""
+    def setUp(self):
+        super().setUp()
+        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+
+    def test_f9_a_nested_checkout_with_no_workflows_reads_no_cap_from_the_parent(self):
+        nested = os.path.join(self.co, "nested")
+        os.makedirs(nested)
+        sh(nested, "git", "init", "-q")
+        host = CapsHost(nested, [check("gates", "cancel", 50)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertNotIn(RE_CAP, why)
 
 
 if __name__ == "__main__":
