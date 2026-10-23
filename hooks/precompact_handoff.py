@@ -54,7 +54,6 @@ and the hook still exits 0 (case_precompact_error_is_ok_false).
 import datetime
 import json
 import os
-import re
 import sys
 import time
 
@@ -66,11 +65,6 @@ NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
 DEFAULT_WINDOW = 500_000
-# The source kinds of a handoff premise, strongest first. decisions/premise-format.md says what
-# each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
-PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
-_PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
-_PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
 
 
 def config_dir():
@@ -370,8 +364,7 @@ def run_reorient_cleared(payload):
     print("This session started after /clear or a fork. Read %s first; it is the handoff of "
           "the session this one follows. Then follow %s and rewrite your own handoff at %s "
           "from it. Rewrite it whole; never append. Confirm checkout and branch before any "
-          "git write. Then continue the last task.%s"
-          % (old, prompt_path(), mine, premise_note(old, True)))
+          "git write. Then continue the last task." % (old, prompt_path(), mine))
     return 0
 
 
@@ -399,45 +392,6 @@ def inbox_note(session_id):
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
     if local_time.is_open(paths[1]):  # never raises
         note += " Feedback capture is still open: the owner has not sent `fb done`."
-    return note
-
-
-def handoff_premises(path):
-    """[(id, kind)] of the premise lines in the handoff's Working premises section, in order,
-    one entry per id. [] when the file is unreadable or the section is missing or has no line.
-    Reads text only. A kind outside PREMISE_KINDS is kept as written, so the caller lists it."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
-    except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
-        return []
-    head = _PREMISES_HEAD.search(text)
-    if not head:
-        return []
-    body = text[head.end():]
-    end = re.search(r"^#{1,2}[ \t]", body, re.M)
-    found = {}
-    for m in _PREMISE_LINE.finditer(body[:end.start()] if end else body):
-        found.setdefault(m.group(1), (m.group(2) or "").strip().lower())
-    return list(found.items())
-
-
-def premise_note(path, everyone):
-    """The reorient text on premises; "" when the handoff file does not exist. everyone: list
-    every premise, since the handoff came from another session. Else list all but the strongest
-    kind, PREMISE_KINDS[0].
-    A kind outside PREMISE_KINDS is not a ruling, so it is listed."""
-    if not os.path.isfile(path):
-        return ""
-    prem = handoff_premises(path)
-    if not prem:
-        note = " The handoff has no Working premises section. Add it per step 4."
-    else:
-        weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != PREMISE_KINDS[0]]
-        note = (" Premises are claims. Check each before you act on it, then rewrite its "
-                "line: %s." % ", ".join(weak)) if weak else ""
-    if not everyone:
-        note += " Facts in the compaction summary are notes until checked."
     return note
 
 
@@ -471,15 +425,13 @@ def _run_reorient(payload):
         print("Context was compacted. Follow %s before anything else. Your handoff is "
               "%s. Rewrite it whole; never append. The digest is missing: use the "
               "compaction summary and the prior handoff instead. Confirm checkout and branch before any git write. Then "
-              "continue the last task.%s%s"
-              % (prompt, handoff, premise_note(handoff, False), inbox_note(session_id)))
+              "continue the last task.%s" % (prompt, handoff, inbox_note(session_id)))
         return 0
 
     print("Context was compacted. Follow %s before anything else. Your handoff is %s. "
           "Rewrite it whole; never append. Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
-          "checkout and branch before any git write. Then continue the last task.%s%s"
-          % (prompt, handoff, state.get("digest"), premise_note(handoff, False),
-             inbox_note(session_id)))
+          "checkout and branch before any git write. Then continue the last task.%s"
+          % (prompt, handoff, state.get("digest"), inbox_note(session_id)))
     return 0
 
 
@@ -548,8 +500,9 @@ def run_nudge(payload):
             ensure_handoff_dir(session_id)
             print(json.dumps({"decision": "block", "reason": (
                 "Context is about %dk tokens. Rewrite your handoff at %s now, the whole "
-                "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue."
+                "file; never append. Follow step 4 of %s: rulings with NO HOME YET first, "
+                "where things stand, rulings with their homes, work in flight, next "
+                "steps, the files and commands that matter. Then continue."
                 % (size // 1000, handoff_path(session_id), prompt_path()))}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)

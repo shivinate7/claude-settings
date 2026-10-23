@@ -102,5 +102,5 @@ that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothi
 
 # Compact instructions
 
-Keep the session's handoff path (~/.claude/handoffs/<session_id>.md), the owner's open rulings with their homes, the Goal, and the Working premises with their sources.
+Keep the session's handoff path (~/.claude/handoffs/<session_id>.md) and the owner's open rulings with their homes.
 The handoff's contents are listed in hooks/precompact_handoff_prompt.md step 4.
