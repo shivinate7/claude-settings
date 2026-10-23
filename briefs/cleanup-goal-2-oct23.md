@@ -27,7 +27,8 @@ rules (git-integration-branch-merge, roles-review-cap-three).
      fix at 599de54 still needs review; it also joins batch 3.
    - Meanwhile build batch 2 and batch 3 lanes as drafts. Batch 1 branches from main only
      after #564 merges.
-   - #556 (memory monitor) merges only on the owner's word. Leave it.
+   - #556 (manual memory monitor, ready at f585fff): owner's word, Oct 23: merge it. Do it
+     after #564 merges, with the merge tool, on green CI against the new main.
 4. Confirm the live settings match main: `git -C <pin> rev-parse HEAD` against
    `git rev-parse origin/main`. If they differ, the session-start auto-pull is still broken
    (batch 2 fixes it): run `git -C <clone> fetch origin main:main`, then
