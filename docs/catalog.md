@@ -19,7 +19,6 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 |---|---|---|---|---|---|---|---|
 | `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
 | `lint/report_gate.py` | hook | Stop | - | - | no model | n/a | At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error. |
-| `lint/md_sweep.py` | hook | Stop | - | - | no model | n/a | At Stop, lints each markdown file this turn changed, whatever tool wrote it. Blocks once when a changed block has an error. |
 | `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | At the end of the turn, checks the subagent model cap in each watched settings file. Reverts a cap change that no tool call explains, or a raise past its expiry time. |
 | `hooks/ruling_home.py` | hook | Stop | - | - | no model | n/a | At Stop, blocks once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost. |
 | `hooks/precompact_handoff.py` | hook | Stop | - | - | no model | n/a | At Stop, blocks once each time the context size passes a new checkpoint, and tells the session to rewrite its handoff. Silent on stop_hook_active or an error. |
