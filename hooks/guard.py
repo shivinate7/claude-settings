@@ -1702,13 +1702,18 @@ def _read_cpu():
         import ctypes
         libsystem = ctypes.CDLL("/usr/lib/libSystem.dylib")
         libsystem.mach_host_self.restype = ctypes.c_uint32
+        host = libsystem.mach_host_self()   # one send right per read, released below
 
         def ticks():
             info, count = (ctypes.c_uint32 * 4)(), ctypes.c_uint32(4)   # user, system, idle, nice
-            if libsystem.host_statistics(libsystem.mach_host_self(), 3, ctypes.byref(info),   # HOST_CPU_LOAD_INFO
+            if libsystem.host_statistics(host, 3, ctypes.byref(info),   # HOST_CPU_LOAD_INFO
                                          ctypes.byref(count)) != 0:
                 raise OSError("host_statistics failed")
             return sum(info), info[2]
+
+        def release():
+            libsystem.mach_task_self.restype = ctypes.c_uint32
+            libsystem.mach_port_deallocate(libsystem.mach_task_self(), host)
     elif sys.platform.startswith("linux"):
         def ticks():
             with open("/proc/stat") as stat:
@@ -1716,9 +1721,16 @@ def _read_cpu():
             return sum(fields), fields[3] + fields[4]
     else:
         return None
-    total_a, idle_a = ticks()
-    time.sleep(0.2)
-    total_b, idle_b = ticks()
+    try:
+        total_a, idle_a = ticks()
+        time.sleep(0.2)
+        total_b, idle_b = ticks()
+    finally:
+        if sys.platform == "darwin":
+            try:
+                release()
+            except Exception:
+                pass   # a failed release leaks one port right; it must not lose the reading
     total = total_b - total_a
     return 100.0 * (total - (idle_b - idle_a)) / total if total > 0 else None
 
