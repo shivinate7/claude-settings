@@ -16,7 +16,6 @@ import ast
 import io
 import os
 import re
-import subprocess
 import sys
 import tokenize
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))

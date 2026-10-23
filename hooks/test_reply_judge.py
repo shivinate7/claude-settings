@@ -333,6 +333,97 @@ def case_prompt_carries_reply_and_rules():
           any(all(word in s.lower() for word in BACKGROUND_WORDS) for s in sentences), prompt[:300])
 
 
+# --------------------------------------------------------------------------- case 5b
+# The owner-step rule, output-never-hand-off-doable-step: a step left to the owner comes as its
+# own fenced code block, outside the report blockquote. The judge is a model and the model is a
+# stub here, so a canned {"ok": false} on a prose-step reply would also be green on main and prove
+# nothing. What can go red is the prompt, the one input the real model gets. Each case sends one
+# reply and reads the rule text before it (never the reply, so a word in the reply cannot satisfy
+# a pin). A pin is one sentence that holds a word from every group. The wording stays the
+# builder's, inside these words.
+#
+# Dropped, and said so: a case for a block that mixes shells (PowerShell and bash lines). It needs
+# a code check, and this hook has none. See the report to the orchestrator.
+
+OWNER_STEP_RULE = "output-never-hand-off-doable-step"
+STEP_IN_PROSE = (  # (a) the owner is told to run a command, with no fenced block anywhere
+    "The hook change is pushed on branch owner-step-command.\n\n"
+    "To see it work, open a terminal in the repo and run python hooks/reply_judge.py with a Stop "
+    "payload on stdin. Then tell me what it prints."
+)
+STEP_IN_OWN_BLOCK = (  # (b) the same step as its own fenced block, outside the report blockquote
+    "> **Done**\n> BUILT: the hook change, commit abc1234.\n> Input Needed: run the check below.\n\n"
+    "Run this in PowerShell:\n\n"
+    "```powershell\ncd C:\\Users\\me\\repo\npython hooks\\test_reply_judge.py\n```\n"
+)
+NO_OWNER_STEP = "Both checks pass. The branch is pushed and nothing is left for you to do."  # (c)
+QUOTES_RAN_COMMAND = (  # false alarm: a command the reply already ran, quoted as history
+    "I ran `python -I hooks/test_reply_judge.py` and it passed in 32 s. The branch is pushed. "
+    "No step is left for you."
+)
+COMMAND_IN_REPORT_LINE = (  # false alarm: a command named inside a report line
+    "> **Done**\n> BUILT: `python hooks/reply_judge.py` now reads the new rule. Commit abc1234.\n"
+    "> Next: a builder adds the check.\n"
+)
+
+
+def rule_sentences(run, reply):
+    """The prompt's rule text as lowercase sentences. It is the part before the reply."""
+    head = run.prompt().split(reply, 1)[0].lower()
+    return [s for s in re.split(r"[.\n]", head) if s.strip()]
+
+
+def has_pin(sentences, *groups):
+    """True when one sentence holds at least one word from each group."""
+    return any(all(any(word in s for word in group) for group in groups) for s in sentences)
+
+
+def run_owner_step_reply(label, reply):
+    run = run_hook(reply, answer=OK_ANSWER)
+    sentences = rule_sentences(run, reply)
+    check("owner step, %s: the prompt carries the reply" % label, reply in run.prompt(), run.prompt()[:300])
+    check("owner step, %s: the prompt names %s before the reply" % (label, OWNER_STEP_RULE),
+          any(OWNER_STEP_RULE in s for s in sentences), run.prompt()[:300])
+    return sentences
+
+
+# (a) A reply that tells the owner to run a command in prose, with no fenced block, is a breach
+# the judge must be asked about: one sentence says a step left to the owner needs a code block.
+
+def case_owner_step_in_prose_prompt_asks_for_fenced_block():
+    sentences = run_owner_step_reply("prose step", STEP_IN_PROSE)
+    check("owner step, prose step: a sentence says a step left to the owner needs a fenced code block",
+          has_pin(sentences, ("owner", "user"), ("step", "command"), ("fenced", "code block", "fence")),
+          sentences)
+
+
+# (b) The same step as its own fenced block, outside the report blockquote, passes. The judge
+# must be told where the block sits: one sentence says the block is outside the report.
+
+def case_owner_step_block_outside_report_prompt_says_where():
+    sentences = run_owner_step_reply("own block", STEP_IN_OWN_BLOCK)
+    check("owner step, own block: a sentence says the block sits outside the report blockquote",
+          has_pin(sentences, ("block", "fence"),
+                  ("outside", "not inside", "never inside", "after the report", "below the report"),
+                  ("report", "blockquote")),
+          sentences)
+
+
+# (c) A reply with no owner step passes, and so do the two false alarms: a command the reply
+# already ran, and a command named in a report line. The judge must be told neither is a step
+# left to the owner. The stub answers ok for all three, so a silent hook shows only that the
+# new rule text adds no stdout of its own.
+
+def case_owner_step_carve_outs_in_prompt():
+    for label, reply in (("no step", NO_OWNER_STEP), ("quotes a command it ran", QUOTES_RAN_COMMAND),
+                         ("command in a report line", COMMAND_IN_REPORT_LINE)):
+        sentences = run_owner_step_reply(label, reply)
+        check("owner step, %s: a sentence says a command already run is not a step left to the owner" % label,
+              has_pin(sentences, ("already",), ("ran", "run"), ("not", "never", "no ")), sentences)
+        check("owner step, %s: a sentence says a command named in a report line is not a step left to the owner" % label,
+              has_pin(sentences, ("report",), ("line",), ("name", "mention"), ("not", "never", "no ")), sentences)
+
+
 # --------------------------------------------------------------------------- case 6
 # Recursion. The child claude call reuses decision_watch's isolation: --safe-mode, --tools "",
 # an empty config dir with no settings or hooks, and a scratch cwd outside this repo.
@@ -704,6 +795,71 @@ def case_good_write_path_judges_stops_1_6_11():
     check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
 
 
+# --------------------------------------------------------------------------- imports on an ignored Stop
+# A Stop the hook ignores must not import the shell parser (guard), the model caller
+# (decision_watch) or the linter (ste_lint). The probe runs the hook file as __main__ in a fresh
+# process, then reports which of them that process imported. The hook's output comes first.
+
+GUARD_FAMILY = ("guard", "decision_watch", "ste_lint")
+IMPORT_PROBE = (
+    "import json, runpy, sys\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "print('PROBE ' + json.dumps([m for m in %r if m in sys.modules]))\n" % (GUARD_FAMILY,)
+)
+
+
+def probe_ignored_stop(payload, config=None):
+    """Return (the hook's stdout, the GUARD_FAMILY modules its process imported, the model calls).
+    The model is the stub, so a Stop that is wrongly judged reaches no real claude. A shared
+    `config` carries the sampling counter from an earlier Stop."""
+    RUNS[0] += 1
+    base = os.path.join(ROOT, "probe-%03d" % RUNS[0])
+    config = config or os.path.join(base, "config")
+    os.makedirs(base, exist_ok=True)
+    os.makedirs(config, exist_ok=True)
+    record = os.path.join(base, "calls.jsonl")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config, PYTHONPATH=STUB_DIR, RJ_SCENARIO="",
+               RJ_ANSWER=FINDING_ANSWER, RJ_RECORD=record, RJ_LOADED=os.path.join(base, "loaded"))
+    proc = subprocess.run(
+        [sys.executable, "-c", IMPORT_PROBE, MODULE_PATH],
+        input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, env=env, cwd=base,
+    )
+    out, mark, tail = proc.stdout.rpartition("PROBE ")
+    if not mark:
+        raise RuntimeError("the probe did not finish: %s" % proc.stderr[-300:])
+    return out, json.loads(tail), os.path.exists(record)
+
+
+def case_ignored_stop_imports_no_guard_family_module():
+    rows = [("stop_hook_active", {"session_id": REPLY_SESSION, "stop_hook_active": True,
+                                  "last_assistant_message": MARK})]
+    for text in EMPTY_REPLIES:
+        payload = {"session_id": REPLY_SESSION, "stop_hook_active": False}
+        if text is not ABSENT:
+            payload["last_assistant_message"] = text
+        rows.append(("reply %r" % ("(missing)" if text is ABSENT else text), payload))
+    for label, payload in rows:
+        out, imported, called = probe_ignored_stop(payload)
+        check("ignored Stop (%s): nothing printed, no model call" % label, out.strip() == "" and not called, out)
+        check("ignored Stop (%s): no guard-family module imported" % label, imported == [],
+              "imported before it had work to do: %s" % imported)
+
+
+def case_sampling_skipped_stop_imports_no_guard_family_module():
+    config = sample_config("skip-imports")
+    seed = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, judged
+    check("skip imports: Stop 1 is judged, so Stop 2 is sampled out", len(seed.calls) == 1, seed.calls)
+    payload = {"session_id": SESSION_ALPHA, "stop_hook_active": False, "last_assistant_message": MARK}
+    out, imported, called = probe_ignored_stop(payload, config=config)  # Stop 2, skipped
+    check("skip imports: Stop 2 prints nothing and calls no model", out.strip() == "" and not called, out)
+    check("skip imports: Stop 2 imports no guard-family module", imported == [],
+          "imported before it had work to do: %s" % imported)
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -731,6 +887,8 @@ def table_write_and_remove():
 
 CASES = (
     case_stop_hook_active_never_calls_model,
+    case_ignored_stop_imports_no_guard_family_module,
+    case_sampling_skipped_stop_imports_no_guard_family_module,
     case_model_ok_is_silent,
     case_model_is_haiku_at_xhigh,
     case_model_finding_emits_note_not_block,
@@ -738,6 +896,9 @@ CASES = (
     case_model_failure_fails_open,
     case_timeout_leaks_no_reply_text,
     case_prompt_carries_reply_and_rules,
+    case_owner_step_in_prose_prompt_asks_for_fenced_block,
+    case_owner_step_block_outside_report_prompt_says_where,
+    case_owner_step_carve_outs_in_prompt,
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_gate_is_not,
     table_sampling,

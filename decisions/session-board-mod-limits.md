@@ -19,7 +19,9 @@ Running servers and background tasks are not part of update-ready. Unknown is ne
 unknown when the reading is stale or stamped ahead, when the git call failed or was slow, and when the
 branch has no upstream.
 
-Each session writes a small summary record and a small detail record to `$.store`, on a heartbeat. The
+Each session writes a small summary record and a small detail record to `$.store`, on a heartbeat. An idle
+session reads git at a turn end, on attach, and then about every 5 minutes. A git reading counts for 330
+seconds (`READ_MAX_AGE_MS`), so an idle board stays update-ready and does not show unknown. The
 board hides a stale entry. The one-day sweep deletes old records and skips a session that `claude agents`
 lists as live. It deletes only when that list is a valid JSON array; a valid empty list counts as real.
 An unreadable check is not a death (`verification-report-unknown-reads`). Session end deletes both

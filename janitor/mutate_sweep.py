@@ -47,7 +47,6 @@ Only some mutants (label fragments, comma-separated; every anchor is still check
 """
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 

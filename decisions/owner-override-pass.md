@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The owner types `override` as a whole prompt. The guard then lets a refusal or an ask through, once or for a time.
+The owner starts a prompt with the word `override`. The guard then lets a refusal or an ask through, once or for a time. The words after `override` are the reason, written to `guard.log` as one line.
 
 Owner words, 2026-10-18 CDT:
 
@@ -21,7 +21,7 @@ Orchestrator's call, not an owner word:
 - A one-act pass that nothing uses ends after 10 minutes.
 - A bare number is minutes: `override 15` is 15 minutes. The units are `m` and `h`.
 - `override off` ends any pass at once.
-- The keyword counts only as the whole owner prompt, in any case: `^override(\s+(off|\d+[mh]?))?$`. A longer message, a notice tag, tool output, a file or text from an agent grants nothing.
+- The keyword counts only as the first word of the owner prompt, after leading whitespace, in any case. `override` alone, or with a reason (`override: use opus for that one review agent`), is a one-act pass. The reason keeps its case, folds newlines and tabs to spaces, and goes to `guard.log` through the guard's own locked log writer. `override <n>[m|h]` and `override off` keep their meaning only as the whole prompt: a word after a length or after `off` (`override 15m please`) is ambiguous and grants nothing, so an intended "off" never becomes a grant. A word that only starts with the keyword (`overrides`, `override15m`), a later line that starts with it, a notice tag, tool output, a file or text from an agent grants nothing.
 - A pass file that is missing, unreadable or corrupt is no pass.
 - The pass check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask.
 - A valid pass writes one guard log line, `override <rule>`, and prints nothing, so the normal permission flow runs.

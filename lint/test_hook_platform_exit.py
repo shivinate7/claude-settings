@@ -8,10 +8,14 @@ must exit 0, silent, with no python start. Where it works, the row must reach py
 - stall_watch --hook: does nothing off posix (hook() returns at once). --stop has no posix gate, so
   its row must still reach python on Windows.
 - sim_boot_record (Pre and Post rows): does nothing without xcrun.
-- ci_wake: does nothing unless the COMMAND holds "ready" (any case; ci_wake.py main()). The row reads
-  the payload first, so it must hand the same bytes and the exit code through, and must not start
-  python for a "ready" that sits only in tool_response. Empty stdin still reaches python, which
-  reports "CI unknown".
+- ci_wake: watches only a `gh pr ready` call in the COMMAND (ci_wake.triggers). The row reads the
+  payload first. It starts python for `gh pr ready`, with runs of spaces or tabs between the words,
+  for a gh in any case, with `.exe`, quoted or with a full path, for a quoted `pr` or `ready`, and
+  for `gh pr ready --undo` (python then watches nothing: the row is no parser). It starts none for
+  another "ready" (`npm run ready`, a title, a description), none for the phrase in tool_response
+  only, and none for `pr ready` in another case: python reads those lowercase only. It hands the
+  same bytes and the exit code through. Empty stdin still reaches python, which
+  reports "CI unknown". Each case asks ci_wake.triggers too, so no row hides a call python watches.
 - stall_watch: only a MINGW uname exits early. Cygwin and MSYS pythons report os.name "posix".
 Override the settings file with HOOK_PLATFORM_EXIT_SETTINGS.
 """
@@ -19,12 +23,14 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = os.environ.get("HOOK_PLATFORM_EXIT_SETTINGS") or os.path.join(HERE, "..", "settings.json")
 SH = shutil.which("sh")
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))   # ci_wake: the script a CiWake row guards
 # Tools a row may use besides builtins. Each becomes a wrapper in the stub folder, so a row never
 # finds the host's python, xcrun or uname.
 PASS_THROUGH = ("cat", "grep", "sed", "tr", "head", "cut", "awk", "wc", "tee", "dirname", "basename")
@@ -157,12 +163,19 @@ class CiWake(Quiet):
         self.assertEqual(len(found), 1)
         return found[0][1]
 
+    def assert_watch(self, command, tool, want=True):
+        """The row's own script must (not) watch this command, or the row case built on it proves nothing."""
+        import ci_wake
+        got = bool(ci_wake.triggers(command, tool == "PowerShell"))
+        self.assertEqual(got, want, "ci_wake.triggers %s %r: re-point this case"
+                         % ("no longer watches" if want else "now watches", command))
+
     @staticmethod
-    def payload(command, tool="Bash", response="", response_first=False, indent=None):
+    def payload(command, tool="Bash", response="", response_first=False, indent=None, description="d"):
         """A PostToolUse payload as the harness sends it, tool_response included."""
         parts = [("session_id", "abc"), ("transcript_path", "/t.jsonl"), ("cwd", "/x"),
                  ("hook_event_name", "PostToolUse"), ("tool_name", tool)]
-        call = ("tool_input", {"command": command, "description": "d"})
+        call = ("tool_input", {"command": command, "description": description})
         reply = ("tool_response", {"stdout": response, "stderr": "", "interrupted": False})
         parts += [reply, call] if response_first else [call, reply]
         return json.dumps(dict(parts + [("tool_use_id", "toolu_1")]), indent=indent)
@@ -172,25 +185,77 @@ class CiWake(Quiet):
             with self.subTest(command=command):
                 self.assert_does_nothing(run_row(self.command(), self.script, self.payload(command)))
 
+    def test_other_ready_text_starts_no_python(self):
+        # "ready" in a script name, a title, a later word, a description, or another case.
+        for command, tool, description in (
+                ("echo already-ready", "Bash", "d"),
+                ("npm run ready", "Bash", "d"),
+                ("gh pr create --draft --title 'Make hooks ready'", "Bash", "d"),
+                ("gh pr view 5 --json isDraft && echo ready", "Bash", "d"),
+                ("echo ready pr gh", "Bash", "d"),
+                ("git pull", "Bash", "Check the PR is ready"),
+                ("GH PR READY 12", "Bash", "d"),
+                ("gh pr Ready 7", "PowerShell", "d")):
+            with self.subTest(command=command, description=description):
+                self.assert_watch(command, tool, want=False)
+                payload = self.payload(command, tool, description=description)
+                self.assert_does_nothing(run_row(self.command(), self.script, payload))
+
     def test_ready_only_in_tool_response_starts_no_python(self):
+        # The phrase itself in the response must not start python either: the row reads tool_input only.
         for first in (False, True):
-            for out in ("Already up to date.", "Ready to merge", "READY"):
+            for out in ("Already up to date.", "Ready to merge", "READY", "Next: gh pr ready 12"):
                 with self.subTest(response_first=first, out=out):
                     payload = self.payload("git pull", response=out, response_first=first)
                     self.assert_does_nothing(run_row(self.command(), self.script, payload))
 
     def test_command_with_ready_reaches_python_with_same_bytes(self):
-        # python's test is `"ready" in command.lower()`: a substring, any case.
-        for command, tool, out in (("gh pr ready 12", "Bash", "ok"), ("GH PR READY 12", "Bash", ""),
-                                   ("gh pr Ready 7", "PowerShell", "Already up to date."),
-                                   ("echo already", "Bash", "x"),
+        for command, tool, out in (("gh pr ready 12", "Bash", "ok"),
+                                   ("gh pr ready 7", "PowerShell", "Already up to date."),
                                    ('echo "a\\b" && gh pr ready 3\nls', "Bash", "line1\nline2\\n")):
             for first in (False, True):
                 with self.subTest(command=command, tool=tool, response_first=first):
+                    self.assert_watch(command, tool)
                     payload = self.payload(command, tool, out, first)
                     result = run_row(self.command(), self.script, payload)
                     self.assert_reaches_python(result, self.script)
                     self.assertEqual(result[2], payload.encode("utf-8"))
+
+    def test_gh_pr_ready_forms_reach_python(self):
+        # Each form is one ci_wake.triggers watches. A row that drops one loses a CI wake.
+        for command, tool in (("gh pr ready 12", "Bash"),
+                              ("cd x && gh pr ready 5", "Bash"),
+                              ("gh   pr    ready 5", "Bash"),
+                              ("gh\tpr\tready 5", "Bash"),
+                              ("echo hi\ngh pr ready 5", "Bash"),
+                              ("GH_REPO=o/r gh pr ready 5", "Bash"),
+                              ("gh pr ready 5 -R o/r", "Bash"),
+                              ("gh.exe pr ready 5", "PowerShell"),
+                              ("& gh pr ready 5", "PowerShell"),
+                              # A quoted or full-path gh, a quoted word, another case of the gh word.
+                              ('& "C:\\Program Files\\GitHub CLI\\gh.exe" pr ready 5', "PowerShell"),
+                              ('"/c/Program Files/GitHub CLI/gh.exe" pr ready 5', "Bash"),
+                              ('& "$env:LOCALAPPDATA\\Programs\\gh\\bin\\gh.exe" pr ready 5', "PowerShell"),
+                              ('"gh" pr ready', "Bash"),
+                              ('gh "pr" ready', "Bash"),
+                              ("gh pr 'ready'", "Bash"),
+                              ("gh.EXE pr ready", "PowerShell"),
+                              ("GH pr ready 5", "PowerShell"),
+                              # PowerShell joins a line with a backtick before the newline.
+                              ("gh `\npr ready 5", "PowerShell"),
+                              ("gh pr `\nready 5", "PowerShell")):
+            with self.subTest(command=command, tool=tool):
+                self.assert_watch(command, tool)
+                payload = self.payload(command, tool)
+                result = run_row(self.command(), self.script, payload)
+                self.assert_reaches_python(result, self.script)
+                self.assertEqual(result[2], payload.encode("utf-8"))
+
+    def test_undo_reaches_python_and_python_decides(self):
+        # The row finds the phrase and leaves flags to ci_wake.ready_call, the one home of that parse.
+        command = "gh pr ready --undo 12"
+        self.assert_watch(command, "Bash", want=False)
+        self.assert_reaches_python(run_row(self.command(), self.script, self.payload(command)), self.script)
 
     def test_multi_line_payload_reaches_python_unchanged(self):
         # `i=$(cat)` drops trailing newlines only; every other byte must arrive.

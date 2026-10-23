@@ -1,2 +1,5 @@
+bin/** text eol=lf
+githooks/** text eol=lf
+*.sh text eol=lf
+skills/impeccable/scripts/impeccable text eol=lf
 *.cmd text eol=crlf
-actions/ste-lint/run.sh text eol=lf

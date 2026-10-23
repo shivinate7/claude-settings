@@ -31,7 +31,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
                        The diff it would send is logged for the reviewer. Never blocks.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
-                       also role-diff-nocwd, role-diff-main-checkout, role-diff-unresolved and
+                       also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
@@ -62,7 +62,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   gh-api-method, ln-over-directory
                        deny. See the comment at rule 3b in judge_shell.
-  destructive-delete   deny. A recursive delete at a root, a home or a glob.
+  destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
+                       the working folder or a folder above it, in either shell.
+                       (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec denies. A push that reaches the default branch asks.
                        (stale-safe-force-push)
@@ -78,6 +80,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   subagent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
+                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore or a
+                       builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -217,7 +221,8 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
-            cmd_exe_delete_hit, linked_nm_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
+            push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -227,8 +232,9 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, PROJECT_FROZEN_FILES, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
+            FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
             project_config_shell_hit,
+            PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
         from guard_env import (
@@ -1508,14 +1514,13 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 def judge_stop(payload) -> None:
     """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. Every path that cannot judge logs too: a
-    missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
+    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
+    diff that could not be read log too. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
-    where = payload.get("cwd", "")
-    if not isinstance(where, str) or not where:
-        record("SubagentStop", "noted", "role-diff-nocwd", role)
+    where = str(payload.get("cwd") or "")
+    if not where:
         return
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
@@ -1617,6 +1622,159 @@ def step_up_hit(tool: str, tool_input) -> str:
         if role == "builder" and kind == "try" and n == "3" and "opus" not in model:
             return "Builder try 3 runs on Opus. Spawn it with model opus."
     return ""
+
+
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# use and disk free on the home drive are shares of this machine's capacity; CPU is a second signal. Busy
+# (memory over 85%, disk free under 15%, or CPU over 85% with memory over 75%) refuses a Workflow and an
+# explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
+# run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
+# and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
+# under 5%) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
+LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+LOAD_BUSY_MEMORY, LOAD_BUSY_DISK, LOAD_BUSY_CPU, LOAD_BUSY_CPU_MEMORY = 85.0, 15.0, 85.0, 75.0
+LOAD_FULL_MEMORY, LOAD_FULL_DISK = 95.0, 5.0
+LOAD_BUSY_REASON = "the machine is busy (%s). %s"
+LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
+LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
+LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
+
+
+def _read_memory():
+    """Percent of physical memory in use, from the OS's own counter, or None on another platform."""
+    import ctypes
+    if sys.platform == "win32":
+        from ctypes import wintypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = MemoryStatus()
+        status.dwLength = ctypes.sizeof(status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
+    if sys.platform == "darwin":
+        # kern.memorystatus_level is the free share that `memory_pressure` prints.
+        level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
+        if ctypes.CDLL(None).sysctlbyname(b"kern.memorystatus_level", ctypes.byref(level),
+                                          ctypes.byref(size), None, 0) != 0:
+            return None
+        return 100.0 - level.value
+    return None
+
+
+def _read_disk():
+    import shutil
+    usage = shutil.disk_usage(os.path.expanduser("~"))
+    return 100.0 * usage.free / usage.total
+
+
+def _read_cpu():
+    """Percent of CPU busy: two Windows system-time reads 200 ms apart, else the 1-minute load average per core."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        def ticks():
+            idle, kernel, user = (wintypes.FILETIME() for _ in range(3))
+            if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel),
+                                                         ctypes.byref(user)):
+                raise OSError("GetSystemTimes failed")
+            return [(t.dwHighDateTime << 32) | t.dwLowDateTime for t in (idle, kernel, user)]
+
+        idle_a, kernel_a, user_a = ticks()
+        time.sleep(0.2)
+        idle_b, kernel_b, user_b = ticks()
+        total = (kernel_b - kernel_a) + (user_b - user_a)   # the kernel time holds the idle time
+        return 100.0 * (total - (idle_b - idle_a)) / total if total > 0 else None
+    if hasattr(os, "getloadavg"):
+        return 100.0 * os.getloadavg()[0] / (os.cpu_count() or 1)
+    return None
+
+
+def read_load() -> dict:
+    """The three readings as percents (memory_pct and cpu_pct busy, disk_free_pct free). No child process
+    and no file. A reading that fails or cannot be read is None, and one failure hides no other."""
+    out = {}
+    for key, read in (("memory_pct", _read_memory), ("disk_free_pct", _read_disk), ("cpu_pct", _read_cpu)):
+        try:
+            value = read()
+            out[key] = None if value is None else min(100.0, max(0.0, float(value)))
+        except Exception:
+            out[key] = None
+    return out
+
+
+def load_hit(tool: str, tool_input) -> tuple:
+    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    read of the call: a failed read or an unread value counts as normal."""
+    if tool not in LANE_TOOLS:
+        return "", ""
+    try:
+        reading = read_load()
+    except Exception:
+        return "", ""
+    if not isinstance(reading, dict):
+        return "", ""
+
+    def value(key):
+        v = reading.get(key)
+        return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
+
+    memory, disk, cpu = value("memory_pct"), value("disk_free_pct"), value("cpu_pct")
+    full = [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
+                        disk is not None and disk < LOAD_FULL_DISK and "disk %.1f%% free" % disk) if t]
+    if full:
+        return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
+    # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
+    # is a background request. A session start has no such field, and no ruling covers it at busy.
+    if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and (
+            "run_in_background" not in tool_input or tool_input["run_in_background"] is False)):
+        return "", ""
+    # A 200 ms CPU sample is a spike: CPU counts only with memory also high, and then both are named.
+    cpu_busy = cpu is not None and memory is not None and cpu > LOAD_BUSY_CPU and memory > LOAD_BUSY_CPU_MEMORY
+    memory_busy = memory is not None and (memory > LOAD_BUSY_MEMORY or cpu_busy)
+    busy = [t for t in (memory_busy and "memory %.1f%% in use" % memory,
+                        disk is not None and disk < LOAD_BUSY_DISK and "disk %.1f%% free" % disk,
+                        cpu_busy and "CPU %.1f%% busy" % cpu) if t]
+    if busy:
+        # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
+        waits = [t for t in busy if not t.startswith("disk")]
+        remedy = " and ".join((["wait until the load drops"] if waits else [])
+                              + (["free disk space"] if len(waits) < len(busy) else []))
+        text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
+                else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
+        return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
+    return "", ""
+
+
+OPUS_SPAWN_REASON = (
+    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for a subagent; Opus runs "
+    "only on the owner's word for this spawn, except Plan, a builder's Try 3 of 3 and Explore "
+    "(decision subagent-model-cap). Approve it only when the owner asked for Opus here."
+)
+OPUS_STANDING_ROLES = ("Plan", "Explore")
+
+
+def opus_spawn_hit(tool: str, tool_input) -> str:
+    """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
+    is the role Plan or Explore, or a builder whose brief holds a `Try 3 of 3` line (the same marker
+    step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
+    override pass, so never_passed does not read it."""
+    if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
+        return ""
+    role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
+    if role in OPUS_STANDING_ROLES:
+        return ""
+    if role == "builder" and isinstance(brief, str) and any(
+            kind.lower() == "try" and n == "3" for kind, n in STEP_UP_MARKER.findall(brief)):
+        return ""
+    return str(tool_input.get("model"))
 
 
 # ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
@@ -1977,11 +2135,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
+    # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
+    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
+    for number in range(len(delete_segments)):
+        matched, reason = parent_delete_hit(delete_segments, number, cwd)
+        if matched:
+            refuse(tool, "deny", "destructive-delete", reason, matched)
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in split_segments(cmd):
+    for segment in delete_segments:
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
@@ -2299,6 +2463,16 @@ def judge(payload) -> None:
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
+
+    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass lifts it.
+    opus_model = opus_spawn_hit(tool, tool_input)
+    if opus_model:
+        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model)
+
+    # 9d. The machine-load brake: one read on a lane-start call, none on any other call.
+    load_reason, load_matched = load_hit(tool, tool_input)
+    if load_reason:
+        refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
     # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:

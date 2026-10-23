@@ -26,8 +26,9 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
-status` at once, then at most once every 30 s, and returns when the status is `completed` or when
-the deadline passes: its last pause ends at the deadline, never past it. A call made at its deadline
+status` at once, then every 30 s for 4 minutes, then at growing gaps of 120 s at most, and returns when
+the status is `completed` or when the deadline passes (55 minutes): its last pause ends at the
+deadline, never past it. A call made at its deadline
 or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
 STATUS_PAUSE pause (decision ci-wait-reads-run-status). A second failed read raises Unknown, so the wake
 line is `CI unknown`. A status that is not `completed` (in_progress, queued) means read again.
@@ -857,7 +858,8 @@ def status_reply(status):
 
 def watch_run_on_fakes(replies, budget):
     """Run watch_run(7, cwd, deadline) in process. The module's `gh` is scripted: one
-    (rc, stdout, stderr) per call, the last repeats. Its `time` is the fake clock. Its `subprocess`
+    (rc, stdout, stderr) per call, the last repeats, or a function of the clock's time that
+    returns one. Its `time` is the fake clock. Its `subprocess`
     and `shutil` are fakes that record a direct call (the old `gh run watch` path) and start nothing.
     budget: seconds from the clock's start to the deadline.
     -> (module, exception or None, clock, gh calls [(time, args)], direct subprocess calls)."""
@@ -870,6 +872,8 @@ def watch_run_on_fakes(replies, budget):
         calls.append((clock.now, list(args)))
         if len(calls) > 400:
             raise AssertionError("runaway reads: 400 gh calls")
+        if callable(replies):
+            return replies(clock.now)
         return replies[min(len(calls), len(replies)) - 1]
 
     class Proc:
@@ -1038,6 +1042,81 @@ def case_watch_run_retry_never_reads_or_pauses_past_the_deadline():
           all(t < T0 + budget for t, _ in calls) and len(calls) >= 1, detail)
 
 
+# watch_run back-off: reads come 30 s apart up to and including the read at BACKOFF_FLAT s after the
+# first read, then each gap grows, to BACKOFF_CAP s at most. The watch still ends at WATCH_BUDGET.
+BACKOFF_FLAT = 240    # 4 min: nine reads, at 0, 30, ... 240 s
+BACKOFF_CAP = 120     # s
+WATCH_BUDGET = 3300   # 55 min, the hook's default budget
+FLAT_READS = WATCH_BUDGET // 30   # the reads of a never-ending run at a flat 30 s gap
+
+
+def never_ending_run(budget=WATCH_BUDGET):
+    """-> (module, clock, gh calls, [read times as seconds after the first read], [gaps])."""
+    mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
+    rel = [round(t - T0, 6) for t in read_times(calls)]
+    return mod, clock, calls, rel, [b - a for a, b in zip(rel, rel[1:])]
+
+
+def case_watch_run_reads_30_s_apart_for_the_first_four_minutes():
+    """The first nine reads sit at 0, 30, ... 240 s. The gap after the read at 240 s is longer
+    than 30 s: the boundary is exact, and a flat 30 s gap forever fails the second check."""
+    label = "watch_run, never completes, 55 min budget"
+    mod, clock, calls, rel, gaps = never_ending_run()
+    detail = "reads at %r" % rel[:14]
+    check("%s: the first nine reads are 30 s apart, at 0 to 240 s" % label,
+          rel[:9] == [30.0 * i for i in range(9)], detail)
+    check("%s: the gap after the read at 240 s is longer than 30 s" % label,
+          len(rel) > 9 and rel[9] - rel[8] > 30, detail)
+
+
+def case_watch_run_gaps_grow_to_a_cap():
+    label = "watch_run, never completes, 55 min budget"
+    mod, clock, calls, rel, gaps = never_ending_run()
+    detail = "distinct gaps %r in %d reads" % (sorted({round(g, 1) for g in gaps}), len(rel))
+    check("%s: no gap is shorter than the one before it" % label, gaps == sorted(gaps), detail)
+    check("%s: no gap is longer than %d s" % (label, BACKOFF_CAP), max(gaps) <= BACKOFF_CAP + 1e-6, detail)
+    check("%s: the gaps grow past 30 s, to 90 s or more" % label, max(gaps) >= 90, detail)
+
+
+def case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads():
+    """The default budget stays 55 min. A never-ending run ends exactly at its deadline, with no read at
+    or after it, in the flat phase (250) and in the growth phase (400, 1000, 3300). Over the 55 min the
+    watch reads at most half as often as a flat 30 s gap does."""
+    for budget in (250, 400, 1000, WATCH_BUDGET):
+        label = "watch_run, never completes, deadline in %d s" % budget
+        mod, clock, calls, rel, gaps = never_ending_run(budget)
+        detail = "end=%.1f reads=%d last=%r" % (clock.now - T0, len(rel), rel[-3:])
+        check("%s: ends at the deadline, not before it and not past it" % label,
+              abs(clock.now - (T0 + budget)) < 1e-6, detail)
+        check("%s: no read at or after the deadline" % label, all(t < budget for t in rel), detail)
+    check("the hook's default budget is %d s (55 min)" % WATCH_BUDGET, mod.DEFAULT_DEADLINE == WATCH_BUDGET,
+          "DEFAULT_DEADLINE=%r" % mod.DEFAULT_DEADLINE)
+    check("watch_run, never completes, 55 min budget: at most %d reads (half of %d at a flat 30 s)"
+          % (FLAT_READS // 2, FLAT_READS), len(rel) <= FLAT_READS // 2, "reads=%d" % len(rel))
+
+
+def case_watch_run_completed_wakes_on_the_next_read():
+    """The status turns `completed` at a moment between two reads: in the flat phase (5, 100), just
+    after the read at 240 s (241), and deep in the growth phase (1000, 2500). The watch ends at the
+    first read that sees it: on the schedule a never-ending run keeps, with no pause after that read,
+    and no later than the gap that was running."""
+    _, _, _, baseline, _ = never_ending_run()
+    for flip in (5, 100, 241, 1000, 2500):
+        label = "watch_run, completed %d s after the first read" % flip
+        mod, raised, clock, calls, direct = watch_run_on_fakes(
+            lambda now, flip=flip: status_reply("completed" if now - T0 >= flip else "in_progress"), WATCH_BUDGET)
+        rel = [round(t - T0, 6) for t in read_times(calls)]
+        detail = watch_detail(raised, clock, calls, direct) + " reads=%r" % rel[-3:]
+        check("%s: returns, no exception" % label, raised is None, detail)
+        check("%s: ends at the first read at or after the flip, with no pause after it" % label,
+              rel != [] and rel[-1] >= flip and (len(rel) < 2 or rel[-2] < flip)
+              and abs(clock.now - T0 - rel[-1]) < 1e-6, detail)
+        check("%s: every read is on the schedule of a never-ending run" % label,
+              rel == baseline[:len(rel)], detail)
+        check("%s: wakes no later than %d s after the flip" % (label, BACKOFF_CAP),
+              rel != [] and rel[-1] - flip <= BACKOFF_CAP, detail)
+
+
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
 def wait_for_on_fakes(runs, budget):
@@ -1121,6 +1200,27 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
         check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
         if budget == 100:
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
+
+
+def case_wait_for_lists_back_off_like_the_status_reads():
+    """A head with only a skipped draft run is listed until the deadline. The lists follow the schedule of
+    the status reads (30 s apart to 240 s, then growing to 120 s at most) and are at most half as many
+    as a flat 30 s gap makes. The one list made at the deadline is the only extra."""
+    label = "wait_for, only a skipped draft run, 55 min budget"
+    _, _, _, baseline, _ = never_ending_run()
+    raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_DONE], WATCH_BUDGET)
+    rel = [round(t - T0, 6) for t in list_times(calls)]
+    before = [t for t in rel if t < WATCH_BUDGET]
+    gaps = [b - a for a, b in zip(before, before[1:])]
+    detail = wait_detail(raised, clock, calls, deadline)[:300] + " distinct gaps %r" % sorted({round(g, 1) for g in gaps})
+    check("%s: ends at the deadline, with no list after it" % label,
+          abs(clock.now - deadline) < 1e-6 and all(t <= WATCH_BUDGET for t in rel), detail)
+    check("%s: at most %d lists (half of %d at a flat 30 s)" % (label, FLAT_READS // 2, FLAT_READS),
+          len(rel) <= FLAT_READS // 2, "lists=%d" % len(rel))
+    check("%s: the lists come at the times of the status reads" % label,
+          before == baseline[:len(before)] and len(before) >= 9, detail)
+    check("%s: the gaps grow to 90 s or more, never past %d s" % (label, BACKOFF_CAP),
+          gaps != [] and 90 <= max(gaps) <= BACKOFF_CAP + 1e-6, detail)
 
 
 # The watch names the PR's repo on every gh call and gives that repo's verdict. The rows put the PR in
@@ -1449,6 +1549,10 @@ def main():
     case_watch_run_retries_a_failed_read_once_and_goes_on()
     case_watch_run_reads_past_a_queued_status()
     case_watch_run_retry_never_reads_or_pauses_past_the_deadline()
+    case_watch_run_reads_30_s_apart_for_the_first_four_minutes()
+    case_watch_run_gaps_grow_to_a_cap()
+    case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads()
+    case_watch_run_completed_wakes_on_the_next_read()
 
     # A draft run that skips, then the real run (debt ci-wake-lists-runs-once).
     case_draft_run_then_real_run()
@@ -1457,6 +1561,7 @@ def main():
     case_draft_run_ending_skipped_is_no_run_yet()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
+    case_wait_for_lists_back_off_like_the_status_reads()
 
     # The repo flag, the no-CI repo, the real alert, and a failed workflow read.
     case_wrong_repo_every_gh_call_names_the_pr_repo()

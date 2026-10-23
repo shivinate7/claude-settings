@@ -551,8 +551,8 @@
     },
     "output-never-hand-off-doable-step": {
       "mechanism": {
-        "kind": "judgment",
-        "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. No check reads a reply and the tool list to decide that."
+        "kind": "unmechanized",
+        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, 1 Stop in 5, never blocks) samples it. A block that mixes shells has no code check."
       }
     },
     "style-option-says-effect": {
@@ -594,7 +594,7 @@
     "building-guard-needs-incident": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
+        "reason": "Whether a named incident, measured risk or likely risk justifies a rule is a human read of the rule's record. Grow while things change, then cull what never fired (owner, 2026-10-21)."
       }
     },
     "roles-review-cap-three": {

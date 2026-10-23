@@ -3,7 +3,7 @@
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally,
 // and helpers that take $ are top-level functions.
 import {
-  AGENTS_TIMEOUT_MS, GC_MS, GIT_BACKOFF_MAX_MS, GIT_SLOW_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
+  AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
 } from './lib.mjs'
@@ -19,8 +19,7 @@ let gitBusy = false // a heartbeat git read is running
 let gen = 0 // counts turn starts: a git read that began in an earlier count is dropped when it lands
 let ended = false // the session ended: nothing is written after that
 const retired = new Set() // ids a /clear or resume left behind: a write that lands late is removed again
-let gitEvery = HEARTBEAT_MS // idle git read interval: doubles after a slow read, back to 30 s on a quick one
-let gitNextAt = 0
+let gitNextAt = 0 // an idle beat reads git from this time on; every read moves it GIT_IDLE_MS ahead
 let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
@@ -74,6 +73,13 @@ export function register(on) {
       if (!e.agentId) tracker.turnComplete(e)
       await soon($, refreshAll($, !e.agentId))
     } catch (err) { note($, 'turn end failed: ' + (err && err.message)) }
+    return result
+  })
+
+  // A client attached: read git once, so the board is current for the person who just looked.
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+    try { await soon($, refreshAll($, true)) } catch (err) { note($, 'attach failed: ' + (err && err.message)) }
     return result
   })
 
@@ -185,21 +191,14 @@ async function soon($, work) {
   timer.cancel()
 }
 
-// Heartbeat. While the session waits, it reads git again, so an idle session keeps a fresh
-// reading. One read at a time: a beat that finds the last read still running skips it. This
+// Heartbeat. It writes the entry on every beat. While the session waits, it reads git again only
+// GIT_IDLE_MS after the last read (a turn end and an attach also read). One read at a time: a beat that finds the last read still running skips it. This
 // runs from a timer, never inside a hook. A failed read makes the counts unknown.
 async function tick($) {
   try {
-    if (tracker.isIdle() && !gitBusy && (gitEvery <= HEARTBEAT_MS || (await $.clock.now()) >= gitNextAt)) {
+    if (tracker.isIdle() && !gitBusy && (await $.clock.now()) >= gitNextAt) {
       gitBusy = true
-      try {
-        const started = await $.clock.now()
-        const { slow } = await refreshGit($)
-        // A read that needed over 5 s: wait twice as long before the next one, up to 5 minutes.
-        // A quick read: back to every beat.
-        gitEvery = slow ? Math.min(gitEvery * 2, GIT_BACKOFF_MAX_MS) : HEARTBEAT_MS
-        gitNextAt = started + gitEvery
-      } finally { gitBusy = false }
+      try { await refreshGit($) } finally { gitBusy = false }
     }
     await refreshAll($, false)
     if (watching) {
@@ -246,31 +245,25 @@ async function flush($, withDetail) {
   } catch (err) { note($, 'store write failed: ' + (err && err.message)) } // the entry goes stale and hides: the safe failure
 }
 
-// One cheap git call per turn end and per idle beat. A failed or slow read makes the counts
+// One cheap git call per turn end, per attach and per GIT_IDLE_MS of idleness. A failed or slow read makes the counts
 // unknown. A read that began before the latest turn start is dropped when it lands: it may
-// describe the tree from before the turn. Gives { slow }: the read took GIT_SLOW_MS or more.
+// describe the tree from before the turn.
 async function refreshGit($) {
   const mine = gen
-  let slow = false
   try {
-    const started = await $.clock.now()
+    gitNextAt = (await $.clock.now()) + GIT_IDLE_MS // set first: a failed or hung read waits as long as a good one
     const cwd = await bounded($, $.session.cwd())
     const r = await bounded($, $.process.run(gitArgs(), { cwd, timeoutMs: GIT_TIMEOUT_MS }), GIT_TIMEOUT_MS + 1000)
     const at = await $.clock.now()
-    slow = at - started >= GIT_SLOW_MS
-    // A quick read, from a turn end or a beat, puts the idle interval back to 30 s.
-    if (!slow) { gitEvery = HEARTBEAT_MS; gitNextAt = at + HEARTBEAT_MS }
-    if (mine !== gen) return { slow }
+    if (mine !== gen) return
     if (r.exitCode !== 0) throw new Error('git exited ' + r.exitCode)
     tracker.setGit(parseStatus(r.stdout), at)
   } catch (err) {
-    slow = slow || (err && err.message === 'timed out')
     if (mine === gen) {
       tracker.setGit(null)
       note($, 'git read failed: ' + (err && err.message))
     }
   }
-  return { slow }
 }
 
 async function refreshAgents($) {

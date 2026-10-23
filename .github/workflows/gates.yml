@@ -77,6 +77,15 @@ jobs:
       - name: Workflow supply-chain audit (zizmor)
         run: pipx run zizmor==1.30.1 .github/ actions/
 
+      # Lint only, never a format step. Rules and exclusions are in ruff.toml.
+      - name: Python lint (ruff)
+        run: pipx run ruff==0.17.1 check .
+
+      # Every tracked *.sh, warning severity and up. A directive that silences a finding sits
+      # beside the line and says why.
+      - name: Shell lint (ShellCheck)
+        run: git ls-files -z '*.sh' | xargs -0 pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning
+
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
         run: python3 hooks/test_guard.py
@@ -350,6 +359,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
+      - name: install.sh checkout-detection suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh hooks/test_install_src.sh
+
       # This step and the skill test step below come last, so a red test in them skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
       # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
@@ -413,6 +426,12 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/mem-monitor.test.ps1
 
+      - name: Install bin eol test, Windows PowerShell 5.1
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        timeout-minutes: 3
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
+
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either. gates-macos
   # below covers the rest of the suite, so this job stays narrow, on purpose.
@@ -453,8 +472,8 @@ jobs:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_macos == 'true' || github.event_name != 'pull_request' }}
-    # Cap 25 min = about 2x the slowest green run (figures: debt measured-time-table).
-    timeout-minutes: 25
+    # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -469,6 +488,10 @@ jobs:
       - name: Guard fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
+
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 hooks/test_guard_load_os.py
 
       - name: rm shim fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -624,7 +647,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows == 'true' || github.event_name != 'pull_request' }}
-    # Cut F moved the guard suite out. Expected about 190 s (install.sh 180 s, plus setup); 10 min leaves room.
+    # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -701,10 +724,23 @@ jobs:
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
-      - name: install.sh checkout-detection suite
+      - name: Load reader against the OS tools
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python hooks/test_guard_load_os.py
+
+      - name: install.sh stays off Windows suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
-        run: sh hooks/test_install_src.sh
+        run: sh hooks/test_install_windows.sh
+
+      # F1 and G1 run session_start.sh, which runs at every Windows session start. Each fetches with the hook's
+      # own 2 s bound (hooks/session_start.sh:15), so a slow runner may kill the fetch. A hang fails this step in 3 min,
+      # by name, not the job's 10 (debt install-checkout-flake).
+      - name: Session start freshness cases (caseF1, caseG1)
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        timeout-minutes: 3
+        run: sh hooks/test_install_src.sh caseF1 caseG1
 
   # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:
@@ -794,7 +830,9 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
     # About 550 s on push (the sweep mutation harness takes about 150 s: runs 37650386161, 37606531387).
-    timeout-minutes: 20
+    # Provisional cap, owner 2026-10-23: run 39916456134 hit the old 20-minute cap with no step red.
+    # Set it to about 2x the slowest of 5 green runs once the ci-time-caps lane lands.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:

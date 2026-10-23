@@ -16,6 +16,9 @@
 #                                      the latest files from GitHub.
 set -u
 
+# install.ps1 is the Windows installer. Write nothing first.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Windows. Use install.ps1: powershell -ExecutionPolicy Bypass -File ./install.ps1"; exit 0;; esac
+
 REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-main}"
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
@@ -97,6 +100,8 @@ pointer_dir() {
   md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
   [ -f "$md" ] || return 1
   d=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$md" 2>/dev/null | head -n1)
+  # SC2088: the pattern is the literal two characters "~/" that the pointer line holds, never an expansion.
+  # shellcheck disable=SC2088
   case "$d" in
     "~"/*) d="$HOME${d#\~}" ;;
   esac
