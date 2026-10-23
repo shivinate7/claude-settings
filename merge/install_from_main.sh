@@ -15,7 +15,9 @@
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
 # writes the files one at a time (a live reader can see a mix there).
 # A pin with tracked changes is never moved, switched or removed, nor is an old tree with them: the
-# run logs one line naming the pin and exits 1.
+# run prints one stderr line naming the pin and exits 1; the SessionStart hook writes that line to
+# the install log. A <clone>-live-<commit> tree whose only changes are missing tracked files (a git
+# worktree add killed part way) has them restored before it is reused.
 # The run tests for link rights before it moves anything, so a host without them never loses the
 # pin path.
 # The run takes the install lock the installers take (install-hooks-whole): one
@@ -66,7 +68,13 @@ take_lock() {
 canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
 common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
 # True when DIR is detached at main's commit.
-at_main() { ! git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1 && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$commit" ]; }
+at_commit() { ! git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1 && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$commit" ]; }
+# A tracked file missing is the mark of a git worktree add killed part way: the tree lacks files,
+# it holds no one's edits. not_deletions prints DIR's other tracked changes.
+missing_files() { git -C "$1" status --porcelain --untracked-files=no 2>/dev/null | grep -qE '^(D.|.D)'; }
+not_deletions() { git -C "$1" status --porcelain --untracked-files=no 2>/dev/null | grep -vE '^(D.|.D)'; }
+# True when DIR is detached at main's commit with no tracked file missing.
+at_main() { at_commit "$1" && ! missing_files "$1"; }
 
 # Makes $pin a link to worktree $1 by one rename of the link. Returns 1 when no real link can be made.
 # The temp name is per run, so a run that died never leaves a name another run shares.
@@ -115,15 +123,17 @@ prune_trees() {
 # Moves the pinned checkout to main's commit.
 move_pin() {
   if [ -n "$(git -C "$pin" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    # Tracked changes in the pin are someone's work: move, switch and remove nothing. The log line
-    # names the pin and is not the helper's own start or end line, so the hook's reader sees it.
-    printf '%s claude-settings pin: %s has tracked changes, so it was not moved to main\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$pin" >> "$INSTALL_LOG"
+    # Tracked changes in the pin are someone's work: move, switch and remove nothing.
     fail "the pinned checkout $pin has tracked changes, so it was not moved; commit or discard them there (git -C \"$pin\" status), then run merge/install_from_main.sh"
   fi
   if ! can_link; then switch_in_place; return; fi   # no link rights: leave the pin path as it is
   short=$(git rev-parse --short=12 "$commit")
   tree="$pin-$short"
   prev=""; [ -e "$pin" ] && prev=$(canon "$pin")
+  # A tree at main's commit whose only changes are missing files: restore them from that commit.
+  if [ -d "$tree" ] && at_commit "$tree" && missing_files "$tree" && [ -z "$(not_deletions "$tree")" ]; then
+    git -C "$tree" checkout -q HEAD -- . >/dev/null 2>&1
+  fi
   if [ -d "$tree" ] && at_main "$tree"; then :   # a tree from an earlier move is already at main
   else
     [ ! -e "$tree" ] || fail "$tree is in the way; move it aside, then run merge/install_from_main.sh"
