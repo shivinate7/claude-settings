@@ -209,7 +209,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   fast-forward only. A tree that holds `main` is merged in place when it has no tracked change;
   otherwise the tree is left alone. The hook never stashes, resets or forces in your trees. When the
   pin is not at local `main`, the child runs `merge/install_from_main.sh`, which switches only the pin
-  and never one with tracked changes (`decisions/merge-reinstalls-from-main.md`). A failed fetch,
+  and never one with tracked changes. A failed fetch,
   move, skip or pin install writes one line to the install log, with its own reason.
   Cost, per session start or resume: one detached child and at most one network fetch. A local
   `git fetch .` runs only when `main` moves by ref because no tree holds it. The helper and the
