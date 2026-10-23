@@ -1394,6 +1394,7 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds
     # the target's own text for it (the mutated one, or the real one).
     shutil.copy(GIT_READS, hooks_dir)
+    shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
 
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
     session_end_text = (
