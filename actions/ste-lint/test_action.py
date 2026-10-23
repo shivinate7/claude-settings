@@ -431,9 +431,9 @@ for label, change, base, want in [
           s_out + "\n--- command ---\n" + c_out)
 
 
-# Shadowed imports. The SCOPE all summary runs `python3 -c` from the linted repo's root, so a json.py,
-# a json/ package or an ste_emit.py there would run as code. A package wins over a module of the same
-# name, so each shape gets its own run. Each planted file writes its own marker when imported.
+# Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
+# ste_emit.py there must not run when the step imports its helpers. A package wins over a module of the
+# same name, so each shape gets its own run. Each planted file writes its own marker when imported.
 def shadow_run(scope, json_path):
     with tempfile.TemporaryDirectory() as outer:
         marks, summary = os.path.join(outer, "marks"), os.path.join(outer, "sum")
