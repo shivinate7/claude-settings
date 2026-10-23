@@ -33,14 +33,15 @@ Contract, from decision gate-hooks-fail-closed:
 - The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
   line equal to the placeholder that install.sh and install.ps1 stamp. A line that drifted would install
   unstamped, and the guard would then deny every call.
-- The SessionStart clone refresh runs install.sh on Linux and Darwin, and never under a MINGW, MSYS or
-  CYGWIN uname: install.ps1 is the Windows installer.
+- The SessionStart clone refresh runs merge/install_from_main.sh. That helper runs install.sh in the pin on
+  Linux and Darwin, and install.ps1 under a MINGW, MSYS or CYGWIN uname, so install.sh never runs there.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
 The shell is started by absolute path, so it still runs.
 
-Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST.
+Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST, and the refresh helper with
+REFRESH_HELPER_UNDER_TEST.
 """
 import json
 import os
@@ -54,6 +55,7 @@ from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.pat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
+HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")
 
 # gate script -> the event whose entry must run it
@@ -345,10 +347,12 @@ GUARD_NAMES = (
 
 
 def clean_env(**extra):
-    """The environment with the guard-test switches removed, then `extra` set."""
+    """The environment with the guard-test switches and every GIT_* key removed, then `extra` set. A git hook
+    sets GIT_DIR, which would point a fixture's git at the real repo."""
     env = dict(os.environ)
-    for key in ("GUARD_UNDER_TEST", "MUTATE_ONLY", "PYTHONPATH"):
-        env.pop(key, None)
+    for key in list(env):
+        if key.startswith("GIT_") or key in ("GUARD_UNDER_TEST", "MUTATE_ONLY", "PYTHONPATH"):
+            env.pop(key)
     env.update(extra)
     return env
 
@@ -537,34 +541,45 @@ WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0
 OTHER_UNAMES = ("Linux", "Darwin")
 
 
-def refresh_entry(settings):
-    """The one SessionStart entry that runs install.sh (the clone refresh), or None."""
-    hits = [h for ev, h in hook_entries(settings) if ev == "SessionStart" and "install.sh" in command_of(h)]
-    return hits[0] if len(hits) == 1 else None
+def wiring_case():
+    """The clone refresh runs the helper. No SessionStart entry runs install.sh itself."""
+    cmds = [command_of(h) for ev, h in hook_entries(load()) if ev == "SessionStart"]
+    direct = [c for c in cmds if "install.sh" in c]
+    runs = [c for c in cmds if "install_from_main.sh" in c]
+    if direct:
+        return False, "%d SessionStart entries name install.sh" % len(direct)
+    if len(runs) != 1:
+        return False, "%d SessionStart entries name install_from_main.sh, want 1" % len(runs)
+    return True, "one SessionStart entry runs install_from_main.sh"
 
 
 def refresh_case(uname_value, runs):
-    """install.sh is the Mac/Linux installer, install.ps1 the Windows one. The refresh hook runs install.sh
-    on Linux and Darwin and never under MINGW, MSYS or CYGWIN, where it ran for 80 to 90 s at each start.
-    A stub uname answers for the row. The clone is a stub too: its install.sh writes a marker file."""
+    """The helper runs install.sh in the pin on Linux and Darwin. Under MINGW, MSYS or CYGWIN it runs install.ps1,
+    and install.sh must not run there: it takes 80 to 90 s at each start. The helper runs in a throwaway clone on
+    main, with stub uname, powershell.exe and cygpath. The clone's install.sh writes a marker file next to itself,
+    so the marker shows that install.sh ran in the pin."""
     def check():
-        h = refresh_entry(load())
-        if h is None:
-            return False, "no single SessionStart entry runs install.sh"
         with tempfile.TemporaryDirectory() as root:
             clone, cfg, tools = (os.path.join(root, n) for n in ("clone", "cfg", "tools"))
-            os.makedirs(os.path.join(clone, ".git"))
-            write_file(os.path.join(clone, "install.sh"), 'printf ran > "$(dirname "$0")/ran.txt"\n')
-            write_file(os.path.join(cfg, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone.replace("\\", "/"))
-            # git is a stub so the hook's pull never reaches a real repository.
-            for name, body in (("uname", "echo %s" % uname_value), ("git", "exit 0")):
+            write_file(os.path.join(clone, "install.sh"), 'printf ran > "$(dirname "$0")/ran-sh.txt"\n')
+            write_file(os.path.join(clone, "install.ps1"), "")
+            for a in (("init", "-q", "-b", "main"), ("add", "."),
+                      ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c")):
+                subprocess.run(["git", "-C", clone, *a], capture_output=True, text=True, check=True, env=clean_env())
+            for name, body in (("uname", "echo %s" % uname_value), ("powershell.exe", "exit 0"),
+                               ("cygpath", 'echo "$2"')):
+                if name == "cygpath" and shutil.which("cygpath"):
+                    continue
                 write_file(os.path.join(tools, name), "#!/bin/sh\n%s\n" % body)
                 os.chmod(os.path.join(tools, name), 0o755)
-            path = os.pathsep.join([tools, os.environ.get("PATH", "")])
-            r = run_sh(PATH_FIRST + command_of(h),
-                       {"CLAUDE_CONFIG_DIR": cfg, "HOME": root, "PATH": path, "STUB_PATH": path})
-            ran = os.path.exists(os.path.join(clone, "ran.txt"))
-        note = "exit %d; install.sh ran: %s; stderr %s" % (r.returncode, ran, r.stderr.strip()[:120])
+            # Git's bash sits after the stubs, so the helper's own bash call never finds the WSL stub first.
+            path = os.pathsep.join([tools, os.path.dirname(SH or ""), os.environ.get("PATH", "")])
+            r = run_sh(PATH_FIRST + 'cd "$CLONE" && bash "$HELPER"',
+                       clean_env(CLAUDE_CONFIG_DIR=cfg, HOME=root, PATH=path, STUB_PATH=path,
+                                 CLONE=clone.replace("\\", "/"),
+                                 HELPER=os.path.abspath(HELPER).replace("\\", "/")))
+            ran = os.path.exists(os.path.join(clone + "-live", "ran-sh.txt"))
+        note = "exit %d; install.sh ran: %s; stderr %s" % (r.returncode, ran, r.stderr.strip()[:160])
         return r.returncode == 0 and ran == runs, note
     return check
 
@@ -615,6 +630,7 @@ def build_cases():
                   guard_sentinel_case))
     cases.append(("install stamp: each hooks/guard*.py holds exactly one placeholder line, as the stampers write it",
                   stamp_lines_case))
+    cases.append(("refresh hook: the SessionStart entry runs install_from_main.sh, not install.sh", wiring_case))
     for u in WINDOWS_UNAMES:
         cases.append(("refresh hook: uname %s does not run install.sh" % u, refresh_case(u, False)))
     for u in OTHER_UNAMES:
