@@ -1683,8 +1683,8 @@ def _read_disk():
 
 
 def _read_cpu():
-    """Percent of CPU busy from the OS's CPU ticks, read twice 200 ms apart: Windows GetSystemTimes, Mac Mach
-    host_statistics, Linux /proc/stat. Never the load average, which counts waiting work and not busy cores."""
+    """Percent of CPU busy from the OS's CPU ticks: Windows GetSystemTimes twice 200 ms apart; Mac Mach
+    host_statistics and Linux /proc/stat up to six times, 200 ms apart, until the tick total moves. Never the load average, which counts waiting work and not busy cores."""
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -1726,8 +1726,11 @@ def _read_cpu():
         return None
     try:
         total_a, idle_a = ticks()
-        time.sleep(0.2)
-        total_b, idle_b = ticks()
+        for _ in range(5):   # bandaid, cause unproven: a VM can show no tick change in 200 ms, so wait up to 1 s
+            time.sleep(0.2)
+            total_b, idle_b = ticks()
+            if total_b != total_a:
+                break
     finally:
         if sys.platform == "darwin":
             try:

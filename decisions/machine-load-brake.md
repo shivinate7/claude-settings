@@ -11,14 +11,14 @@ Owner, 2026-10-21 (spec), 2026-10-22 (CPU and foreground) and 2026-10-23 (disk):
 - **The refusal** names each reading that tripped it. When CPU and memory trip busy together, it names both. At busy, an Agent or Task call is told to wait for the load to drop (memory, CPU) or free disk space (disk). It is also told to start the lane as an Agent call that leaves `run_in_background` out or sets it false. A Workflow has no foreground form, so it gets only the wait or free-disk remedy.
 - **A read error counts as normal.** On Linux memory is unread, so CPU never makes busy there. A reading that fails or cannot be read is unread, and one unread reading hides no other.
 - **Which calls read.** Agent, Task, Workflow and `start_session`, once each. No other tool reads load.
-- **How it reads.** Windows: `GlobalMemoryStatusEx`, and `GetSystemTimes` twice, 200 ms apart, through ctypes. Mac: `kern.memorystatus_level`, and Mach `host_statistics` CPU ticks twice, through ctypes. Linux: `/proc/stat` twice, memory unread. Disk everywhere: `shutil.disk_usage`. Never the load average (107 on 15 cores while `top` showed half idle). No platform starts a child process.
+- **How it reads.** Windows: `GlobalMemoryStatusEx`, and `GetSystemTimes` twice, 200 ms apart, through ctypes. Mac: `kern.memorystatus_level`, and Mach `host_statistics` CPU ticks, through ctypes. Linux: `/proc/stat`, memory unread. Mac and Linux read the ticks up to six times, 200 ms apart, until the total moves. Disk everywhere: `shutil.disk_usage`. Never the load average (107 on 15 cores while `top` showed half idle). No platform starts a child process.
 - **An owner override pass lifts a refusal.** The brake is not in the never-passed list (`owner-override-pass`).
 
 Why: many lanes at once can exhaust memory or disk and stall every session.
 
 Risk kind: likely, per `building-guard-needs-incident`. A session that fans out lanes is likely to hit it in normal work. No incident and no measurement of a stalled machine is recorded, and the memory and CPU levels are placeholders for the owner to tune. Landed 2026-10-22.
 
-Cost, per `outcomes-mechanize-rules`: process starts, none. Files written, none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads. How often: once per lane-start call. Each read waits 200 ms. No timer, no watcher, no read on any other call. `hooks/test_guard.py` (family `load-brake`) pins the zero children, zero files and one read per lane call. `hooks/test_guard_load_os.py` checks each reading against the OS's own tool on the Windows and Mac runners (the Mac CPU against `top -l 2`).
+Cost, per `outcomes-mechanize-rules`: process starts, none. Files written, none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads. How often: once per lane-start call. Each read waits 200 ms on Windows, and 200 ms to 1 s on Mac and Linux. No timer, no watcher, no read on any other call. `hooks/test_guard.py` (family `load-brake`) pins the zero children, zero files and one read per lane call. `hooks/test_guard_load_os.py` checks each reading against the OS's own tool on the Windows and Mac runners (the Mac CPU against `top -l 2`).
 
 Kind: build
 Plan: decisions/machine-load-brake.md#the-ruling (windows)

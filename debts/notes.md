@@ -523,3 +523,6 @@
 - refresh-gcm-prompt: GIT_TERMINAL_PROMPT=0 does not stop a Git Credential Manager window on Windows, so the refresh fetch may wait on one (settings.json SessionStart refresh). Decision: none
 - install-hkcu-msix-copy: an install.ps1 started from a Claude-spawned shell on a packaged (MSIX) Claude may write its HKCU Path change to the package's private copy (install.ps1 Path write; machine note this-machine-msix-appdata). Unproven. Decision: none
 - temp-helpers-predate-standard: existing test temp helpers in this repo, such as actions/stamp/test_stamp.mjs withTempDir, do not follow the run-folder standard; the rule binds new or touched temp code. Decision: test-temp-standard (one run folder per test run)
+- brake-cpu-zero-tick-cause-unproven: the Mac and Linux CPU read repeats until the tick total moves, a bandaid. Why ticks stay still for 200 ms on a CI Mac VM is unmeasured. The test's unread note names the cause on the next red (hooks/guard.py _read_cpu). Decision: machine-load-brake
+- brake-spike-text-200ms: "a 200 ms CPU sample is a spike" is exact on Windows; a stalled Mac or Linux VM samples up to 1 s (hooks/guard.py load_hit). Decision: machine-load-brake
+- test-guard-root-predates-standard: hooks/test_guard.py ROOT is a plain mkdtemp, not the test temp-root standard. Decision: test-temp-standard

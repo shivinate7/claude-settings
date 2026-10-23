@@ -14332,7 +14332,7 @@ for _label, _check in (
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, disk free on the
-# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks, read twice, as a second
+# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks (Windows reads twice, Mac and Linux up to six times), as a second
 # signal. It counts no claude process and no running lane. A GB here is 2**30 bytes, as df -k and PowerShell
 # 1GB give. The levels (decision machine-load-brake; memory and CPU levels are placeholders):
 #   busy  memory over 85%, disk free under the smaller of 10% of the disk and 15 GB, or (CPU over 85% AND
@@ -14357,8 +14357,8 @@ FAMILY = "load-brake"
 #                  raise: every reading then counts as normal. It returns no claude_procs, and a
 #                  claude_procs key in a reading changes nothing.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads the Mach CPU ticks through
-#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read twice) and memory
-#                  through sysctlbyname; linux reads /proc/stat twice; both read the disk through
+#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read up to six times) and memory
+#                  through sysctlbyname; linux reads /proc/stat up to six times; both read the disk through
 #                  shutil.disk_usage on the home folder and never the load average.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
@@ -14367,7 +14367,8 @@ FAMILY = "load-brake"
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg and
 # os.cpu_count (15), time.sleep (a no-op), shutil.disk_usage, and the /proc/stat file (builtins.open and
 # io.open). Each source is restored before the judge runs. Tick samples: a base sample, then one that adds
-# the case's busy share, so the two reads differ by that share.
+# the case's busy share, so the two reads differ by that share. A `ticks` list replaces them: the samples
+# in order, the last one repeating, so a zero change can come before a rise.
 # A fake case must start no child process; the probe counts them and the case checks the count.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
@@ -14415,11 +14416,21 @@ def under_fake(read, fake):
     real_open = open
     busy = int(fake["busy"])
     samples = [(1000, 0, 9000, 0), (1000 + busy * 10, 0, 9000 + (100 - busy) * 10, 0)]   # (user, system, idle, nice)
+    if fake.get("ticks"):
+        samples = [tuple(s) for s in fake["ticks"]]
     calls = {"ticks": 0, "stat": 0}
 
+    def sample(counter):
+        # A read past 100 raises, so a loop with no bound fails its case instead of hanging the run.
+        calls[counter] += 1
+        if calls[counter] > 100:
+            raise RuntimeError("the fake host gave more than 100 tick reads")
+        if fake.get("raise_first") and calls[counter] == 1:
+            raise OSError("fake first tick read failed")
+        return samples[min(calls[counter] - 1, len(samples) - 1)]
+
     def host_statistics(host, flavor, info, count):
-        user, system, idle, nice = samples[min(calls["ticks"], 1)]
-        calls["ticks"] += 1
+        user, system, idle, nice = sample("ticks")
         target = getattr(info, "_obj", info)
         for index, value in enumerate((user, system, idle, nice)):
             target[index] = value
@@ -14435,8 +14446,7 @@ def under_fake(read, fake):
 
     def stat_open(file, *args, **kwargs):
         if str(file) == "/proc/stat":
-            user, system, idle, nice = samples[min(calls["stat"], 1)]
-            calls["stat"] += 1
+            user, system, idle, nice = sample("stat")
             return io.StringIO("cpu  %d %d %d %d 0 0 0 0 0 0\n" % (user, nice, system, idle))
         return real_open(file, *args, **kwargs)
 
@@ -14451,7 +14461,41 @@ def under_fake(read, fake):
             mock.patch("time.sleep", lambda seconds: None), \
             mock.patch("shutil.disk_usage", lambda path: usage), \
             mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
-        return read()
+        try:
+            return read()
+        finally:
+            out["tick_reads"] = calls["ticks"] + calls["stat"]
+
+
+# Why the real CPU read came back unread. read_load turns an exception into None, the same as a zero tick
+# change, so the probe wraps _read_cpu before read_load and keeps what read_load's own call did. A second
+# call would read the ticks again, and a first-read raise could then pass as no exception.
+def record_cpu(holder):
+    first = {}
+    real = getattr(holder, "_read_cpu", None)
+    if real is None:
+        return first
+
+    def wrapped():
+        try:
+            value = real()
+        except Exception as exc:
+            first["raised"] = "%s: %s" % (type(exc).__name__, str(exc)[:80])
+            raise
+        first["value"] = value
+        return value
+    holder._read_cpu = wrapped
+    return first
+
+
+def cpu_cause(first):
+    if "raised" in first:
+        return "exception raised: %s" % first["raised"]
+    if "value" not in first:
+        return "unknown, read_load never reached _read_cpu"
+    if first["value"] is None:
+        return "zero tick change, no exception: the tick total did not move in the sample window"
+    return "unknown, the first read returned %.1f%%" % first["value"]
 
 
 out = {"reads": 0}
@@ -14478,11 +14522,14 @@ try:
         if not holders:
             out["missing"] = True
         else:
+            first = record_cpu(holders[0])
             try:
                 if "fake" in spec:
                     out["reading"] = under_fake(holders[0].read_load, spec["fake"])
                 else:
                     out["reading"] = holders[0].read_load()
+                if out["reading"].get("cpu_pct") is None:
+                    out["cpu_cause"] = cpu_cause(first)
             except Exception as exc:
                 out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
     else:
@@ -14539,11 +14586,22 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, ticks=None,
+            raise_first=False):
     """A fake host for THE FAKE HOST: `busy` the CPU share from ticks, `load` the 1-minute load average,
-    `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on the disk."""
+    `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on the disk.
+    `ticks` gives the tick samples in order, as (user, system, idle, nice), in place of the busy share.
+    `raise_first` makes the first tick read raise OSError."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "ticks": ticks,
+            "raise_first": raise_first}
+
+
+# Tick samples as (user, system, idle, nice). LB_TICKS_HALF is 50% busy over the 1000 ticks after LB_TICKS_A.
+LB_TICKS_A = (1000, 0, 9000, 0)
+LB_TICKS_HALF = (1500, 0, 9500, 0)
+# The first tick sample and five repeats, each 0.2 s after the last: _read_cpu's loop, range(5), and no more.
+LB_TICK_READS = 6
 
 
 def lb_reading(**changes):
@@ -14688,9 +14746,10 @@ def lb_reader(spec_check):
     return check
 
 
-def lb_reader_fake(fake, spec_check):
-    """The real read_load under THE FAKE HOST, called alone. `spec_check(reading)` returns (ok, note). The
-    read must start no child process and write no file, and must not raise."""
+def lb_reader_fake(fake, spec_check, side_check=False):
+    """The real read_load under THE FAKE HOST, called alone. `spec_check(reading)` returns (ok, note), or
+    `spec_check(side)` when side_check is set, for the probe's own counts. The read must start no child
+    process and write no file, and must not raise."""
     def check():
         got, reason, side = lb_run(None, {"mode": "reader", "fake": fake}, tool_input={})
         if got == "error":
@@ -14703,6 +14762,8 @@ def lb_reader_fake(fake, spec_check):
             return False, "read_load started %d child process(es): %s" % (len(side["children"]), side["children"][:3])
         if side["files"]:
             return False, "read_load wrote %d file(s): %s" % (len(side["files"]), side["files"][:2])
+        if side_check:
+            return spec_check(side)
         return spec_check(side.get("reading") or {})
     return check
 
@@ -14742,7 +14803,7 @@ def lb_reader_shape(side):
     supported = sys.platform in ("win32", "darwin")
     if side.get("raised"):
         if supported:
-            return False, "read_load raised on a supported platform: %s" % side["raised"]
+            return False, "exception raised in read_load on %s: %s" % (sys.platform, side["raised"])
         return True, "read_load raised on %s, which counts as normal" % sys.platform
     reading = side.get("reading")
     if not isinstance(reading, dict):
@@ -14765,7 +14826,8 @@ def lb_reader_shape(side):
         need = ("memory_pct", "disk_free_gb", "disk_total_gb", "cpu_pct")
         unread = [key for key in need if reading.get(key) is None]
         if unread:
-            return False, "read_load left %s unread on %s" % (", ".join(unread), sys.platform)
+            cause = ", cpu_pct cause: %s" % side["cpu_cause"] if "cpu_pct" in unread and side.get("cpu_cause") else ""
+            return False, "read_load left %s unread on %s%s" % (", ".join(unread), sys.platform, cause)
         if not (reading["memory_pct"] > 0 and reading["disk_free_gb"] > 0):
             return False, "memory_pct and disk_free_gb read 0: %r" % (reading,)
         if reading["disk_free_gb"] > reading["disk_total_gb"]:
@@ -14955,11 +15017,83 @@ lb_add("Agent, load 107 and CPU ticks 50% busy, memory 80%, run_in_background tr
 lb_add("Agent, load 1.0 and CPU ticks 90% busy, memory 80%, run_in_background true: busy, refused, names CPU and memory",
        lb_decision_check("Agent", None, "deny", LB_CPU90 + LB_MEM80, background=True, lacks=(LB_FOREGROUND,),
                          fake=lb_fake("darwin", busy=90.0, load=1.0, memory=80)))
-# CPU on linux, from /proc/stat read twice. The reader has no memory on linux, so only the value is pinned.
+# CPU on linux, from /proc/stat read up to six times. The reader has no memory on linux, so only the value is pinned.
 lb_add("CPU on linux: /proc/stat 50% busy with load 107 reads cpu_pct 50, not the load average",
        lb_reader_fake(lb_fake("linux", busy=50.0, load=107.0), lb_cpu_share(50.0)))
 lb_add("CPU on linux: /proc/stat 90% busy with load 1.0 reads cpu_pct 90",
        lb_reader_fake(lb_fake("linux", busy=90.0, load=1.0), lb_cpu_share(90.0)))
+
+
+def lb_flat_ticks(side):
+    """Every tick sample equal: cpu_pct is None, which counts as unread and normal, and the reader made
+    exactly LB_TICK_READS tick reads, then stopped."""
+    reading = side.get("reading") or {}
+    if reading.get("cpu_pct") is not None:
+        return False, "cpu_pct %r with every tick sample equal, want None" % (reading.get("cpu_pct"),)
+    reads = side.get("tick_reads")
+    if reads != LB_TICK_READS:
+        return False, "the reader made %s tick reads, want %d" % (reads, LB_TICK_READS)
+    return True, "cpu_pct None after %d tick reads" % reads
+
+
+# Two equal samples, then a rise: the reader reads on past the zero change, and does not return None.
+# The rise ends the loop at the third tick read: the first sample, the equal repeat, the rise. A reader that
+# reads on past the rise still reads 50, so only the count of tick reads pins the stop.
+LB_RISE_READS = 3
+
+
+def lb_rise_check(want):
+    """The rise to `want` percent busy, read in exactly LB_RISE_READS tick reads."""
+    share = lb_cpu_share(want)
+
+    def check(side):
+        ok, note = share(side.get("reading") or {})
+        if not ok:
+            return False, note
+        reads = side.get("tick_reads")
+        if reads != LB_RISE_READS:
+            return False, "the reader made %s tick reads, want %d: it must stop at the rise" % (reads, LB_RISE_READS)
+        return True, "%s, %d tick reads" % (note, reads)
+    return check
+
+
+lb_add("CPU on darwin: two equal tick samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
+       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
+                      side_check=True))
+lb_add("CPU on linux: two equal /proc/stat samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
+       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
+                      side_check=True))
+# Every sample equal: the reader stops at its bound, and the unread CPU still fails open.
+lb_add("CPU on darwin: every tick sample equal reads cpu_pct None after the bound of six tick reads",
+       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A]), lb_flat_ticks, side_check=True))
+lb_add("CPU on linux: every /proc/stat sample equal reads cpu_pct None after the bound of six tick reads",
+       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A]), lb_flat_ticks, side_check=True))
+lb_add("Agent, every tick sample equal, memory 80%, run_in_background true: unread CPU counts as normal, allowed",
+       lb_decision_check("Agent", None, "allow", background=True,
+                         fake=lb_fake("darwin", memory=80, ticks=[LB_TICKS_A])))
+
+
+def lb_cause_check(cause):
+    """An unread CPU whose first tick read raised: the note starts with `cause`, and the reader made one
+    tick read, since the raise ends the read."""
+    def check(side):
+        if (side.get("reading") or {}).get("cpu_pct") is not None:
+            return False, "cpu_pct read with the first tick read raising, want unread"
+        note = side.get("cpu_cause") or ""
+        if not note.startswith(cause):
+            return False, "the note is %r, want it to start with %r" % (note[:100], cause)
+        if side.get("tick_reads") != 1:
+            return False, "the reader made %s tick reads, want 1 after the raise" % side.get("tick_reads")
+        return True, note[:100]
+    return check
+
+
+lb_add("CPU on darwin: the first tick read raises, the unread CPU's note names the exception, one tick read",
+       lb_reader_fake(lb_fake("darwin", raise_first=True), lb_cause_check("exception raised: OSError"),
+                      side_check=True))
+lb_add("CPU on linux: the first /proc/stat read raises, the unread CPU's note names the exception, one tick read",
+       lb_reader_fake(lb_fake("linux", raise_first=True), lb_cause_check("exception raised: OSError"),
+                      side_check=True))
 
 # CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
 # memory 80% is refused.
@@ -15018,6 +15152,27 @@ lb_add("the real reader starts no child process", lb_reader(lb_reader_children),
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
 lb_add("the real reader returns readings in range, and on Windows and Mac reads memory, disk and CPU",
        lb_reader(lb_reader_shape), real=True)
+
+
+def lb_unread_cause_check():
+    """An unread CPU on darwin names its cause in the note: an exception raised, or a zero tick change."""
+    real, named = sys.platform, []
+    for cause, word in (("exception raised: OSError: host_statistics failed", "exception raised"),
+                        ("zero tick change, no exception: the tick total did not move in the sample window",
+                         "zero tick change")):
+        sys.platform = "darwin"
+        try:
+            ok, note = lb_reader_shape({"reading": lb_reading(cpu_pct=None), "cpu_cause": cause})
+        finally:
+            sys.platform = real
+        if ok or word not in note:
+            return False, "the note %r does not name %r" % (note, word)
+        named.append(word)
+    return True, "the note names %s" % " and ".join(named)
+
+
+lb_add("the real-reader failure names the cause of an unread CPU: an exception raised, or a zero tick change",
+       lb_unread_cause_check)
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
