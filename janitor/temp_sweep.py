@@ -2,7 +2,7 @@
 """Removes a session's temp folder, `<Temp>/claude/<project>/<session id>/`, once the session's
 transcript has been idle over 24 hours. When a read cannot tell, it keeps.
 
-Spec: decisions/windows-temp-sweep.md.
+Spec: decisions/windows-temp-sweep.md (owner ruling 2026-10-16).
 
 The transcript is `<config dir>/projects/<project>/<session id>.jsonl`. Its mtime decides, never the
 folder's own mtime. No transcript, an unreadable one, or a future mtime means keep. A session whose
