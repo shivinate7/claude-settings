@@ -1726,8 +1726,11 @@ def _read_cpu():
         return None
     try:
         total_a, idle_a = ticks()
-        time.sleep(0.2)
-        total_b, idle_b = ticks()
+        for _ in range(5):   # a VM can show no tick change in 200 ms, so wait up to 1 s for one
+            time.sleep(0.2)
+            total_b, idle_b = ticks()
+            if total_b != total_a:
+                break
     finally:
         if sys.platform == "darwin":
             try:
