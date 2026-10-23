@@ -1,0 +1,10 @@
+{
+  "title": "Idle desktop sessions each burn a full CPU core",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 107.5,
+  "why": "Session question, Oct 23 (goal 2 pace): the machine sat at 90-100% CPU with no work running, and the brake held every lane. Same pattern as the 15 spinning claude.exe workers of Oct 19 (c14).",
+  "note": "Measured by the advisor, Oct 23 02:30 CDT, read-only: 37 claude.exe processes; 17 use about 1.0-1.1 cores each over 5 s (19 of 24 cores, CPU 93%, memory 72% of 63.5 GB). All 17 are Claude Desktop 3.1623.0.0 children running claude-code 2.1.304 with --resume, children conhost only (one also keeps a bash wait loop from Oct 22 12:35 polling a temp file). Their transcripts last changed Oct 19-22, mostly Oct 21 ~15:30 (q-max 8, 77-rollover 2, claude-settings 2, others 1 each); one (q-max 3a3eb243) wrote at 01:48 today, and one has no --resume, so those two may not be idle (unknown). None runs a claude-settings hook. Not checked: whether this is a known upstream bug, and why they spin (unknown). Not fixable in claude-settings; the brake already reads it right. Open for you: (1) archive or stop the idle sessions in the app (frees about 17 cores; loses their in-memory state, transcripts stay); (2) report it to Anthropic with the version numbers above; (3) whether claude-settings should add a read-only 'idle sessions burning CPU' line to the health view, so you see it without a session asking.",
+  "ask": "Owner action, no brief yet: archive or stop the idle Claude Desktop sessions listed in the note, then report the spin upstream (Claude Desktop 3.1623.0.0, claude-code 2.1.304, Windows 11 26200). A health-view line is a later lane only if you want it.",
+  "updatedAt": "2026-10-23T07:35:00Z"
+}
