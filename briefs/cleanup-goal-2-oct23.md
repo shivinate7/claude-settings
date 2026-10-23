@@ -58,12 +58,15 @@ Bring each as one question with options and a pick, and keep working meanwhile.
 
 Branch from main after #564 merges. Decision machine-load-brake.
 
-1. Disk in GB, not percent. Today `_read_disk` returns 100 * free / total, against 15 (busy) and
-   5 (full). On the owner's 926 GB Mac disk, busy fires under about 139 GB free; it held lanes back
-   at 119 GB free. Owner ruling, Oct 23: disk is absolute free space; memory stays a share. Read
-   `shutil.disk_usage(home).free / 1e9`. Busy under 15 GB, full under 5 GB. Refusal text
-   "disk %.1f GB free". Rename `disk_free_pct` to `disk_free_gb` and update every reader.
-   read_load clamps every reading to 0-100: do not clamp the GB value.
+1. Disk: the smaller of a share and a GB cap, so big drives are not penalized. Today
+   `_read_disk` returns 100 * free / total, against 15 (busy) and 5 (full). On the owner's 926 GB
+   Mac disk, busy fires under about 139 GB free; it held lanes back at 119 GB free. Owner ruling,
+   Oct 23: busy when free space is under the smaller of 10% of the disk and 15 GB; full when it
+   is under the smaller of 5% and 5 GB. (926 GB disk: busy under 15 GB, full under 5 GB. 100 GB
+   disk: busy under 10 GB, full under 5 GB.) Memory stays a share. Read free bytes and total from
+   `shutil.disk_usage(home)`. Refusal text "disk %.1f GB free of %.0f GB". Replace the
+   `disk_free_pct` key with `disk_free_gb` and `disk_total_gb` and update every reader.
+   read_load clamps every reading to 0-100: do not clamp the GB values.
 2. CPU from ticks on Mac and Linux, not the load average. Today darwin uses
    os.getloadavg()[0] / cpu_count. Measured on the owner's Mac: Spotlight indexing gave load 107
    on 15 cores (reads 100% busy) while top showed 49-53% idle. Read Mach CPU ticks twice, 200 ms
@@ -77,11 +80,13 @@ Branch from main after #564 merges. Decision machine-load-brake.
 - Reference only: the owner's Mac has an uncommitted version of fixes 1 and 2 in its
   claude-settings-live-<hash>/hooks/guard.py (`git -C <that checkout> diff`). Build fresh.
 - Proof: a test-author writes cases red on today's code: 926 GB disk with 119 GB free is not
-  busy; 10 GB free is busy; 3 GB free is full; a darwin reading with high load average and low
+  busy; 926 GB with 10 GB free is busy and with 3 GB free is full; 100 GB with 9 GB free is busy
+  and with 12 GB free is not; a darwin reading with high load average and low
   tick use is not busy; ticks at 90% busy with memory over 75% is busy. The builder makes them
   green. Update test_guard_load_os.py and test_guard.py where they assert percent disk or load
   average; show each red, then green. The Mac runner checks ticks against `top -l 2`.
-- Rewrite the machine-load-brake decision in place: disk in GB, CPU from ticks on Mac and Linux.
+- Rewrite the machine-load-brake decision in place: disk as the smaller of a share and a GB cap,
+  CPU from ticks on Mac and Linux.
 
 ## Batch 2. Local sessions pick up merged settings on their own (live-pin-autopull)
 
