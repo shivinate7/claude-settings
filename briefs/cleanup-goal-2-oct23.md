@@ -1,0 +1,154 @@
+# Goal 2: finish the cleanup phase of claude-settings, fast and measured
+
+Paste this whole file to one fresh claude-settings session with `/goal finish this end to end`.
+Written by the advisor, Oct 23, against main 1842e56 and #564 (batch-oct22d, CI running).
+It replaces briefs/cleanup-goal-oct21.md. Each batch is its own integration PR, under the usual
+rules (git-integration-branch-merge, roles-review-cap-three).
+
+## 0. First, before any work
+
+1. Save this file as `~/.claude/handoffs/goal-cleanup-2.md`. Put that path on the Goal line of
+   your handoff. After every compaction, read it again before you act.
+2. Check each "checked at" fact against current main. A fact that no longer holds: re-plan
+   that lane and say so in the report. A lane whose work is already on main: skip it, say so.
+3. If #564 is not merged yet: let it finish under its own rules first.
+4. Confirm the live settings match main: `git -C <pin> rev-parse HEAD` against
+   `git rev-parse origin/main`. If they differ, the session-start auto-pull is still broken
+   (batch 2 fixes it): run `git -C <clone> fetch origin main:main`, then
+   `bash merge/install_from_main.sh` from the clone, and check again.
+
+## Pace: measure, never guess (owner gripe, Oct 22: goal 1 measured compute badly and ran slowly)
+
+Goal 1 ran slowly for three causes: the brief capped lanes at "one or two at a time" by guess;
+the load brake read the machine wrong (CPU from one 200 ms spike, disk as a percent, Mac CPU
+from the load average) and refused lanes the machine could run; and "run in the foreground"
+was a remedy this app cannot use, since every Agent lane here runs in the background.
+
+- No fixed lane cap. Start every lane that is ready and does not touch another open lane's
+  files. The brake decides when the machine is too loaded; when it refuses, start the next lane
+  once one finishes, and say which reading tripped it.
+- Batch 1 (brake reads right) goes first, because every later batch paces on it.
+- Never idle. While CI runs, build and review the next batch's lanes as drafts. A question goes
+  to the advisor first (rule from #564), and you keep working on anything that does not depend
+  on the answer.
+- Measure each batch, at its merge, from what git and GitHub already hold (no new log, no
+  watcher): wall-clock from first lane commit to merge; lanes run, and the most at once; minutes
+  with no lane running, and why (CI, a question, a brake refusal, a red run); the brake readings
+  of each refusal. Put these four numbers in the batch report. A batch with more idle minutes
+  than working minutes names the cause and the fix in its report.
+
+## Handoff rules (it will compact many times)
+
+Your handoff (`~/.claude/handoffs/<session_id>.md`) always holds, current, not as a log:
+Goal (this path and the batch, by number and plain name); State (each open lane and PR with its
+plain name, branch, last CI head and verdict); owner rulings this goal received, one line each
+with the record they now live in; open questions and what you do meanwhile; the next action;
+working premises, each with its source (ruling, measured, read with file and commit, or notes).
+Update it on events: a lane done, a merge, a CI verdict, a ruling, a premise found wrong.
+After a compaction: read this file, then the handoff, then `git fetch` and
+`gh pr list --state open`. Trust GitHub over the handoff, and fix the handoff when they differ.
+
+## Stop points (the only places you wait for the owner)
+
+Bring each as one question with options and a pick, and keep working meanwhile.
+- Batch 4, guard cull part 2: the list of rules to delete, before any deletion. Needs the Mac.
+- Batch 5, kill guard: needs the owner's Mac. On Windows, park it and say so.
+
+## Batch 1. The brake reads the machine right (c14)
+
+Branch from main after #564 merges. Decision machine-load-brake.
+
+1. Disk in GB, not percent. Today `_read_disk` returns 100 * free / total, against 15 (busy) and
+   5 (full). On the owner's 926 GB Mac disk, busy fires under about 139 GB free; it held lanes back
+   at 119 GB free. Owner ruling, Oct 23: disk is absolute free space; memory stays a share. Read
+   `shutil.disk_usage(home).free / 1e9`. Busy under 15 GB, full under 5 GB. Refusal text
+   "disk %.1f GB free". Rename `disk_free_pct` to `disk_free_gb` and update every reader.
+   read_load clamps every reading to 0-100: do not clamp the GB value.
+2. CPU from ticks on Mac and Linux, not the load average. Today darwin uses
+   os.getloadavg()[0] / cpu_count. Measured on the owner's Mac: Spotlight indexing gave load 107
+   on 15 cores (reads 100% busy) while top showed 49-53% idle. Read Mach CPU ticks twice, 200 ms
+   apart, like the Windows GetSystemTimes branch: ctypes on /usr/lib/libSystem.dylib,
+   host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO=3, uint32[4] {user, system, idle, nice},
+   count 4). Busy share = (delta total - delta idle) / delta total. Linux: /proc/stat read twice
+   the same way. No child process on any platform.
+3. Keep from #564: a spawn that leaves run_in_background out or sets it false passes busy; CPU
+   counts only with memory over 75%. The refusal text says plainly that in this app busy slows
+   only Workflows and explicit background calls, and full stops every lane.
+- Reference only: the owner's Mac has an uncommitted version of fixes 1 and 2 in its
+  claude-settings-live-<hash>/hooks/guard.py (`git -C <that checkout> diff`). Build fresh.
+- Proof: a test-author writes cases red on today's code: 926 GB disk with 119 GB free is not
+  busy; 10 GB free is busy; 3 GB free is full; a darwin reading with high load average and low
+  tick use is not busy; ticks at 90% busy with memory over 75% is busy. The builder makes them
+  green. Update test_guard_load_os.py and test_guard.py where they assert percent disk or load
+  average; show each red, then green. The Mac runner checks ticks against `top -l 2`.
+- Rewrite the machine-load-brake decision in place: disk in GB, CPU from ticks on Mac and Linux.
+
+## Batch 2. Local sessions pick up merged settings on their own (live-pin-autopull)
+
+Checked at 1842e56: the SessionStart hook in settings.json reads the @ path from
+~/.claude/CLAUDE.md, tests `[ -d "$d/.git" ]`, then pulls and runs install.sh. That path is
+<clone>-live, a worktree (or a link to <clone>-live-<commit>), so .git is a file and the test
+fails. The pull never runs, and could not work anyway: the pin is a detached HEAD. install.sh
+then reinstalls whatever local main holds, nothing moves local main, and all output goes to
+/dev/null. Incident, Oct 22: the owner's Mac pin was 174 commits behind origin/main.
+
+- Find the clone from the pin with `git rev-parse --git-common-dir`.
+- Fetch origin main and move local main fast-forward only, never force. If main is checked out
+  in any worktree, do not touch that worktree: skip the move and log it.
+- Run merge/install_from_main.sh from the clone (decision merge-reinstalls-from-main: only that
+  script moves the pin).
+- Keep: exit at once when CLAUDE_CODE_REMOTE is set; never block the session; a failed step never
+  fails the session. Windows: read install.ps1 and the hook's MINGW branch, say what Windows
+  does today, and change it only if it has the same fault.
+- A failed step writes one line to the install log install.sh writes. Nothing else is logged.
+- Files: settings.json (SessionStart hook), merge/install_from_main.sh, install.sh (pin logic
+  near merge-reinstalls-from-main), README.md ("Why local sessions never run stale": rewrite in
+  place), lint/test_hook_catalog.py (re-point the pinned hook text), hooks/test_guard.py (the
+  guard allows the new commands).
+- Proof: test first, red on today's hook: a temp clone with a -live worktree, origin ahead; after
+  the hook runs, the pin is at origin/main. Second case: main checked out in the clone; the hook
+  leaves it and logs one line. Builder makes both green. Reviewer reads the diff.
+
+## Batch 3. Small lanes (each a few lines; one integration PR)
+
+- janitor-fast-sweep (c16): dropped from #564, red on test_decision_watch judge_isolation,
+  fixed in its own lane. Check the fix, then join.
+- merge-wait-covers-ci (c34 on the roadmap): set merge.deadlineMinutes in .github/stamp.json to
+  the largest job timeout-minutes plus 5; extend the check that validates stamp.json so it fails
+  when the wait is below the largest job timeout (red on main, green after). Run the report-gate
+  timing test that failed once 20 times on main; fix the cause if it fails, never add a retry.
+- ste-lint-import-path (c35): actions/ste-lint/run.sh line 131 runs `python3 -c` in the linted
+  repo's root, so a json.py or ste_emit.py there runs as code. Move that summary into a script
+  file in $EMIT_DIR, like HUNK_MAP_PY and SPLIT_PY. No -I, no -P. Test in
+  actions/ste-lint/test_action.py with fixture json.py, json/__init__.py and ste_emit.py that
+  write a marker; SCOPE all and changed; no marker, summary still prints. Red then green.
+- ste-stubs-delete: delete the exit-0 ste_gate and md_sweep stubs #564 left, per that debt, once
+  every install has run past #564 (check the install logs on both machines; on doubt, keep them
+  and say why).
+- test-temp-standard (new, from the Degen Swift session, Oct 22): test temp folders filled the
+  Mac disk. Make this the standard for every repo, in its one home (agents/test-author.md and a
+  decision; find the existing home first): one temp root per repo; one run folder per test run,
+  named <pid>-<UUID>; every helper takes its folder from the run folder, never the system temp
+  dir directly; teardown removes the run folder; the first request of a run removes sibling run
+  folders older than one day (crashed runs), and leaves newer ones (parallel runs). A test proves
+  the sweep: an old sibling goes, a new one stays. Rule only; each repo's helper stays in that
+  repo (Degen: TempDirSupport.swift). Do not copy code across repos.
+- windows-temp-sweep (debt, ruled Oct 16, never built): the janitor removes a session's
+  %LOCALAPPDATA%\Temp\claude<project><session id>\ folder once its transcript has been idle 24
+  hours; no transcript found means keep. Red cases are in the debt. 17 GB was found on Oct 16.
+
+## Batch 4. Cull the guard, part 2 (c23). Needs the Mac.
+
+On the Mac: `python3 lint/guard_log_report.py --all-rules --days all`. Join that count with the
+Windows count of Oct 22. Bring the list for gh-api-method and ln-over-directory to the owner
+(stop point). Delete only what the owner names, with code and tests. On Windows: park it.
+
+## Batch 5. Kill guard knows a lane's left-behind server (c27). Mac only.
+
+Its brief (c27, kill guard session tag) comes from the owner when this batch starts on the Mac.
+On Windows, park it and say so.
+
+## When the goal is done
+
+Report per the report rules, plus the four pace numbers per batch, and the total. List anything
+parked and why.
