@@ -9,11 +9,9 @@ Owner, 2026-10-13. `hooks/guard_core.py:record()` appends one line per verdict t
 The window is the days since the stamp, the stamp day through the day before today, at most 7 days. A day with no session start keeps its lines for the next start. With no stamp, the window is the day before today. The checks:
 
 - a `crash` line in the window: a guard hook crashed.
-- an `STE-fallback` line whose matched field ends `fallback=crash`.
-- an `STE-unchecked` line: the lint could not run, so those writes are unknown.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
 
-The STE gate and the Stop sweep (`lint/md_sweep.py`) write their own lines through `guard_logger` in `lint/_transcript.py`: `fixed`, `deny`, and `noted` rows for `STE-fallback` and `STE-unchecked`. A write with no such outcome writes no line.
+The STE write gate and the markdown sweep wrote `STE-fallback` and `STE-unchecked` lines. Both are removed (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`), so no new line of either kind is written, and the two checks that read them are removed too. Old rows stay in guard.log and show in `lint/guard_log_report.py` like any other row.
 
 Reason: the table is the outcome meter for the two owner concerns, prompts the owner did not need and agents refused with no allowed path. Judge a rule by its row here, not by its test count.
 
