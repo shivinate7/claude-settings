@@ -411,25 +411,8 @@ def case_unseen_receivers_allow_with_no_model_call():
           and r.word == "unseen", detail(r))
 
 
-def case_advisor_receiver_allows_with_no_board_read_or_model_call():
-    # A question to the advisor is never mid-task talk (questions-ask-advisor-first). A busy advisor
-    # would reach the model judge, which may flag it; the carve-out sends it straight through.
-    r = run_hook(hook_input(to="advisor-ab", message="Question: may I merge?"),
-                 rows=[row(SID_A, "advisor-ab", "busy")], answer=FLAG)
-    check("advisor- receiver, busy: allow, no model call, no board read",
-          r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and not r.reader_calls
-          and not r.agents_calls and r.loaded, detail(r))
-    # Only "advisor-" plus a 2-to-6 character suffix with no other hyphen is the advisor. These four names
-    # do not fit, so each is a peer, judged as before. A session in a folder such as wt\advisor-asks is not
-    # one of them: it shows as advisor-cf (the first word of the folder plus a code), which fits, a known
-    # gap (decision advisor-answers-questions).
-    for name in ("advisorx", "advisor-asks-xx", "advisor-a", "advisor-abcdefg"):
-        r = run_hook(hook_input(to=name, message="Chat."), rows=[row(SID_A, name, "busy")], answer=FLAG)
-        check("%s is a peer, judged as before" % name,
-              r.deny() is not None and len(r.model_calls) == 1, detail(r))
-
-
-def case_malformed_input_fails_open_with_no_deny():    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
+def case_malformed_input_fails_open_with_no_deny():
+    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
     # inside main() and print the failed-open line; the last two return 0 with no line.
     for label, text, opened in (
         ("stdin is not JSON", "not json", True),
@@ -521,7 +504,6 @@ def case_hook_runs():
                  case_busy_flag_rows,
                  case_busy_allows_when_the_model_does_not_flag,
                  case_unseen_receivers_allow_with_no_model_call,
-                 case_advisor_receiver_allows_with_no_board_read_or_model_call,
                  case_malformed_input_fails_open_with_no_deny,
                  case_model_failures_fail_open_with_no_deny,
                  case_reader_timeout_allows_with_one_plain_line,

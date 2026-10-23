@@ -61,21 +61,6 @@ def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
 
 
-def peer_msg(body, stamp=None):
-    """A cross-session reply in the shape a real transcript stores: type user, origin.kind peer,
-    isMeta true. It lands mid-turn, so it is never the owner's last message."""
-    rec = {"type": "user", "isSidechain": False, "isMeta": True,
-           "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                      "name": "advisor-cf", "fromSession": "local_fixture", "fromMode": "bypass",
-                      "body": body},
-           "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                       '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                       'from-name="advisor-cf" from-mode="bypass">%s</cross-session-message>' % body}}
-    if stamp:
-        rec["timestamp"] = stamp
-    return rec
-
-
 def tool_use_msg(name, input_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
@@ -170,8 +155,6 @@ class ReportGateTests(unittest.TestCase):
             GOOD_REPORT,
             # Catches: a colon inside a bold label is read as a bad label.
             "> **Done:** BUILT abc123\n> **Next:** ship it",
-            # Catches: the advisor-answers label (questions-ask-advisor-first) is read as unknown.
-            "> **Done** BUILT abc123\n> **Deviations** none\n> **Decided by the advisor** test names\n> **Next** ship",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
@@ -204,8 +187,6 @@ class ReportGateTests(unittest.TestCase):
             "> **Done** BUILT\n> **Next** ship\n> **Deviations** none",
             # Catches: the same order check misses colon labels.
             "> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none",
-            # Catches: the advisor-answers label passes after Input Needed.
-            "> **Done** BUILT\n> **Input Needed** merge?\n> **Decided by the advisor** names",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
@@ -569,59 +550,6 @@ class ReportGateTests(unittest.TestCase):
                 out, imported = run_import_probe(REPORT_GATE, hook)
                 self.assertEqual(out.strip(), "", "the input was not ignored")
                 self.assertEqual(imported, [], "imported before it had work to do")
-
-    def test_71_commit_then_peer_reply_then_stop_with_no_report_blocks(self):
-        # Catches: a peer reply that lands mid-turn is read as the owner's last message, so the
-        # commit before it falls outside the turn and the missing report goes unflagged.
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            peer_msg("Answer: yes, rename it."),
-            assistant_text("Renamed it and committed."),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertNotEqual(run.stdout.strip(), "", "the gate stayed silent on a landed turn")
-        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
-
-    def test_72_commit_then_peer_reply_then_stop_with_good_report_passes(self):
-        # Catches: counting the commit once the peer reply is skipped also blocks a good report.
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            peer_msg("Answer: yes, rename it."),
-            assistant_text(GOOD_REPORT),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_73_peer_reply_does_not_move_the_turn_start_in_either_direction(self):
-        rows = [
-            # Pin (green before the fix): a peer record before the commit never hides the commit.
-            ("peer before commit", [human("go"), peer_msg("Answer: ok."),
-                                    tool_use_msg("Bash", {"command": "git commit -m x"}),
-                                    tool_result_msg(), assistant_text("done")], "block"),
-            # Pin (green before the fix): a commit from an earlier turn never counts because a peer
-            # reply came after the new human message.
-            ("earlier turn commit", [human("land it"), tool_use_msg("Bash", {"command": "git commit -m a"}),
-                                     tool_result_msg(), human("what is the log"),
-                                     peer_msg("Answer: ok."), tool_use_msg("Bash", {"command": "git log -1"}),
-                                     tool_result_msg(), assistant_text("no report needed")], "pass"),
-        ]
-        for label, records, want in rows:
-            with self.subTest(label), tempfile.TemporaryDirectory() as tmp:
-                path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
-                self.assertEqual(run.returncode, 0)
-                if want == "block":
-                    self.assertNotEqual(run.stdout.strip(), "", "the gate stayed silent on a landed turn")
-                    self.assertEqual(json.loads(run.stdout).get("decision"), "block")
-                else:
-                    self.assertEqual(run.stdout.strip(), "")
 
 
 class DoneFormatAndCiteTests(unittest.TestCase):
@@ -2865,21 +2793,6 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         self.assertEqual(after, records_after_last_human(full))
         self.assertEqual(last, records[3])
         self.assertEqual(read_turn(write_transcript([assistant_text("x")], self.tmp.name)), (None, []))
-
-    def test_the_shared_readers_skip_a_peer_record_as_the_last_human(self):
-        # Catches: a peer reply (type user, origin.kind peer, isMeta) taken as the owner's last
-        # message, so every Stop hook reads a turn that starts after it.
-        import _transcript
-        records = [human("q1"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   peer_msg("Answer: ok.", "2026-10-22T18:00:05.000Z"), assistant_text("done")]
-        records[0]["timestamp"] = "2026-10-22T18:00:00.000Z"
-        path = write_transcript(records, self.tmp.name)
-        self.assertFalse(_transcript.is_last_human(records[3]))
-        self.assertTrue(_transcript.is_last_human(records[0]))
-        self.assertEqual(_transcript.records_after_last_human(records), records[1:])
-        self.assertEqual(_transcript.read_turn(path), (records[0], records[1:]))
-        self.assertEqual(_transcript.last_human_epoch(path),
-                         _transcript.parse_utc_timestamp("2026-10-22T18:00:00.000Z"))
 
     def test_read_turn_crosses_a_chunk_boundary(self):
         import _transcript

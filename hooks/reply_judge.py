@@ -36,7 +36,7 @@ INSTRUCTIONS = (
     "Judge the final reply below against four rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
-    "a Done/Deviations/Decided by the advisor/Input Needed/Next report is never narration. "
+    "a Done/Deviations/Input Needed/Next report is never narration. "
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
     "output-never-hand-off-doable-step: a command left to the owner needs its own fenced code block, "
     "ready to run as is, with one shell in the block. "
