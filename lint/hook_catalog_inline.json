@@ -1,3 +1,3 @@
 {
-  "SessionStart matcher=startup|resume #1d81985e": "Pulls the claude-settings clone with a fast-forward pull, then runs its install.sh, except on Windows, where install.ps1 is the installer. Does nothing in cloud sessions. A failed pull or install falls through, and the command always exits 0."
+  "SessionStart matcher=startup|resume #5b7bfd3f": "Moves the claude-settings local main to origin/main by fast-forward only, then runs merge/install_from_main.sh from the clone, so the live pin follows main (installer: install.sh, or install.ps1 on Windows). Never stashes, resets, switches or forces; a clean tree holding main is merged in place, any other is left. Does nothing in cloud sessions. A failed fetch or move writes one line to the install log, and the command always exits 0."
 }
