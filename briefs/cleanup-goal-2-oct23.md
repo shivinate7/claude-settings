@@ -67,6 +67,13 @@ After a compaction: read this file, then the handoff, then `git fetch` and
 ## Stop points (the only places you wait for the owner)
 
 Bring each as one question with options and a pick, and keep working meanwhile.
+
+When the owner does not answer (owner's word, Oct 23): never wait. Park only the item that needs
+the answer, and keep going with every other lane and batch, in order. Ask the advisor first for
+anything it may answer (rule from #564); only the owner's calls wait for the owner. Each parked
+item goes in the handoff under "Open questions" with what it blocks. When nothing is left that
+does not depend on an answer, write the report with each parked item and its question, then stop.
+The goal is not done until those items are answered or the owner drops them.
 - Batch 4, guard cull part 2: the list of rules to delete, before any deletion. Needs the Mac.
 - Batch 5, kill guard: needs the owner's Mac. On Windows, park it and say so.
 
