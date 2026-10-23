@@ -105,7 +105,12 @@ Branch from main after #564 merges. Decision machine-load-brake.
    host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO=3, uint32[4] {user, system, idle, nice},
    count 4). Busy share = (delta total - delta idle) / delta total. Linux: /proc/stat read twice
    the same way. No child process on any platform.
-3. Keep from #564: a spawn that leaves run_in_background out or sets it false passes busy; CPU
+3. CPU sample window: 2 seconds on every platform (Windows, Mac, Linux), one constant. Owner's
+   word, Oct 23. Why: a 200 ms sample catches bursts, such as a lane's own local CI filling the
+   cores for a moment; on the Mac a lane read 100% busy while top showed 24% idle. With 2 s the
+   owner's Mac read about 14% busy against top's 27%. Cost: a 2-second pause per lane start
+   only; no other call reads CPU. The owner's Mac has this as an uncommitted patch too.
+4. Keep from #564: a spawn that leaves run_in_background out or sets it false passes busy; CPU
    counts only with memory over 75%. The refusal text says plainly that in this app busy slows
    only Workflows and explicit background calls, and full stops every lane.
 - Reference only: the owner's Mac has an uncommitted version of fixes 1 and 2 in its
@@ -113,7 +118,8 @@ Branch from main after #564 merges. Decision machine-load-brake.
 - Proof: a test-author writes cases red on today's code: 926 GB disk with 119 GB free is not
   busy; 926 GB with 10 GB free is busy and with 3 GB free is full; 100 GB with 9 GB free is busy
   and with 12 GB free is not; a darwin reading with high load average and low
-  tick use is not busy; ticks at 90% busy with memory over 75% is busy. The builder makes them
+  tick use is not busy; ticks at 90% busy with memory over 75% is busy; a 0.3 s burst at 100% in
+  an otherwise idle 2 s window reads about 15%, not busy. The lane-start path takes about 2 s, not 300 ms. The builder makes them
   green. Update test_guard_load_os.py and test_guard.py where they assert percent disk or load
   average; show each red, then green. The Mac runner checks ticks against `top -l 2`.
 - Rewrite the machine-load-brake decision in place: disk as the smaller of a share and a GB cap,
