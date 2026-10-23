@@ -285,9 +285,10 @@ def generator(root, *args, cwd=None, flag_root=False, env=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-# What the SessionStart refresh must keep doing, pinned by behaviour, not by its text: the remote
-# exit, the fast-forward-only move of main, the pin helper it runs; and it never stashes, resets,
-# switches or forces.
+# Text markers the SessionStart refresh must keep: the remote exit, the fast-forward-only move of
+# main, and the pin helper it runs. It must not contain stash, reset, switch, checkout, --force or a
+# force refspec. Behaviour is pinned by the cases in merge/test_install_from_main.sh; no case runs
+# those words, so this text lint is the only guard on them.
 SESSION_REFRESH_MUST = (
     '[ -n "$CLAUDE_CODE_REMOTE" ] && exit 0',
     'refs/remotes/origin/main:refs/heads/main',
@@ -437,9 +438,9 @@ class RealRepo(unittest.TestCase):
         self.assertEqual(committed, out.replace("\r\n", "\n"),
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
-    def test_r9_session_start_refresh_keeps_its_behaviour(self):
-        # The refresh may change shape; it must keep the markers above. It stays inline: a move
-        # into a script gates recovery on an install.
+    def test_r9_session_start_refresh_has_its_text_markers(self):
+        # A text lint, not a behaviour test. The refresh stays inline: a move into a script gates
+        # recovery on an install.
         commands = [hook.get("command", "") for event, matcher, _cond, hook in registrations()
                     if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
         refresh = [c for c in commands if "CLAUDE.md" in c]

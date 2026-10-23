@@ -15,7 +15,7 @@
 # stubs, except cases 8 and 9, which run the real install.sh. Each stub writes a marker file into
 # its own folder, so a case can see which tree ran it. HOME and CLAUDE_CONFIG_DIR point into the
 # temp dir, so the real ~/.claude is never touched. INSTALL_FROM_MAIN_UNDER_TEST lets a case point
-# at another copy of the script. Cases 22 to 27 run the SessionStart hook command that settings.json
+# at another copy of the script. Cases 22 to 31 run the SessionStart hook command that settings.json
 # carries; HOOK_SETTINGS_UNDER_TEST lets a case point at another settings file.
 
 set -u
@@ -909,7 +909,8 @@ sys.stdout.buffer.write(hits[0].encode("utf-8"))
 }
 
 # A bare origin, and a clone holding one commit. The pinned checkout <clone>-live is detached and
-# locked, as install.sh makes it, at c0. Then origin's main moves to c1. $2 says where main is:
+# locked, as install.sh makes it, at c0. Then origin's main moves to c1, unless $3 is same (c1 is c0).
+# $2 says where main is:
 # trunk (the clone's checkout is on trunk, so main is free), main (the clone's own checkout is on
 # main), or linked (a linked worktree <dir>/linked holds main). The clone holds the real merge/install_from_main.sh, a stub install.sh that appends the
 # commit it ran from to $HOME/ran-install.txt, and a stub install.ps1. The config dir's CLAUDE.md
@@ -942,20 +943,46 @@ EOF
   esac
   git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$c0"
   printf '@%s/CLAUDE.md\n' "$d/clone-live" > "$d/home/.claude-cfg/CLAUDE.md"
-  git clone -q "$d/origin.git" "$d/pusher"
-  git -C "$d/pusher" config user.email t@example.com
-  git -C "$d/pusher" config user.name t
-  git -C "$d/pusher" commit -q --allow-empty -m next
-  git -C "$d/pusher" push -q origin main
-  c1=$(git -C "$d/pusher" rev-parse HEAD)
+  c1="$c0"
+  if [ "${3:-ahead}" = ahead ]; then
+    git clone -q "$d/origin.git" "$d/pusher"
+    git -C "$d/pusher" config user.email t@example.com
+    git -C "$d/pusher" config user.name t
+    git -C "$d/pusher" commit -q --allow-empty -m next
+    git -C "$d/pusher" push -q origin main
+    c1=$(git -C "$d/pusher" rev-parse HEAD)
+  fi
 }
 
 # Runs the hook command as the harness does: sh -c, in cwd $1, with HOME and CLAUDE_CONFIG_DIR in
 # the fixture and its Linux uname first on PATH. $2 = remote sets CLAUDE_CODE_REMOTE. Sets cmd, hrc
 # and hout. Returns 1 when settings.json has no such command.
+# Clock in seconds with a fraction, from python. Times one hook run.
+clock() { python3 -c 'import time; print("%.3f" % time.time())'; }
+
+# The install-log lines a hook run wrote, without the helper's own start and end lines.
+hook_log_lines() { grep -v 'install_from_main.sh:' "$1" 2>/dev/null; }
+
+# Waits for detached work a hook may leave running: returns once the install log has stopped
+# growing for 3 s, or after 30 s. A hook that writes nothing returns after about 3 s.
+settle() {
+  last=""; quiet=0; i=0
+  while [ "$i" -lt 60 ]; do
+    cur=$(cat "$1" 2>/dev/null | wc -c | tr -d ' ')
+    if [ "$cur" = "$last" ]; then quiet=$((quiet + 1)); else quiet=0; last="$cur"; fi
+    [ "$quiet" -lt 6 ] || break
+    sleep 0.5; i=$((i + 1))
+  done
+}
+
+# Runs the hook command as the harness does: sh -c, in cwd $1, with HOME and CLAUDE_CONFIG_DIR in
+# the fixture and its Linux uname first on PATH. $2 = remote sets CLAUDE_CODE_REMOTE. Sets cmd, hrc,
+# hout and hook_secs (the hook's own wall-clock time, before any detached work is waited for).
+# Returns 1 when settings.json has no such command.
 run_hook() {
   cmd=$(hook_command) || cmd=""
   [ -n "$cmd" ] || return 1
+  t0=$(clock)
   (
     cd "$1" || exit 1
     unset CLAUDE_CODE_REMOTE
@@ -965,7 +992,11 @@ run_hook() {
     sh -c "$cmd"
   ) > "$work/hook.out" 2> "$work/hook.err"
   hrc=$?
+  t1=$(clock)
+  hook_secs=$(python3 -c 'import sys; print("%.3f" % (float(sys.argv[2]) - float(sys.argv[1])))' "$t0" "$t1")
   hout=$(cat "$work/hook.out" "$work/hook.err")
+  settle "$1/home/.claude-cfg/claude-settings-install.log"
+  return 0
 }
 
 # ---- Case 22: origin ahead -> local main and the pin move to origin/main, then the install runs from the pin ----
@@ -1093,7 +1124,85 @@ case27() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27"
+# ---- Case 28: a dirty pinned checkout -> the pin is not moved, its change stays, one log line names it ----
+case28() {
+  name="case28: SessionStart hook with a dirty pinned checkout leaves the pin unmoved with its change, and logs one line that names it"
+  d="$work/case28"; hook_fixture "$d" trunk
+  printf 'pin edit\n' >> "$d/clone-live/notes.txt"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ ! -L "$d/clone-live" ] || why="$why; the pin path is now a link"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] \
+    || why="$why; the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  if git -C "$d/clone-live" symbolic-ref -q HEAD >/dev/null 2>&1; then why="$why; the pin was switched to a branch"; fi
+  [ "$(tail -n 1 "$d/clone-live/notes.txt")" = "pin edit" ] \
+    || why="$why; the pin's change is gone or changed"
+  skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
+  n=$(printf '%s\n' "$skip" | grep -c .)
+  if [ "$n" -ne 1 ]; then
+    why="$why; want one log line for the dirty pin, got $n: [$skip]"
+  elif ! printf '%s\n' "$skip" | grep -q clone-live; then
+    why="$why; the log line does not name the pin: [$skip]"
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 29: origin unreachable -> the hook returns within 2 s; the detached work logs git's fetch reason ----
+case29() {
+  name="case29: SessionStart hook with an unreachable origin returns within 2 s, and the detached work logs one line with git's fetch reason"
+  d="$work/case29"; hook_fixture "$d" trunk
+  git -C "$d/clone" remote set-url origin "$d/no-such.git"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(python3 -c 'import sys; print(float(sys.argv[1]) <= 2.0)' "$hook_secs")" = True ] \
+    || why="$why; the hook took $hook_secs s, want 2 s or less"
+  skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
+  n=$(printf '%s\n' "$skip" | grep -c .)
+  if [ "$n" -ne 1 ]; then
+    why="$why; want one log line for the fetch failure, got $n: [$skip]"
+  elif ! printf '%s\n' "$skip" | grep -q "fatal:"; then
+    why="$why; the log line has no git reason: [$skip]"
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 30: pin and local main already at origin/main -> the installer does not run ----
+case30() {
+  name="case30: SessionStart hook with the pin and local main already at origin/main does not run the installer"
+  d="$work/case30"; hook_fixture "$d" trunk same
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone" rev-parse main)" = "$c0" ] || why="$why; local main moved"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pinned checkout moved"
+  [ ! -e "$d/home/ran-install.txt" ] || why="$why; the installer ran: [$(cat "$d/home/ran-install.txt")]"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 31: local main diverged from origin, clean tree on main -> the tree stays; one log line with git's reason ----
+case31() {
+  name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged and logs one line with git's reason"
+  d="$work/case31"; hook_fixture "$d" main
+  git -C "$d/clone" commit -q --allow-empty -m local
+  cl=$(git -C "$d/clone" rev-parse HEAD)
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  why=""
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  [ "$(git -C "$d/clone" rev-parse HEAD)" = "$cl" ] \
+    || why="$why; the clone's checkout moved to $(git -C "$d/clone" rev-parse HEAD), want $cl"
+  skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
+  n=$(printf '%s\n' "$skip" | grep -c .)
+  if [ "$n" -ne 1 ]; then
+    why="$why; want one log line for the refused fast-forward, got $n: [$skip]"
+  elif ! printf '%s\n' "$skip" | grep -q "fatal:"; then
+    why="$why; the log line has no git reason: [$skip]"
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
