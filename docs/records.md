@@ -238,6 +238,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `linked-nm-prefix-workspace` | `-w`, `--workspace` and `--prefix` change the folder npm works in. | [`debts/linked-nm-prefix-workspace.md`](../debts/linked-nm-prefix-workspace.md) |
 | `long-lived-head-lost-in-batch` | `cut_lanes` deletes any origin head whose sha is a lane tip. | [`debts/long-lived-head-lost-in-batch.md`](../debts/long-lived-head-lost-in-batch.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`debts/measured-time-table.md`](../debts/measured-time-table.md) |
+| `merge-deletes-dropped-lane` | After a batch merges, the merge tool deletes the remote branch of every lane merged into the batch, including a lane the batch later reverted. | [`debts/merge-deletes-dropped-lane.md`](../debts/merge-deletes-dropped-lane.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`debts/merge-head-race-remains.md`](../debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`debts/merge-records-stale-base.md`](../debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`debts/merge-silent-exit.md`](../debts/merge-silent-exit.md) |
