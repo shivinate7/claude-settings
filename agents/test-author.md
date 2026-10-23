@@ -22,6 +22,8 @@ Make a red-proof checkout under `<repo>/.claude/worktrees/`, named `agent-<somet
 
 Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text, per building-scanner-respects-strings.
 
+Test temp files follow the run-folder standard (test-temp-standard): one run folder per test run, named `<pid>-<UUID>`, under one temp root per repo. Every helper takes its folder from the run folder, never from the system temp dir directly. Teardown removes the run folder. The first request of a run removes sibling run folders older than one day and keeps newer ones. A test proves that sweep: an old sibling goes, and a new one stays.
+
 Never build the feature. Never review your own work. You cannot spawn agents. If the task is
 too large for one worker, stop at a clean point and report PARTIAL with the split you propose.
 

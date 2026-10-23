@@ -181,10 +181,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `subagent-powershell-tool` | With Claude Code's PowerShell tool. | [`decisions/subagent-powershell-tool.md`](../decisions/subagent-powershell-tool.md) |
 | `sweep-shuts-down-idle-simulators` | Sessions boot simulators. The sweep stops idle ones. | [`decisions/sweep-shuts-down-idle-simulators.md`](../decisions/sweep-shuts-down-idle-simulators.md) |
 | `test-strategy-reset` | A test must not fail on runner speed. | [`decisions/test-strategy-reset.md`](../decisions/test-strategy-reset.md) |
+| `test-temp-standard` | Each test run writes temp files only in its own run folder, under one temp root per repo, and removes that folder at teardown. | [`decisions/test-temp-standard.md`](../decisions/test-temp-standard.md) |
 | `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch that holds no unique work. | [`decisions/the-janitor-is-one-machine-wide-sweep.md`](../decisions/the-janitor-is-one-machine-wide-sweep.md) |
 | `unattended-sweep-stops-proven-orphans` | **What an unattended run can stop.** A `--confirm` run, run by the SessionEnd hook or the scheduled task, can send one signal to one process. | [`decisions/unattended-sweep-stops-proven-orphans.md`](../decisions/unattended-sweep-stops-proven-orphans.md) |
 | `ux-house-rules` | The UX rules that every repo with screens shares, beyond the three third-party sets, live in `ux/`. | [`decisions/ux-house-rules.md`](../decisions/ux-house-rules.md) |
 | `when-a-worktree-may-be-removed` | Four idle limits. | [`decisions/when-a-worktree-may-be-removed.md`](../decisions/when-a-worktree-may-be-removed.md) |
+| `windows-temp-sweep` | A session's temp folder goes after its transcript is idle 24 hours | [`decisions/windows-temp-sweep.md`](../decisions/windows-temp-sweep.md) |
 | `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`decisions/worktree-setup-is-per-repo.md`](../decisions/worktree-setup-is-per-repo.md) |
 | `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
 
@@ -268,7 +270,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`debts/upgrade-strips-name-port.md`](../debts/upgrade-strips-name-port.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`debts/verdict-pipe-drops-line.md`](../debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`debts/verdict-skip-reads-pass.md`](../debts/verdict-skip-reads-pass.md) |
-| `windows-temp-sweep` | A session's temp folder, `%LOCALAPPDATA%\Temp\claude<project><session id>\`, is never deleted. | [`debts/windows-temp-sweep.md`](../debts/windows-temp-sweep.md) |
 
 ## Plans
 
