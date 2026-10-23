@@ -471,6 +471,155 @@ def tearDownModule():
     shutil.rmtree(ROOT, ignore_errors=True)
 
 
+# ----------------------------------------------------------- the Windows temp-folder sweep
+#
+# `janitor/temp_sweep.py` removes a session's temp folder, `<LOCALAPPDATA>\Temp\claude\<project>\
+# <session id>\`, once the session's transcript, `<CLAUDE_CONFIG_DIR>\projects\<project>\
+# <session id>.jsonl`, has been idle 24 hours. No transcript found means keep. The step runs as a
+# real process. Each case points LOCALAPPDATA, TEMP, TMP, HOME, USERPROFILE and CLAUDE_CONFIG_DIR
+# at fixture folders, so no case can reach the real temp folder or the real ~/.claude. Without
+# --confirm the step removes nothing. Each keep case carries a positive control: an idle session
+# that the same run must remove, so a keep verdict cannot pass over a step that never ran.
+
+TEMP_SWEEP_PATH = os.path.join(REPO_ROOT, "janitor", "temp_sweep.py")
+TEMP_SWEEP_PROJECT = "C--Users-Fixture-Clones-demo"
+TEMP_IDLE_HOURS = 25  # over the 24-hour limit, with a wide margin
+TEMP_FRESH_HOURS = 1  # under the limit, with a wide margin
+
+
+def temp_session_id(number):
+    return "00000000-0000-4000-8000-%012d" % number
+
+
+def temp_set_age(path, hours_ago):
+    stamp = time.time() - hours_ago * 3600
+    os.utime(path, (stamp, stamp))
+
+
+class TempSweepTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="janitor_temp_sweep_")
+        self.assertTrue(os.path.realpath(self.base).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep),
+                        "fixture %r is not under the temp folder; refusing to run" % self.base)
+        self.localappdata = os.path.join(self.base, "LOCALAPPDATA")
+        self.temp_root = os.path.join(self.localappdata, "Temp", "claude")
+        self.cfg = os.path.join(self.base, "cfg")
+        self.projects = os.path.join(self.cfg, "projects")
+        self.home = os.path.join(self.base, "home")
+        for folder in (self.temp_root, self.projects, self.home):
+            os.makedirs(folder)
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def make_session(self, session, transcript_hours=None, folder_hours=None, root=None):
+        """A session folder with a nested file. transcript_hours None means no transcript at all.
+        folder_hours None leaves the folder's own mtime at now."""
+        folder = os.path.join(root or self.temp_root, TEMP_SWEEP_PROJECT, session)
+        write(os.path.join(folder, "nested", "scratch.txt"), "temp")
+        if transcript_hours is not None:
+            transcript = os.path.join(self.projects, TEMP_SWEEP_PROJECT, session + ".jsonl")
+            write(transcript, '{"type": "user"}\n')
+            temp_set_age(transcript, transcript_hours)
+        if folder_hours is not None:
+            temp_set_age(folder, folder_hours)
+        return folder
+
+    def run_step(self, *flags):
+        env = dict(os.environ)
+        env.update(LOCALAPPDATA=self.localappdata, TEMP=os.path.join(self.localappdata, "Temp"),
+                   TMP=os.path.join(self.localappdata, "Temp"), HOME=self.home,
+                   USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg)
+        return subprocess.run([sys.executable, TEMP_SWEEP_PATH, *flags], cwd=self.base, env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def check_removed(self, folder, reason, proc):
+        self.assertFalse(os.path.exists(folder),
+                         "%s\n  still exists: %s\n  exit %s, stderr: %s"
+                         % (reason, folder, proc.returncode, proc.stderr.strip()[-400:]))
+
+    def check_kept(self, folder, reason, proc):
+        self.assertTrue(os.path.isdir(folder),
+                        "%s\n  was removed: %s\n  exit %s" % (reason, folder, proc.returncode))
+
+    def check_exit(self, proc):
+        self.assertEqual(proc.returncode, 0,
+                         "the step exited %s: %s" % (proc.returncode, proc.stderr.strip()[-400:]))
+
+    def test_transcript_idle_25_hours_removes_the_session_folder(self):
+        session = temp_session_id(1)
+        folder = self.make_session(session, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
+        transcript = os.path.join(self.projects, TEMP_SWEEP_PROJECT, session + ".jsonl")
+        proc = self.run_step("--confirm")
+        self.check_removed(folder, "a session whose transcript was idle 25 hours must be removed", proc)
+        self.check_exit(proc)
+        self.assertTrue(os.path.isfile(transcript),
+                        "the step removed a transcript; it may remove only the temp folder")
+
+    def test_transcript_idle_1_hour_keeps_the_session_folder(self):
+        control = self.make_session(temp_session_id(2), transcript_hours=TEMP_IDLE_HOURS)
+        kept = self.make_session(temp_session_id(3), transcript_hours=TEMP_FRESH_HOURS)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session must be removed "
+                                    "in this run", proc)
+        self.check_kept(kept, "a session whose transcript changed 1 hour ago must be kept", proc)
+        self.check_exit(proc)
+
+    def test_no_transcript_keeps_the_session_folder(self):
+        control = self.make_session(temp_session_id(4), transcript_hours=TEMP_IDLE_HOURS)
+        kept = self.make_session(temp_session_id(5), transcript_hours=None,
+                                 folder_hours=TEMP_IDLE_HOURS)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session must be removed "
+                                    "in this run", proc)
+        self.check_kept(kept, "a session with no transcript found must be kept", proc)
+        self.check_exit(proc)
+
+    def test_a_path_outside_the_temp_claude_root_is_never_touched(self):
+        control = self.make_session(temp_session_id(6), transcript_hours=TEMP_IDLE_HOURS)
+        # `claude-old` shares the prefix `claude`, so a plain startswith test would reach it.
+        sibling = self.make_session(temp_session_id(7), transcript_hours=TEMP_IDLE_HOURS,
+                                    folder_hours=TEMP_IDLE_HOURS,
+                                    root=os.path.join(self.localappdata, "Temp", "claude-old"))
+        elsewhere = self.make_session(temp_session_id(8), transcript_hours=TEMP_IDLE_HOURS,
+                                      folder_hours=TEMP_IDLE_HOURS,
+                                      root=os.path.join(self.localappdata, "Temp", "elsewhere"))
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session must be removed "
+                                    "in this run", proc)
+        self.check_kept(sibling, "a folder under Temp\\claude-old is outside the temp claude root", proc)
+        self.check_kept(elsewhere, "a folder under Temp\\elsewhere is outside the temp claude root", proc)
+        self.check_exit(proc)
+
+    def test_without_confirm_the_idle_folder_is_named_and_kept(self):
+        session = temp_session_id(9)
+        folder = self.make_session(session, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
+        proc = self.run_step()
+        self.assertIn(session, proc.stdout,
+                      "the preview must name the idle folder it would remove; stdout=%r stderr=%r"
+                      % (proc.stdout[-400:], proc.stderr[-400:]))
+        self.check_kept(folder, "without --confirm the idle folder must stay", proc)
+        self.check_exit(proc)
+
+    def test_fresh_transcript_keeps_a_folder_whose_own_mtime_is_old(self):
+        control = self.make_session(temp_session_id(10), transcript_hours=TEMP_IDLE_HOURS)
+        kept = self.make_session(temp_session_id(11), transcript_hours=TEMP_FRESH_HOURS,
+                                 folder_hours=TEMP_IDLE_HOURS)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session must be removed "
+                                    "in this run", proc)
+        self.check_kept(kept, "the transcript decides: a folder whose transcript changed 1 hour ago "
+                              "stays, whatever its own mtime says", proc)
+        self.check_exit(proc)
+
+    def test_idle_transcript_removes_a_folder_that_was_just_written_to(self):
+        folder = self.make_session(temp_session_id(12), transcript_hours=TEMP_IDLE_HOURS)
+        proc = self.run_step("--confirm")
+        self.check_removed(folder, "the transcript decides: an idle 25-hour transcript removes its "
+                                   "folder, whatever the folder's own mtime says", proc)
+        self.check_exit(proc)
+
+
 # --------------------------------------------------------------------------- the anchor arm
 
 
