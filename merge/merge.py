@@ -11,7 +11,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, contextlib, json, math, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -518,6 +518,7 @@ class Host:
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
+        self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
 
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
@@ -589,17 +590,31 @@ class Host:
         return names
 
     def checks(self, n):
-        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], self.cwd)
+        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code.
+        The same read judges time against each job's cap (`job_caps`, from the workflow files on disk). A job over 70% of its cap prints one line.
+        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped."""
+        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link,startedAt,completedAt"], self.cwd)
         try:
             rows = json.loads(out)
         except ValueError:
             if "no checks reported" in out:
                 return {}
             raise Stop("gh pr checks failed: " + out)
+        flow = pathlib.Path(self.cwd or ".") / ".github" / "workflows"
+        try:
+            caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml")))
+        except (OSError, ValueError):  # the warning is advice: with no readable workflow there is no cap to judge against
+            caps = {}
         got = {}
         for d in rows:
-            got.setdefault(d["name"], []).append((d["bucket"], d.get("link") or ""))
+            bucket, link, cap, used = d["bucket"], d.get("link") or "", caps.get(d["name"]), job_minutes(d)
+            if cap and used is not None:
+                if bucket == "cancel" and used >= cap:
+                    bucket = f"timed out at its {cap}-minute cap; re-cap or split"
+                elif used > 0.7 * cap and (d["name"], link) not in self.warned:
+                    self.warned.add((d["name"], link))
+                    say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
+            got.setdefault(d["name"], []).append((bucket, link))
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
@@ -1132,6 +1147,47 @@ def host_default_branch(root):
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the default branch cannot be read from gh: {e}")
 
+def job_minutes(row):
+    """Minutes a `gh pr checks` row ran, from startedAt to completedAt. None when either is missing or the job has not finished (gh gives a pending one the zero time)."""
+    try:
+        a, b = (datetime.datetime.fromisoformat(row[k].replace("Z", "+00:00")) for k in ("startedAt", "completedAt"))
+    except (KeyError, AttributeError, ValueError):
+        return None
+    return (b - a).total_seconds() / 60 if b > a else None
+
+def job_caps(texts):
+    """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
+    only a job's own keys count, at four spaces under a two-space job id under `jobs:`. A step's cap, a comment, a block scalar
+    and a quoted string are deeper or start with another character."""
+    caps = {}
+    for text in texts:
+        in_jobs, job, jobs = False, None, []
+        for line in text.splitlines():
+            if re.match(r"[^\s#]", line):
+                in_jobs, job = line.startswith("jobs:"), None
+            elif in_jobs and (m := re.match(r"^ {2}([\w-]+):\s*(?:#.*)?$", line)):
+                job = {"ids": [m.group(1)], "cap": None}
+                jobs.append(job)
+            elif job and (m := re.match(r"^ {4}name:\s*(.+?)\s*$", line)):
+                job["ids"].append(m.group(1).strip("'\""))
+            elif job and (m := re.match(r"^ {4}timeout-minutes:\s*(\d+)\s*(?:#.*)?$", line)):
+                job["cap"] = int(m.group(1))
+        caps.update({i: j["cap"] for j in jobs if j["cap"] for i in j["ids"]})
+    return caps
+
+def base_job_caps(root, ref):
+    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
+    c, listed = git(root, "ls-tree", "-r", "--name-only", ref, "--", ".github/workflows")
+    if c:
+        raise Stop(f"cannot read {ref} to look for .github/workflows: {listed}")
+    texts = []
+    for f in (f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))):
+        c, text = git(root, "show", f"{ref}:{f}")
+        if c:
+            raise Stop(f"cannot read {f} on {ref}: {text}")
+        texts.append(text)
+    return job_caps(texts)
+
 def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
@@ -1164,6 +1220,10 @@ def load_config(root, base, path):
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
+    caps = base_job_caps(root, ref)
+    if caps and dm < max(caps.values()) + 5:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
+        raise Stop(f"{path} on {ref}: merge.deadlineMinutes is {dm}, but the largest job timeout-minutes in .github/workflows is {max(caps.values())}. "
+                   f"Set merge.deadlineMinutes to at least {max(caps.values()) + 5}.")
     ne = lambda v: isinstance(v, str) and v.strip()
     # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
     # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.
