@@ -421,6 +421,11 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
+      - name: Memory monitor test, Windows PowerShell 5.1
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/mem-monitor.test.ps1
+
       - name: Install bin eol test, Windows PowerShell 5.1
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: powershell
