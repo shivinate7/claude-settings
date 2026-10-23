@@ -77,6 +77,7 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
+import temp_sweep  # noqa: E402  (the Windows temp-folder step, janitor/temp_sweep.py)
 
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)
@@ -1831,6 +1832,20 @@ def print_sim_report(decisions, confirm, out=sys.stdout):
             " FAILED " + d["error"] if d.get("error") else ""), file=out)
 
 
+def _on_windows():
+    return sys.platform.startswith("win")
+
+
+def temp_tier(confirm):
+    """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
+    without CONFIRM). Windows only. Returns the number of folders it could not remove."""
+    if not _on_windows():
+        return 0
+    print("")
+    print("== session temp folders ==")
+    return temp_sweep.run(confirm)
+
+
 # A Claude Code Bash call starts every command as `zsh -c 'source ~/.claude/shell-snapshots/...
 # && <command>'`, so that path sits in the argv of the process and stays there after the
 # session is gone. Measured on this machine: 10 live processes carry it, read in 0.03 s.
@@ -3243,6 +3258,8 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print_grace_period_report(reaped)
     if not _past_deadline():
         print_sim_report(sim_tier(args.confirm), args.confirm)
+    if not _past_deadline():
+        temp_tier(args.confirm)
     return 0
 
 

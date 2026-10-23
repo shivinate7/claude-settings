@@ -64,8 +64,8 @@ def idle_sessions(now=None):
                 yield session, folder
 
 
-def main(argv):
-    confirm = "--confirm" in argv
+def run(confirm):
+    """Print each idle session id; with CONFIRM remove its folder. Returns the removal failures."""
     failed = 0
     for session, folder in idle_sessions():
         print(session)
@@ -75,7 +75,11 @@ def main(argv):
             except OSError as exc:
                 failed += 1
                 print("could not remove %s: %s" % (folder, exc), file=sys.stderr)
-    return 1 if failed else 0
+    return failed
+
+
+def main(argv):
+    return 1 if run("--confirm" in argv) else 0
 
 
 if __name__ == "__main__":
