@@ -267,7 +267,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`debts/squash-lane-branch-kept.md`](../debts/squash-lane-branch-kept.md) |
 | `stall-message-repeats-every-stop` | There is no dedupe. | [`debts/stall-message-repeats-every-stop.md`](../debts/stall-message-repeats-every-stop.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`debts/stamp-shallow-depth-two.md`](../debts/stamp-shallow-depth-two.md) |
-| `ste-stubs-delete` | `ste_gate.py` and `md_sweep.py` do nothing. | [`debts/ste-stubs-delete.md`](../debts/ste-stubs-delete.md) |
 | `test-guard-no-progress-line` | `hooks/test_guard.py` prints nothing for minutes, so the stall watch cuts off a healthy full run. | [`debts/test-guard-no-progress-line.md`](../debts/test-guard-no-progress-line.md) |
 | `three-skill-findings` | Two fixes for `skills/compliance-check` wait for the owner. | [`debts/three-skill-findings.md`](../debts/three-skill-findings.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`debts/upgrade-strips-name-port.md`](../debts/upgrade-strips-name-port.md) |
