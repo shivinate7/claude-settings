@@ -29,6 +29,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 """
 
 import ast
+import atexit
 import contextlib
 import io
 import json
@@ -42,7 +43,8 @@ import sys
 import tempfile
 import threading
 import time
-from collections import namedtuple
+import uuid
+from collections import Counter, namedtuple
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -9969,8 +9971,8 @@ add("builder-diff: a new branch name does not reset the base", "allow",
 sh("builder-diff: a new branch name does not reset the base at push", PUSH, "allow",
    cwd=_repo, agent_id="bld1", agent_type="builder")
 
-# The stop is never blocked (guard.py judge_stop). A builder stop with a test change and a dirty
-# main tree is an offence that logs, and the stop still goes through. This pins the first stop.
+# A diff offence never blocks a stop. A builder stop with a test change and a dirty main tree is an
+# offence that logs, and the stop still goes through. A live task does block (the live-tasks cases).
 _repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                          # the MAIN tree is dirty too
                                          write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
@@ -9983,6 +9985,411 @@ add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="
 add("builder-diff: a stop whose cwd is a main checkout is allowed (and logged)", "allow",
     event="SubagentStop", cwd=os.path.join(DIFFROOT, "b-giveup-main"), agent_id="bld1",
     agent_type="builder")
+
+
+# ---- live-tasks: a stop waits while a background task the agent started is still live. A Monitor or
+# a background Bash that outlives its agent wakes the parent at each task end, so judge_stop blocks
+# that stop once and names TaskStop in the reason. The agent's own transcript (agent_transcript_path)
+# says which tasks are live. The parent session's transcript (transcript_path) never does.
+# Each file here goes in this run's folder, under one temp root per repo (decisions/test-temp-standard.md).
+LIVE_TEMP_ROOT = os.path.join(tempfile.gettempdir(), "claude-settings-test-temp")
+LIVE_DAY = 24 * 60 * 60
+LIVE_AGENT = "a0f1e2d3c4b5a697"
+LIVE_SESSION = "live-tasks-session"
+
+
+def claim_run_folder(root, now=None):
+    """The first request of a run. Remove each sibling run folder under `root` that is over a day
+    old, keep the newer ones (a parallel run owns them), and make this run's folder <pid>-<UUID>."""
+    now = time.time() if now is None else now
+    os.makedirs(root, exist_ok=True)
+    for sibling in os.listdir(root):
+        path = os.path.join(root, sibling)
+        try:
+            stale = os.path.isdir(path) and now - os.path.getmtime(path) > LIVE_DAY
+        except OSError:
+            continue
+        if stale:
+            shutil.rmtree(path, ignore_errors=True)
+    folder = os.path.join(root, "%d-%s" % (os.getpid(), uuid.uuid4()))
+    os.makedirs(folder)
+    return folder
+
+
+LIVE_RUN = claim_run_folder(LIVE_TEMP_ROOT)
+atexit.register(shutil.rmtree, LIVE_RUN, ignore_errors=True)
+
+
+def live_entry(kind, content):
+    """One transcript line, in the shape Claude Code writes for a subagent's messages."""
+    return {"type": kind, "isSidechain": True, "agentId": LIVE_AGENT, "sessionId": LIVE_SESSION,
+            "message": {"role": "user" if kind == "user" else "assistant", "content": content}}
+
+
+def live_call(tool_id, name, **tool_input):
+    """An assistant line that holds one tool_use."""
+    block = {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}
+    return live_entry("assistant", [block])
+
+
+def live_result(tool_id, text):
+    """The user line that answers a tool_use. Its content is a plain string."""
+    return live_entry("user", [{"type": "tool_result", "tool_use_id": tool_id, "content": text}])
+
+
+def live_started_bash(tool_id, task_id):
+    """A background Bash: its start, then the result that names the task."""
+    out = os.path.join(LIVE_RUN, "tasks", task_id + ".output")
+    return [live_call(tool_id, "Bash", command="npm run watch-synthetic", description="watch",
+                      run_in_background=True),
+            live_result(tool_id, "Command running in background with ID: %s. Output is being written "
+                                 "to: %s. You will be notified when it completes." % (task_id, out))]
+
+
+def live_started_monitor(tool_id, task_id):
+    """A Monitor: its start, then the result that names the task."""
+    return [live_call(tool_id, "Monitor", command="tail -f synthetic.log", description="watch",
+                      timeout_ms=1800000),
+            live_result(tool_id, "Monitor started (task %s, expires in 30m unless the source ends "
+                                 "first; you get one notice at expiry)." % task_id)]
+
+
+def live_stopped(tool_id, task_id):
+    """A TaskStop call on one task, and its result."""
+    return [live_call(tool_id, "TaskStop", task_id=task_id),
+            live_result(tool_id, json.dumps({"message": "Successfully stopped task: " + task_id}))]
+
+
+def live_notice(tool_id, task_id, status):
+    """The task-notification that ends a task, in the shape the harness sends it."""
+    out = os.path.join(LIVE_RUN, "tasks", task_id + ".output")
+    text = ("[SYSTEM NOTIFICATION - NOT USER INPUT]\n"
+            "This is an automated background-task event, NOT a message from the user.\n\n"
+            "<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+            "<output-file>%s</output-file>\n<status>%s</status>\n"
+            "<summary>Background command \"npm run watch-synthetic\" ended</summary>\n"
+            "</task-notification>" % (task_id, tool_id, out, status))
+    return {"type": "user", "isMeta": True, "agentId": LIVE_AGENT,
+            "origin": {"kind": "task-notification", "producer": "session-task"},
+            "message": {"role": "user", "content": text}}
+
+
+def live_blob(line):
+    """An api-request-blob line: the same content again, as a transcript repeats it."""
+    return {"type": "api-request-blob", "agentId": LIVE_AGENT,
+            "message": {"role": "assistant", "content": line["message"]["content"]}}
+
+
+def live_plain():
+    """A transcript that starts no task: the prompt, then a reply that names none."""
+    return [live_entry("user", "Check the change and report."),
+            live_entry("assistant", [{"type": "text", "text": "Checked. Nothing is left running."}])]
+
+
+def live_write(path, *parts):
+    """Write JSONL, one line per entry. A part is one entry, or a list of entries."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        for part in parts:
+            for entry in (part if isinstance(part, list) else [part]):
+                handle.write(json.dumps(entry) + "\n")
+    return path
+
+
+def live_agent(name, *parts):
+    """The agent's own transcript, where the harness keeps it: subagents/agent-<id>.jsonl."""
+    return live_write(os.path.join(LIVE_RUN, name, "subagents", "agent-%s.jsonl" % LIVE_AGENT),
+                      *parts)
+
+
+def live_parent(name, *parts):
+    """The parent session's transcript: the payload names it as transcript_path."""
+    return live_write(os.path.join(LIVE_RUN, name, "parent-session.jsonl"), *parts)
+
+
+def live_raw(path, text):
+    """A file holding text as it is, for the transcripts that are not JSON."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+def live_payload(agent_type, transcript=None, parent=None, cwd=NOGIT, stop_active=False, extra=None):
+    """A SubagentStop payload. agent_transcript_path is the agent's own transcript, as the harness
+    sends it. transcript_path is the parent session's transcript."""
+    body = {"hook_event_name": "SubagentStop", "session_id": LIVE_SESSION, "agent_id": LIVE_AGENT,
+            "agent_type": agent_type, "stop_hook_active": stop_active,
+            "transcript_path": parent or os.path.join(LIVE_RUN, "no-parent.jsonl"),
+            "permission_mode": "bypassPermissions", "last_assistant_message": "> **Done**"}
+    if cwd:
+        body["cwd"] = cwd
+    if transcript is not None:
+        body["agent_transcript_path"] = transcript
+    body.update(extra or {})
+    return json.dumps(body)
+
+
+def live_case(name, expected, payload, **kw):
+    add("live-tasks: " + name, expected, raw=payload, event="SubagentStop", **kw)
+
+
+def live_allow(name, payload):
+    """An allow that prints nothing: the stop passes, and no block is written."""
+    live_case(name, "allow", payload, silent=True)
+
+
+# BLOCK. A live task blocks the stop. The reason names TaskStop and each live task's id.
+_b1 = live_agent("b1-bash", live_started_bash("tu-b1", "bsynth001"),
+                 live_blob(live_started_bash("tu-b1", "bsynth001")[0]))
+live_case("a background Bash still running blocks the stop, and the reason says TaskStop", "deny",
+          live_payload("builder", transcript=_b1), carries=("TaskStop", "bsynth001"))
+_b2 = live_agent("b2-monitor", live_started_monitor("tu-b2", "bsynth002"))
+live_case("a live Monitor blocks the stop, and the reason says TaskStop", "deny",
+          live_payload("builder", transcript=_b2), carries=("TaskStop", "bsynth002"))
+_b3 = live_agent("b3-role", live_started_bash("tu-b3", "bsynth003"))
+for _type, _cwd in (("test-author", NOGIT), ("record-writer", NOGIT), ("Explore", NOGIT),
+                    ("reviewer", None)):
+    live_case("a %s stop %s blocks on a live background Bash, and the reason says TaskStop" % (
+        _type, "with a cwd" if _cwd else "with no cwd"), "deny",
+        live_payload(_type, transcript=_b3, cwd=_cwd), carries=("TaskStop", "bsynth003"))
+_b4 = live_agent("b4-two", live_started_bash("tu-b4a", "bsynth004"),
+                 live_started_bash("tu-b4b", "bsynth005"), live_stopped("tu-b4c", "bsynth004"))
+live_case("one of two tasks stopped still blocks, and the reason names only the live one", "deny",
+          live_payload("builder", transcript=_b4), carries=("TaskStop", "bsynth005"),
+          lacks=("bsynth004",))
+
+# PASS. Nothing live, or nothing the guard can read as live: each stop passes silently.
+_p1 = live_agent("p1-bash-stopped", live_started_bash("tu-p1", "bsynth011"),
+                 live_stopped("tu-p1b", "bsynth011"))
+live_allow("a background Bash stopped with TaskStop does not block",
+           live_payload("builder", transcript=_p1))
+_p1m = live_agent("p1-monitor-stopped", live_started_monitor("tu-p1m", "bsynth012"),
+                  live_stopped("tu-p1n", "bsynth012"))
+live_allow("a Monitor stopped with TaskStop does not block",
+           live_payload("builder", transcript=_p1m))
+_p2 = live_agent("p2-done", live_started_bash("tu-p2", "bsynth013"),
+                 live_notice("tu-p2", "bsynth013", "completed"))
+live_allow("a background Bash whose completion notice was seen does not block",
+           live_payload("builder", transcript=_p2))
+_p2f = live_agent("p2-failed", live_started_bash("tu-p2f", "bsynth014"),
+                  live_notice("tu-p2f", "bsynth014", "failed"))
+live_allow("a background Bash whose failure notice was seen does not block",
+           live_payload("builder", transcript=_p2f))
+_p3 = live_agent("p3-second", live_started_bash("tu-p3", "bsynth015"))
+live_allow("a second stop with stop_hook_active set does not block again",
+           live_payload("builder", transcript=_p3, stop_active=True))
+live_allow("a transcript path that is a directory does not block",
+           live_payload("builder", transcript=os.path.join(LIVE_RUN, "p4-dir")))
+live_allow("a transcript path that does not exist does not block",
+           live_payload("builder", transcript=os.path.join(LIVE_RUN, "p4-missing", "agent.jsonl")))
+live_allow("a transcript that is not JSON does not block",
+           live_payload("builder", transcript=live_raw(
+               os.path.join(LIVE_RUN, "p4-garbage", "agent.jsonl"), "not json at all\n{broken\n")))
+live_allow("a transcript path that is not a string does not block",
+           live_payload("builder", transcript=12345))
+live_allow("a transcript with no background task does not block",
+           live_payload("builder", transcript=live_agent("p5-plain", live_plain())))
+_p6 = live_agent("p6-foreground",
+                 live_call("tu-p6", "Bash", command="grep -rn 'Command running' notes.md",
+                           description="search"),
+                 live_result("tu-p6", "notes.md:3: Command running in background with ID: fakeid001. "
+                                      "Output is being written to: x\nnotes.md:9: Monitor started "
+                                      "(task fakeid002, expires in 30m unless the source ends first)."))
+live_allow("a foreground Bash whose output quotes the start text does not block",
+           live_payload("builder", transcript=_p6))
+_p7 = live_parent("p7-parent", live_started_monitor("tu-p7", "bsynth021"))
+live_allow("the parent session's live Monitor does not block a clean agent",
+           live_payload("builder", transcript=live_agent("p7-clean", live_plain()), parent=_p7))
+live_allow("the parent session's live Monitor does not block an agent with no transcript path",
+           live_payload("builder", parent=_p7))
+live_allow("a background_tasks list in the payload does not block a clean agent",
+           live_payload("builder", transcript=live_agent("p8-clean", live_plain()), extra={
+               "background_tasks": [
+                   {"id": "bsynth031", "type": "shell", "status": "running", "description": "x"},
+                   {"id": "bsynth032", "type": "monitor", "status": "running", "description": "x"},
+               ]}))
+
+
+def live_config(name):
+    """A fresh config folder for one guard run, so each run's guard.log is its own."""
+    folder = os.path.join(LIVE_RUN, "cfg-" + name)
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    return folder
+
+
+def live_env(folder):
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
+    return env
+
+
+def live_guard_log(folder):
+    path = os.path.join(folder, "guard.log")
+    return open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+
+
+def live_sweep_check():
+    """The first request of a run removes a sibling run folder over a day old, and keeps a new one."""
+    root = os.path.join(LIVE_RUN, "sweep-probe")
+    old = os.path.join(root, "1-old-run")
+    new = os.path.join(root, "2-new-run")
+    os.makedirs(old)
+    os.makedirs(new)
+    now = time.time()
+    os.utime(old, (now - 2 * LIVE_DAY, now - 2 * LIVE_DAY))
+    own = claim_run_folder(root, now=now)
+    problems = []
+    if os.path.exists(old):
+        problems.append("the old sibling is still there")
+    if not os.path.isdir(new):
+        problems.append("the new sibling was removed")
+    if not os.path.isdir(own):
+        problems.append("this run's folder was not made")
+    return (not problems), ("; ".join(problems) or "the old sibling went, the new one stayed")
+
+
+def live_second_stop_check():
+    """A second stop with a live task passes, prints nothing, and writes one agent-live-tasks line."""
+    folder = live_config("second-stop")
+    payload = live_payload("builder", stop_active=True, transcript=live_agent(
+        "l1-second", live_started_bash("tu-l1", "bsynth041")))
+    got = subprocess.run([sys.executable, GUARD], input=payload, capture_output=True, text=True,
+                         env=live_env(folder), timeout=120)
+    problems = []
+    if got.returncode != 0:
+        problems.append("exit %d" % got.returncode)
+    if got.stdout.strip():
+        problems.append("it printed %r, want nothing" % got.stdout.strip()[:60])
+    count = sum("agent-live-tasks" in line for line in live_guard_log(folder).splitlines())
+    if count != 1:
+        problems.append("%d guard.log lines name agent-live-tasks, want exactly 1" % count)
+    return (not problems), ("; ".join(problems) or "passes, and writes one agent-live-tasks line")
+
+
+def live_block_keeps_diff_log_check():
+    """A live task blocks the stop, and the diff judgement still writes its builder-diff line."""
+    repo = os.path.join(DIFFROOT, "b-giveup")
+    materialize(repo)
+    folder = live_config("block-diff-log")
+    payload = live_payload("builder", cwd=repo, transcript=live_agent(
+        "l2-block", live_started_bash("tu-l2", "bsynth051")))
+    got = subprocess.run([sys.executable, GUARD], input=payload, capture_output=True, text=True,
+                         env=live_env(folder), timeout=120)
+    decision, reason = read_decision(got.stdout)
+    problems = []
+    if decision != "deny":
+        problems.append("decision %s, want deny" % decision)
+    elif "TaskStop" not in reason:
+        problems.append("the reason does not name TaskStop")
+    if "builder-diff" not in live_guard_log(folder):
+        problems.append("no builder-diff line: the diff judgement did not run")
+    return (not problems), ("; ".join(problems) or "blocks, and the builder-diff line is written")
+
+
+# The audit probe counts what one guard run does: each open of a file, each write, each child process.
+# It runs the guard through runpy, so the guard's own code is what it measures. The snapshot is taken
+# before the probe writes its own output file, so that write is not counted.
+LIVE_PROBE = r"""
+import atexit, json, os, runpy, sys
+sys.dont_write_bytecode = True
+events = []
+
+
+def hook(event, args):
+    if event == "open":
+        mode = args[1] if len(args) > 1 and isinstance(args[1], str) else "r"
+        events.append(["open", str(args[0]), mode])
+    elif event == "subprocess.Popen":
+        events.append(["popen", "", ""])
+    elif event in ("os.remove", "os.rmdir", "os.mkdir", "os.unlink"):
+        events.append([event, str(args[0]), "w"])
+    elif event in ("os.rename", "os.replace"):
+        events.append([event, str(args[1]), "w"])
+
+
+def dump():
+    snapshot = list(events)
+    with open(os.environ["LIVE_AUDIT_OUT"], "w", encoding="utf-8") as handle:
+        json.dump(snapshot, handle)
+
+
+sys.addaudithook(hook)
+atexit.register(dump)
+guard = sys.argv[1]
+sys.path.insert(0, os.path.dirname(os.path.abspath(guard)))
+sys.argv = [guard]
+runpy.run_path(guard, run_name="__main__")
+"""
+
+
+def live_audit_run(name, payload):
+    """One guard run under the audit probe. Returns (events or None, config folder, the run)."""
+    folder = live_config(name)
+    out = os.path.join(LIVE_RUN, "audit-%s.json" % name)
+    if os.path.exists(out):
+        os.remove(out)
+    env = live_env(folder)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["LIVE_AUDIT_OUT"] = out
+    got = subprocess.run([sys.executable, "-B", "-c", LIVE_PROBE, GUARD], input=payload,
+                         capture_output=True, text=True, env=env, timeout=120)
+    if not os.path.exists(out):
+        return None, folder, got
+    with open(out, encoding="utf-8") as handle:
+        return json.load(handle), folder, got
+
+
+def live_tally(events, folder, transcript):
+    """(reads of the transcript, child processes, writes keyed by path under the config folder)."""
+    reads = children = 0
+    writes = Counter()
+    want = os.path.normcase(os.path.abspath(transcript))
+    here = os.path.normcase(os.path.abspath(folder)) + os.sep
+    for kind, path, mode in events:
+        if kind == "popen":
+            children += 1
+        elif kind == "open" and not any(c in mode for c in "wax+"):
+            reads += os.path.normcase(os.path.abspath(path)) == want
+        else:
+            full = os.path.normcase(os.path.abspath(path))
+            writes[full[len(here):] if full.startswith(here) else full] += 1
+    return reads, children, writes
+
+
+def live_cost_check():
+    """A live-task stop reads the agent's transcript once, starts no child process beyond a stop with
+    no task, and writes one guard.log line and nothing else."""
+    live_t = live_agent("l3-live", live_started_bash("tu-l3", "bsynth061"))
+    base_t = live_agent("l3-base", live_plain())
+    live_ev, live_dir, live_got = live_audit_run("cost-live", live_payload(
+        "builder", transcript=live_t, cwd=None, stop_active=True))
+    base_ev, base_dir, base_got = live_audit_run("cost-base", live_payload(
+        "builder", transcript=base_t, cwd=None, stop_active=True))
+    if live_ev is None or base_ev is None:
+        return False, "the audit probe wrote nothing (exit %d, %d)" % (
+            live_got.returncode, base_got.returncode)
+    problems = []
+    if live_got.returncode != 0 or base_got.returncode != 0:
+        problems.append("a run exited %d or %d" % (live_got.returncode, base_got.returncode))
+    reads, children, writes = live_tally(live_ev, live_dir, live_t)
+    _, base_children, base_writes = live_tally(base_ev, base_dir, base_t)
+    if reads != 1:
+        problems.append("%d reads of the agent transcript, want 1" % reads)
+    if children != base_children:
+        problems.append("%d child process(es), a stop with no task starts %d" % (
+            children, base_children))
+    extra = writes - base_writes
+    if dict(extra) != {"guard.log": 1}:
+        problems.append("writes beyond one guard.log line: %s" % dict(extra))
+    return (not problems), ("; ".join(problems) or "one transcript read, %d child process(es), one "
+                                                   "guard.log line" % children)
+
 
 
 def role_log_case():
@@ -10108,6 +10515,15 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+LOG_CHECKS_EXTRA.append(("live-tasks: a run-folder sweep removes an old sibling and keeps a new one",
+                         live_sweep_check))
+LOG_CHECKS_EXTRA.append(("live-tasks: a second stop with a live task passes and writes one "
+                         "agent-live-tasks line", live_second_stop_check))
+LOG_CHECKS_EXTRA.append(("live-tasks: a live task blocks, and the builder-diff line is still written",
+                         live_block_keeps_diff_log_check))
+LOG_CHECKS_EXTRA.append(("live-tasks: a live-task stop reads the transcript once, starts no child "
+                         "process, writes one guard.log line", live_cost_check))
+FIXTURELESS_CHECKS.update((live_sweep_check, live_second_stop_check, live_cost_check))
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
