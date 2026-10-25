@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `ux/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"). |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
@@ -197,6 +197,51 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 * **Other repositories cannot use `actions/` after this repository becomes private.** Open
   Settings, then Actions, then General, then Access. Set "Accessible from repositories owned by
   the user".
+
+## Shipping iOS apps
+
+`bin/ios-ship` builds, signs and ships the owner's iOS apps from the Mac. It runs on macOS only, under `/bin/bash` 3.2.
+Each private app repo calls it from a thin wrapper and keeps its own settings in `tools/ios-ship.json`.
+
+**The App Store Connect API key**
+
+* An App Store Connect API key exists for the owner's Apple team.
+* The `.p8` file lives only on the Mac, at `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`. Never commit it.
+  This repo is public, so it holds no team ID, key ID, issuer ID or phone ID.
+* A command-line build needs the key. It cannot see the account that is signed in to the Xcode window, and it fails
+  with "No Accounts".
+* Each app repo's `tools/ios-ship.json` holds the key path and the IDs. The tool checks that the key file exists. It
+  never reads the file.
+
+**The config.** The top level holds `team_id`, `device_udid`, `asc_key_path`, `asc_key_id`, `asc_issuer_id`, `repo_url`
+(the install job clones it) and `apps`. Each app holds `name`, `scheme`, `bundle_id` and `project_dir`. These keys are
+optional:
+
+* `project_yml`: the XcodeGen spec. Without it, the project is hand-written and XcodeGen does not run.
+* `product_name`: the `.app` name when it differs from the scheme.
+* `prebuild`: commands that run in the repo root before XcodeGen.
+* `trust_package_plugins`: `true` adds `-skipPackagePluginValidation` and `-skipMacroValidation` to the build.
+* `configuration`: `Release` (default) or `Debug`. The install job only.
+* `copy_in`: a list of `{from, to}` secret files. The tool copies each into the tree for the build only, and removes
+  the copy on every exit path. `to` must be git-ignored. A relative `from` resolves against the repo root of the config.
+* `after_archive`: commands that check the archive. They run in the repo root with `ARCHIVE` set. A command that fails
+  fails the app. The testflight job only.
+
+An environment variable of the same name in capitals (`TEAM_ID`, `DEVICE_UDID`, `ASC_KEY_PATH`, `ASC_KEY_ID`,
+`ASC_ISSUER_ID`) wins over the config. A value that is unset in both is refused. The tool has no built-in IDs.
+
+**Run it.** A wrapper in the app repo passes its own config:
+`exec "${IOS_SHIP:-$HOME/.claude/bin/ios-ship}" <job> "$(cd "$(dirname "$0")" && pwd)/ios-ship.json" "$@"`.
+
+* `ios-ship testflight CONFIG [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+  It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
+  stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
+  `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
+* `ios-ship install CONFIG [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
+  `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
+  the others. Exit 75 means the phone was not reachable. `--no-install` stops after a build for generic iOS.
+  An install that is more than 300 days old raises an overdue notice.
+* `--app NAME` limits a run to the named apps. A name that is not in the config exits 2.
 
 ## Details worth knowing but not part of setup
 

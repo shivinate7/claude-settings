@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# ios-ship: one shared tool to ship the owner's iOS apps from this Mac. macOS only. Runs on /bin/bash 3.2.
+#   ios-ship testflight CONFIG [--app NAME]... [--export-only]
+#   ios-ship install    CONFIG [--app NAME]... [--no-install] [--debug] [--force]
+# CONFIG is the tools/ios-ship.json of a private app repo (README, "Shipping iOS apps"). No ID is built in.
+# Env overrides win over CONFIG: TEAM_ID, DEVICE_UDID, ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID.
+# --app limits a run to the named apps (unknown name: exit 2). No --app: every app in CONFIG.
+# The repo root is the git toplevel of CONFIG's folder. It is never derived from this script's own path.
+#
+# testflight: archive each app as Release from the checkout that holds CONFIG, then upload it to TestFlight.
+#   Needs a clean tree at origin/main. --export-only skips the main check, exports instead of uploading,
+#   keeps the export in a printed folder, and deletes the .ipa of each app that has copy_in (it holds the secret).
+#   Prints steps and one verdict line. xcodebuild output goes to a log file. Stops at the first failing app.
+# install: build each app in its own clone and install it on the phone (devicectl). Env: REINSTALL_HOME (clones + stamps),
+#   LOG_DIR, OVERDUE_DAYS, STEP_TIMEOUT (seconds; overrides every step timeout). One app's failure does not stop the others.
+#   --force has no effect (every run installs). --debug builds Debug. --no-install stops after a generic-iOS build, no phone needed.
+#   Exit 75: the phone is not reachable. Works only in its own clones. Never touches a shared checkout.
+set -uo pipefail
+
+usage() { echo "usage: ios-ship testflight|install CONFIG [--app NAME]... [--export-only | --no-install --debug --force]" >&2; exit 2; }
+JOB=${1:-}; CONFIG=${2:-}
+case $JOB in testflight|install) ;; *) usage ;; esac
+[[ -n $CONFIG ]] || usage
+shift 2
+want_apps=(); export_only=0; noinstall=0; debug=0
+while (( $# )); do
+  case $1 in
+    --app) (( $# >= 2 )) || usage; want_apps+=("$2"); shift ;;
+    --export-only) [[ $JOB == testflight ]] || usage; export_only=1 ;;
+    --no-install) [[ $JOB == install ]] || usage; noinstall=1 ;;
+    --debug) [[ $JOB == install ]] || usage; debug=1 ;;
+    --force) [[ $JOB == install ]] || usage ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ $CONFIG == /* ]] || CONFIG=$PWD/$CONFIG
+ROOT=$(git -C "$(dirname "$CONFIG")" rev-parse --show-toplevel 2>/dev/null) || ROOT=
+
+# ---- shared ----
+
+expand() { case $1 in \~/*) printf '%s' "$HOME/${1#\~/}" ;; *) printf '%s' "$1" ;; esac; }
+cfg_get() { jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/dev/null; }
+app_get() { printf '%s' "$ENTRY" | jq -r --arg k "$1" '.[$k] // empty' 2>/dev/null; }
+
+# resolve VAR KEY: VAR from the env, else from CONFIG's KEY. Unset in both: refuse.
+resolve() {
+  local v=${!1:-}
+  [[ -n $v ]] || v=$(cfg_get "$2")
+  [[ -n $v ]] || refuse "config: $2 is unset; set it in $CONFIG or export $1"
+  printf -v "$1" '%s' "$v"
+}
+
+# select_apps: ENTRIES = the config's apps, narrowed by --app. A name that is not in the config exits 2.
+select_apps() {
+  local e n w hit
+  jq -e '(.apps | type == "array") and (.apps | length > 0)' "$CONFIG" >/dev/null 2>&1 || refuse "config: $CONFIG is missing, invalid or lists no apps"
+  for w in ${want_apps[@]+"${want_apps[@]}"}; do
+    jq -e --arg n "$w" '.apps | map(.name) | index($n) != null' "$CONFIG" >/dev/null 2>&1 || { echo "ios-ship: unknown app: $w" >&2; exit 2; }
+  done
+  ENTRIES=()
+  while IFS= read -r e; do
+    if (( ${#want_apps[@]} )); then
+      n=$(printf '%s' "$e" | jq -r '.name // empty'); hit=0
+      for w in "${want_apps[@]}"; do [[ $w == "$n" ]] && hit=1; done
+      (( hit )) || continue
+    fi
+    ENTRIES+=("$e")
+  done < <(jq -c '.apps[]' "$CONFIG")
+}
+
+# check_entry: ENTRY has a safe name and well-formed lists. Sets NAME.
+check_entry() {
+  NAME=$(app_get name)
+  [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || refuse "config: app name missing or unsafe"
+  printf '%s' "$ENTRY" | jq -e '
+    def strs: type == "array" and all(type == "string");
+    ((.prebuild // []) | strs) and ((.after_archive // []) | strs)
+    and ((.copy_in // []) | type == "array" and all(type == "object" and ((.from | type) == "string") and ((.to | type) == "string")
+         and (.from | length) > 0 and (.to | length) > 0))' >/dev/null 2>&1 \
+    || refuse "config: $NAME: prebuild and after_archive must be lists of strings, copy_in a list of {from, to}"
+}
+
+# copy_in: secret files copied into a tree for the build only. COPIED holds what this run made and drop_copies removes only that.
+COPIED=()
+drop_copies() { local f; for f in ${COPIED[@]+"${COPIED[@]}"}; do rm -f "$f"; done; COPIED=(); }
+# resolve_from PATH: FROM = PATH with ~/ expanded and a relative path made absolute against the repo root of CONFIG.
+resolve_from() {
+  FROM=$(expand "$1")
+  [[ $FROM == /* ]] && return 0
+  [[ -n $ROOT ]] || refuse "config: $NAME: copy_in.from is relative and CONFIG is not in a git repo"
+  FROM=$ROOT/$FROM
+}
+# The loops below read through a process substitution but run in this shell, so a refusal ends the run.
+# copy_in_check TREE: every copy_in of ENTRY could be made in TREE. Refuses before any build; copies nothing.
+copy_in_check() {
+  local from to
+  while IFS=$'\t' read -r from to; do
+    resolve_from "$from"; from=$FROM
+    case $to in /*|..|../*|*/..|*/../*) refuse "$NAME: copy_in.to must stay inside the tree: $to" ;; esac
+    [[ $from -ef $1/$to ]] && continue
+    [[ -f $from ]] || refuse "$NAME: copy_in source missing: $from"
+    [[ ! -e $1/$to && ! -L $1/$to ]] || refuse "$NAME: $to already exists in the tree, so it is not this run's copy"
+    git -C "$1" check-ignore -q -- "$to" || refuse "$NAME: $to is not git-ignored in the tree, so it could be committed"
+  done < <(printf '%s' "$ENTRY" | jq -r '(.copy_in // [])[] | [.from, .to] | @tsv')
+}
+# copy_in_make TREE: copy each file in. A source that is already the target file (same inode) is left alone and never removed.
+copy_in_make() {
+  local from to
+  while IFS=$'\t' read -r from to; do
+    resolve_from "$from"; from=$FROM
+    [[ $from -ef $1/$to ]] && continue
+    cp "$from" "$1/$to" || refuse "$NAME: cannot copy $from to $to"
+    COPIED+=("$1/$to")
+  done < <(printf '%s' "$ENTRY" | jq -r '(.copy_in // [])[] | [.from, .to] | @tsv')
+}
+
+# ---- testflight ----
+
+# The clean-main check: ship only what main holds. All of its refusals come before any build.
+require_clean_main() {
+  [[ -z $(git -C "$ROOT" status --porcelain) ]] || refuse "the tree is not clean; commit or stash first"
+  (( export_only )) && return 0
+  git -C "$ROOT" fetch -q origin main || refuse "git fetch origin main failed; a stale origin/main proves nothing"
+  [[ $(git -C "$ROOT" rev-parse HEAD) == "$(git -C "$ROOT" rev-parse origin/main)" ]] || refuse "HEAD is not origin/main; run from an up-to-date main checkout"
+}
+
+tf_cleanup() {
+  local d
+  drop_copies
+  for d in ${SCRUB[@]+"${SCRUB[@]}"}; do find "$d" -name '*.ipa' -delete 2>/dev/null; done
+  [[ -z $SCRATCH ]] || rm -rf "$SCRATCH"
+}
+
+job_testflight() {
+  refuse() { echo "TESTFLIGHT FAIL: $*"; exit 1; }
+  command -v jq >/dev/null || refuse "config: jq not found"
+  [[ -n $ROOT ]] || refuse "config: $CONFIG is not inside a git repo"
+  select_apps
+  # No device ID: an upload needs the team and the API key only.
+  resolve TEAM_ID team_id; resolve ASC_KEY_PATH asc_key_path; resolve ASC_KEY_ID asc_key_id; resolve ASC_ISSUER_ID asc_issuer_id
+  ASC_KEY_PATH=$(expand "$ASC_KEY_PATH")
+  [[ -f $ASC_KEY_PATH ]] || refuse "no App Store Connect key at $ASC_KEY_PATH"
+  require_clean_main
+  # Every app is checked before the first archive, so no app uploads while a later one would have refused.
+  for ENTRY in "${ENTRIES[@]}"; do check_entry; copy_in_check "$ROOT"; done
+
+  # ponytail: minute resolution; two uploads in one UTC minute collide. Add seconds if that ever happens.
+  local build asc mode names plist branch sha entry pdir pyml scheme out cmd archive plugins
+  build=$(date -u +%Y%m%d%H%M)
+  SCRATCH=; SCRUB=()
+  trap tf_cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/ios-ship-scratch.XXXXXX") || refuse "cannot make a scratch dir"
+  # The log and a kept export live outside the scratch dir, which is deleted on exit.
+  LOG=$(mktemp "${TMPDIR:-/tmp}/ios-ship-testflight.XXXXXX") || refuse "cannot make a log file"
+  out=$SCRATCH/export; mode=upload
+  if (( export_only )); then mode="export"; out=$(mktemp -d "${TMPDIR:-/tmp}/ios-ship-export.XXXXXX") || refuse "cannot make an export dir"; fi
+  asc=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+  plist=$SCRATCH/ExportOptions.plist
+  cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>$mode</string>
+  <key>teamID</key><string>$TEAM_ID</string>
+  <key>signingStyle</key><string>automatic</string>
+</dict></plist>
+PLIST
+  # tf_step LABEL CMD...: run CMD, output to the log. A failure ends the run with the one verdict line.
+  tf_step() {
+    local label=$1; shift
+    echo "ios-ship: $NAME: $label"
+    "$@" >> "$LOG" 2>&1 || { drop_copies; echo "TESTFLIGHT FAIL: $NAME $label, see $LOG"; exit 1; }
+  }
+  in_dir() { ( cd "$1" && shift && "$@" ); }
+  echo "ios-ship: build number $build, log $LOG"
+  names=
+  for entry in "${ENTRIES[@]}"; do
+    ENTRY=$entry; check_entry
+    names=${names:+$names, }$NAME
+    pdir=$(app_get project_dir); pdir=${pdir:-.}; pyml=$(app_get project_yml); scheme=$(app_get scheme); scheme=${scheme:-$NAME}
+    archive=$SCRATCH/$NAME.xcarchive
+    plugins=(); [[ $(app_get trust_package_plugins) == true ]] && plugins=(-skipPackagePluginValidation -skipMacroValidation)
+    [[ $(printf '%s' "$ENTRY" | jq '(.copy_in // []) | length') == 0 ]] || SCRUB+=("$out/$NAME")
+    while IFS= read -r cmd; do
+      [[ -n $cmd ]] && tf_step "prebuild: $cmd" in_dir "$ROOT" bash -c "$cmd"
+    done < <(printf '%s' "$ENTRY" | jq -r '.prebuild[]?')
+    copy_in_make "$ROOT"
+    [[ -z $pyml ]] || tf_step xcodegen in_dir "$ROOT/$pdir" xcodegen generate --spec "$pyml"
+    tf_step archive in_dir "$ROOT/$pdir" xcodebuild archive -scheme "$scheme" -configuration Release \
+      -destination generic/platform=iOS -archivePath "$archive" -derivedDataPath "$SCRATCH/dd" -allowProvisioningUpdates \
+      "${asc[@]}" ${plugins[@]+"${plugins[@]}"} DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$build"
+    drop_copies
+    while IFS= read -r cmd; do
+      [[ -n $cmd ]] && ARCHIVE=$archive tf_step "after_archive: $cmd" in_dir "$ROOT" bash -c "$cmd"
+    done < <(printf '%s' "$ENTRY" | jq -r '.after_archive[]?')
+    tf_step "$mode" in_dir "$ROOT/$pdir" xcodebuild -exportArchive -archivePath "$archive" \
+      -exportOptionsPlist "$plist" -exportPath "$out/$NAME" -allowProvisioningUpdates "${asc[@]}"
+  done
+  branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD); sha=$(git -C "$ROOT" rev-parse --short HEAD)
+  if (( export_only )); then echo "TESTFLIGHT OK: build $build exported to $out (not uploaded: $names)"
+  else echo "TESTFLIGHT OK: build $build uploaded ($names) from $branch $sha"; fi
+}
+
+# ---- install ----
+
+# tmo SECONDS CMD... : portable timeout (perl ships with macOS). Kills the process group; exit 124 on timeout.
+# ponytail: a child that calls setsid leaves the group and can escape the kill. Upgrade: launchd's own limits.
+tmo() {
+  perl -e '$t=shift; $p=fork; if(!$p){setpgrp(0,0); exec @ARGV or exit 127}
+    $SIG{ALRM}=sub{kill "TERM",-$p; sleep 2; kill "KILL",-$p; waitpid $p,0; exit 124};
+    alarm $t; waitpid $p,0; exit(($? & 127) ? 128 + ($? & 127) : $? >> 8)' "$@"
+}
+
+# Notify first: it needs only osascript, never the state dir or the log dir. A hung or failed notify is logged.
+notify() { tmo 10 osascript -e 'on run a' -e 'display notification (item 2 of a) with title (item 1 of a)' -e 'end run' "phone-apps reinstall: $APP" "$1" >/dev/null 2>&1 || log "note: notify failed or timed out"; }
+log() { echo "[$(date +%T)] [$APP] $*" | tee -a "$LOG" 2>/dev/null; }
+die() { # $1 = step, $2 = exit code, $3 = optional hint
+  log "FAILED: $1 (exit $2)"
+  notify "$APP failed at step: $1.${3:+ $3} Log: $LOG"
+  exit "${2:-1}"
+}
+
+# step NAME SECONDS CMD... ; output goes to a file, never a pipe, so a child holding stdout cannot defeat the timeout.
+# Install and build soft-fail (exit 75) when the phone is absent or locked. Leaves the output in $STEP_OUT.
+step() {
+  local name=$1 secs=${STEP_TIMEOUT:-$2} rc; shift 2
+  log "step: $name"
+  tmo "$secs" "$@" >"$STEP_OUT" 2>&1 </dev/null; rc=$?
+  cat "$STEP_OUT" >> "$LOG" 2>/dev/null
+  (( rc == 0 )) && return 0
+  (( rc == 124 )) && die "$name" 124 "Timed out after ${secs}s."
+  if { [[ $name == install ]] && grep -qiE 'locked|not connected|unavailable|no devices|could not be found|CoreDeviceError error 4016([^0-9]|$)' "$STEP_OUT"; } ||
+     { [[ $name == build ]] && grep -q 'Unable to find a device matching' "$STEP_OUT"; }; then
+    log "phone not on home Wi-Fi or asleep"
+    die "$name" 75 "Phone not on home Wi-Fi or asleep; run again once it is reachable."
+  fi
+  die "$name" "$rc"
+}
+
+# Reset guard: the clone must be a real dir (no symlink) under REINSTALL_HOME, be its own git toplevel, and have the expected origin.
+guard_clone() {
+  local hp rp top url
+  [[ -L $REPO ]] && die "guard: clone is a symlink" 1
+  [[ -d $REPO/.git && ! -L $REPO/.git ]] || die "guard: .git is missing or a symlink" 1
+  hp=$HOME_DIR; rp=$(cd "$REPO" && pwd -P) || die "guard: clone path" 1
+  [[ $rp == "$hp"/* ]] || die "guard: clone outside REINSTALL_HOME" 1
+  top=$(cd "$REPO" && git rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P)
+  [[ $top == "$rp" ]] || die "guard: clone is not its own git toplevel" 1
+  url=$(cd "$REPO" && git config --get remote.origin.url 2>/dev/null)   # raw value: get-url applies insteadOf rules
+  [[ $url == "$REPO_URL" ]] || die "guard: origin is not the expected repo" 1
+}
+
+# run_app ENTRY_JSON : one app, in a subshell, so die's exit ends only this app.
+run_app() {
+  ENTRY=$1
+  local cmd now last pdir pyml scheme bundle product config plugins asc dest
+  trap drop_copies EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  APP=phone-apps; NAME=
+  check_entry; APP=$NAME
+  pdir=$(app_get project_dir); pyml=$(app_get project_yml); scheme=$(app_get scheme); bundle=$(app_get bundle_id)
+  product=$(app_get product_name); product=${product:-$scheme}
+  [[ -n $pdir && -n $scheme && -n $bundle ]] || die "config: missing project_dir, scheme or bundle_id" 1
+  config=$(app_get configuration); config=${config:-Release}; (( debug )) && config=Debug
+  [[ $config == Release || $config == Debug ]] || die "config: configuration must be Release or Debug" 1
+  REPO="$HOME_DIR/$APP/repo"; STAMP="$HOME_DIR/$APP/last-success"
+  mkdir -p "$HOME_DIR/$APP" 2>/dev/null || die "create state dir" 1
+
+  # Overdue alert first, so a failed step cannot hide it.
+  # A stamp that is a symlink, unreadable, not a number or in the future is invalid: overdue alert.
+  now=$(date +%s); last=
+  if [[ -e $STAMP || -L $STAMP ]]; then
+    # A FIFO, symlink or directory is invalid and never read (cat would block on a FIFO).
+    if [[ -f $STAMP && ! -L $STAMP ]]; then last=$(cat "$STAMP" 2>/dev/null); fi
+    if [[ ! $last =~ ^[0-9]+$ ]] || (( last > now )); then
+      log "OVERDUE: stamp invalid"; notify "Reinstall overdue for $APP: last-success stamp is invalid. Log: $LOG"; last=
+    elif (( now - last > OVERDUE )); then
+      log "OVERDUE: last success $(( (now - last) / 86400 )) days ago"; notify "Reinstall overdue for $APP: last success $(( (now - last) / 86400 )) days ago. The app signing may lapse. Log: $LOG"
+    fi
+  fi
+
+  log "start (no-install=$noinstall configuration=$config) log=$LOG"
+  [[ -d $REPO/.git ]] || step clone 300 git clone "$REPO_URL" "$REPO"
+  guard_clone
+  cd "$REPO" || die "enter clone" 1
+  step fetch 120 git fetch origin
+  step reset 60 git reset --hard origin/main
+  copy_in_check "$REPO"
+  while IFS= read -r cmd; do
+    [[ -n $cmd ]] && step "prebuild: $cmd" 900 bash -c "$cmd"
+  done < <(printf '%s' "$ENTRY" | jq -r '.prebuild[]?')
+  copy_in_make "$REPO"
+  cd "$pdir" || die "enter project_dir" 1
+  [[ -z $pyml ]] || step xcodegen 120 xcodegen generate --spec "$pyml"
+  # A headless build cannot answer Xcode's package-plugin trust prompt, so an app with plugins opts in.
+  plugins=(); [[ $(app_get trust_package_plugins) == true ]] && plugins=(-skipPackagePluginValidation -skipMacroValidation)
+  # Test that the key file exists; never read it. Without it, build as before.
+  asc=()
+  if [[ -f $ASC_KEY_PATH ]]; then asc=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+  else log "no App Store Connect key at $ASC_KEY_PATH; building without it"; fi
+  # Aimed at the phone, not generic iOS, so Xcode registers a new phone and puts it in the profile.
+  # --no-install installs nothing, so it builds generic and needs no phone.
+  dest="id=$DEVICE_UDID"; (( noinstall )) && dest=generic/platform=iOS
+  step build 1800 xcodebuild -scheme "$scheme" -configuration "$config" -destination "$dest" \
+    -derivedDataPath build -allowProvisioningUpdates -allowProvisioningDeviceRegistration ${asc[@]+"${asc[@]}"} ${plugins[@]+"${plugins[@]}"} DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic build
+  drop_copies
+  if (( noinstall )); then log "stopped before install (--no-install)"; exit 0; fi
+  step install 300 xcrun devicectl device install app --device "$DEVICE_UDID" "build/Build/Products/$config-iphoneos/$product.app"
+  # devicectl can exit 0 and still print an error; then the install is not a success.
+  grep -qi error "$STEP_OUT" && die "install" 1 "devicectl printed an error."
+  # The install is the success: signing is renewed. Record it before the best-effort launch.
+  rm -f "$STAMP"   # never write through a symlink
+  { date +%s > "$STAMP"; } 2>/dev/null || die "write stamp" 1
+  log "OK: installed"
+  # Launch is best-effort: the next app open reloads the lists.
+  if tmo "${STEP_TIMEOUT:-60}" xcrun devicectl device process launch --device "$DEVICE_UDID" --terminate-existing "$bundle" >"$STEP_OUT" 2>&1; then
+    cat "$STEP_OUT" >> "$LOG" 2>/dev/null; log "OK: launched"
+  else
+    cat "$STEP_OUT" >> "$LOG" 2>/dev/null; log "note: launch failed (soft); the next app open reloads the lists"
+  fi
+}
+
+job_install() {
+  HOME_DIR=${REINSTALL_HOME:-$HOME/Library/Application Support/ios-adblock-reinstall}
+  LOG_DIR=${LOG_DIR:-$HOME/Library/Logs/ios-adblock-reinstall}
+  [[ $HOME_DIR == /* ]] || HOME_DIR=$PWD/$HOME_DIR   # absolute before any cd
+  [[ $LOG_DIR == /* ]] || LOG_DIR=$PWD/$LOG_DIR
+  # Signing lasts about a year, so warn about two months before it lapses.
+  OVERDUE=$(( ${OVERDUE_DAYS:-300} * 86400 ))
+  APP=phone-apps   # the app being handled; names every notice
+  # The log dir falls back to /tmp, so logging never blocks a notification.
+  mkdir -p "$LOG_DIR" 2>/dev/null || { LOG_DIR=/tmp/ios-adblock-reinstall; mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR=/tmp; }
+  LOG="$LOG_DIR/$(date +%Y%m%d-%H%M%S).log"
+  STEP_OUT="$LOG.step"
+  refuse() { die "$1" 1; }
+  command -v jq >/dev/null || refuse "config: jq not found"
+  select_apps
+  # An App Store Connect API key: a command-line build cannot see the Xcode GUI account ("No Accounts"). The IDs are not secret.
+  resolve TEAM_ID team_id; resolve DEVICE_UDID device_udid; resolve ASC_KEY_PATH asc_key_path; resolve ASC_KEY_ID asc_key_id; resolve ASC_ISSUER_ID asc_issuer_id
+  ASC_KEY_PATH=$(expand "$ASC_KEY_PATH")
+  REPO_URL=$(cfg_get repo_url); [[ -n $REPO_URL ]] || refuse "config: repo_url is unset in $CONFIG"
+  mkdir -p "$HOME_DIR" 2>/dev/null || die "create state dir" 1
+  HOME_DIR=$(cd "$HOME_DIR" && pwd -P) || die "resolve state dir" 1
+
+  local e rc exit_rc=0
+  for e in "${ENTRIES[@]}"; do
+    ( run_app "$e" ); rc=$?
+    (( rc != 0 && exit_rc == 0 )) && exit_rc=$rc
+  done
+  APP=phone-apps
+  (( exit_rc == 0 )) || log "done: at least one app failed (exit $exit_rc)"
+  exit "$exit_rc"
+}
+
+job_"$JOB"
