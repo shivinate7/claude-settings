@@ -19,6 +19,7 @@ Brief, home session:
      do not copy it);
    - python -m py_compile tools/*.py; node --check tools/ha-ws.mjs; shellcheck tools/*.sh;
    - every records/*.json parses.
-2. Make "check" required on main (branch protection), so the merge tool and the grant both see it.
+2. Add .github/stamp.json with merge.requiredChecks ["check"] (copy the shape from claude-settings), so the
+   merge tool and the grant both see it. Branch protection on main is optional and needs the owner's login.
 3. Test: a PR with a broken record link goes red, and the same PR fixed goes green.
 Report: the workflow, the red and green run links, and anything the first run flags on main.
