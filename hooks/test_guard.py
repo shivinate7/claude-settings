@@ -72,7 +72,7 @@ FAMILIES = {
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "pointer": "the pointer HEAD checkout",
     "kill": "machine-wide kills and detached launches",
-    "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
+    "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
@@ -3986,29 +3986,6 @@ sh("narrate: an ordinary command piped to tail", "make check 2>&1 | tail -40", "
 sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT)
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
-
-# --- gh api with a field and no method
-sh("gh-api: a field with no method is a POST",
-   "gh api repos/o/r/pulls -f state=open", "deny", "gh-api-method", cwd=NOGIT)
-sh("gh-api: a typed field with no method is a POST",
-   "gh api repos/o/r/pulls -F per_page=5 --paginate", "deny", "gh-api-method", cwd=NOGIT)
-sh("gh-api: gh's own --repo flag ahead of api is skipped",
-   "gh --repo o/r api repos/o/r/pulls -f state=open", "deny", "gh-api-method", cwd=NOGIT)
-sh("gh-api: a leading slash on graphql is still graphql",
-   "gh api /graphql -f query='{ viewer { login } }'", "allow", cwd=NOGIT)
-sh("gh-api: -XPOST joined is a named method", "gh api repos/o/r/issues -XPOST -f title=x",
-   "allow", cwd=NOGIT)
-sh("gh-api: a field glued to its flag is still a field",
-   "gh api repos/o/r/pulls -fstate=open", "deny", "gh-api-method", cwd=NOGIT)
-sh("gh-api: a named method says what is meant",
-   "gh api -X POST repos/o/r/issues -f title=x", "allow", cwd=NOGIT)
-sh("gh-api: --method GET with a field is a stated read",
-   "gh api --method=GET repos/o/r/pulls -f state=open", "allow", cwd=NOGIT)
-sh("gh-api: a query string and no field", "gh api 'repos/o/r/pulls?state=open'", "allow", cwd=NOGIT)
-sh("gh-api: graphql is a POST by design", "gh api graphql -f query='{ viewer { login } }'",
-   "allow", cwd=NOGIT)
-sh("gh-api: -f on another program is not gh api", "curl -f https://example.invalid/x", "allow",
-   cwd=NOGIT)
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",

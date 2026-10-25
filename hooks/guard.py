@@ -60,8 +60,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
-  gh-api-method, ln-over-directory
-                       deny. See the comment at rule 3b in judge_shell.
+  ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder or a folder above it, in either shell.
                        (rm-path-wrapper)
@@ -252,9 +251,9 @@ while True:
         )
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
-            gh_api_post_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+            live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
             narrated_tail_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -2107,16 +2106,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if hits:
         refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))
 
-    # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
-    # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
-    # command word, never a substring, and `ln` reads the filesystem rather than the text.
+    # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
+    # already there. It reads the segment's own command word, never a substring, and reads the
+    # filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)
     ends = []
     nm_segments = split_segments(stripped, ends)
     for number, segment in enumerate(nm_segments):
-        matched = gh_api_post_hit(segment)
-        if matched:
-            refuse(tool, "deny", "gh-api-method", GH_API_METHOD_REASON, matched)
         matched = ln_descends_hit(segment, run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)

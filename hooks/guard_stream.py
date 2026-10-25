@@ -418,63 +418,7 @@ PATTERN_POLLER_REASON = (
 )
 
 
-# ------------------------------------------------------------------ two shell traps
-
-# `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
-# so a call meant as a GET silently becomes a write.
-# A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
-# is a POST by design and takes no method.
-GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
-GH_METHOD_FLAGS = ("-X", "--method")
-GH_VALUE_FLAGS = ("-H", "--header", "--hostname", "--jq", "-q", "--template", "-t", "--cache",
-                  "--input", "-p", "--preview")
-
-
-def gh_api_post_hit(segment: str) -> str:
-    """Return the matched text when a `gh api` call has a field and no method, else ''."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    at = resolve_command(tokens)
-    if at is None or basename(tokens[at]) not in ("gh", "gh.exe"):
-        return ""
-    # gh's own global flags may sit ahead of `api`: `gh --repo o/r api ...`.
-    sub_at = at + 1
-    while sub_at < len(tokens) and tokens[sub_at].startswith("-"):
-        sub_at += 2 if tokens[sub_at] in ("-R", "--repo") else 1
-    if tokens[sub_at:sub_at + 1] != ["api"]:
-        return ""
-    rest = tokens[sub_at + 1:]
-    fielded = False
-    endpoint = ""
-    index = 0
-    while index < len(rest):
-        token = rest[index]
-        index += 1
-        if token in GH_METHOD_FLAGS or token.startswith(("--method=", "-X")):
-            return ""
-        if token in GH_FIELD_FLAGS:
-            fielded = True
-            index += 1
-        elif token.startswith(("--field=", "--raw-field=")) or (
-                token[:2] in ("-f", "-F") and len(token) > 2 and not token.startswith("--")):
-            fielded = True
-        elif token in GH_VALUE_FLAGS:
-            index += 1
-        elif not token.startswith("-") and not endpoint:
-            endpoint = token
-    if not fielded or endpoint.strip("/") == "graphql":
-        return ""
-    return "gh api " + endpoint + " with a field and no method"
-
-
-GH_API_METHOD_REASON = (
-    "a field flag gives the request a body, and gh sends a body with POST, so with no method named "
-    "this is a write and not the read it looks like. "
-    "Remedy: put a read's parameters in the query string of the endpoint, or name the method with "
-    "--method when the body is what you want."
-)
-
+# ------------------------------------------------------------------ one shell trap
 
 # `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
 # link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0.
