@@ -6,7 +6,8 @@ Modes:
   order and denies or asks on the first match. Bad input allows the call.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. Logs an offence for
-  the reviewer and never blocks the stop.
+  the reviewer and never blocks on it. Any agent that stops with a background task still
+  live is blocked once, so the task cannot wake its parent after the report.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -34,6 +35,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread.
                        (builders-cannot-edit-tests)
+  agent-live-tasks     deny (a SubagentStop block), then noted. SubagentStop of any agent that
+                       still has a background Bash or Monitor it never stopped: the first stop is
+                       blocked once, and a second stop (`stop_hook_active`) passes with one noted
+                       line.
+                       (agent-live-tasks-block-the-stop)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-denied)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
@@ -1515,9 +1521,25 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 
 def judge_stop(payload) -> None:
-    """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
-    diff that could not be read log too. A missing cwd logs nothing."""
+    """Any agent that stops is checked for live background tasks (`live_tasks`); a builder,
+    test-author or record-writer also has its whole diff judged. A diff offence never blocks the
+    stop: it logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main
+    checkout and a diff that could not be read log too. A missing cwd logs nothing. A live task
+    blocks the first stop, once; a second stop (`stop_hook_active`) passes and logs `agent-live-tasks`."""
+    judge_stop_diff(payload)
+    live = live_tasks(payload)
+    if not live:
+        return
+    if payload.get("stop_hook_active"):
+        record("SubagentStop", "noted", "agent-live-tasks", " ".join(live))
+        return
+    record("SubagentStop", "deny", "agent-live-tasks", " ".join(live))
+    print(json.dumps({"decision": "block", "reason": (
+        "agent-live-tasks: this agent started background tasks that still run: " + ", ".join(live)
+        + ". Stop them with TaskStop, then report again.")}))
+
+
+def judge_stop_diff(payload) -> None:
     role = agent_role(payload)
     if not role:
         return
@@ -1535,6 +1557,74 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found:
         record("SubagentStop", "noted", diff_rule(role), found)
+
+
+LINT_DIR = os.path.join(_HERE, "..", "lint")   # holds _transcript.py, the shared transcript reader
+BACKGROUND_STARTS = (
+    ("Bash", re.compile(r"Command running in background with ID: ([\w-]+)")),
+    ("PowerShell", re.compile(r"Command running in background with ID: ([\w-]+)")),
+    ("Monitor", re.compile(r"Monitor started \(task ([\w-]+),")),
+)
+NOTICE_ID = re.compile(r"<task-id>\s*([\w-]+)\s*</task-id>")
+NOTICE_STATUS = re.compile(r"<status>\s*([\w-]+)\s*</status>")
+# A notice whose status is none of these (a Monitor event line) leaves its task live.
+TERMINAL_STATUSES = frozenset({"completed", "failed", "killed", "stopped", "cancelled", "canceled",
+                               "terminated", "expired", "timeout", "timed_out", "error", "exited"})
+
+
+def block_text(content) -> str:
+    """The text of a message or tool_result content: a string, or the text blocks of a list."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(b.get("text", "") for b in content
+                        if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
+def live_tasks(payload) -> list:
+    """The ids of background tasks the agent started and neither stopped nor saw end, read from
+    its own transcript (`agent_transcript_path`; `transcript_path` is the parent's). Starts come from
+    a Bash or Monitor tool_result, never from text a foreground command printed. Fails open: a
+    transcript that cannot be read or parsed gives no live task."""
+    path = payload.get("agent_transcript_path")
+    if not isinstance(path, str) or not path:
+        return []
+    try:
+        if LINT_DIR not in sys.path:
+            sys.path.insert(0, LINT_DIR)
+        from _transcript import read_transcript
+        records = read_transcript(path)
+    except Exception:
+        return []
+    live, tools = {}, {}   # live keeps start order
+    for rec in records:
+        message = rec.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        origin = rec.get("origin")
+        if rec.get("type") == "user" and isinstance(origin, dict) and origin.get("kind") == "task-notification":
+            text = block_text(content)
+            ids, status = NOTICE_ID.search(text), NOTICE_STATUS.search(text)
+            if ids and status and status.group(1).lower() in TERMINAL_STATUSES:
+                live.pop(ids.group(1), None)
+            continue
+        if rec.get("type") not in ("user", "assistant") or not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                tools[block.get("id")] = block.get("name")
+                tool_input = block.get("input")
+                if block.get("name") == "TaskStop" and isinstance(tool_input, dict):
+                    live.pop(str(tool_input.get("task_id") or tool_input.get("shell_id")), None)
+            elif block.get("type") == "tool_result":
+                text = block_text(block.get("content")).lstrip()
+                for tool, start in BACKGROUND_STARTS:
+                    found = start.match(text) if tools.get(block.get("tool_use_id")) == tool else None
+                    if found:
+                        live[found.group(1)] = True
+    return list(live)
 
 
 SPAWN_TOOLS = ("Agent", "Task")

@@ -1378,7 +1378,8 @@ def set_log_session(value) -> None:
 def record(tool: str, decision: str, rule: str, matched: str) -> None:
     try:
         folder = config_dir()
-        os.makedirs(folder, exist_ok=True)
+        if not os.path.isdir(folder):  # a log write into a folder that exists makes no directory call
+            os.makedirs(folder, exist_ok=True)
         fields = [
             datetime.now().isoformat(timespec="seconds"),
             tool or "",
