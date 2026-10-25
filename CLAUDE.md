@@ -98,7 +98,7 @@ Bring my decisions as a question with options and a recommendation.<!-- rule:out
 
 **Reports, in order:** Done, Deviations, Decided by the advisor, Input Needed, Next. Decided by the advisor lists each answer the advisor gave.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER. BUILT and RECORDED carry a PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
-that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed --> At each batch merge, the report also gives four pace numbers, as OTHER items under Done. Read them from git and GitHub at report time: wall-clock from first lane commit to merge; lanes run, and the most running at once; minutes with no lane running, and why; brake refusals, with their readings from guard.log. Cost: git and GitHub reads, once per batch merge. It adds no log, watcher or timer.<!-- rule:reports-batch-pace-numbers -->
+that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed --> At each batch merge, the report also gives four pace numbers, as OTHER items under Done. Read them from git and GitHub at report time. Number one: wall-clock from first lane commit to merge. Number two: lanes run, and the most running at once. Number three: minutes with no lane running, and why. Number four: brake refusals, with their readings from guard.log. Cost: git and GitHub reads, once per batch merge. It adds no log, watcher or timer.<!-- rule:reports-batch-pace-numbers -->
 
 # Compact instructions
 
