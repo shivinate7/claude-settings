@@ -96,7 +96,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override pass: one act or a timed pass, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read, the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -14331,19 +14331,20 @@ for _label, _check in (
 # =========================================================================== the machine-load brake
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
-# the guard reads the machine's load once: memory in use as a share of this machine's memory, disk free on the
-# home drive in GB against the drive's size, and CPU busy from the OS's CPU ticks (Windows reads twice, Mac and Linux up to six times), as a second
-# signal. It counts no claude process and no running lane. A GB here is 2**30 bytes, as df -k and PowerShell
-# 1GB give. The levels (decision machine-load-brake; memory and CPU levels are placeholders):
-#   busy  memory over 85%, disk free under the smaller of 10% of the disk and 15 GB, or (CPU over 85% AND
-#         memory over 75%). An Agent or Task call passes busy only when run_in_background is absent or exactly
-#         false. Any other value (true, a string, null, a number) is refused. Any Workflow is refused. The refusal
-#         says to wait for the load to drop, or to start the lane as an Agent call that leaves run_in_background
-#         out or sets it false. A disk reading names free disk space instead.
+# the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
+# the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
+# sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
+# lane. A GB here is 2**30 bytes, as df -k and PowerShell 1GB give. The levels:
+#   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
+#         passes busy only when run_in_background is absent or exactly false. Any other value (true, a string,
+#         null, a number) is refused. Any Workflow is refused. The refusal says to wait for the load to drop, or
+#         to start the lane as an Agent call that leaves run_in_background out or sets it false. A disk reading
+#         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
-#         an Agent or Task call too. CPU never makes the machine full.
-# The refusal names the reading that tripped it. A read that fails, or a reading left unread, counts as normal.
-# Every other tool reads no load. The read starts no child process and writes no file.
+#         an Agent or Task call too.
+# The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
+# unread, counts as normal. Every other tool reads no load. The read starts no child process, writes no file,
+# and sleeps for no wait.
 # Not pinned: start_session at busy.
 #
 # THE SEAM. The cases drive the guard in a probe process that imports guard.py (GUARD_UNDER_TEST
@@ -14352,31 +14353,35 @@ FAMILY = "load-brake"
 #   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
 #                  no argument and does every OS read. It returns a dict with the keys memory_pct
 #                  (percent of physical memory IN USE), disk_free_gb and disk_total_gb (GB FREE and GB
-#                  TOTAL on the home drive, never clamped to 0-100) and cpu_pct (percent CPU busy). A
+#                  TOTAL on the home drive, never clamped to 0-100). It returns no cpu_pct key. A
 #                  missing key or a None is an unread reading, which counts as normal. read_load may
 #                  raise: every reading then counts as normal. It returns no claude_procs, and a
-#                  claude_procs key in a reading changes nothing.
-#                  The OS sources, all faked by THE FAKE HOST: darwin reads the Mach CPU ticks through
-#                  ctypes (host_statistics, uint32[4] of user, system, idle, nice, read up to six times) and memory
-#                  through sysctlbyname; linux reads /proc/stat up to six times; both read the disk through
-#                  shutil.disk_usage on the home folder and never the load average.
+#                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
+#                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
+#                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
+#                  linux reads memory unread; both read the disk through shutil.disk_usage on the home
+#                  folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per lane-start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
-# call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg and
-# os.cpu_count (15), time.sleep (a no-op), shutil.disk_usage, and the /proc/stat file (builtins.open and
-# io.open). Each source is restored before the judge runs. Tick samples: a base sample, then one that adds
-# the case's busy share, so the two reads differ by that share. A `ticks` list replaces them: the samples
-# in order, the last one repeating, so a zero change can come before a rise.
+# call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
+# average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
+# Each source is restored before the judge runs. Tick samples: a base sample, then one that adds the case's
+# busy share, so a reader that reads the ticks would see that share. `tick_reads` counts each read of them.
+# THE WAITS. Every time.sleep the probe makes is counted in `sleeps`, and nothing waits. On Windows the probe
+# also counts each GetSystemTimes call (`GetSystemTimes`). A judge with no `reading` and no `fake` runs the
+# real reader on this host (the live judge), so its waits and tick calls are the lane call's own.
 # A fake case must start no child process; the probe counts them and the case checks the count.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 LB_PROBE = r"""
-import importlib.machinery, importlib.util, io, json, os, subprocess, sys, types
+import importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
+sleeps = []
+time.sleep = lambda seconds: sleeps.append(seconds)   # counted, never waited on
 real_popen = subprocess.Popen
 
 
@@ -14411,13 +14416,11 @@ GB = 2 ** 30
 
 
 # Run `read` with every OS source faked, then restore each one: the platform, the Mach ticks and
-# memory level (darwin), the load average, the CPU count, the sleep, the disk and /proc/stat.
+# memory level (darwin), the load average, the disk and /proc/stat. The waits stay counted, not waited on.
 def under_fake(read, fake):
     real_open = open
     busy = int(fake["busy"])
     samples = [(1000, 0, 9000, 0), (1000 + busy * 10, 0, 9000 + (100 - busy) * 10, 0)]   # (user, system, idle, nice)
-    if fake.get("ticks"):
-        samples = [tuple(s) for s in fake["ticks"]]
     calls = {"ticks": 0, "stat": 0}
 
     def sample(counter):
@@ -14425,8 +14428,6 @@ def under_fake(read, fake):
         calls[counter] += 1
         if calls[counter] > 100:
             raise RuntimeError("the fake host gave more than 100 tick reads")
-        if fake.get("raise_first") and calls[counter] == 1:
-            raise OSError("fake first tick read failed")
         return samples[min(calls[counter] - 1, len(samples) - 1)]
 
     def host_statistics(host, flavor, info, count):
@@ -14457,8 +14458,6 @@ def under_fake(read, fake):
             mock.patch("ctypes.CDLL", cdll), \
             mock.patch("ctypes.cdll", types.SimpleNamespace(LoadLibrary=cdll)), \
             mock.patch("os.getloadavg", lambda: (load, load, load), create=True), \
-            mock.patch("os.cpu_count", lambda: 15), \
-            mock.patch("time.sleep", lambda seconds: None), \
             mock.patch("shutil.disk_usage", lambda path: usage), \
             mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
         try:
@@ -14467,38 +14466,17 @@ def under_fake(read, fake):
             out["tick_reads"] = calls["ticks"] + calls["stat"]
 
 
-# Why the real CPU read came back unread. read_load turns an exception into None, the same as a zero tick
-# change, so the probe wraps _read_cpu before read_load and keeps what read_load's own call did. A second
-# call would read the ticks again, and a first-read raise could then pass as no exception.
-def record_cpu(holder):
-    first = {}
-    real = getattr(holder, "_read_cpu", None)
-    if real is None:
-        return first
-
-    def wrapped():
-        try:
-            value = real()
-        except Exception as exc:
-            first["raised"] = "%s: %s" % (type(exc).__name__, str(exc)[:80])
-            raise
-        first["value"] = value
-        return value
-    holder._read_cpu = wrapped
-    return first
-
-
-def cpu_cause(first):
-    if "raised" in first:
-        return "exception raised: %s" % first["raised"]
-    if "value" not in first:
-        return "unknown, read_load never reached _read_cpu"
-    if first["value"] is None:
-        return "zero tick change, no exception: the tick total did not move in the sample window"
-    return "unknown, the first read returned %.1f%%" % first["value"]
-
-
 out = {"reads": 0}
+if sys.platform == "win32":
+    # The Windows CPU tick read is GetSystemTimes: count each call the reader makes, then make the real one.
+    import ctypes
+    kernel = ctypes.windll.kernel32
+    real_times = kernel.GetSystemTimes
+
+    def counted_times(*args):
+        out["GetSystemTimes"] = out.get("GetSystemTimes", 0) + 1
+        return real_times(*args)
+    kernel.GetSystemTimes = counted_times
 try:
     # The loader is named, so a GUARD_UNDER_TEST copy with a .bak suffix loads like guard.py does.
     loader = importlib.util.spec_from_file_location(
@@ -14522,14 +14500,11 @@ try:
         if not holders:
             out["missing"] = True
         else:
-            first = record_cpu(holders[0])
             try:
                 if "fake" in spec:
                     out["reading"] = under_fake(holders[0].read_load, spec["fake"])
                 else:
                     out["reading"] = holders[0].read_load()
-                if out["reading"].get("cpu_pct") is None:
-                    out["cpu_cause"] = cpu_cause(first)
             except Exception as exc:
                 out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
     else:
@@ -14553,6 +14528,7 @@ try:
     out["files"] = [p for p in listing() if p not in before]
 except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
+out["sleeps"] = len(sleeps)
 out["children"] = children
 with open(side, "w", encoding="utf-8") as handle:
     json.dump(out, handle, default=str)
@@ -14569,8 +14545,8 @@ LB_LANE_INPUT = {
     "Workflow": {"script": _flow("sonnet")},
     "mcp__ccd_session__start_session": {"initiation": "user_asked", "prompt": "x", "model": "sonnet"},
 }
-LB_NORMAL = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0, "cpu_pct": 10.0}
-LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_gb": 1.0, "disk_total_gb": 926.0, "cpu_pct": 99.0}
+LB_NORMAL = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
+LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_gb": 1.0, "disk_total_gb": 926.0}
 # The tools that take run_in_background. At busy, only an absent or exactly false value passes.
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
@@ -14586,22 +14562,12 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, ticks=None,
-            raise_first=False):
-    """A fake host for THE FAKE HOST: `busy` the CPU share from ticks, `load` the 1-minute load average,
-    `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on the disk.
-    `ticks` gives the tick samples in order, as (user, system, idle, nice), in place of the busy share.
-    `raise_first` makes the first tick read raise OSError."""
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+    """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
+    load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
+    the disk."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "ticks": ticks,
-            "raise_first": raise_first}
-
-
-# Tick samples as (user, system, idle, nice). LB_TICKS_HALF is 50% busy over the 1000 ticks after LB_TICKS_A.
-LB_TICKS_A = (1000, 0, 9000, 0)
-LB_TICKS_HALF = (1500, 0, 9500, 0)
-# The first tick sample and five repeats, each 0.2 s after the last: _read_cpu's loop, range(5), and no more.
-LB_TICK_READS = 6
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
 
 
 def lb_reading(**changes):
@@ -14777,16 +14743,6 @@ def lb_gb_unclamped(reading):
     return ok, "disk_free_gb %s, disk_total_gb %s, want 119 and 926" % (free, total)
 
 
-def lb_cpu_share(want):
-    """The CPU reading, from the tick sample on a fake host, is `want` percent busy to one point."""
-    def check(reading):
-        cpu = reading.get("cpu_pct")
-        if cpu is None:
-            return False, "cpu_pct unread"
-        return abs(cpu - want) <= 1.0, "cpu_pct %.1f, want %.1f" % (cpu, want)
-    return check
-
-
 def lb_reader_children(side):
     if side["children"]:
         return False, "read_load started %d child process(es): %s" % (len(side["children"]), side["children"][:3])
@@ -14810,7 +14766,9 @@ def lb_reader_shape(side):
         return False, "read_load returned %r, want a dict" % (reading,)
     if "claude_procs" in reading:
         return False, "read_load still returns claude_procs, the process count the owner dropped"
-    for key in ("memory_pct", "cpu_pct"):
+    if "cpu_pct" in reading:
+        return False, "read_load still returns cpu_pct %r, the CPU reading the owner dropped" % (reading["cpu_pct"],)
+    for key in ("memory_pct",):
         value = reading.get(key)
         if value is None:
             continue
@@ -14823,11 +14781,10 @@ def lb_reader_shape(side):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             return False, "%s is %r, want a number of GB" % (key, value)
     if supported:
-        need = ("memory_pct", "disk_free_gb", "disk_total_gb", "cpu_pct")
+        need = ("memory_pct", "disk_free_gb", "disk_total_gb")
         unread = [key for key in need if reading.get(key) is None]
         if unread:
-            cause = ", cpu_pct cause: %s" % side["cpu_cause"] if "cpu_pct" in unread and side.get("cpu_cause") else ""
-            return False, "read_load left %s unread on %s%s" % (", ".join(unread), sys.platform, cause)
+            return False, "read_load left %s unread on %s" % (", ".join(unread), sys.platform)
         if not (reading["memory_pct"] > 0 and reading["disk_free_gb"] > 0):
             return False, "memory_pct and disk_free_gb read 0: %r" % (reading,)
         if reading["disk_free_gb"] > reading["disk_total_gb"]:
@@ -14868,7 +14825,7 @@ LB_STAND_IN = '''import json, sys
 
 
 def read_load():
-    return {"memory_pct": 99.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0, "cpu_pct": 99.0}
+    return {"memory_pct": 99.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
 
 
 def main():
@@ -14926,9 +14883,7 @@ lb_add("neutral default: a lane call in another family's case meets a neutral lo
 LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
 LB_MEM_FULL = lb_names("memory", "97.2", "97")
 LB_MEM90 = lb_names("memory", "90.0", "90")
-LB_MEM80 = lb_names("memory", "80.0", "80")
-LB_CPU94 = lb_names("cpu", "94.0", "94")
-LB_CPU90 = lb_names("cpu", "90.0", "90")
+LB_CPU_WORD = re.compile(r"cpu", re.I)   # a refusal that names the CPU at all
 
 # Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only a value
 # other than absent or false is refused.
@@ -15001,102 +14956,41 @@ lb_add("disk 100 GB, 12 GB free, run_in_background true: not busy, allowed",
                          fake=lb_fake("darwin", disk_total=100.0, disk_free=12.0)))
 lb_add("disk GB not clamped: a 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119",
        lb_reader_fake(lb_fake("darwin", disk_total=926.0, disk_free=119.0), lb_gb_unclamped))
-lb_add("Agent, CPU 93.4%, run_in_background true: CPU alone is not busy, allowed",
-       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "allow", background=True))
-lb_add("Agent, CPU 93.4%, run_in_background false: allowed",
-       lb_decision_check("Agent", lb_reading(cpu_pct=93.4), "allow", background=False))
-lb_add("Agent, CPU 99%, run_in_background false: CPU never fills the machine, allowed",
-       lb_decision_check("Agent", lb_reading(cpu_pct=99.0), "allow", background=False))
-
-# CPU from ticks on darwin, under THE FAKE HOST: a high load average with low tick use is not busy, and ticks
-# at 90% with memory at 80% are busy. Memory 80% is above the 75% that CPU needs, and below the 85% that
-# memory alone needs, so only the CPU reading can trip busy.
-lb_add("Agent, load 107 and CPU ticks 50% busy, memory 80%, run_in_background true: CPU not busy, allowed",
+# Memory 80% is under the 85% that memory alone needs, so it is not busy. The brake reads no CPU: the load average
+# and the CPU ticks change nothing here. The darwin fake host shows the real reader's memory is what counts.
+lb_add("Agent, darwin host at memory 80%, load 107 and CPU ticks 50% busy, run_in_background true: not busy, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
                          fake=lb_fake("darwin", busy=50.0, load=107.0, memory=80)))
-lb_add("Agent, load 1.0 and CPU ticks 90% busy, memory 80%, run_in_background true: busy, refused, names CPU and memory",
-       lb_decision_check("Agent", None, "deny", LB_CPU90 + LB_MEM80, background=True, lacks=(LB_FOREGROUND,),
-                         fake=lb_fake("darwin", busy=90.0, load=1.0, memory=80)))
-# CPU on linux, from /proc/stat read up to six times. The reader has no memory on linux, so only the value is pinned.
-lb_add("CPU on linux: /proc/stat 50% busy with load 107 reads cpu_pct 50, not the load average",
-       lb_reader_fake(lb_fake("linux", busy=50.0, load=107.0), lb_cpu_share(50.0)))
-lb_add("CPU on linux: /proc/stat 90% busy with load 1.0 reads cpu_pct 90",
-       lb_reader_fake(lb_fake("linux", busy=90.0, load=1.0), lb_cpu_share(90.0)))
-
-
-def lb_flat_ticks(side):
-    """Every tick sample equal: cpu_pct is None, which counts as unread and normal, and the reader made
-    exactly LB_TICK_READS tick reads, then stopped."""
-    reading = side.get("reading") or {}
-    if reading.get("cpu_pct") is not None:
-        return False, "cpu_pct %r with every tick sample equal, want None" % (reading.get("cpu_pct"),)
-    reads = side.get("tick_reads")
-    if reads != LB_TICK_READS:
-        return False, "the reader made %s tick reads, want %d" % (reads, LB_TICK_READS)
-    return True, "cpu_pct None after %d tick reads" % reads
-
-
-# Two equal samples, then a rise: the reader reads on past the zero change, and does not return None.
-# The rise ends the loop at the third tick read: the first sample, the equal repeat, the rise. A reader that
-# reads on past the rise still reads 50, so only the count of tick reads pins the stop.
-LB_RISE_READS = 3
-
-
-def lb_rise_check(want):
-    """The rise to `want` percent busy, read in exactly LB_RISE_READS tick reads."""
-    share = lb_cpu_share(want)
-
-    def check(side):
-        ok, note = share(side.get("reading") or {})
-        if not ok:
-            return False, note
-        reads = side.get("tick_reads")
-        if reads != LB_RISE_READS:
-            return False, "the reader made %s tick reads, want %d: it must stop at the rise" % (reads, LB_RISE_READS)
-        return True, "%s, %d tick reads" % (note, reads)
-    return check
-
-
-lb_add("CPU on darwin: two equal tick samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
-       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
-                      side_check=True))
-lb_add("CPU on linux: two equal /proc/stat samples, then a rise to 50% busy, reads cpu_pct 50 in three tick reads",
-       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A, LB_TICKS_A, LB_TICKS_HALF]), lb_rise_check(50.0),
-                      side_check=True))
-# Every sample equal: the reader stops at its bound, and the unread CPU still fails open.
-lb_add("CPU on darwin: every tick sample equal reads cpu_pct None after the bound of six tick reads",
-       lb_reader_fake(lb_fake("darwin", ticks=[LB_TICKS_A]), lb_flat_ticks, side_check=True))
-lb_add("CPU on linux: every /proc/stat sample equal reads cpu_pct None after the bound of six tick reads",
-       lb_reader_fake(lb_fake("linux", ticks=[LB_TICKS_A]), lb_flat_ticks, side_check=True))
-lb_add("Agent, every tick sample equal, memory 80%, run_in_background true: unread CPU counts as normal, allowed",
+lb_add("Agent, darwin host at memory 80%, load 1.0 and CPU ticks 90% busy, run_in_background true: not busy, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
-                         fake=lb_fake("darwin", memory=80, ticks=[LB_TICKS_A])))
+                         fake=lb_fake("darwin", busy=90.0, load=1.0, memory=80)))
 
 
-def lb_cause_check(cause):
-    """An unread CPU whose first tick read raised: the note starts with `cause`, and the reader made one
-    tick read, since the raise ends the read."""
-    def check(side):
-        if (side.get("reading") or {}).get("cpu_pct") is not None:
-            return False, "cpu_pct read with the first tick read raising, want unread"
-        note = side.get("cpu_cause") or ""
-        if not note.startswith(cause):
-            return False, "the note is %r, want it to start with %r" % (note[:100], cause)
-        if side.get("tick_reads") != 1:
-            return False, "the reader made %s tick reads, want 1 after the raise" % side.get("tick_reads")
-        return True, note[:100]
-    return check
+def lb_no_tick_check(side):
+    """The reader read no CPU tick: on a host whose ticks would read 90% busy, the host_statistics and
+    /proc/stat counts stay at zero."""
+    reads = side.get("tick_reads")
+    if reads:
+        return False, "read_load made %s CPU tick read(s), want none" % reads
+    return True, "no CPU tick read"
 
 
-lb_add("CPU on darwin: the first tick read raises, the unread CPU's note names the exception, one tick read",
-       lb_reader_fake(lb_fake("darwin", raise_first=True), lb_cause_check("exception raised: OSError"),
-                      side_check=True))
-lb_add("CPU on linux: the first /proc/stat read raises, the unread CPU's note names the exception, one tick read",
-       lb_reader_fake(lb_fake("linux", raise_first=True), lb_cause_check("exception raised: OSError"),
-                      side_check=True))
+def lb_no_cpu_key(reading):
+    if "cpu_pct" in reading:
+        return False, "read_load returns cpu_pct %r, want no cpu_pct key" % (reading["cpu_pct"],)
+    return True, "no cpu_pct key: %s" % ", ".join(sorted(reading))
 
-# CPU makes the machine busy only with memory over 75% too: CPU 94% alone is allowed, and CPU 94% with
-# memory 80% is refused.
+
+lb_add("CPU on darwin: read_load makes no host_statistics tick read on a host whose ticks would read 90% busy",
+       lb_reader_fake(lb_fake("darwin", busy=90.0), lb_no_tick_check, side_check=True))
+lb_add("CPU on linux: read_load makes no /proc/stat read on a host whose ticks would read 90% busy",
+       lb_reader_fake(lb_fake("linux", busy=90.0), lb_no_tick_check, side_check=True))
+lb_add("the reader returns no cpu_pct key on darwin", lb_reader_fake(lb_fake("darwin"), lb_no_cpu_key))
+lb_add("the reader returns no cpu_pct key on linux", lb_reader_fake(lb_fake("linux"), lb_no_cpu_key))
+
+
+# Memory 90% and 80% are the memory levels. The CPU never adds to a refusal, and a CPU reading never makes a busy
+# call of its own.
 for _short, _tool in LB_SPAWNS:
     lb_add("%s, memory 90%%, run_in_background left out: busy, allowed" % _short,
            lb_decision_check(_tool, lb_reading(memory_pct=90.0), "allow"))
@@ -15109,18 +15003,40 @@ for _short, _tool in LB_SPAWNS:
         lb_add("%s, memory 90%%, run_in_background %s: busy, refused, names the memory" % (_short, _label),
                lb_decision_check(_tool, lb_reading(memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
                                  tool_input=lb_spawn_input(_tool, _value), lacks=(LB_FOREGROUND,)))
-    lb_add("%s, CPU 94%%, memory 70%%, disk 50%% free, run_in_background true: CPU alone is not busy, allowed"
-           % _short,
+    lb_add("%s, memory 70%%, disk 463 of 926 GB free, CPU 94%% ignored, run_in_background true: allowed" % _short,
            lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=70.0, disk_free_gb=463.0, disk_total_gb=926.0),
                              "allow", background=True))
-    lb_add("%s, CPU 94%%, memory 80%%, run_in_background true: busy, refused, names CPU and memory" % _short,
-           lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=80.0), "deny", LB_CPU94 + LB_MEM80,
-                             background=True))
-lb_add("Workflow, CPU 94%, memory 70%, disk 463 of 926 GB free: CPU alone is not busy, allowed",
+    # Any CPU state at memory 80% is not busy. A stub's CPU is ignored, and a reading with no CPU key is the shape
+    # the reader returns.
+    lb_add("%s, memory 80%%, CPU 94%%, run_in_background true: not busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=80.0), "allow", background=True))
+    lb_add("%s, memory 80%%, CPU 99%%, run_in_background true: not busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(cpu_pct=99.0, memory_pct=80.0), "allow", background=True))
+    lb_add("%s, memory 80%%, no CPU reading, run_in_background true: not busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=80.0), "allow", background=True))
+
+# A refusal never names the CPU. Memory 90 with CPU 94 is refused on memory alone; a brake that still reads the CPU
+# names both, and these cases catch that.
+for _short, _tool in LB_SPAWNS:
+    lb_add("%s, memory 90%%, CPU 94%%, run_in_background true: busy, refused, names memory and never CPU" % _short,
+           lb_decision_check(_tool, lb_reading(cpu_pct=94.0, memory_pct=90.0), "deny", LB_MEM90 + (LB_REMEDY,),
+                             background=True, lacks=(LB_CPU_WORD, LB_FOREGROUND)))
+lb_add("Workflow, memory 80%, CPU 94%: not busy, allowed",
+       lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=80.0), "allow"))
+lb_add("Workflow, memory 80%, no CPU reading: not busy, allowed",
+       lb_decision_check("Workflow", lb_reading(memory_pct=80.0), "allow"))
+lb_add("Workflow, memory 70%, disk 463 of 926 GB free, CPU 94% ignored: allowed",
        lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=70.0, disk_free_gb=463.0,
                                                 disk_total_gb=926.0), "allow"))
-lb_add("Workflow, CPU 94%, memory 80%: busy, refused, names CPU and memory",
-       lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=80.0), "deny", LB_CPU94 + LB_MEM80))
+lb_add("Workflow, memory 90%, CPU 94%: busy, refused, names memory and never CPU",
+       lb_decision_check("Workflow", lb_reading(cpu_pct=94.0, memory_pct=90.0), "deny", LB_MEM90,
+                         lacks=(LB_CPU_WORD,)))
+lb_add("Agent, darwin host at memory 90%, CPU ticks 94% busy, run_in_background true: busy, refused, names memory and never CPU",
+       lb_decision_check("Agent", None, "deny", LB_MEM90 + (LB_REMEDY,), background=True,
+                         lacks=(LB_CPU_WORD, LB_FOREGROUND), fake=lb_fake("darwin", busy=94.0, memory=90)))
+lb_add("Agent, memory 97.2%, CPU 99%, run_in_background false: full, refused, names memory and never CPU",
+       lb_decision_check("Agent", lb_reading(cpu_pct=99.0, memory_pct=97.2), "deny", LB_MEM_FULL,
+                         background=False, lacks=(LB_CPU_WORD,)))
 lb_add("Agent, 20 claude processes read, the rest normal: no process count, allowed",
        lb_decision_check("Agent", lb_reading(claude_procs=20), "allow"))
 lb_add("Agent, memory unread and the rest normal, run_in_background left out: allowed",
@@ -15150,29 +15066,43 @@ lb_add("Agent with run_in_background false, the real reader, starts no child pro
        lb_real_children_check("Agent", background=False), real=True)
 lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
-lb_add("the real reader returns readings in range, and on Windows and Mac reads memory, disk and CPU",
+lb_add("the real reader returns readings in range, and on Windows and Mac reads memory and disk, with no cpu_pct key",
        lb_reader(lb_reader_shape), real=True)
 
 
-def lb_unread_cause_check():
-    """An unread CPU on darwin names its cause in the note: an exception raised, or a zero tick change."""
-    real, named = sys.platform, []
-    for cause, word in (("exception raised: OSError: host_statistics failed", "exception raised"),
-                        ("zero tick change, no exception: the tick total did not move in the sample window",
-                         "zero tick change")):
-        sys.platform = "darwin"
-        try:
-            ok, note = lb_reader_shape({"reading": lb_reading(cpu_pct=None), "cpu_cause": cause})
-        finally:
-            sys.platform = real
-        if ok or word not in note:
-            return False, "the note %r does not name %r" % (note, word)
-        named.append(word)
-    return True, "the note names %s" % " and ".join(named)
+def lb_live_waits_check(tool):
+    """A lane-start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool))
+        if got == "error":
+            return False, reason
+        if not side.get("had_reader"):
+            return False, "the guard has no read_load, so no real reading was taken"
+        if side.get("sleeps"):
+            return False, "%s slept %d time(s), want none" % (got, side["sleeps"])
+        return True, "%s, no sleep" % got
+    return check
 
 
-lb_add("the real-reader failure names the cause of an unread CPU: an exception raised, or a zero tick change",
-       lb_unread_cause_check)
+def lb_live_times_check():
+    """On Windows, no lane-start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
+    if sys.platform != "win32":
+        return SKIP, "GetSystemTimes is the Windows CPU tick read, so this runs on Windows only"
+    for _short, tool in LB_TOOLS:
+        got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool))
+        if got == "error":
+            return False, reason
+        if not side.get("had_reader"):
+            return False, "the guard has no read_load, so no real reading was taken"
+        if side.get("GetSystemTimes"):
+            return False, "%s made %d GetSystemTimes call(s), want none" % (_short, side["GetSystemTimes"])
+    return True, "no GetSystemTimes call on any lane-start call"
+
+
+for _short, _tool in LB_TOOLS:
+    lb_add("%s on the live judge makes no sleep, so no 200 ms CPU wait" % _short,
+           lb_live_waits_check(_tool), real=True)
+lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
@@ -15201,8 +15131,8 @@ WINDOWS_CHECKERS = {
 # audit-high: the fail-closed checks read no Windows-only code, but the Windows slice runs on
 # every pull request, and a missing sibling is the Windows incident. They run in that slice too.
 WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
-# load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx,
-# GetSystemTimes and a process snapshot) that no Linux run exercises.
+# load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx
+# and a process snapshot) that no Linux run exercises.
 WINDOWS_CHECKERS.update(LB_CHECKS)
 
 
