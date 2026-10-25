@@ -358,6 +358,7 @@ end_case "tf: a copy that dies half-made is removed"
 for sig in TERM INT; do
   one_app "$(copy_in "$work/secrets/Secret.xcconfig" ios/Secret.xcconfig)"
   XCODEBUILD_SLEEP=6 signal_mid_build "$sig"
+  need "$sig: no xcodebuild call, so the signal tested nothing" built
   need "$sig: the copy was still in the tree 3 s after the signal" test "$sig_gone" = yes
   need "$sig: the copy was left in the tree after the tool exited" not test -e "$COPY_PROBE"
   end_case "tf: $sig during the archive removes the copy at once"
