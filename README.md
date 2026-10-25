@@ -239,7 +239,7 @@ An environment variable of the same name in capitals (`TEAM_ID`, `DEVICE_UDID`, 
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
 * `ios-ship install CONFIG [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
-  the others. Exit 75 means the phone was not reachable. `--no-install` stops after a build for generic iOS.
+  the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.
   An install that is more than 300 days old raises an overdue notice.
 * `--app NAME` limits a run to the named apps. A name that is not in the config exits 2.
 
