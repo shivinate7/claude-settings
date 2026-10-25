@@ -67,6 +67,7 @@ SH
 # xcodebuild: logs the call and its args; notes whether COPY_PROBE exists at call time; makes the archive and a fake .ipa.
 # XCODEBUILD_FAIL_KIND (archive, export or build) and XCODEBUILD_FAIL_SCHEME fail just those calls; XCODEBUILD_RC, _OUT,
 # _SLEEP (seconds, in the foreground) and _HANG as before. XCODEBUILD_LOCK_EXPORT=1 makes the export folder read-only.
+# XCODEBUILD_PID_FILE with _SLEEP: the sleep is the step's own process, and its pid goes to that file.
 cat > "$stubs/xcodebuild" <<'SH'
 #!/usr/bin/env bash
 echo xcodebuild >> "$CALL_LOG"
@@ -81,6 +82,7 @@ for a in "$@"; do
   prev=$a
 done
 [[ -n ${XCODEBUILD_OUT:-} ]] && echo "$XCODEBUILD_OUT"
+[[ -z ${XCODEBUILD_PID_FILE:-} || -z ${XCODEBUILD_SLEEP:-} ]] || { echo $$ > "$XCODEBUILD_PID_FILE"; exec sleep "$XCODEBUILD_SLEEP"; }
 [[ -n ${XCODEBUILD_SLEEP:-} ]] && sleep "$XCODEBUILD_SLEEP"
 [[ -n ${XCODEBUILD_FAIL_KIND:-} && $kind == "$XCODEBUILD_FAIL_KIND" ]] && exit 1
 if [[ -n ${XCODEBUILD_FAIL_SCHEME:-} && "$*" == *"-scheme $XCODEBUILD_FAIL_SCHEME "* ]]; then exit 1; fi
@@ -139,7 +141,7 @@ tool_exec() {
     DATE_COUNTER="$work/datecount" COPY_PROBE="${COPY_PROBE:-}" XCODEGEN_TOUCH="${XCODEGEN_TOUCH:-}" CP_PARTIAL="${CP_PARTIAL:-}" \
     XCODEBUILD_RC="${XCODEBUILD_RC:-0}" XCODEBUILD_OUT="${XCODEBUILD_OUT:-}" XCODEBUILD_SLEEP="${XCODEBUILD_SLEEP:-}" \
     XCODEBUILD_FAIL_KIND="${XCODEBUILD_FAIL_KIND:-}" XCODEBUILD_FAIL_SCHEME="${XCODEBUILD_FAIL_SCHEME:-}" XCODEBUILD_HANG="${XCODEBUILD_HANG:-}" \
-    XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" \
+    XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" XCODEBUILD_PID_FILE="${XCODEBUILD_PID_FILE:-}" \
     XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" \
     STEP_TIMEOUT="${STEP_TIMEOUT:-}" REINSTALL_HOME="${REINSTALL_HOME:-}" TEAM_ID="${TEAM_ID:-}" DEVICE_UDID="${DEVICE_UDID:-}" \
     ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" \
@@ -178,14 +180,24 @@ mk_tf() { # APPS_LIST [JQ_FILTER]: a clean clone at origin/main
 }
 tf() { run testflight "$tfconf" "$work/home" "$@"; }
 one_app() { mk_tf "$(apps "$(app A "${1:-}")")" "${2:-.}"; }
-# signal_mid_build SIG: start a testflight run, send SIG to the tool alone once xcodebuild runs, and record in sig_gone
-# whether the copy_in file left the tree within 3 s. The tool must not wait for the build to end to clean up.
+# signal_mid_build SIG: start a testflight run, send SIG to the tool alone once xcodebuild runs. Records in sig_gone
+# whether the copy_in file left the tree within 3 s, and in sig_step_gone whether the archive step's own process
+# (sig_pid, from $xcb_pid) died within 3 s. The tool must not wait for the build to end to clean up.
 signal_mid_build() {
+  local xcb_pid=$work/xcodebuild.pid XCODEBUILD_PID_FILE
+  rm -f "$xcb_pid"; XCODEBUILD_PID_FILE=$xcb_pid
   BG=1 tf
-  for _ in $(seq 1 100); do grep -q '^xcodebuild' "$calls" && break; sleep 0.1; done
+  for _ in $(seq 1 100); do grep -q '^xcodebuild' "$calls" && [[ -s $xcb_pid ]] && break; sleep 0.1; done
+  sig_pid=$(cat "$xcb_pid" 2>/dev/null)
   kill -"$1" "$RUN_PID"
-  sig_gone=no
-  for _ in $(seq 1 30); do if [[ ! -e $COPY_PROBE ]]; then sig_gone=yes; break; fi; sleep 0.1; done
+  sig_gone=no; sig_step_gone=no
+  for _ in $(seq 1 30); do
+    [[ -e $COPY_PROBE ]] || sig_gone=yes
+    if [[ -n $sig_pid ]] && ! kill -0 "$sig_pid" 2>/dev/null; then sig_step_gone=yes; fi
+    [[ $sig_gone = yes && $sig_step_gone = yes ]] && break
+    sleep 0.1
+  done
+  [[ $sig_step_gone = yes || -z $sig_pid ]] || kill "$sig_pid" 2>/dev/null   # a step still alive is stopped here, not left for the next case
   wait "$RUN_PID"; rc=$?
 }
 
@@ -362,6 +374,9 @@ for sig in TERM INT; do
   need "$sig: the copy was still in the tree 3 s after the signal" test "$sig_gone" = yes
   need "$sig: the copy was left in the tree after the tool exited" not test -e "$COPY_PROBE"
   end_case "tf: $sig during the archive removes the copy at once"
+  need "$sig: the archive step wrote no pid, so it could not be checked" test -n "$sig_pid"
+  need "$sig: the archive step (pid $sig_pid) was alive 3 s after the signal" test "$sig_step_gone" = yes
+  end_case "tf: $sig during the archive stops the archive step within 3 s"
 done
 
 # New: a step that reads stdin must not eat the steps after it, and a checked step must not be skipped.
@@ -384,7 +399,7 @@ end_case "tf: an after_archive that reads stdin does not hide a failing check"
 one_app '{"prebuild":["printf x >> ios/.keep"]}'; tf
 need "rc=$rc, want non-zero" test "$rc" -ne 0
 need "build ran" not built
-need "refusal text: $(tail -1 "$out")" grep -q 'TESTFLIGHT FAIL: .*tracked.*ios/.keep' "$out"
+need "refusal does not name the prebuild step: $(tail -1 "$out")" grep -qF 'a prebuild step changed tracked files: ios/.keep' "$out"
 need "the upload was labelled from main" not grep -q 'from main' "$out"
 end_case "tf: a prebuild that changes a tracked file is refused before any archive"
 one_app; XCODEGEN_TOUCH=$work/repo/ios/.keep tf
