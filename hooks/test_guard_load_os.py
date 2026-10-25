@@ -9,12 +9,13 @@ Run it from the repository root, on a real Windows or Mac host:
 On any other platform each case prints SKIP and the run passes. GUARD_UNDER_TEST points the run at
 another copy of the guard, as in hooks/test_guard.py.
 
-THE CLAIM. The load brake in hooks/guard.py judges a lane-start call from three readings. A reading
+THE CLAIM. The load brake in hooks/guard.py judges a lane-start call from memory and disk. A reading
 that is off by a wide margin brakes a healthy machine or lets a full one run, and the unit cases in
 hooks/test_guard.py cannot see it, because they replace the reader. Here the real reader runs and
 each reading is compared with the OS's own tool, taken a moment later, within a tolerance. The
 tolerances are wide on purpose: the machine moves between two reads, and the brake needs the right
-level, not the exact digit.
+level, not the exact digit. The brake reads no CPU (decision machine-load-brake), so no CPU reading is
+checked here.
 
 THE READER. read_load() is the function named in the load-brake section of hooks/test_guard.py. It
 returns a dict, and each reading is defined here:
@@ -28,10 +29,6 @@ returns a dict, and each reading is defined here:
   disk_total_gb   GB of the drive that holds the home folder, in the same unit.
                   Windows reference: Get-PSDrive, (Free + Used) / 1GB.
                   Mac reference: df -k on the home folder, 1K-blocks / 1048576.
-  cpu_pct         percent of CPU busy. Secondary: it only ever makes the machine busy. The brake reads
-                  the CPU ticks, not the load average, so each reference is the OS's own busy share.
-                  Windows reference: Win32_PerfFormattedData_PerfOS_Processor, the _Total row.
-                  Mac reference: top -l 2 -n 0, the second "CPU usage" sample, 100 minus its idle share.
 
 The brake counts no claude process, so no reading here does.
 """
@@ -49,21 +46,17 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 
 # Per reading, the points of percent (or GB, for the disk) by which the reader and the OS tool may differ.
 TOLERANCE = {
-    "win32": {"memory_pct": 5.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0, "cpu_pct": 35.0},
-    "darwin": {"memory_pct": 8.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0, "cpu_pct": 25.0},
+    "win32": {"memory_pct": 5.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0},
+    "darwin": {"memory_pct": 8.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0},
 }
-# The CPU of a machine moves most between two reads, so a CPU case takes the closest of this many tries.
-CPU_TRIES = 3
 
 WINDOWS_SCRIPT = r"""
 $os = Get-CimInstance Win32_OperatingSystem
 $drive = Get-PSDrive -Name $env:LB_DRIVE
-$cpu = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime
 [pscustomobject]@{
   memory_pct = 100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize
   disk_free_gb = $drive.Free / 1GB
   disk_total_gb = ($drive.Free + $drive.Used) / 1GB
-  cpu_pct = [double]$cpu
 } | ConvertTo-Json -Compress
 """
 
@@ -87,14 +80,10 @@ def mac_reference():
     pressure = run("memory_pressure")
     free = re.search(r"System-wide memory free percentage:\s*(\d+)%", pressure)
     df = run("df", "-k", os.path.expanduser("~")).strip().splitlines()[-1].split()
-    # top -l 2 takes two samples a second apart. The second is the current busy share.
-    busy = re.findall(r"CPU usage:\s*[\d.]+% user,\s*[\d.]+% sys,\s*([\d.]+)% idle",
-                      run("top", "-l", "2", "-n", "0"))
     return {
         "memory_pct": 100 - int(free.group(1)),
         "disk_free_gb": int(df[3]) / 1048576,
         "disk_total_gb": int(df[1]) / 1048576,
-        "cpu_pct": 100.0 - float(busy[-1]),
     }
 
 
@@ -113,27 +102,20 @@ def load_reader():
     return next((m.read_load for m in holders if hasattr(m, "read_load")), None)
 
 
-def check_reading(key, tries=1):
+def check_reading(key):
     """The reader's `key` against the OS tool, within the platform's tolerance. Returns (ok, note)."""
     read_load = load_reader()
     if read_load is None:
         return False, "no read_load function in guard.py or a guard_*.py module"
     tolerance = TOLERANCE[sys.platform][key]
-    best = None
-    for _ in range(tries):
-        try:
-            reading = read_load()[key]
-        except Exception as exc:
-            return False, "read_load failed on %s: %s: %s" % (sys.platform, type(exc).__name__, str(exc)[:80])
-        if reading is None:
-            return False, "read_load left %s unread on %s" % (key, sys.platform)
-        reference = REFERENCE[sys.platform]()[key]
-        gap = abs(reading - reference)
-        if best is None or gap < best[0]:
-            best = (gap, reading, reference)
-        if gap <= tolerance:
-            break
-    gap, reading, reference = best
+    try:
+        reading = read_load()[key]
+    except Exception as exc:
+        return False, "read_load failed on %s: %s: %s" % (sys.platform, type(exc).__name__, str(exc)[:80])
+    if reading is None:
+        return False, "read_load left %s unread on %s" % (key, sys.platform)
+    reference = REFERENCE[sys.platform]()[key]
+    gap = abs(reading - reference)
     return (gap <= tolerance,
             "%s read %.1f, the OS tool %.1f, gap %.1f, tolerance %.1f" % (key, reading, reference, gap, tolerance))
 
@@ -144,7 +126,6 @@ CASES = [
      ("win32", "darwin")),
     ("disk size on the home drive matches the OS tool", lambda: check_reading("disk_total_gb"),
      ("win32", "darwin")),
-    ("CPU busy matches the OS tool", lambda: check_reading("cpu_pct", CPU_TRIES), ("win32", "darwin")),
 ]
 
 
