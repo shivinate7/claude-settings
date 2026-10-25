@@ -110,8 +110,8 @@ copy_in_make() {
   while IFS=$'\t' read -r from to; do
     resolve_from "$from"; from=$FROM
     [[ $from -ef $1/$to ]] && continue
+    COPIED+=("$1/$to")   # recorded first: a cp that dies half-made still leaves a file to remove
     cp "$from" "$1/$to" || refuse "$NAME: cannot copy $from to $to"
-    COPIED+=("$1/$to")
   done < <(printf '%s' "$ENTRY" | jq -r '(.copy_in // [])[] | [.from, .to] | @tsv')
 }
 
@@ -119,17 +119,37 @@ copy_in_make() {
 
 # The clean-main check: ship only what main holds. All of its refusals come before any build.
 require_clean_main() {
-  [[ -z $(git -C "$ROOT" status --porcelain) ]] || refuse "the tree is not clean; commit or stash first"
+  [[ -z $(git -C "$ROOT" status --porcelain --untracked-files=normal) ]] || refuse "the tree is not clean; commit or stash first"
   (( export_only )) && return 0
-  git -C "$ROOT" fetch -q origin main || refuse "git fetch origin main failed; a stale origin/main proves nothing"
+  # An explicit refspec: a narrowed remote.origin.fetch would leave origin/main stale.
+  git -C "$ROOT" fetch -q origin +refs/heads/main:refs/remotes/origin/main || refuse "git fetch origin main failed; a stale origin/main proves nothing"
   [[ $(git -C "$ROOT" rev-parse HEAD) == "$(git -C "$ROOT" rev-parse origin/main)" ]] || refuse "HEAD is not origin/main; run from an up-to-date main checkout"
 }
 
+# scrub_ipas: delete every .ipa of a copy_in app (it holds the secret). Fails if one is still there; find's own exit code is not trusted.
+scrub_ipas() {
+  local d rc=0
+  for d in ${SCRUB[@]+"${SCRUB[@]}"}; do
+    find "$d" -name '*.ipa' -delete 2>/dev/null
+    [[ -z $(find "$d" -name '*.ipa' 2>/dev/null) ]] || rc=1
+  done
+  return $rc
+}
+
+# tf_kill: stop the running step, so a signal does not leave it holding the tree.
+tf_kill() { [[ -z $STEP_PID ]] || kill "$STEP_PID" 2>/dev/null; }
+
 tf_cleanup() {
-  local d
   drop_copies
-  for d in ${SCRUB[@]+"${SCRUB[@]}"}; do find "$d" -name '*.ipa' -delete 2>/dev/null; done
+  scrub_ipas
   [[ -z $SCRATCH ]] || rm -rf "$SCRATCH"
+}
+
+# require_untouched STEP: a step must not change a tracked file, or the upload is no longer what main holds.
+require_untouched() {
+  local c
+  c=$(git -C "$ROOT" status --porcelain --untracked-files=no | sed 's/^...//' | tr '\n' ' ')
+  [[ -z $c ]] || refuse "$NAME: a $1 step changed tracked files: $c"
 }
 
 job_testflight() {
@@ -143,13 +163,14 @@ job_testflight() {
   [[ -f $ASC_KEY_PATH ]] || refuse "no App Store Connect key at $ASC_KEY_PATH"
   require_clean_main
   # Every app is checked before the first archive, so no app uploads while a later one would have refused.
+  # (copy_in_check runs again right before each copy, because a prebuild can create a target.)
   for ENTRY in "${ENTRIES[@]}"; do check_entry; copy_in_check "$ROOT"; done
 
   # ponytail: minute resolution; two uploads in one UTC minute collide. Add seconds if that ever happens.
   local build asc mode names plist branch sha entry pdir pyml scheme out cmd archive plugins
   build=$(date -u +%Y%m%d%H%M)
-  SCRATCH=; SCRUB=()
-  trap tf_cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  SCRATCH=; SCRUB=(); STEP_PID=
+  trap tf_cleanup EXIT; trap 'tf_kill; exit 130' INT; trap 'tf_kill; exit 143' TERM; trap 'tf_kill; exit 129' HUP
   SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/ios-ship-scratch.XXXXXX") || refuse "cannot make a scratch dir"
   # The log and a kept export live outside the scratch dir, which is deleted on exit.
   LOG=$(mktemp "${TMPDIR:-/tmp}/ios-ship-testflight.XXXXXX") || refuse "cannot make a log file"
@@ -167,13 +188,18 @@ job_testflight() {
   <key>signingStyle</key><string>automatic</string>
 </dict></plist>
 PLIST
-  # tf_step LABEL CMD...: run CMD, output to the log. A failure ends the run with the one verdict line.
+  # tf_step LABEL CMD...: run CMD, output to the log, stdin from /dev/null so a step cannot eat the command list.
+  # CMD runs in the background and the shell waits, so INT and TERM reach the trap at once.
+  # A failure ends the run with the one verdict line.
   tf_step() {
     local label=$1; shift
     echo "ios-ship: $NAME: $label"
-    "$@" >> "$LOG" 2>&1 || { drop_copies; echo "TESTFLIGHT FAIL: $NAME $label, see $LOG"; exit 1; }
+    "$@" >> "$LOG" 2>&1 </dev/null & STEP_PID=$!
+    wait "$STEP_PID" || { STEP_PID=; drop_copies; echo "TESTFLIGHT FAIL: $NAME $label, see $LOG"; exit 1; }
+    STEP_PID=
   }
-  in_dir() { ( cd "$1" && shift && "$@" ); }
+  # exec: the signal in tf_kill then reaches the command itself, not a subshell around it.
+  in_dir() { ( cd "$1" && shift && exec "$@" ); }
   echo "ios-ship: build number $build, log $LOG"
   names=
   for entry in "${ENTRIES[@]}"; do
@@ -186,8 +212,10 @@ PLIST
     while IFS= read -r cmd; do
       [[ -n $cmd ]] && tf_step "prebuild: $cmd" in_dir "$ROOT" bash -c "$cmd"
     done < <(printf '%s' "$ENTRY" | jq -r '.prebuild[]?')
-    copy_in_make "$ROOT"
+    require_untouched prebuild
+    copy_in_check "$ROOT"; copy_in_make "$ROOT"
     [[ -z $pyml ]] || tf_step xcodegen in_dir "$ROOT/$pdir" xcodegen generate --spec "$pyml"
+    require_untouched xcodegen
     tf_step archive in_dir "$ROOT/$pdir" xcodebuild archive -scheme "$scheme" -configuration Release \
       -destination generic/platform=iOS -archivePath "$archive" -derivedDataPath "$SCRATCH/dd" -allowProvisioningUpdates \
       "${asc[@]}" ${plugins[@]+"${plugins[@]}"} DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$build"
@@ -197,6 +225,7 @@ PLIST
     done < <(printf '%s' "$ENTRY" | jq -r '.after_archive[]?')
     tf_step "$mode" in_dir "$ROOT/$pdir" xcodebuild -exportArchive -archivePath "$archive" \
       -exportOptionsPlist "$plist" -exportPath "$out/$NAME" -allowProvisioningUpdates "${asc[@]}"
+    scrub_ipas || refuse "$NAME: cannot delete the .ipa under $out/$NAME; it holds a secret, remove it by hand"
   done
   branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD); sha=$(git -C "$ROOT" rev-parse --short HEAD)
   if (( export_only )); then echo "TESTFLIGHT OK: build $build exported to $out (not uploaded: $names)"
@@ -286,11 +315,11 @@ run_app() {
   cd "$REPO" || die "enter clone" 1
   step fetch 120 git fetch origin
   step reset 60 git reset --hard origin/main
-  copy_in_check "$REPO"
+  copy_in_check "$REPO"   # early, so a refusal comes before any prebuild
   while IFS= read -r cmd; do
     [[ -n $cmd ]] && step "prebuild: $cmd" 900 bash -c "$cmd"
   done < <(printf '%s' "$ENTRY" | jq -r '.prebuild[]?')
-  copy_in_make "$REPO"
+  copy_in_check "$REPO"; copy_in_make "$REPO"   # again after the prebuild, which can create a target
   cd "$pdir" || die "enter project_dir" 1
   [[ -z $pyml ]] || step xcodegen 120 xcodegen generate --spec "$pyml"
   # A headless build cannot answer Xcode's package-plugin trust prompt, so an app with plugins opts in.
@@ -314,7 +343,7 @@ run_app() {
   { date +%s > "$STAMP"; } 2>/dev/null || die "write stamp" 1
   log "OK: installed"
   # Launch is best-effort: the next app open reloads the lists.
-  if tmo "${STEP_TIMEOUT:-60}" xcrun devicectl device process launch --device "$DEVICE_UDID" --terminate-existing "$bundle" >"$STEP_OUT" 2>&1; then
+  if tmo "${STEP_TIMEOUT:-60}" xcrun devicectl device process launch --device "$DEVICE_UDID" --terminate-existing "$bundle" >"$STEP_OUT" 2>&1 </dev/null; then
     cat "$STEP_OUT" >> "$LOG" 2>/dev/null; log "OK: launched"
   else
     cat "$STEP_OUT" >> "$LOG" 2>/dev/null; log "note: launch failed (soft); the next app open reloads the lists"
