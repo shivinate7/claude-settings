@@ -280,5 +280,13 @@ class Scope(unittest.TestCase):
     def test_an_rm_shim_suite_change_turns_on_the_macos_job(self):
         self.assertFlags(run(["lint/test_rm_shim.py"], existing=["lint/test_rm_shim.py"]), want_true=["gates_macos", "code"])
 
+    # bin/ios-ship and its suite run in the shell-macos job only (macOS /bin/bash 3.2). An edit to either turns on that
+    # job and `code`, and no other flag. Without the arm, an unmapped path turns every flag on, so this goes red.
+    # Only the edit is exact: a new file under bin/ also sets the install-suite flags (the landed-dirs rule).
+    def test_ios_ship_edit_turns_on_only_the_macos_shell_job(self):
+        for p in ("bin/ios-ship", "lint/test_ios_ship.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
 if __name__ == "__main__":
     unittest.main()
