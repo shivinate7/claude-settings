@@ -1,10 +1,10 @@
 {
   "ask": "Lane 6 of the premises brief; its full text is in the Ask of c7 (fix the reply-style conflict). Plan: plans/premise-handoffs-plan.md in the project files.",
-  "note": "Planners already run on Opus with a fresh context per lane, so model and context are not the gap. The gap: a planner plans inside its brief and never doubts it, sees one lane only, and reads a repo that lacks your newest rulings (o5b). Shape, advisor pick Oct 21, not yet ruled: no new reviewer. The planner prompt gains one duty: before planning, list the premises the brief rests on, each with its source ('from notes' or 'measured in run X'), check each against decisions/ and recent rulings, and name any that don't hold and any simpler route. The orchestrator does the same check once, across lanes, when it writes a batch's briefs. Three layers together steer: rulings filed the day they're made (o5b), the question judge (c7), this premise check. Draft with c7. Goal session report, Oct 22: built and reviewed, waiting for the next batch (batch 6).",
+  "note": "Planners already run on Opus with a fresh context per lane, so model and context are not the gap. The gap: a planner plans inside its brief and never doubts it, sees one lane only, and reads a repo that lacks your newest rulings (o5b). Shape, advisor pick Oct 21, not yet ruled: no new reviewer. The planner prompt gains one duty: before planning, list the premises the brief rests on, each with its source ('from notes' or 'measured in run X'), check each against decisions/ and recent rulings, and name any that don't hold and any simpler route. The orchestrator does the same check once, across lanes, when it writes a batch's briefs. Three layers together steer: rulings filed the day they're made (o5b), the question judge (c7), this premise check. Draft with c7. Landed in #566 (batch-oct23a, Oct 23), checked at claude-settings f463787 (main, Oct 25).",
   "order": 112,
   "phase": "cleanup",
-  "status": "active",
+  "status": "done",
   "title": "Planners check their brief's premises before planning",
-  "updatedAt": "2026-10-22T18:15:00Z",
+  "updatedAt": "2026-10-25T19:45:00Z",
   "why": "Your question, Oct 21: can questions steer the work? A question judge (c7) only acts when a session stops to ask; a wrong premise in a plan can reach a PR without ever becoming a question. Today's 'the freeze stops me' was baked into the plan."
 }

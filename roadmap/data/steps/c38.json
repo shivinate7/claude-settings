@@ -1,10 +1,10 @@
 {
   "title": "Tests clean up their temp folders, in every repo",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "order": 111.9,
   "why": "Oct 22: Degen's Swift tests left temp folders that filled the Mac disk (note from the Degen session).",
-  "note": "Pattern from Degen (branch temp-dir-leak): one temp root per repo; a <pid>-<UUID> run folder; every helper takes its folder from it; teardown removes it; the first request of a run removes sibling run folders older than a day (crashed runs) and keeps newer ones (parallel runs); a test proves the sweep. claude-settings has no such rule; the nearest home is the janitor (debt windows-temp-sweep, ruled Oct 16, never built: session temp folders, 17 GB on Windows). Rule only; each repo keeps its own helper, no copying code across repos. Both are lanes in batch 3 of briefs/cleanup-goal-2-oct23.md (full text on c37). Ties to the brake: disk filling up is what full guards.",
+  "note": "Pattern from Degen (branch temp-dir-leak): one temp root per repo; a <pid>-<UUID> run folder; every helper takes its folder from it; teardown removes it; the first request of a run removes sibling run folders older than a day (crashed runs) and keeps newer ones (parallel runs); a test proves the sweep. claude-settings has no such rule; the nearest home is the janitor (debt windows-temp-sweep, ruled Oct 16, never built: session temp folders, 17 GB on Windows). Rule only; each repo keeps its own helper, no copying code across repos. Both are lanes in batch 3 of briefs/cleanup-goal-2-oct23.md (full text on c37). Ties to the brake: disk filling up is what full guards. claude-settings part landed in #567 (batch-oct23b, Oct 23), checked at claude-settings f463787 (main, Oct 25): the run-folder standard is in agents/test-author.md, and the janitor removes idle session temp folders on Windows (debt windows-temp-sweep built). Each repo's own helper (Degen's TempDirSupport.swift) stays with that repo; not checked here.",
   "ask": "See c37 (goal 2), batch 3, lanes test-temp-standard and windows-temp-sweep.",
-  "updatedAt": "2026-10-23T02:35:00Z"
+  "updatedAt": "2026-10-25T19:45:00Z"
 }

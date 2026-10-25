@@ -66,9 +66,9 @@
       },
       {
         "label": "Biggest CLAUDE.md, lines",
-        "rule": "banchi 396, q_max 182, claude-settings 106, home-app 15, home 9",
+        "rule": "banchi 398 (Oct 25, 9683902), q_max 182, claude-settings 106, home-app 15, home 9",
         "target": "200 or fewer",
-        "value": 396
+        "value": 398
       },
       {
         "label": "Remote branches, claude-settings",
@@ -107,9 +107,9 @@
       },
       {
         "label": "home-app padding or spacing literals",
-        "rule": "Views.swift (2,254 lines): .padding(...) or spacing: calls with a number. The Oct 17 audit counted about 95 another way (r3)",
+        "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 166
+        "value": 167
       },
       {
         "label": "home-app web border radii",
