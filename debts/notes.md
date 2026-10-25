@@ -523,3 +523,4 @@
 - install-hkcu-msix-copy: an install.ps1 started from a Claude-spawned shell on a packaged (MSIX) Claude may write its HKCU Path change to the package's private copy (install.ps1 Path write; machine note this-machine-msix-appdata). Unproven. Decision: none
 - temp-helpers-predate-standard: existing test temp helpers in this repo, such as actions/stamp/test_stamp.mjs withTempDir, do not follow the run-folder standard; the rule binds new or touched temp code. Decision: test-temp-standard (one run folder per test run)
 - test-guard-root-predates-standard: hooks/test_guard.py ROOT is a plain mkdtemp, not the test temp-root standard. Decision: test-temp-standard
+- gh-api-write-unguarded: `gh api` with a field and no method sends a POST, and no guard refuses it now, an API merge included; `gh pr merge` keeps its own gate. Owner, 2026-10-25 16:07 CDT, accepted this when the rule was culled. Decision: cull-rules (how a cull runs)

@@ -1368,7 +1368,7 @@ MUTATIONS = [
     ("role-diff: the author reason drops the remedy",
      '"report. The orchestrator assigns it to a builder."', '"report."', "guard",
      "test-author: Edit of product code is refused"),
-    # Added with the four ported shell traps (narrated tail, ln over a directory,
+    # Added with the three ported shell traps (narrated tail, ln over a directory,
     # push HEAD to a stray name). Each mutant undoes one predicate the trap's cases pin.
     ('narrate: never refuse a narrating command piped to tail',
      '        refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)',
