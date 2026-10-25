@@ -188,18 +188,17 @@ job_testflight() {
   <key>signingStyle</key><string>automatic</string>
 </dict></plist>
 PLIST
-  # tf_step LABEL CMD...: run CMD, output to the log, stdin from /dev/null so a step cannot eat the command list.
+  # tf_step LABEL DIR CMD...: run CMD in DIR, output to the log, stdin from /dev/null so a step cannot eat the command list.
   # CMD runs in the background and the shell waits, so INT and TERM reach the trap at once.
+  # exec replaces the one background subshell, so STEP_PID is CMD itself and tf_kill stops it.
   # A failure ends the run with the one verdict line.
   tf_step() {
-    local label=$1; shift
+    local label=$1 dir=$2; shift 2
     echo "ios-ship: $NAME: $label"
-    "$@" >> "$LOG" 2>&1 </dev/null & STEP_PID=$!
+    ( cd "$dir" && exec "$@" ) >> "$LOG" 2>&1 </dev/null & STEP_PID=$!
     wait "$STEP_PID" || { STEP_PID=; drop_copies; echo "TESTFLIGHT FAIL: $NAME $label, see $LOG"; exit 1; }
     STEP_PID=
   }
-  # exec: the signal in tf_kill then reaches the command itself, not a subshell around it.
-  in_dir() { ( cd "$1" && shift && exec "$@" ); }
   echo "ios-ship: build number $build, log $LOG"
   names=
   for entry in "${ENTRIES[@]}"; do
@@ -210,20 +209,20 @@ PLIST
     plugins=(); [[ $(app_get trust_package_plugins) == true ]] && plugins=(-skipPackagePluginValidation -skipMacroValidation)
     [[ $(printf '%s' "$ENTRY" | jq '(.copy_in // []) | length') == 0 ]] || SCRUB+=("$out/$NAME")
     while IFS= read -r cmd; do
-      [[ -n $cmd ]] && tf_step "prebuild: $cmd" in_dir "$ROOT" bash -c "$cmd"
+      [[ -n $cmd ]] && tf_step "prebuild: $cmd" "$ROOT" bash -c "$cmd"
     done < <(printf '%s' "$ENTRY" | jq -r '.prebuild[]?')
     require_untouched prebuild
     copy_in_check "$ROOT"; copy_in_make "$ROOT"
-    [[ -z $pyml ]] || tf_step xcodegen in_dir "$ROOT/$pdir" xcodegen generate --spec "$pyml"
+    [[ -z $pyml ]] || tf_step xcodegen "$ROOT/$pdir" xcodegen generate --spec "$pyml"
     require_untouched xcodegen
-    tf_step archive in_dir "$ROOT/$pdir" xcodebuild archive -scheme "$scheme" -configuration Release \
+    tf_step archive "$ROOT/$pdir" xcodebuild archive -scheme "$scheme" -configuration Release \
       -destination generic/platform=iOS -archivePath "$archive" -derivedDataPath "$SCRATCH/dd" -allowProvisioningUpdates \
       "${asc[@]}" ${plugins[@]+"${plugins[@]}"} DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$build"
     drop_copies
     while IFS= read -r cmd; do
-      [[ -n $cmd ]] && ARCHIVE=$archive tf_step "after_archive: $cmd" in_dir "$ROOT" bash -c "$cmd"
+      [[ -n $cmd ]] && ARCHIVE=$archive tf_step "after_archive: $cmd" "$ROOT" bash -c "$cmd"
     done < <(printf '%s' "$ENTRY" | jq -r '.after_archive[]?')
-    tf_step "$mode" in_dir "$ROOT/$pdir" xcodebuild -exportArchive -archivePath "$archive" \
+    tf_step "$mode" "$ROOT/$pdir" xcodebuild -exportArchive -archivePath "$archive" \
       -exportOptionsPlist "$plist" -exportPath "$out/$NAME" -allowProvisioningUpdates "${asc[@]}"
     scrub_ipas || refuse "$NAME: cannot delete the .ipa under $out/$NAME; it holds a secret, remove it by hand"
   done
