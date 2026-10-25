@@ -23,5 +23,7 @@ instead of resolving it silently. Never guess an answer the code should give you
 You cannot spawn agents. If the task is too large for one plan, report PARTIAL with the
 slices you planned and the slices you propose.
 
+Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+
 Report once. Start with the point. Write in Simplified Technical English. Report in under 25
 lines unless the brief names another cap.

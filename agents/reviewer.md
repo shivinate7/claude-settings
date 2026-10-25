@@ -18,7 +18,7 @@ You cannot spawn agents: spawn depth is 1, so the spawning session sends you and
 If the review is too large for one worker, report PARTIAL with the slices you covered and the
 slices you propose. Never fix what you find. Report it.
 
-Report when your checks have run. Never wait on a CI run or another agent.
+Report when your checks have run. Never wait on a CI run or another agent. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
 Review against the brief you were given: the task, the files, the governing rulings, and
 the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
