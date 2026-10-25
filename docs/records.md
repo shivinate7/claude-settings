@@ -231,7 +231,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`debts/finished-agent-shells-keep-tree.md`](../debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`debts/gates-job-near-timeout.md`](../debts/gates-job-near-timeout.md) |
 | `gitignore-skips-map-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`debts/gitignore-skips-map-tests.md`](../debts/gitignore-skips-map-tests.md) |
-| `guard-cull-held-two` | `gh-api-method` and `ln-over-directory` have zero guard.log lines on this Windows machine (20,685 lines since 2026-09-16), yet they stay. | [`debts/guard-cull-held-two.md`](../debts/guard-cull-held-two.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`debts/guard-stdin-not-utf8.md`](../debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`debts/hooks-to-mods-judges.md`](../debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`debts/inplace-edit-under-0-9-flagged.md`](../debts/inplace-edit-under-0-9-flagged.md) |
