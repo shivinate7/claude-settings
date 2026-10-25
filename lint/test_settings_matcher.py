@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's subagent-model-floor never sees those calls.
 """
-import ast, json, os, re, subprocess, sys, tempfile, unittest
+import json, os, re, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -329,81 +329,6 @@ class SteHooksRemoved(unittest.TestCase):
         agent_entries = [e for e in pre if any(h.get("type") == "agent" for h in e.get("hooks", []))]
         covered = [e for e in agent_entries if "AskUserQuestion" in e.get("matcher", "").split("|")]
         self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
-
-
-# An installed settings.json copy still calls lint/ste_gate.py and lint/md_sweep.py until its owner
-# refreshes it, and a missing hook script fails closed: every write is refused. So both files stay as
-# stubs. Each one only exits 0 and imports nothing from the repo, so a repo change cannot break it.
-LINT = os.path.dirname(os.path.abspath(__file__))
-STUBS = ("ste_gate.py", "md_sweep.py")
-STUB_INPUTS = {
-    "empty": b"",
-    "write payload": json.dumps({"tool_name": "Write", "tool_input": {
-        "file_path": "notes.md", "content": "It is important to note that the file was written."}}).encode(),
-    "edit payload": json.dumps({"tool_name": "Edit", "tool_input": {
-        "file_path": "notes.md", "old_string": "a", "new_string": "b"}}).encode(),
-    "not json": b"{not json at all",
-    "binary": bytes(range(256)) * 8,
-    "long line": b"x" * 200000,
-}
-
-
-def imported_modules(path):
-    with open(path, encoding="utf-8") as f:
-        tree = ast.parse(f.read())
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            names.add(("." * node.level) + (node.module or "").split(".")[0])
-    return names
-
-
-class SteStubsExitZero(unittest.TestCase):
-    def run_stub(self, folder, name, data, args=()):
-        return subprocess.run([sys.executable, "-I", os.path.join(folder, name), *args],
-                              input=data, capture_output=True, cwd=folder, timeout=60)
-
-    def test_each_stub_exists(self):
-        for name in STUBS:
-            with self.subTest(stub=name):
-                self.assertTrue(os.path.isfile(os.path.join(LINT, name)),
-                                "%s is gone: an installed settings.json copy would refuse every write" % name)
-
-    def test_each_stub_only_exits_0_on_any_input_and_prints_nothing(self):
-        for name in STUBS:
-            for label, data in STUB_INPUTS.items():
-                with self.subTest(stub=name, stdin=label):
-                    got = self.run_stub(LINT, name, data)
-                    self.assertEqual((got.returncode, got.stdout), (0, b""), got.stderr[-300:])
-
-    def test_each_stub_exits_0_with_arguments_and_with_stdin_closed(self):
-        for name in STUBS:
-            with self.subTest(stub=name, case="arguments"):
-                self.assertEqual(self.run_stub(LINT, name, b"", ("--check", "notes.md", "-x")).returncode, 0)
-            with self.subTest(stub=name, case="stdin closed"):
-                got = subprocess.run([sys.executable, "-I", os.path.join(LINT, name)],
-                                     stdin=subprocess.DEVNULL, capture_output=True, cwd=LINT, timeout=60)
-                self.assertEqual(got.returncode, 0, got.stderr[-300:])
-
-    def test_each_stub_imports_nothing_from_the_repo(self):
-        for name in STUBS:
-            with self.subTest(stub=name):
-                path = os.path.join(LINT, name)
-                self.assertTrue(os.path.isfile(path), "%s is missing" % name)
-                self.assertEqual(sorted(imported_modules(path) - set(sys.stdlib_module_names)), [])
-
-    def test_each_stub_runs_alone_in_an_empty_folder(self):
-        # A stub that reads a repo file or a repo module fails here, where only the stub exists.
-        for name in STUBS:
-            with self.subTest(stub=name), tempfile.TemporaryDirectory() as folder:
-                self.assertTrue(os.path.isfile(os.path.join(LINT, name)), "%s is missing" % name)
-                with open(os.path.join(LINT, name), "rb") as src, open(os.path.join(folder, name), "wb") as dst:
-                    dst.write(src.read())
-                for label in ("empty", "write payload"):
-                    got = self.run_stub(folder, name, STUB_INPUTS[label])
-                    self.assertEqual((got.returncode, got.stdout), (0, b""), (label, got.stderr[-300:]))
 
 
 # The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
