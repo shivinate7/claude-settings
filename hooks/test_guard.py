@@ -10637,6 +10637,34 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
+# ---- designer: the design folder only (decision design-agents). A designer writes mockups, not product code. The folder is the `design` kind of
+# lint/layout.json, read from the file. Failure classes: false allow (a path outside the folder, or a
+# near-miss name, slips through) and false deny (a mockup, its notes, or a scratch file is blocked).
+DZ = dict(agent_id="dz1", agent_type="designer", cwd=GITMAIN)
+DZ_RULE = "designer-scope"
+for _tool, _path in (("Write", "docs/design/robots.html"), ("Edit", "docs/design/robots-notes.md"),
+                     ("Write", os.path.join(GITMAIN, "docs", "design", "tabs", "a.css")),
+                     ("Write", "Docs/Design/x.html")):
+    add("designer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool, file_path=_path,
+        new_string="x", content="x", **DZ)
+for _tool in ("Edit", "Write"):
+    for _path in ("src/App.tsx", "docs/designs/x.html", "docs/design.md", "docs/design",
+                  "docs/design/../x.py", "CLAUDE.md", "hooks/guard.py", "x/docs/design/y.html"):
+        add("designer: %s of %s is refused" % (_tool, _path), "deny", rule=DZ_RULE,
+            carries=("design folder", "Report"), tool=_tool, file_path=_path, new_string="x",
+            content="x", **DZ)
+    add("designer: %s of a temp file in no repo is allowed" % _tool, "allow", tool=_tool,
+        file_path=os.path.join(ROOT, "outside", "shot.png"), content="x", new_string="x", **DZ)
+add("designer: a decoy mockup path does not hide a product path in another field", "deny",
+    rule=DZ_RULE, tool="NotebookEdit", file_path="docs/design/x.html", notebook_path="src/a.ipynb",
+    **DZ)
+# Controls: the design reviewer never writes, and the builder's own scope is unchanged by the new role.
+add("designer-control: a builder may still write docs/design/x.html", "allow", tool="Write",
+    file_path="docs/design/x.html", content="x", **dict(B, cwd=GITMAIN))
+add("designer-control: a design-reviewer Write is not a designer write", "allow", tool="Write",
+    file_path="src/App.tsx", content="x", agent_id="dr1", agent_type="design-reviewer",
+    cwd=GITMAIN)
+
 # ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
@@ -10813,6 +10841,52 @@ LOG_CHECKS_EXTRA.append(("record-writer-diff: a non-.md diff is logged at commit
                          rw_diff_logs_case))
 LOG_CHECKS_EXTRA.append(("record-writer-diff: an all-.md diff logs no writer-diff line",
                          rw_markdown_logs_case))
+
+
+# A designer's diff: a path outside the design folder logs `designer-diff` once each at commit, push and
+# stop; a diff inside the folder logs nothing (decision design-agents).
+DZ_RED = (("product-edit", _put("src/app.py", "x = 2\n")),)
+DZ_GREEN = (("design-only", lambda w: (write(os.path.join(w, "docs/design/robots.html"), "<p>x</p>\n"),
+                                       write(os.path.join(w, "docs/design/robots-notes.md"), "# x\n"))),)
+for _name, _change in DZ_RED + DZ_GREEN:
+    diff_repo("dz-" + _name, _change)
+
+
+def dz_diff_case(name, want):
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-dz-" + name),
+                                  os.path.join(DIFFROOT, "dz-" + name), "designer", "dz1")
+        hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "designer-diff"]
+        if out or len(hits) != want:
+            return False, "expected %d noted/designer-diff lines and silent allows, got %d, %r" % (
+                want, len(hits), out[:60])
+        return True, "%d designer-diff lines" % want
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("designer-diff: a product path is logged at commit, push and stop",
+                         dz_diff_case("product-edit", 3)))
+LOG_CHECKS_EXTRA.append(("designer-diff: a design-folder diff logs no designer-diff line",
+                         dz_diff_case("design-only", 0)))
+
+
+def dz_unread_layout_case():
+    """With no readable lint/layout.json the design folder is unknown, so a designer may write no repo
+    path: a false deny the designer reports, never a false allow. A readable layout still allows a mockup."""
+    guard = _load_guard_module()
+    empty = os.path.join(ROOT, "dz-no-layout")
+    os.makedirs(empty, exist_ok=True)
+    guard.settings_roots = lambda: [empty]
+    del guard._DESIGN_FOLDER[:]
+    if guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "an unread layout allowed a mockup path"
+    guard = _load_guard_module()
+    if not guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "a readable layout refused a mockup path"
+    return True, "an unread layout allows no path; a readable one allows the mockup"
+
+
+LOG_CHECKS_EXTRA.append(("designer-scope: an unread layout allows no path", dz_unread_layout_case))
 
 
 # An .xctestplan diff: a builder's ADDED skippedTests line is logged once each at commit, push and
@@ -11736,6 +11810,15 @@ add("ceiling: Agent Plan with model opus is allowed (standing word)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
 add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing word)", "allow",
     tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
+# The designer and the design reviewer run Opus by the owner's standing word
+# (decision design-agents). A near-miss role name earns no word.
+for _role in ("designer", "design-reviewer"):
+    for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
+        add("ceiling: %s %s on %s is allowed (standing word)" % (_tool, _role, _model), "allow",
+            tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type=_role)
+for _role in ("design", "designers", "design-review", "Designer"):
+    add("ceiling: Agent %s on opus asks (no standing word)" % _role, "ask", CEILING,
+        tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
 add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing word)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")

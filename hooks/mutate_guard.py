@@ -1098,7 +1098,7 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
     # that exercises the whole sequence, `worktree_home_case`.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
@@ -1295,8 +1295,12 @@ MUTATIONS = [
     # Builders do not edit tests, test-authors edit only tests. Each mutant breaks one clause; the
     # named case must go red.
     ("role-diff: every caller reads as no role",
-     '    role = role.strip().lower()\n    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE) else ""',
+     '    role = role.strip().lower()\n    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE, DESIGNER_ROLE) else ""',
      '    return ""', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+    ("designer-scope: an unread layout allows every path",
+     '    if folder is None or ".." in parts:\n        return False',
+     '    if folder is None:\n        return True\n    if ".." in parts:\n        return False',
+     "guard", "designer-scope: an unread layout allows no path"),
     ("role-diff: SubagentStop is never judged",
      '    if payload.get("hook_event_name") == "SubagentStop":\n        judge_stop(payload)',
      '    if False:\n        judge_stop(payload)', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
