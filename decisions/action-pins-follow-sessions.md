@@ -22,10 +22,10 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 ## Holes, named
 
 - (a) Only `ste-lint` is checked. `stamp`, `readme-links`, `all-jobs-passed`, `ci-alarm` and `ruling-kind` pins can drift unseen. `ste-lint` is the one with a local twin that a session runs.
-- (d) Any byte change in `LINT_FILES` is drift, a comment edit too. The line says a line can pass here and fail CI, not that one will.
-- (e) The check reads the commit at the clone's HEAD. It misses lint edits that are not yet committed.
 - (b) A session that never runs `bin/ste-changed` before a push still meets the old pin in CI. The rule covers that red.
 - (c) Moving each child repo's pins waits for the owner's plan for each repo (step c76, child-repo part).
+- (d) Any byte change in `LINT_FILES` is drift, a comment edit too. The line says a line can pass here and fail CI, not that one will.
+- (e) The check reads the commit at the clone's HEAD. It misses lint edits that are not yet committed.
 
 Kind: process
 Home: bin/ste-changed
