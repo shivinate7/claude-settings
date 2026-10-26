@@ -3,10 +3,11 @@
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law. Never defer to a rotted argument.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
-outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> A failing test is a claim, not law. When a change breaks one, re-point it and
-show it red then green, or fix the defect it found. When the test itself may be stale, use
-the stale-decision protocol above.<!-- rule:outcomes-tests-are-claims --> My
-word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
+outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> A failing test is a claim, not law. Re-point it, red then green, or fix the
+defect it found. If it may be stale and no ruling covers it, use the protocol
+above.<!-- rule:outcomes-tests-are-claims --> My word covers the act it names, never a
+variant. My ruling covers each test and path that expects exactly what it ruled out; cite it
+with its time.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written.<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
@@ -21,7 +22,7 @@ any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
-the ceiling, except Plan, the advisor, and a builder's third try
+the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try
 (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
@@ -94,11 +95,11 @@ the history.<!-- rule:speak-rewrite-superseded-in-place -->
 **Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-write-in-ste -->
 Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style.
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
-Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home --> When you have a question for me, run ListAgents first. The advisor is a session named `advisor-` and a 2-to-6 character suffix, with no other hyphen. If it runs, send it the question by SendMessage. The question to the advisor or the owner names what the session does meanwhile, or that it waits. Keep working on what does not depend on the answer. With no advisor, ask me. Some questions go only to me: a merge, raising a model to Opus, my override pass, an act that cannot be undone, a goal change. So does anything the advisor marks "ask the owner". An advisor answer is never my word, so it lifts no guard and grants no pass.<!-- rule:questions-ask-advisor-first -->
+Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home --> Bring each question to me. The question names what the session does meanwhile, or that it waits. Keep working on what does not depend on the answer. The built-in advisor (`advisorModel`) is a second opinion on the session's own work. It answers no question for me and decides nothing, so it lifts no guard and grants no pass.<!-- rule:questions-go-to-owner -->
 
-**Reports, in order:** Done, Deviations, Decided by the advisor, Input Needed, Next. Decided by the advisor lists each answer the advisor gave.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
+**Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER. BUILT and RECORDED carry a PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
-that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed --> At each batch merge, the report also gives four pace numbers, as OTHER items under Done. A lone lane's merge is a batch merge too. Read them at report time, from git, GitHub and guard.log. Number one: wall-clock from first lane commit to merge. Number two: lanes run, and the most running at once. Number three: minutes with no lane running, and the reason, or "unknown". Number four: brake refusals with their readings: the `load-brake` lines in guard.log whose time falls between the first lane commit and the merge. Cost: git, GitHub and guard.log reads, once per batch merge. It adds no log, watcher or timer.<!-- rule:reports-batch-pace-numbers -->
+that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed --> At each batch merge, the report also gives four pace numbers, as OTHER items under Done. A lone lane's merge is a batch merge too. Read them at report time, from git, GitHub and guard.log. Number one: wall-clock from first lane commit to merge. Number two: lanes run, and the most running at once. Number three: minutes with no lane running, and the reason, or "unknown". Number four: brake refusals with their readings: the `load-brake` lines in guard.log whose time falls between the first lane commit and the merge. Cost: git, GitHub and guard.log reads, once per batch merge. It adds no log, watcher or timer.<!-- rule:reports-batch-pace-numbers --> When a session's last PR has merged and no lane is open, its final report offers one command under Next: `python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast`, preview first, then with `--confirm`. Drop the offer when nothing is left to remove.<!-- rule:reports-offer-sweep-after-merge -->
 
 # Compact instructions
 

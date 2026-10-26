@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -136,24 +136,64 @@ class PipeOut(io.TextIOWrapper):
         self.flush()
         return self.buffer.getvalue().decode("cp1252", errors="replace")
 
+def build_repos(t):
+    """In folder t: origin.git (main with the seed commit, feat one commit ahead of it), and two clones of it, co and other."""
+    bare = os.path.join(t, "origin.git")
+    sh(t, "git", "init", "-q", "--bare", "-b", "main", bare)
+    seed = os.path.join(t, "seed")
+    sh(t, "git", "clone", "-q", bare, seed)
+    sh(seed, "git", "checkout", "-q", "-b", "main")
+    put(os.path.join(seed, ".github/stamp.json"), json.dumps(CONFIG))
+    put(os.path.join(seed, "docs/decisions/first.md"), record("D-001", "first"))
+    sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "seed"); sh(seed, "git", "push", "-q", "origin", "main")
+    sh(seed, "git", "checkout", "-q", "-b", "feat")
+    put(os.path.join(seed, "docs/decisions/second.md"), record("pending", "second"))
+    sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "feat: second"); sh(seed, "git", "push", "-q", "origin", "feat")
+    for name in ("co", "other"):
+        sh(t, "git", "clone", "-q", bare, os.path.join(t, name))
+
+_TEMPLATE = []
+
+def copy_repos(t):
+    """Put build_repos(t)'s result in t without running git: copy a template built once per process, then point the two clones at the copy of origin.
+    Setup was 14 git starts per test (a clone is the slow one on Windows); a copy is files only. False when the copy cannot be made or checked: the caller builds with git."""
+    try:
+        if not _TEMPLATE:
+            root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-template-"))
+            atexit.register(shutil.rmtree, root, True)
+            build_repos(root)
+            _TEMPLATE.append(root)
+        tpl = _TEMPLATE[0]
+        for name in ("origin.git", "co", "other"):
+            shutil.copytree(os.path.join(tpl, name), os.path.join(t, name), symlinks=True)
+        for name in ("co", "other"):
+            cfg = os.path.join(t, name, ".git", "config")
+            with open(cfg, encoding="utf-8", newline="") as f:
+                text = f.read()
+            # the clone's url as git wrote it: the path as given, with a backslash doubled (config escaping), or with forward slashes
+            for form in (lambda p: p.replace("\\", "\\\\"), lambda p: p.replace("\\", "/"), lambda p: p):
+                was, now = (form(os.path.join(base, "origin.git")) for base in (tpl, t))
+                if text.count(was) == 1:
+                    break
+            else:
+                raise OSError(f"the config of the clone {name} does not name the template origin once: {text!r}")
+            with open(cfg, "w", encoding="utf-8", newline="") as f:
+                f.write(text.replace(was, now))
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"test_merge: the repo template could not be copied ({e}); building this test's repos with git", file=sys.stderr)
+        for name in os.listdir(t):
+            shutil.rmtree(os.path.join(t, name), True)
+        return False
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
         self.addCleanup(shutil.rmtree, self.t, True)
         self.bare = os.path.join(self.t, "origin.git")
-        sh(self.t, "git", "init", "-q", "--bare", "-b", "main", self.bare)
-        seed = os.path.join(self.t, "seed")
-        sh(self.t, "git", "clone", "-q", self.bare, seed)
-        sh(seed, "git", "checkout", "-q", "-b", "main")
-        put(os.path.join(seed, ".github/stamp.json"), json.dumps(CONFIG))
-        put(os.path.join(seed, "docs/decisions/first.md"), record("D-001", "first"))
-        sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "seed"); sh(seed, "git", "push", "-q", "origin", "main")
-        sh(seed, "git", "checkout", "-q", "-b", "feat")
-        put(os.path.join(seed, "docs/decisions/second.md"), record("pending", "second"))
-        sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "feat: second"); sh(seed, "git", "push", "-q", "origin", "feat")
         self.co, self.other = (os.path.join(self.t, n) for n in ("co", "other"))
-        for d in (self.co, self.other):
-            sh(self.t, "git", "clone", "-q", self.bare, d)
+        if not copy_repos(self.t):
+            build_repos(self.t)
         self.now = time.time()
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
@@ -2144,17 +2184,35 @@ def list_item(number, head, head_ref, base_ref):
     return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
 '''
 
-FAKE_GH_PR = "#!/usr/bin/env python3\nimport os, subprocess, sys\n" + GH_REST_LIB + r'''
+FAKE_GH_PR = "#!/usr/bin/env python3\nimport os, sys\n" + GH_REST_LIB + r'''
 d = os.environ["FAKE_GH_DIR"]; a = sys.argv[1:]
 sp = os.path.join(d, "state.json"); S = json.load(open(sp))
 def save(): json.dump(S, open(sp, "w"))
 def note(name, line): open(os.path.join(d, name), "a").write(line + "\n")
-def git(*c): return subprocess.run(["git", *c], capture_output=True, text=True, cwd=S["other"]).stdout.strip()  # the "other" clone shares origin with the test's checkout, and gh runs wherever the caller does
-def feat_head(): return git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]
+def git(*c):  # subprocess is imported here, not at the top: most calls never start git, and the import is a measurable part of a start (a Windows .cmd shim pays it per call)
+    import subprocess
+    return subprocess.run(["git", *c], capture_output=True, text=True, cwd=S["other"]).stdout.strip()  # the "other" clone shares origin with the test's checkout, and gh runs wherever the caller does
+def ref(name):
+    """The object id of a ref on origin, "" when there is none. Read from the files of the bare repo (a loose ref, else packed-refs), so a read starts no git process:
+    the same answer as `git ls-remote origin <name>`, at a cost that matters when a Windows .cmd shim answers hundreds of calls."""
+    bare = S["bare"]
+    try:
+        return open(os.path.join(bare, *name.split("/"))).read().strip()
+    except OSError:
+        pass
+    try:
+        for line in open(os.path.join(bare, "packed-refs")):
+            if line.rstrip("\n").endswith(" " + name):
+                return line.split()[0]
+    except OSError:
+        pass
+    return ""
+def feat_head(): return ref("refs/heads/feat")
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
     h = S.get("hold")
     if h and h["on"] == kind and not os.path.exists(os.path.join(d, "held")):
         open(os.path.join(d, "held"), "w").close()
+        import subprocess
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
 def finish(text, code, include=False):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
@@ -2251,7 +2309,7 @@ try:
                 val = seq.pop(0) if len(seq) > 1 else seq[0]; save()
             else:
                 val = not (S.get("dirty_after_checks") is not None and S.get("checks_calls", 0) >= S["dirty_after_checks"])
-            locked = bool(git("ls-remote", "origin", "refs/merge-lock/main"))
+            locked = bool(ref("refs/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
@@ -2465,7 +2523,7 @@ class GhHalf(Env):
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
         f = pathlib.Path(p)
-        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "checks_calls": 0}
+        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0}
         s.update(kw)
         f.write_text(json.dumps(s))
 
@@ -2473,7 +2531,7 @@ class GhHalf(Env):
         p = pathlib.Path(self.state, "calls.log")
         return p.read_text() if p.exists() else ""  # a case that makes no gh call leaves no log
 
-    def gh_host(self, required=("gates",), pause=None, ignore=None):
+    def gh_host(self, required=("gates",), pause=None, ignore=None, minute=60):
         def tick(s):
             self.ticks += 1
             self.paused.append(s)
@@ -2484,7 +2542,7 @@ class GhHalf(Env):
                 self.at_pause.append((s, self.now, cur[1] if cur else None))
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick, ignore=ignore)
+        return merge.Host(required if required == "protection" else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
@@ -3531,7 +3589,7 @@ class GhHalf(Env):
     def test_no_config_waits_the_default_45_minutes(self):
         drop_config(self)
         self.set(contexts=["gates"], checks_seq=[[("gates", "pending", "")]])
-        rc, out = self.go(required="protection")
+        rc, out = self.go(required="protection", minute=900)  # a poll every 15 minutes of the fake clock: 3 reads reach the deadline, not 45 (each read is a few process starts)
         self.assertEqual(rc, 1)
         self.assertIn("the deadline of 45 minutes passed", out)
         self.assertNotIn(MERGE_CALL, self.calls())

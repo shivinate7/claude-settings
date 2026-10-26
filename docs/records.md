@@ -14,7 +14,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-decision-is-argument` | Treat a recorded decision as an argument, not a law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-stale-decision-protocol` | When a decision looks stale, name the entry and the sentence. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-tests-are-claims` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
-| `outcomes-word-covers-named-act` | My word covers the act it names, never a variant of it. | [`CLAUDE.md`](../CLAUDE.md) |
+| `outcomes-word-covers-named-act` | My word covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-pick-mode-from-request` | Pick solo or orchestrate from my request. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-solo-builds-short-edit-list` | Solo: the request is a short list of edits with nothing to run in parallel. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -23,7 +23,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-orchestrator-never-builds` | Orchestrate: every other job. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-worker` | Each worker is one role: builder, reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the advisor, and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -88,12 +88,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `output-never-paste-passing-output` | Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-bring-decisions-as-question` | Bring my decisions as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-answer-has-a-home` | An answer to a question I bring is a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
-| `questions-ask-advisor-first` | When you have a question for me, run ListAgents first. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-order-of-labels` | Done, Deviations, Decided by the advisor, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
+| `questions-go-to-owner` | Bring each question to me. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-batch-pace-numbers` | At each batch merge, the report also gives four pace numbers, as OTHER items under Done. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-offer-sweep-after-merge` | When a session's last PR has merged and no lane is open, its final report offers one command under Next: `python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast`, preview first, then with `--confirm`. | [`CLAUDE.md`](../CLAUDE.md) |
 
 ## Rulings
 
@@ -102,7 +103,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
 | `a-kill-by-pid-needs-an-owned-pid` | Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
-| `advisor-answers-questions` | Owner, 2026-10-22: a session with a question for the owner first runs `ListAgents`. | [`decisions/advisor-answers-questions.md`](../decisions/advisor-answers-questions.md) |
 | `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops. | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
@@ -149,7 +149,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-deletes-batch-lanes` | Owner, 2026-10-19 12:14 CDT: each merge deletes the lane branches its batch took in. | [`decisions/merge-deletes-batch-lanes.md`](../decisions/merge-deletes-batch-lanes.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
-| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
+| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no workflow step. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
@@ -162,6 +162,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
 | `premise-format` | A premise is a claim, not a fact. | [`decisions/premise-format.md`](../decisions/premise-format.md) |
 | `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`decisions/question-reviewer-agent-hook.md`](../decisions/question-reviewer-agent-hook.md) |
+| `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`decisions/questions-go-to-owner.md`](../decisions/questions-go-to-owner.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `reply-judge-samples-never-blocks` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`decisions/reply-judge-samples-never-blocks.md`](../decisions/reply-judge-samples-never-blocks.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
@@ -207,6 +208,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hook-catalog-page` | `docs/catalog.md` lists every hook, judge, mod and skill. | [`decisions/hook-catalog-page.md`](../decisions/hook-catalog-page.md) |
 | `install-refuses-linked-tree` | The installer refuses a linked worktree. | [`decisions/install-refuses-linked-tree.md`](../decisions/install-refuses-linked-tree.md) |
 | `install-sh-stays-off-windows` | `install.sh` does nothing on Windows. | [`decisions/install-sh-stays-off-windows.md`](../decisions/install-sh-stays-off-windows.md) |
+| `lanes-start-in-tool-worktrees` | Owner, 2026-10-21: block the hand-made lane worktree fully, and record which layer refused isolation. | [`decisions/lanes-start-in-tool-worktrees.md`](../decisions/lanes-start-in-tool-worktrees.md) |
 | `machine-load-brake` | Owner, 2026-10-21 (spec), 2026-10-22 (foreground), 2026-10-23 (disk) and 2026-10-25 (CPU dropped: a 200 ms sample is noise; memory and disk are what stall a machine): a lane-start call reads the machine's load, and a busy or full machine refuses new lanes (disk is the smaller of a share and a GB cap). | [`decisions/machine-load-brake.md`](../decisions/machine-load-brake.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `owner-override-pass` | The owner starts a prompt with the word `override`. | [`decisions/owner-override-pass.md`](../decisions/owner-override-pass.md) |
@@ -221,7 +223,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`debts/agent-end-log-loses-row.md`](../debts/agent-end-log-loses-row.md) |
-| `agents-write-main-clone` | On 2026-10-20 at 16:53 CDT, two lane agents wrote into the main clone `C:\Users\ShivamSemwal\Clones\claude-settings` through relative paths. | [`debts/agents-write-main-clone.md`](../debts/agents-write-main-clone.md) |
+| `agent-reports-with-live-watcher` | No check stops an agent that sends its final report while a Monitor or background task it started is still running. | [`debts/agent-reports-with-live-watcher.md`](../debts/agent-reports-with-live-watcher.md) |
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`debts/banchi-build-steps.md`](../debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`debts/bg-end-false-alarms.md`](../debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`debts/build-disk-guard.md`](../debts/build-disk-guard.md) |

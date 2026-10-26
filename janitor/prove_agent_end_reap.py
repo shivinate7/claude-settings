@@ -24,7 +24,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
-import agent_end_reap  # noqa: E402
 import sweep  # noqa: E402
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
@@ -102,7 +101,7 @@ def main(argv):
             pid = start_leaking_server(cwd, port)
             if pid is None:
                 sys.exit("proof setup failed: %s server on %d never listened" % (name, port))
-            stub = agent_end_reap.parent_pid(pid)
+            stub = sweep._parent_pid(pid)
             started += [pid] + ([stub] if stub else [])
             servers[name] = (pid, port)
             print("started %-8s pid %s port %s parent %s orphan-read %s"
