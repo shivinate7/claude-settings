@@ -2961,7 +2961,7 @@ def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION,
 TAG_LEADER = tag_case("kill: a PPID-1 pid whose environment holds this session's id", "allow",
                       env_entries=[TAG + "=" + SUB_SESSION])
 # Every subagent shares the main session's id, so the tag owns a pid for the main session only
-# (decision a-kill-by-pid-needs-an-owned-pid, owner 2026-10-26). A truthy agent_id or agent_type
+# (decision a-kill-by-pid-needs-an-owned-pid). A truthy agent_id or agent_type
 # marks a subagent call, which keeps the agent-worktree rule alone.
 for _who, _kw in (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
                   ("agent_id only", dict(agent_id="tag-sub1")),
