@@ -1,0 +1,9 @@
+{
+  "title": "A session waiting on CI never sleeps through the result",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.302,
+  "why": "Your gripe, Oct 26 (\"how come I haven't seen much done in the past hours?\"): nothing moved for about 2.5 hours. Batch #649's gates-macos job went red at 22:05 and green at 22:09; a run with a failed job sends no all-done event, a green job wakes nobody, and the build advisor had set no check-in, so it never woke.",
+  "note": "Fix, needs no answer from you: (1) any session that waits on CI sets a send_later check-in when it starts waiting, and again after each red job, spaced wider each time; a rule in the global CLAUDE.md plus the batch and merge skills. (2) Each standing role carries a stall check: if no lane, PR or batch moved since its last turn, it looks why (the coordinator now sets one). (3) Platform: ask that a PR wake fire when the last job of a run ends, whatever its result; if not possible, record it as a platform limit in the cloud reference. The local stall watch (decision stall-watch) covers stalled background shells only, not a CI wait, so it does not catch this. Check that the waiter guard rule does not refuse a send_later check-in. Port: yes; the rule is global and every session that waits on CI needs it. Placed ahead of c82, after c53 (triage, Oct 26): an idle pipeline stops every lane at once.",
+  "updatedAt": "2026-10-26T23:58:00Z"
+}
