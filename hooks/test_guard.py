@@ -9868,7 +9868,7 @@ chained_ask("ask-alone: the prune piped to sh, a command with effects, still den
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
 
-# TWO SAFETY HOLES (owner review, 2026-10-15). Both must DENY. The first: the `\"` inside the echo is an
+# TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
 # escaped quote, so the `; rm -rf y` after it is a real step. The second: `cd -` moves to the previous
 # folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
 # chained ask step.
