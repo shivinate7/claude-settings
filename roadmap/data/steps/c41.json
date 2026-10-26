@@ -1,7 +1,7 @@
 {
   "title": "Opus for one session or one run, without lifting other guards",
   "phase": "cleanup",
-  "status": "active",
+  "status": "done",
   "order": 109.4,
   "why": "Your question, Oct 25: can override say 'Opus builders for this part of the plan or this session'? Today it cannot without lifting every other guard too.",
   "note": "Ruling, Oct 26 (shiv, page item 14, a): build the Opus-only pass word. Merged to main Oct 26 in batch PR #629 (main be4b30e), from lane PR #623. What it does: you type `opus 2h` or `opus 15m` as the whole prompt. Opus spawns then go through without the ask for this session and its subagents until the pass ends. `opus builders 2h` does the same for one role only, and `opus off` ends the pass. Every other guard still applies, including the ask on a settings write that raises the model. The unit is required, because `opus 4` could be a model name. guard.log records each grant, lift and end. Decision owner-override-pass holds the rules. Ready for triage to close.",
