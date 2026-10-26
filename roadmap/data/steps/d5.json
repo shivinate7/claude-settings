@@ -1,9 +1,9 @@
 {
-  "note": "Your ruling, Oct 20 (one-home rule, o11): only the ideas move into ux/ (spacing by relationship, the four jobs of motion, the icon rule); banchi keeps its values and screens, and its docs point at ux/. Checked Oct 26 at 149f4bc: ux/ holds README, a11y, checklist, principles and tokens; whether those ideas are already in principles.md is not checked. banchi not checked (not in this project's repos). Open: settle the 4px rule against banchi's 2, 3 and 6px steps.",
+  "note": "Your ruling, Oct 20 (one-home rule, o11): only the ideas move into ux/ (spacing by relationship, the four jobs of motion, the icon rule); banchi keeps its values and screens, and its docs point at ux/. Checked Oct 26 at claude-settings 149f4bc and banchi 19abdfb: ux/principles.md has the icon rule (ux-one-plain-name, citing banchi's UX-118) but neither spacing by relationship nor motion roles, and ux/tokens.md says motion is per repo. So two of the three ideas are left to move. The 4px question has an answer in banchi already: --bn-1 (4px) is the floor, and 2, 3 and 6px are named micro-spacing tokens (Sep 20) for uses that shipped untokened. Proposed: take that as the house rule.",
   "order": 250,
   "phase": "design",
   "status": "todo",
   "title": "Promote banchi's design specs into ux/",
-  "updatedAt": "2026-10-26T05:30:00Z",
+  "updatedAt": "2026-10-26T05:45:00Z",
   "why": "Spacing by relationship, the four jobs of motion, the icon rule, a named reference screen. Settle the 4px rule against banchi's 2, 3 and 6px steps."
 }

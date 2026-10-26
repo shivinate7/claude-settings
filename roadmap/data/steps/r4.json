@@ -1,9 +1,9 @@
 {
-  "note": "Not started; no change since Oct 17. The six homes are not rechecked; q_max is not in this project's repos. This is q_max's part of o2 (one layout, one DESIGN.md per repo).",
+  "note": "Checked Oct 26 at q_max b47bd00: all six homes still hold design truth. design/ (mockups, w15-layers), specs/ (design-audit, engine-design, grouping-design and more), docs/design.md (1,534 lines), docs/rules/ (ui-primitives among 14 files), src/styles.md (189 lines) and brand/ (four logo files). This is q_max's part of o2 (one layout, one DESIGN.md per repo). Not started.",
   "order": 340,
   "phase": "rollout",
   "status": "todo",
   "title": "q_max: merge its six design homes into one DESIGN.md",
-  "updatedAt": "2026-10-26T05:30:00Z",
+  "updatedAt": "2026-10-26T05:45:00Z",
   "why": "design/, specs/, docs/design.md, docs/rules/, src/styles.md and brand/ all hold design truth today. One home is how its agents find the look."
 }
