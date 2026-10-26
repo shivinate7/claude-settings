@@ -238,7 +238,9 @@ class ConstantCheck(Tree):
 
     def setUp(self):
         super().setUp()
-        tracked_tree.copy_tracked(self.tree, "lint", "hooks", "actions")  # every reader, action and stamp example
+        tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
+        os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
+        shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
         for name in ("layout.py", "layout.json"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 

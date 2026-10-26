@@ -14,6 +14,7 @@ A folder git cannot list, or that lists nothing, raises: an empty fixture would 
     tracked_tree.copy_tracked(tree, "lint", "hooks")        # tree/lint/..., tree/hooks/...
     tracked_tree.copy_folder("hooks", scratch, skip=("git_reads.py",))   # flat into scratch
 """
+import functools
 import os
 import shutil
 import sys
@@ -30,7 +31,12 @@ def is_suite(name):
 
 def tracked(folder, root=REPO):
     """Paths under `folder` (repo-relative, `/`-separated), relative to that folder, sorted."""
-    folder = folder.strip("/")
+    return list(_listing(folder.strip("/"), root))
+
+
+@functools.lru_cache(maxsize=None)
+def _listing(folder, root):
+    """One git call per folder and root in a run: a suite builds hundreds of fixtures from one checkout."""
     done = _nowindow.run(["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
                           "--", folder + "/"], capture_output=True)
     if done.returncode != 0:
@@ -41,7 +47,7 @@ def tracked(folder, root=REPO):
             names.add(path[len(folder) + 1:])
     if not names:
         raise RuntimeError("git lists no file under %s/ in %s" % (folder, root))
-    return sorted(names)
+    return tuple(sorted(names))
 
 
 def copy_folder(folder, dest, root=REPO, skip=()):
