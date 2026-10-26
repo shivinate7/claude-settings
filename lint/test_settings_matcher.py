@@ -346,8 +346,8 @@ class SteHooksRemoved(unittest.TestCase):
         self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
 
 
-# The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
-# input (to, summary, message), so the state has to be read by code: a command or agent hook.
+# The SendMessage judges must see the receiver's busy state and the override pass. A prompt hook
+# sees only its tool input (to, summary, message), so both are read by code: a command hook.
 # `claude agents --json` rows carry name, sessionId, status (busy, idle, waiting), cwd.
 def pre_tool_hooks(matcher):
     return [h for e in json.load(open(SETTINGS))["hooks"]["PreToolUse"] if e["matcher"] == matcher

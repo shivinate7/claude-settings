@@ -254,6 +254,7 @@
 - sb-safe-stop-origin: /safe-stop origin check is a block-list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
 - schtasks-test-not-in-ci: janitor/test_install_schtasks.py is in no CI job; its skip never ran on Windows CI (janitor, CI)
 - sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
+- sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override pass too; the busy judge removes none (hooks/sendmessage_state.py)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)

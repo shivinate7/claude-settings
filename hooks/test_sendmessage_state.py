@@ -445,18 +445,26 @@ def case_advisor_named_receiver_is_a_peer():
 
 
 def case_malformed_input_fails_open_with_no_deny():    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
-    # inside main() and print the failed-open line; the last two return 0 with no line.
-    for label, text, opened in (
-        ("stdin is not JSON", "not json", True),
-        ("tool_input is not an object", '{"tool_input": "oops"}', True),
-        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False),
-        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False),
+    # inside main() and print the failed-open line, with no judge call. The rest are not a plain message
+    # to a named receiver: no board read and no busy call, but the wording judge still reads them.
+    for label, text, opened, wording in (
+        ("stdin is not JSON", "not json", True, 0),
+        ("tool_input is not an object", '{"tool_input": "oops"}', True, 0),
+        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False, 1),
+        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False, 1),
+        ("message is an object", '{"tool_input": {"to": "peer", "summary": "s", "message": {"type": "x"}}}', False, 1),
     ):
         r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG, direct=True)
-        check("malformed input (%s): exit 0, no deny, no model call, no reader call, failed-open line %s"
-              % (label, "printed" if opened else "absent"),
-              r.code == 0 and r.out == "" and not r.model_calls and not r.wording_calls and r.reader_calls == []
-              and ("failed open" in r.err) == opened, detail(r))
+        check("malformed input (%s): exit 0, no deny, no busy call, %d wording call, no reader call, failed-open line %s"
+              % (label, wording, "printed" if opened else "absent"),
+              r.code == 0 and r.out == "" and not r.model_calls and len(r.wording_calls) == wording
+              and r.reader_calls == [] and ("failed open" in r.err) == opened, detail(r))
+    r = run_hook('{"session_id": "%s", "tool_input": {"to": "peer", "summary": "chat about X", "message": {"type": "x"}}}'
+                 % SID_A, wording=FLAG, direct=True)
+    d = r.deny()
+    check("a structured message the wording judge flags: one deny, no board read",
+          d is not None and d.get("permissionDecision") == "deny" and len(r.wording_calls) == 1
+          and r.reader_calls == [], detail(r))
 
 
 def case_reader_timeout_allows_with_one_plain_line():

@@ -40,9 +40,10 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
-# THE TIME BUDGET. The board read (READER_TIMEOUT) then the busy call (MODEL_TIMEOUT) run beside the
-# wording call (WORDING_TIMEOUT), so the longest path is 12 + 25 = 37 s. The settings.json PreToolUse
-# entry for this hook carries "timeout": 45, an 8 s margin.
+# THE TIME BUDGET. The board read (READER_TIMEOUT, plus up to 5 s for kill_tree) then the busy call
+# (MODEL_TIMEOUT) run beside the wording call (WORDING_TIMEOUT, joined 5 s later at most), so the
+# longest path is 12 + 5 + 25 = 42 s plus start-up. The settings.json PreToolUse entry for this hook
+# carries "timeout": 50.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
@@ -126,8 +127,12 @@ def build_prompt(to, message):
 
 
 def build_wording_prompt(tool_input, message):
-    shown = dict(tool_input, message=message[:MESSAGE_MAX])
-    return WORDING_PROMPT % json.dumps({"tool_name": "SendMessage", "tool_input": shown}, ensure_ascii=False)
+    if isinstance(message, str):
+        shown = json.dumps({"tool_name": "SendMessage", "tool_input": dict(tool_input, message=message[:MESSAGE_MAX])},
+                           ensure_ascii=False)
+    else:  # a structured message: clip the whole call instead
+        shown = json.dumps({"tool_name": "SendMessage", "tool_input": tool_input}, ensure_ascii=False)[:MESSAGE_MAX + 1000]
+    return WORDING_PROMPT % shown
 
 
 def ask(answers, key, prompt, **kwargs):
@@ -164,8 +169,9 @@ def main():
         payload = json.load(sys.stdin)
         tool_input = payload.get("tool_input") or {}
         to, message = tool_input.get("to"), tool_input.get("message")
-        if not isinstance(to, str) or not to.strip() or not isinstance(message, str):
-            return 0
+        # A structured message or a non-string receiver still gets the wording judge; only a plain
+        # message to a named receiver gets the board read and the busy judge.
+        plain = isinstance(to, str) and bool(to.strip()) and isinstance(message, str)
     except Exception as exc:
         print("sendmessage state judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
@@ -175,7 +181,7 @@ def main():
                                kwargs={"model": WORDING_MODEL, "timeout": WORDING_TIMEOUT, "effort": None})
     wording.start()
     try:
-        if receiver_state(to) == "busy":
+        if plain and receiver_state(to) == "busy":
             ask(answers, "busy", build_prompt(to, message), timeout=MODEL_TIMEOUT)
     except Exception as exc:
         answers["busy"] = (None, "%s: %s" % (type(exc).__name__, exc))
@@ -192,7 +198,7 @@ def main():
             reason = verdict.get("reason")
             reasons.append(reason if isinstance(reason, str) else "")
     if reasons:
-        return deny(payload, to, next((r for r in reasons if r.strip()), ""))
+        return deny(payload, to if isinstance(to, str) else "", next((r for r in reasons if r.strip()), ""))
     return 0
 
 
