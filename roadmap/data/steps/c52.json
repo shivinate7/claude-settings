@@ -1,0 +1,10 @@
+{
+  "title": "This project builds the portable claude-settings backlog as PRs",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.6,
+  "why": "Your idea, Oct 26: the goal of the advisor setup was something that answers your questions and pushes the backlog along; this cloud project can edit code.",
+  "note": "Checked Oct 26 at claude-settings 149f4bc5: CI (gates.yml) runs on ubuntu, macos and windows, so a cloud PR is proven on all three. Cloud threads each run in their own container: parallel lanes cost your machines nothing (no worktrees, brake or idle-CPU problems). Limits: claude-settings hooks are not installed in the cloud session, so guards do not run there (a fresh reviewer and CI gate each logic diff); machine-bound steps (live transcript replays, Mac kill guard, desktop app behaviour, install checks) stay local; merges need your word or a grant. Blocked by the project instruction 'Never push to claude-settings'. Decision card sent Oct 26: cloud builds and you merge (advisor pick), cloud builds with a merge grant, or briefs only. Candidates: c46, c50, c51.",
+  "ask": "Waiting on your pick.",
+  "updatedAt": "2026-10-26T03:55:00Z"
+}
