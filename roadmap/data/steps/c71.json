@@ -1,10 +1,10 @@
 {
-  "title": "After every overnight run, everything waiting on you is on one page, with a pick for each",
+  "title": "Everything waiting on you is on one page, with a pick for each, from every session",
   "phase": "cleanup",
   "status": "active",
   "order": 103.39,
   "why": "Sessions work overnight and park questions; you should answer them all in one sitting, not hunt across threads.",
-  "note": "Ruling, Oct 26 (shiv): make \"one place to answer everything waiting on me\" a standing process; it comes up often because sessions work overnight. Each deferred decision is gathered on one page with its context, the options and a pick. Design: thread \"Answer all waiting decisions in one place\" (cmsg_01DoF7thf3iq2Srr1UsfXgh2ADTZhQexksM43HTmuCPZMa). Today's deferred items carry a \"Deferred (shiv, Oct 26)\" line on their steps, so the roadmap is the source to read. Overlap: o10 (a page per session for questions waiting on you, plan on main 54f2dfd) is the per-session page; this is the project-wide gathering; the design thread decides whether they become one page. Placed ahead of c69 (triage, Oct 26): it unblocks every deferred step at once.",
+  "note": "Deferred part (shiv, Oct 26): the claude-settings build waits on your answer to item 1 of the pilot page. Rulings, Oct 26 (shiv): make \"one place to answer everything waiting on me\" a standing process, since sessions work overnight; and it must work in all your sessions, every repo, local too. Pilot (thread \"Answer all waiting decisions in one place\", cmsg_01DoF7thf3iq2Srr1UsfXgh2ADTZhQexksM43HTmuCPZMa): https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8, reading items from its own artifact database (items, answers, meta), so the link never changes; 22 items (17 decisions, 5 hands-on tasks) at roadmap 3409d28, main 54f2dfd. Proposed build, one rule plus one skill in claude-settings: a session that defers an item for you writes it to the page's items collection (id, title, context, options with how, gain and lose, pick, home, owning thread); at its next turn it reads answers/<id>, files the answer in its home and closes the item. Unmeasured: whether a local session can write to a page's database; o10's test clicks (page item 19) measure the nearby case. Overlap: o10's choices 3 and 4 are page items 2 and 3; its choices 1 and 2 become moot if item 1 is (a). Port to other repos: yes, by your widening. Placed ahead of c69 (triage, Oct 26): it unblocks every deferred step at once.",
   "ask": "",
-  "updatedAt": "2026-10-26T15:55:00Z"
+  "updatedAt": "2026-10-26T16:00:00Z"
 }
