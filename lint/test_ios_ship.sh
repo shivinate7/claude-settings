@@ -19,6 +19,8 @@ need() { local msg=$1; shift; [[ -n $why ]] && return 0; "$@" || why=$msg; }
 not() { ! "$@"; }
 
 REAL_GIT=$(command -v git); REAL_DATE=$(command -v date); REAL_CP=$(command -v cp); export REAL_GIT REAL_DATE REAL_CP
+# The owner's shell may export these. Unset here, so only a case's own prefix assignment reaches the tool.
+unset TEAM_ID DEVICE_UDID ASC_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID PHONE_APPS_JSON
 
 # ---- run folder (decisions/test-temp-standard.md) ----
 tmp_root=${TMPDIR:-/tmp}/claude-settings-tests
@@ -144,21 +146,27 @@ acct() { # HOME [JQ_FILTER]: the account file under HOME, with fake values. The 
 # SIGINT and SIGTERM are reset to the default, so a signal a case sends reaches the tool when the case started it in the background.
 tool_exec() {
   local home=$1; shift
-  cd "${run_dir:-$work/elsewhere}" && exec env -i HOME="$home" PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" \
+  # HOME is unset when a case sets no_home (the case passes an empty HOME with it). PHONE_APPS_JSON reaches the tool
+  # only when the case sets it, even to empty: the tool tells set from unset.
+  local homevar phone
+  homevar=(HOME="$home"); phone=()
+  [[ -z ${no_home:-} ]] || homevar=()
+  [[ -z ${PHONE_APPS_JSON+x} ]] || phone=(PHONE_APPS_JSON="$PHONE_APPS_JSON")
+  cd "${run_dir:-$work/elsewhere}" && exec env -i ${homevar[@]+"${homevar[@]}"} PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" \
     DATE_COUNTER="$work/datecount" COPY_PROBE="${COPY_PROBE:-}" XCODEGEN_TOUCH="${XCODEGEN_TOUCH:-}" CP_PARTIAL="${CP_PARTIAL:-}" \
     XCODEBUILD_RC="${XCODEBUILD_RC:-0}" XCODEBUILD_OUT="${XCODEBUILD_OUT:-}" XCODEBUILD_SLEEP="${XCODEBUILD_SLEEP:-}" \
     XCODEBUILD_FAIL_KIND="${XCODEBUILD_FAIL_KIND:-}" XCODEBUILD_FAIL_SCHEME="${XCODEBUILD_FAIL_SCHEME:-}" XCODEBUILD_HANG="${XCODEBUILD_HANG:-}" \
     XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" XCODEBUILD_PID_FILE="${XCODEBUILD_PID_FILE:-}" \
     XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" \
     STEP_TIMEOUT="${STEP_TIMEOUT:-}" REINSTALL_HOME="${REINSTALL_HOME:-}" TEAM_ID="${TEAM_ID:-}" DEVICE_UDID="${DEVICE_UDID:-}" \
-    ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" PHONE_APPS_JSON="${PHONE_APPS_JSON:-}" \
+    ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" ${phone[@]+"${phone[@]}"} \
     perl -e '$SIG{INT} = $SIG{TERM} = "DEFAULT"; alarm shift; exec @ARGV' "${LIMIT:-60}" "$tool" "$@"
 }
 # run JOB CONFIG HOME ARGS...: the tool, from elsewhere/. Sets rc and fills $out. BG=1 starts it in the background and sets RUN_PID.
 # LIMIT (seconds, default 60) kills a hung run: rc 142.
 run() {
   local job=$1 conf=$2 home=$3; shift 3
-  rm -rf "$work/tmp"; mkdir -p "$home" "$work/tmp"; : > "$calls"; : > "$calls.args"; : > "$calls.probe"; : > "$calls.plist"; rm -f "$work/datecount"
+  rm -rf "$work/tmp"; [[ -z $home ]] || mkdir -p "$home"; mkdir -p "$work/tmp"; : > "$calls"; : > "$calls.args"; : > "$calls.probe"; : > "$calls.plist"; rm -f "$work/datecount"
   if [[ -n ${BG:-} ]]; then
     ( tool_exec "$home" "$job" "$conf" "$@" ) > "$out" 2>&1 &
     RUN_PID=$!; return 0
@@ -907,6 +915,50 @@ need "notice lacks --app: $(tail -1 "$out")" grep -qF -- '--app' "$out"
 need "notice lacks tools/ios-ship.json" grep -qF 'tools/ios-ship.json' "$out"
 need "xcodebuild ran" not built
 end_case "install: PHONE_APPS_JSON is refused with exit 2, and the notice names --app and tools/ios-ship.json"
+
+# PHONE_APPS_JSON set to an empty value is still set, so install refuses it.
+icfg "$(apps "$(app AdBlock)")"
+PHONE_APPS_JSON='' install_run "$work/pj2"
+need "exit $rc, want 2" test "$rc" -eq 2
+need "notice lacks --app: $(tail -1 "$out")" grep -qF -- '--app' "$out"
+need "xcodebuild ran" not built
+end_case "install: PHONE_APPS_JSON set but empty is refused with exit 2 and no xcodebuild"
+
+# An account file that is not JSON gives no values. The refusal names both files, and jq prints no error.
+one_app "" 'del(.team_id)'; mkdir -p "$work/bad1/.config/ios-ship"; printf 'not json\n' > "$work/bad1/.config/ios-ship/account.json"
+run testflight "$tfconf" "$work/bad1"
+need "rc=$rc, want non-zero" test "$rc" -ne 0
+need "build ran" not built
+need "notice lacks the config path: $(tail -1 "$out")" grep -qF "$tfconf" "$out"
+need "notice lacks the account file" grep -qF "$work/bad1/.config/ios-ship/account.json" "$out"
+need "jq printed an error: $(tail -1 "$out")" not grep -qiE 'parse error|^jq' "$out"
+end_case "tf: an account file that is not JSON gives no values: the refusal names both files, with no jq error"
+
+# HOME empty or unset, and no key in env or config: no account file can be named, so the notice must not name /.config/ios-ship/account.json.
+one_app "" 'del(.asc_key_path)'
+run testflight "$tfconf" ""
+need "rc=$rc, want non-zero" test "$rc" -ne 0
+need "build ran" not built
+need "notice names /.config/ios-ship/account.json: $(tail -1 "$out")" not grep -qF '/.config/ios-ship/account.json' "$out"
+need "notice lacks ASC_KEY_PATH" grep -qF ASC_KEY_PATH "$out"
+end_case "tf: HOME empty, no key in env or config: refused, and the notice does not name /.config/ios-ship/account.json"
+one_app "" 'del(.asc_key_path)'
+no_home=1 run testflight "$tfconf" ""
+need "rc=$rc, want non-zero" test "$rc" -ne 0
+need "build ran" not built
+need "notice names /.config/ios-ship/account.json: $(tail -1 "$out")" not grep -qF '/.config/ios-ship/account.json' "$out"
+need "notice lacks ASC_KEY_PATH" grep -qF ASC_KEY_PATH "$out"
+end_case "tf: HOME unset, no key in env or config: refused, and the notice does not name /.config/ios-ship/account.json"
+
+# No CONFIG outside a git repo: there is no toplevel, so the notice must not claim one or name /tools/ios-ship.json.
+# No file is made at that root path: the test would have to write to / on the owner's Mac.
+for job in testflight install; do
+  run_in "$work/nowhere" "$job" "$work/n6"
+  need "$job: rc=$rc, want 2" test "$rc" -eq 2
+  need "$job: the notice claims a git toplevel: $(cat "$out")" not grep -qF toplevel "$out"
+  need "$job: the notice names /tools/ios-ship.json" not grep -qF '/tools/ios-ship.json' "$out"
+  end_case "$job: no CONFIG outside a git repo: the notice names no git toplevel and no /tools/ios-ship.json"
+done
 
 # ===================== run folder: sweep and teardown (decisions/test-temp-standard.md) =====================
 # The probe child sweeps the same temp root on its first request, prints its folder, and exits.
