@@ -313,7 +313,8 @@ class Scope(unittest.TestCase):
     # bin/shoot's suite installs a browser, so only its own paths turn `shoot` on. An edit sets `code` and `shoot`
     # and no other flag; an unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):
-        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json"):
+        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json",
+                  "actions/playwright-setup/action.yml"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
