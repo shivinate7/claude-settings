@@ -20,6 +20,17 @@ Run from any folder:
 The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths
 `lint/layout.py` gives. A home that is not there reads "unknown", never "none".
 
+## Records and health
+
+The Records tab shows Health, then each listed record kind (decisions, debts, plans): its count, as
+`ls | wc -l` counts it, and its newest five entries by add commit, linked to GitHub. In a shallow
+clone the newest list reads "unknown", because the history stops before the files were added.
+
+Health shows the repo map, the compliance scores and the session board. The map's path comes from
+the extras: `{"map": "<path>", "github": "<owner>/<repo>"}`, under `"roadmap"` in the rolled-out
+layout extras file, else in `roadmap/extras.json` on the record branch. The compliance scores have no
+home yet, and the session board is deferred, so both read "unknown" and say why.
+
 ## A merge marks a step
 
 A lane commit names its step in a `Step: <id>` trailer, in the last paragraph of the message, beside

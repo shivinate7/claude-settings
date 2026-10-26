@@ -47,6 +47,16 @@ HOMES = (("decisions", "Decisions"), ("debts", "Debts"), ("debt-notes", "Debt no
 # A merge subject that names its pull request: GitHub's merge commit, or a squash title ending "(#N)".
 PR_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b|\(#(\d+)\)\s*$")
 
+# The listed kinds the Records panel counts. Each shows its count and its NEWEST newest entries.
+LISTED = ("decisions", "debts", "plans")
+NEWEST = 5
+# The extras: {"map": "<path of the repo map>", "github": "<owner>/<repo>"}. The rolled-out layout
+# extras file holds them under "roadmap"; else the record branch holds them in EXTRAS.
+EXTRAS = "roadmap/extras.json"
+GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
+COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
+BOARD_WHY = "unknown (Deferred: where live worker state is read from is still open for the owner)"
+
 HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 
@@ -256,6 +266,121 @@ def homes(repo):
             sys.path.remove(str(LINT))
 
 
+def extras(repo, source):
+    """(extras dict, where it came from) or ({}, None)."""
+    try:
+        sys.path.insert(0, str(LINT))
+        import layout
+        if layout.rolled_out(str(repo)):
+            path = repo / layout.layout()["extras"]
+            found = json.loads(path.read_text(encoding="utf-8")).get("roadmap")
+            if isinstance(found, dict):
+                return found, layout.layout()["extras"]
+    except Exception:  # an unreadable extras file falls through to the record branch's
+        pass
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+    if source is not None:
+        text = source.read([EXTRAS]).get(EXTRAS)
+        try:
+            found = json.loads(text) if text else None
+        except ValueError:
+            found = None
+        if isinstance(found, dict):
+            return found, "%s on %s" % (EXTRAS, source.label)
+    return {}, None
+
+
+def github_slug(repo, extra):
+    if isinstance(extra.get("github"), str):
+        return extra["github"]
+    url = (git(repo, "remote", "get-url", "origin") or "").strip()
+    hit = GITHUB.search(url)
+    return (hit.group(1) or hit.group(2)) if hit else None
+
+
+def shallow_edge(repo):
+    """The commits where a shallow clone's history stops. git shows each as adding every file it holds,
+    so their add dates are not real and the newest lists skip them."""
+    name = (git(repo, "rev-parse", "--git-path", "shallow") or "").strip()
+    try:
+        return set((repo / name).read_text(encoding="utf-8").split()) if name else set()
+    except OSError:
+        return set()
+
+
+def title_of(path):
+    """The first Markdown heading of a file, else its name."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for n, line in enumerate(handle):
+                if line.startswith("# "):
+                    return line[2:].strip()
+                if n > 40:
+                    break
+    except OSError:
+        pass
+    return path.name
+
+
+def records(repo, found, slug, branch):
+    """Per listed kind: its count (as `ls | wc -l` counts), its newest entries, or why it is unknown."""
+    here = {kind: found[kind][0] for kind in LISTED if found.get(kind, (None,))[0]}
+    added, cut = {}, set()
+    if here:
+        out = git(repo, "log", "HEAD", "--diff-filter=A", "--format=@%H %cI", "--name-only", "--", *here.values()) or ""
+        cut = shallow_edge(repo)
+        when, rank, skip = None, 0, False
+        for line in out.splitlines():
+            if line.startswith("@"):
+                sha, when = line[1:].split(" ", 1)
+                rank, skip = rank + 1, sha in cut
+            elif line and not skip:
+                # A file in a subfolder dates the subfolder, the entry `ls` shows.
+                for home in here.values():
+                    if line.startswith(home + "/"):
+                        added.setdefault(home + "/" + line[len(home) + 1:].split("/")[0], (rank, when))
+    rows = []
+    for kind in LISTED:
+        name = dict(HOMES)[kind]
+        home = here.get(kind)
+        if home is None:
+            rows.append({"kind": kind, "name": name, "home": None, "count": None, "newest": [],
+                         "why": "unknown (%s)" % found.get(kind, (None, "no such kind"))[1]})
+            continue
+        folder = repo / home
+        entries = sorted(e for e in os.listdir(folder) if not e.startswith(".")) if folder.is_dir() else []
+        # git log lists newest first, so a lower rank is a newer add, and same-second commits keep their order.
+        dated = sorted((added[home + "/" + e], e) for e in entries if home + "/" + e in added)
+        newest = []
+        for (_, at), entry in dated[:NEWEST]:
+            rel = home + "/" + entry
+            newest.append({"name": entry, "title": title_of(folder / entry), "added": at,
+                           "url": "https://github.com/%s/blob/%s/%s" % (slug, branch, rel) if slug else None})
+        rows.append({"kind": kind, "name": name, "home": home, "count": len(entries), "newest": newest,
+                     "why": None if folder.is_dir() else "unknown (%s is not a folder)" % home,
+                     "newestWhy": "unknown (a shallow clone: its history stops before these files were added)"
+                     if cut and not newest and entries else None})
+    return rows
+
+
+def health(repo, extra, where, slug, branch):
+    """The Health panel: the repo map, the compliance scores and the session board."""
+    path = extra.get("map")
+    if not isinstance(path, str) or not path:
+        repo_map = {"name": "Repo map", "home": None,
+                    "read": "unknown (no extras file names a map%s)" % (": " + where if where else "")}
+    elif not (repo / path).exists():
+        repo_map = {"name": "Repo map", "home": path, "read": "unknown (%s is not in this checkout)" % path}
+    else:
+        last = (git(repo, "log", "-1", "--format=%h", "--", path) or "").strip()
+        repo_map = {"name": "Repo map", "home": path, "read": last or "unknown (git has no commit for it)",
+                    "url": "https://github.com/%s/blob/%s/%s" % (slug, branch, path) if slug else None}
+    return [repo_map, {"name": "Compliance scores", "home": None, "read": COMPLIANCE_WHY},
+            {"name": "Session board", "home": None, "read": BOARD_WHY}]
+
+
 def build_info(repo, source, why):
     """window.ROADMAP_BUILD: the build time and, per panel, the home it read and the commit it read at."""
     if source is None:
@@ -346,6 +471,10 @@ def main(argv=None):
     ref = main_ref(repo, args.main_branch)
     marks, strays, unread = landed_marks(repo, ref, args.main_branch, data["steps"] if data else {})
     info["landed"] = marks
+    extra, where = extras(repo, source)
+    slug, found = github_slug(repo, extra), homes(repo)
+    info["records"] = records(repo, found, slug, args.main_branch)
+    info["health"] = health(repo, extra, where, slug, args.main_branch)
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
                               "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
     out.write_text(render(data, info), encoding="utf-8")

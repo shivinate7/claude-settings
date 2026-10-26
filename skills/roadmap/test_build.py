@@ -256,5 +256,75 @@ class StepTrailers(Fixture):
         self.assertEqual(build_info(page)["landed"], {})
 
 
+class RecordsAndHealth(Fixture):
+    """Counts, newest five and the repo map (lane 3)."""
+
+    def setUp(self):
+        super().setUp()
+        self.on_main()
+        for n in range(7):
+            (self.repo / "decisions" / ("d%d.md" % n)).write_text("# Decision %d\n" % n, encoding="utf-8")
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-q", "-m", "d%d" % n)
+        (self.repo / "decisions" / ".hidden").write_text("x", encoding="utf-8")
+        git(self.repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
+
+    def records(self, page):
+        return {r["kind"]: r for r in build_info(page)["records"]}
+
+    def test_count_equals_ls(self):
+        page, _ = self.build_from_main()
+        ls = subprocess.run("ls | wc -l", shell=True, cwd=self.repo / "decisions", capture_output=True, text=True)
+        self.assertEqual(self.records(page)["decisions"]["count"], int(ls.stdout))
+
+    def test_newest_five_newest_first_with_links(self):
+        page, _ = self.build_from_main()
+        newest = self.records(page)["decisions"]["newest"]
+        self.assertEqual([n["title"] for n in newest], ["Decision %d" % n for n in (6, 5, 4, 3, 2)])
+        self.assertEqual(newest[0]["url"], "https://github.com/owner/fixture/blob/main/decisions/d6.md")
+
+    def test_missing_home_count_is_unknown(self):
+        page, _ = self.build_from_main()
+        debts = self.records(page)["debts"]
+        self.assertIsNone(debts["count"])
+        self.assertTrue(debts["why"].startswith("unknown"))
+
+    def test_shallow_clone_newest_reads_unknown(self):
+        clone = pathlib.Path(self.tmp.name) / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "main", self.repo.as_uri(), str(clone)], check=True)
+        code, out = run_build("--repo", str(clone), "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        row = self.records(self.out.read_text(encoding="utf-8"))["decisions"]
+        self.assertEqual(row["count"], 8)
+        self.assertEqual(row["newest"], [])
+        self.assertTrue(row["newestWhy"].startswith("unknown"))
+
+    def health(self, page):
+        return {h["name"]: h for h in build_info(page)["health"]}
+
+    def test_map_unknown_without_an_extras_file(self):
+        page, _ = self.build_from_main()
+        self.assertTrue(self.health(page)["Repo map"]["read"].startswith("unknown"))
+
+    def test_map_from_the_record_branch_extras(self):
+        (self.repo / "MAP.md").write_text("# map\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "map")
+        git(self.repo, "checkout", "-q", "roadmap")
+        (self.repo / "roadmap" / "extras.json").write_text(json.dumps({"map": "MAP.md"}), encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "extras")
+        page, _ = self.build_from_main()
+        repo_map = self.health(page)["Repo map"]
+        self.assertEqual(repo_map["home"], "MAP.md")
+        self.assertEqual(repo_map["read"], git(self.repo, "log", "-1", "--format=%h", "--", "MAP.md").strip())
+
+    def test_compliance_and_session_board_say_why_unknown(self):
+        page, _ = self.build_from_main()
+        health = self.health(page)
+        self.assertIn("unknown", health["Compliance scores"]["read"])
+        self.assertIn("Deferred", health["Session board"]["read"])
+
+
 if __name__ == "__main__":
     unittest.main()
