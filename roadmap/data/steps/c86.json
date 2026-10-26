@@ -1,0 +1,9 @@
+{
+  "title": "A check refuses a question box while the session's own agents or commands run",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.335,
+  "why": "Your gripe, Oct 26: a UI/UX session's question waited on you while its background agents filled the disk. c84 makes it a rule; this makes a machine hold it.",
+  "note": "From the c84 thread (Oct 26): the question hook judges the box alone and cannot see live agents, so it cannot hold c84's rule. The only reader of a session's live agents today is the host agent list in the session-board mod, which only observes. Build: a mod, or a new hook that reads that list, refuses AskUserQuestion while this session has a live agent or background command; red on main first. Incident: the disk fill, Oct 26. Debt question-box-while-work-runs (PR 648) holds the gap until then. After PR 648 merges. Needs no answer from you. Port: no; it installs from claude-settings into every repo. Placed ahead of c75, after c84 (triage, Oct 26): it turns c84's prose rule into a check for the same incident.",
+  "updatedAt": "2026-10-26T21:15:00Z"
+}
