@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only counter for where a ruling lands: memory, scratchpad, or a tracked file.
 
-See decisions/memory-is-never-a-rulings-only-home.md (on branch claude/ruling-home) for the
+See docs/decisions/memory-is-never-a-rulings-only-home.md (on branch claude/ruling-home) for the
 finding this counts. It reads Claude Code transcripts under a projects root. It writes no
 file. Its only outside call is a local `git log`, per repo, to run the reach test. On a
 partial clone, `git log -S` can make git fetch a missing blob over the network, so this is

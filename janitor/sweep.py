@@ -659,7 +659,7 @@ def worktree_idle_seconds(path: str, now=None):
 
 def _merged_read(where: str, path: str, batch=None):
     """True when HEAD in PATH holds no commit the default branch lacks, by ancestry or by patch
-    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). False when it holds one. None
+    (docs/decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). False when it holds one. None
     when git could not tell. HEAD is read in the worktree itself, never in WHERE. One home: the
     strict keep and the unpushed keep both ask it. BATCH (`merged_batch`) holds the commits that
     are in the default branch: a HEAD in it is merged with no further read. Any other HEAD is
@@ -684,7 +684,7 @@ def _merged_read(where: str, path: str, batch=None):
 def _strict_keep(where: str, path: str, idle, batch=None, fast=False):
     """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
     Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
-    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged,
+    (docs/decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged,
     except after STRICT_UNMERGED_IDLE_SECONDS: the caller already kept an unpushed tree, so an
     unmerged tree here is pushed. FAST: no push was read, so an unmerged tree is always kept."""
     merged = _merged_read(where, path, batch)
@@ -1768,7 +1768,7 @@ def print_dead_rooted_report(decisions, out=sys.stdout):
 
 # ------------------------------------------------------------------ the simulator tier
 #
-# decisions/sweep-shuts-down-idle-simulators.md. One home for "idle": `sim_keep_code` is the
+# docs/decisions/sweep-shuts-down-idle-simulators.md. One home for "idle": `sim_keep_code` is the
 # test; the guard's reuse rule (hooks/guard.py) imports it from here.
 SIM_IDLE_SECONDS = 3600
 SIM_SHUTDOWN_CAP = 4  # per run; the rest wait for the next run
@@ -2607,7 +2607,7 @@ def reap_husk(root: str, decision: dict, names):
 
 # ------------------------------------------------------------------ build folders and their trash
 #
-# decisions/build-dirs-reaped-at-agent-end.md. The agent-end reap renames a proven build folder to a
+# docs/decisions/build-dirs-reaped-at-agent-end.md. The agent-end reap renames a proven build folder to a
 # trash name, and a detached child deletes it. The pattern and the scan live here, one home: the reap
 # (agent_end_reap.py) and the sweep below both call them.
 

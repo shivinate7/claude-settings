@@ -1507,7 +1507,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 #
 # A builder that cannot pass a test may otherwise delete it, skip it, or rewrite it to pass.
 #
-# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). The act is a
+# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (docs/decisions/predicate-is-the-act.md). The act is a
 # test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
 # `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
@@ -1520,6 +1520,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 # change ONLY test paths and test config, never product code (agents/test-author.md).
 # `record-writer` may change ONLY `*.md` files (case-insensitive
 # extension; agents/*.md and CLAUDE.md included), never anything else (agents/record-writer.md).
+# `designer` may change ONLY paths under the repo's design folder (agents/designer.md, decision
+# design-agents).
 #
 # A TEST PATH is read from the path's own parts, never from a substring: a basename shape
 # (`test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`, `conftest.py`) or a
@@ -1534,15 +1536,16 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
+DESIGNER_ROLE = "designer"
 
 
 def agent_role(payload) -> str:
-    """BUILDER_ROLE, AUTHOR_ROLE or WRITER_ROLE for a subagent of that type, else ''."""
+    """BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE or DESIGNER_ROLE for a subagent of that type, else ''."""
     role = payload.get("agent_type")
     if not payload.get("agent_id") or not isinstance(role, str):
         return ""
     role = role.strip().lower()
-    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE) else ""
+    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE, DESIGNER_ROLE) else ""
 
 
 # ------------------------------------------------------------------ helpers several families share

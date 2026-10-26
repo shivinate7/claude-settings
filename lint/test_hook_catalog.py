@@ -137,7 +137,7 @@ ROOT = os.path.dirname(HERE)
 GEN = os.path.join(HERE, "hook_catalog.py")
 INLINE_JSON = os.path.join(HERE, "hook_catalog_inline.json")
 PAGE = os.path.join(ROOT, "docs", "catalog.md")
-TABLE = os.path.join(ROOT, "decisions", "subagent-model-cap.md")
+TABLE = os.path.join(ROOT, "docs", "decisions", "subagent-model-cap.md")
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
 TABLE_PATH = re.compile(r"`([\w./-]+\.(?:py|sh|mjs|js))`")
@@ -1410,14 +1410,14 @@ class RealRecords(unittest.TestCase):
 
     def test_r10_every_record_file_has_one_row_and_a_link_that_resolves(self):
         rows = self.rows()
-        folders = (("decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("debts", ("Debts",)),
-                   ("plans", ("Plans",)))
+        folders = (("docs/decisions", ("Rulings", "Build designs", "Unsorted decisions")), ("docs/debts", ("Debts",)),
+                   ("docs/plans", ("Plans",)))
         problems = []
         for folder, sections in folders:
-            # debts/notes.md is the notes tier, no record: a row for it is an extra.
-            # Compared by path: a decisions/notes.md is still a record and needs its row.
-            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, folder))
-                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "debts/notes.md")
+            # docs/debts/notes.md is the notes tier, no record: a row for it is an extra.
+            # Compared by path: a docs/decisions/notes.md is still a record and needs its row.
+            names = sorted(f[:-3] for f in os.listdir(os.path.join(ROOT, *folder.split("/")))
+                           if f.endswith(".md") and f != "README.md" and "%s/%s" % (folder, f) != "docs/debts/notes.md")
             self.assertTrue(names, "no record in %s, so the scan proves nothing" % folder)
             got = sorted(r["slug"] for r in rows if r["section"] in sections)
             if got != names:
@@ -1449,10 +1449,10 @@ class RealRecords(unittest.TestCase):
         # A record may fence an example of both kinds (the FENCED_KINDS fixture); only its unfenced Kind lines decide the group.
         got = {r["slug"]: r["section"] for r in self.rows() if r["section"] in ("Rulings", "Build designs", "Unsorted decisions")}
         problems = []
-        for name in sorted(os.listdir(os.path.join(ROOT, "decisions"))):
+        for name in sorted(os.listdir(os.path.join(ROOT, "docs", "decisions"))):
             if not name.endswith(".md"):
                 continue
-            kinds = {m.group(1) for m in map(KIND_LINE.match, unfenced_lines(read(os.path.join(ROOT, "decisions", name)))) if m}
+            kinds = {m.group(1) for m in map(KIND_LINE.match, unfenced_lines(read(os.path.join(ROOT, "docs", "decisions", name)))) if m}
             want = {frozenset(["process"]): "Rulings", frozenset(["build"]): "Build designs", frozenset(): "Unsorted decisions"}.get(frozenset(kinds))
             if want and got.get(name[:-3]) != want:
                 problems.append("%s: listed under %r, want %r" % (name, got.get(name[:-3]), want))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """At SubagentStop, stops processes the finished agent left running in its worktree, and removes other idle agent worktrees. When a check cannot tell, it keeps.
 
-Design: decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
+Design: docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md.
 
 Reads one hook payload on stdin. SubagentStop names the agent by `agent_id`. The harness names
 that agent's worktree `.claude/worktrees/agent-<agent_id>` under the primary checkout.
@@ -18,13 +18,13 @@ A process is stopped only when all of these answer a confirmed yes:
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
 
-Build folders (decisions/build-dirs-reaped-at-agent-end.md): when the gates above hold for the whole
+Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the gates above hold for the whole
 worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
 a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
-Worktrees (decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
+Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
@@ -88,7 +88,7 @@ def _log_lock(path: str):
 
 def log(record: dict, replace_run=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
-    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
+    fields the docs leave open (docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
     Parallel runs take turns on a lock file, because writers lost rows without it. The temp name
     carries the pid. On Windows the replace can raise PermissionError while the destination is
     held for a moment, so it retries a few times.
