@@ -54,6 +54,4 @@ Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
 that hit the 60 s hook cap sent no signal and left a server running. The batch timeout stays below the
 hook cap.
 
-Owner ruling, 2026-10-26: scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end. Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. `janitor/agent_end_reap.py` stays as above.
-
 The payload log is written under a lock file. Measured on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a shared temp name and no lock.

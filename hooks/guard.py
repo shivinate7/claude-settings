@@ -2138,8 +2138,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every subagent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if subagent else session_id)
+        matched = foreign_pid_kill(tokens, transcript)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
@@ -2571,7 +2570,7 @@ def judge(payload) -> None:
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
-                        bool(payload.get("agent_id") or payload.get("agent_type")),
+                        bool(payload.get("agent_id")),
                         tool_input.get("run_in_background") is True,
                         tool_input.get("description") or "")
             names = [n for seg in split_segments(strip_heredoc_bodies(command))

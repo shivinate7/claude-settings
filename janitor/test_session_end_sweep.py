@@ -15,21 +15,17 @@ Every fixture repository is a REAL git repository built with real git calls, the
 janitor/test_sweep.py's own fixtures are: a fake or mocked git would prove nothing about
 `guard.primary_checkout`, which shells out to git twice.
 """
-import atexit
 import contextlib
 import io
 import json
 import os
-import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
 import unittest
-import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -42,33 +38,7 @@ import guard  # noqa: E402
 VCS = "g" + "it"
 IDENT = ["-c", "user.email=session-end-cases@example.invalid", "-c", "user.name=session-end-cases"]
 
-# test-temp-standard (decisions/test-temp-standard.md): this run's folder is `<pid>-<UUID>` under the
-# one temp root this repo shares with hooks/test_guard.py. The first request of a run sweeps the
-# sibling run folders older than one day, and the run removes its own folder at exit.
-TEMP_ROOT = os.path.join(tempfile.gettempdir(), "claude-settings-test-temp")
-RUN_FOLDER_RE = re.compile(r"[0-9]+-[0-9a-f]{32}")
-RUN_FOLDER_MAX_AGE = 24 * 60 * 60
-
-
-def sweep_run_folders(temp_root, own, now=None):
-    """Remove each sibling run folder under `temp_root` whose mtime is over a day old. `own` stays."""
-    now = time.time() if now is None else now
-    try:
-        names = os.listdir(temp_root)
-    except OSError:
-        return
-    for name in names:
-        path = os.path.join(temp_root, name)
-        if (path != own and RUN_FOLDER_RE.fullmatch(name) and os.path.isdir(path)
-                and now - os.path.getmtime(path) > RUN_FOLDER_MAX_AGE):
-            shutil.rmtree(path, ignore_errors=True)
-
-
-os.makedirs(TEMP_ROOT, exist_ok=True)
-ROOT = os.path.join(TEMP_ROOT, "%d-%s" % (os.getpid(), uuid.uuid4().hex))
-os.makedirs(ROOT)
-sweep_run_folders(TEMP_ROOT, ROOT)
-atexit.register(shutil.rmtree, ROOT, True)
+ROOT = tempfile.mkdtemp(prefix="session_end_cases_")
 
 
 def run_vcs(where, *args):
@@ -842,130 +812,6 @@ class HookLoadsNoGuardModule(unittest.TestCase):
         self.assertTrue(os.path.isfile(marker), "the hook never ran the sweep, so this run proved "
                         "nothing: it must find the repository without the guard")
         self.assertEqual(loaded, [], "one hook run loaded these guard modules")
-
-
-# THE SCRATCHPAD REAP (decision agent-end-reap-stops-what-a-finished-agent-left).
-# At SessionEnd the hook also stops each process whose PPID is 1,
-# whose environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and whose cwd sits
-# in the payload's `scratchpad_dir`. Both paths are realpath'd: macOS shows /var as /private/var, so
-# the payload names the /var form while the holder's cwd reads back as /private/var. Each holder is
-# a python process whose shell exits first, so init adopts it.
-TAG = "CLAUDE_CODE_SESSION_ID"
-HOLDER = "import time; time.sleep(300)"
-HOLDERS = []
-
-
-def spawn_orphan(cwd, env_entries=()):
-    """A holder in `cwd` with `env_entries` (NAME=value) in its environment, the inherited tag
-    removed first. Returns its pid, or None when it is not a PPID-1 orphan on this host."""
-    env = {key: value for key, value in os.environ.items() if key != TAG}
-    env.update(entry.split("=", 1) for entry in env_entries)
-    os.makedirs(cwd, exist_ok=True)
-    try:
-        answer = subprocess.run(
-            ["sh", "-c", '"$@" </dev/null >/dev/null 2>&1 & echo $!', "sh", sys.executable, "-c",
-             HOLDER],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=20)
-        pid = int(answer.stdout.strip())
-        HOLDERS.append(pid)
-        parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
-                                text=True, timeout=5).stdout.strip()
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    return pid if parent == "1" else None
-
-
-def still_running(pid):
-    """True while `pid` is alive and not a zombie. A reaped process has no `ps` line at all."""
-    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
-                           timeout=5).stdout.strip()
-    return bool(state) and not state.startswith("Z")
-
-
-def stop_holders():
-    for pid in HOLDERS:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-
-
-atexit.register(stop_holders)
-
-
-class ScratchpadReap(unittest.TestCase):
-    """The hook stops a PPID-1 process that holds this session's tag and sits in the scratchpad.
-    Every case must exit 0. Each holder is skipped when this host gives no PPID-1 orphan."""
-
-    def make_dir(self, name):
-        path = os.path.join(ROOT, name)
-        os.makedirs(path, exist_ok=True)
-        return path
-
-    def hold(self, cwd, env_entries=()):
-        pid = spawn_orphan(cwd, env_entries)
-        if pid is None:
-            self.skipTest("needs a PPID-1 orphan from ps, which this host does not give")
-        return pid
-
-    def session_end(self, session, cwd, scratchpad):
-        payload = {"hook_event_name": "SessionEnd", "cwd": cwd, "session_id": session}
-        if scratchpad is not None:
-            payload["scratchpad_dir"] = scratchpad
-        return run_hook(payload, env_extra={"CLAUDE_CONFIG_DIR": self.make_dir("cfg_reap")})
-
-    def assert_stopped(self, pid):
-        deadline = time.time() + 5
-        while still_running(pid) and time.time() < deadline:
-            time.sleep(0.1)
-        self.assertFalse(still_running(pid), "the hook left pid %d running" % pid)
-
-    def test_tagged_orphan_in_scratchpad_is_stopped(self):
-        repo = self.make_dir("reap_repo")
-        make_repo(repo)
-        scratch = self.make_dir("scratch_stop")
-        pid = self.hold(scratch, [TAG + "=sess-reap-a"])
-        result = self.session_end("sess-reap-a", repo, scratch)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_stopped(pid)
-
-    def test_tagged_orphan_is_stopped_when_cwd_is_no_repository(self):
-        """No repo sweep runs here, so the scratchpad reap must run on its own."""
-        plain = self.make_dir("plain_cwd")
-        scratch = self.make_dir("scratch_stop_plain")
-        pid = self.hold(scratch, [TAG + "=sess-reap-b"])
-        result = self.session_end("sess-reap-b", plain, scratch)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_stopped(pid)
-
-    def test_another_sessions_tag_is_kept(self):
-        scratch = self.make_dir("scratch_other")
-        pid = self.hold(scratch, [TAG + "=sess-other-id"])
-        result = self.session_end("sess-reap-c", self.make_dir("plain_c"), scratch)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(still_running(pid), "the hook stopped a process of another session")
-
-    def test_no_tag_is_kept(self):
-        scratch = self.make_dir("scratch_untagged")
-        pid = self.hold(scratch)
-        result = self.session_end("sess-reap-d", self.make_dir("plain_d"), scratch)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(still_running(pid), "the hook stopped an untagged process")
-
-    def test_tagged_orphan_outside_the_scratchpad_is_kept(self):
-        outside = self.make_dir("outside_scratch")
-        pid = self.hold(outside, [TAG + "=sess-reap-e"])
-        result = self.session_end("sess-reap-e", self.make_dir("plain_e"),
-                                  self.make_dir("scratch_empty_e"))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(still_running(pid), "the hook stopped a process outside the scratchpad")
-
-    def test_payload_without_scratchpad_keeps_the_tagged_orphan(self):
-        scratch = self.make_dir("scratch_no_field")
-        pid = self.hold(scratch, [TAG + "=sess-reap-f"])
-        result = self.session_end("sess-reap-f", self.make_dir("plain_f"), None)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(still_running(pid), "the hook stopped a process with no scratchpad named")
 
 
 if __name__ == "__main__":

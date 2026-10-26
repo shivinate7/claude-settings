@@ -62,7 +62,6 @@ WRITER_RULES = [
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
     "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
     "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
-    "- Before you end, stop each server you started, by the $! from the same call or through the harness.",
 ]
 READER_RULES = [
     "Standing rules for this agent:",
@@ -282,11 +281,11 @@ def line_set_check(expected):
 
 
 for _t in ["builder", "test-author", "record-writer"]:
-    add("line set: %s gets the nine-line set" % _t, "context", payload(_t),
+    add("line set: %s gets the eight-line set" % _t, "context", payload(_t),
         line_set_check(WRITER_RULES))
-add("line set: a general (unknown) type gets the nine-line set", "context",
+add("line set: a general (unknown) type gets the eight-line set", "context",
     payload("some-new-agent"), line_set_check(WRITER_RULES))
-add("line set: a missing agent type gets the nine-line set", "context", payload(),
+add("line set: a missing agent type gets the eight-line set", "context", payload(),
     line_set_check(WRITER_RULES))
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
