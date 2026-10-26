@@ -21,7 +21,7 @@ When I name a gripe, even in passing, fix it twice: change how you work here rig
 
 Building (owner rulings, Oct 26; plan: step c52)
 - This project builds the portable claude-settings backlog as PRs: steps whose proof CI can give (it runs on Linux, Mac and Windows). Steps that need my machines (live transcripts, the Mac, the desktop app, a phone) stay as briefs for my local Claude Code sessions.
-- One advisor thread plans, files and answers build threads' questions; it does not build. Each lane is its own build thread: test-author shows new cases red, builder makes them green, a fresh reviewer that never saw the build reads every logic diff (up to three rounds). Lanes ready together join one integration PR.
+- The coordinator orchestrates. Advisor threads run one per area of work, in parallel; each plans, files and answers build threads' questions; it does not build. An advisor thread asks for its replacement at about 40 exchanges, at a phase change, or at once after a slip, and leaves a handoff in the advisor repo's handoffs/ folder. Each lane is its own build thread: test-author shows new cases red, builder makes them green, a fresh reviewer that never saw the build reads every logic diff (up to three rounds). Lanes ready together join one integration PR.
 - This project holds the standing merge grant for claude-settings (decision standing-merge-grant). Merge only on green CI, through merge/merge.py, never GitHub's merge button (a button merge skips the records page rebuild, record-number claim and branch cleanup).
 - My calls stay mine: raising a model to Opus, the override pass, anything that cannot be undone, any goal change.
 - Other repos are for reference only. Before any step that touches one, check in with me first.
