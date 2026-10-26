@@ -1,0 +1,10 @@
+{
+  "title": "Any repo can adopt this project's way of working: standing roles, hand-offs, batching and a roadmap",
+  "phase": "organize",
+  "status": "todo",
+  "order": 149,
+  "why": "The process proven here should serve every repo, not be rebuilt in each one.",
+  "note": "Ruling, Oct 26 (shiv): processes built here are portable to your other repos by default. Scope, in claude-settings (needs no answer from you): package this project's operating model as templates, a skill and docs: the standing roles (triage gatekeeper, build advisor and dispatcher, local liaison, merge hand), the roster, counted hand-offs, autopilot deferral, integration-branch batching, and the roadmap with its page (roadmap/build.py and the data layout). Deferred part (shiv, Oct 26): adopting it in any other repo; you settle each repo's plan first. Linked: o8 (a living roadmap page for every repo) is the page this package ships; o8 builds the page, this step packages the process around it. Placed just ahead of o8 (triage, Oct 26): the process is the frame o8's page serves.",
+  "ask": "",
+  "updatedAt": "2026-10-26T15:58:00Z"
+}
