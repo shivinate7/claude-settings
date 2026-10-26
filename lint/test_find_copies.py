@@ -15,15 +15,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
-import uuid
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _test_temp  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("FIND_COPIES_UNDER_TEST") or os.path.join(HERE, "find_copies.py")
-# test-temp-standard (one run folder per test run): the repo's one temp root and run folder
-# name, as in hooks/test_guard.py. Its sweep removes a run folder that a crashed run left here.
-TEMP_ROOT = os.path.join(tempfile.gettempdir(), "claude-settings-test-temp")
-RUN_FOLDER = os.path.join(TEMP_ROOT, "%d-%s" % (os.getpid(), uuid.uuid4().hex))
+RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 
 SKILL_MD = "---\nname: {name}\ndescription: A shared skill for the fixture.\n---\n\n" + "".join(
     f"Step {i}: do the shared thing number {i} with care.\n" for i in range(12)
@@ -68,9 +68,26 @@ def run(parent, child, *extra):
     return proc
 
 
+class RunFolderSweepTest(unittest.TestCase):
+    def test_old_sibling_goes_and_new_one_stays(self):
+        root = os.path.join(RUN_FOLDER, "root")
+        old = os.path.join(root, "1-" + "a" * 32)
+        new = os.path.join(root, "2-" + "b" * 32)
+        other = os.path.join(root, "not-a-run-folder")
+        for path in (old, new, other):
+            os.makedirs(path)
+        two_days_ago = time.time() - 2 * 24 * 60 * 60
+        os.utime(old, (two_days_ago, two_days_ago))
+        os.utime(other, (two_days_ago, two_days_ago))
+        own = _test_temp.run_folder(root)
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.isdir(new))
+        self.assertTrue(os.path.isdir(other))
+        self.assertTrue(os.path.isdir(own))
+
+
 class FindCopiesTest(unittest.TestCase):
     def setUp(self):
-        os.makedirs(RUN_FOLDER, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.parent = os.path.join(self.tmp.name, "parent")
         self.child = os.path.join(self.tmp.name, "child")
@@ -173,6 +190,16 @@ class FindCopiesTest(unittest.TestCase):
         code, out = self.findings()
         self.assertEqual(code, 1)
         self.assertEqual([(f["parent"], f["kind"]) for f in out["files"]], [("lint/traps.mjs", "byte-equal")])
+
+    def test_large_file_that_quotes_a_parent_file_is_not_a_copy(self):
+        write(self.child, "src/big.mjs", TEST + "".join(f"const mine{i} = 'own line {i}';\n" for i in range(60)))
+        code, out = self.findings()
+        self.assertEqual(code, 0, out)
+
+    def test_scanner_traps_near_equal(self):
+        write(self.child, "src/traps.mjs", "// local header\n" + TRAPS)
+        code, out = self.findings()
+        self.assertEqual([(f["parent"], f["kind"]) for f in out["files"]], [("lint/traps.mjs", "near-equal")])
 
     def test_shared_boilerplate_is_not_a_copy(self):
         # A file that shares a few common lines with a parent file is not a copy.

@@ -15,6 +15,11 @@ It reports two kinds of copy:
   a header added on top still reads as a copy. It never parses code,
   so a comment opener or a quote inside a string cannot change a result.
 
+Blind spots, by design: a file under MIN_LINES significant lines or MIN_BYTES is boilerplate
+and never a copy; a child file with over CHILD_GROWTH times the parent's lines only quotes it.
+A skill matches on its folder name or its `name`, so a renamed skill with a new `name` shows only
+through its files.
+
 Files inside a reported skill copy are not reported again. License and lock files, parent
 files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. Exit 0: no copies. Exit 1: copies found.
 Exit 2: the child or parent cannot be read, so the result is unknown.
@@ -31,6 +36,7 @@ import sys
 MAX_BYTES = 1_000_000
 MIN_BYTES = 200  # a byte-equal file smaller than this is boilerplate, not a copy
 MIN_LINES = 12  # a near-equal file needs this many significant lines on the parent side
+CHILD_GROWTH = 2  # a child with more than this many times the parent's lines only quotes it
 COMMON = 20  # a line in more parent files than this picks no candidate
 SKIP_NAMES = re.compile(r"^(LICENSE|LICENCE|NOTICE|COPYING)(\..*)?$|^\.git(ignore|attributes|keep)$|"
                         r"^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock)$",
@@ -44,8 +50,9 @@ def list_files(root):
     """Tracked files when root is a git tree, else every file outside SKIP_DIRS."""
     if os.path.exists(os.path.join(root, ".git")):
         proc = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
-        if proc.returncode == 0:
-            return sorted(p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p)
+        if proc.returncode != 0:
+            return None  # a walk would add untracked files, so the result is unknown
+        return sorted(p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p)
     out = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -160,6 +167,8 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
         best = None
         for p in counts:
             plines = lines_of[p]
+            if len(clines) > CHILD_GROWTH * len(plines):
+                continue
             score = len(plines & clines) / len(plines)
             if score >= threshold and (best is None or (-score, rank(p)) < (-best[1], rank(best[0]))):
                 best = (p, score)
@@ -184,6 +193,10 @@ def main(argv=None):
         print(f"unknown: {parent} has no skills/ folder, so it is not a claude-settings tree")
         return 2
     pfiles, cfiles = list_files(parent), list_files(child)
+    for label, root, files in (("parent", parent, pfiles), ("child", child, cfiles)):
+        if files is None:
+            print(f"unknown: git ls-files failed in the {label} {root}")
+            return 2
     skills = find_skill_copies(parent, pfiles, child, cfiles)
     files = find_file_copies(parent, pfiles, child, cfiles, [s["child_path"] for s in skills], args.threshold)
     if args.json:
