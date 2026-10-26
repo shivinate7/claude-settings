@@ -1,6 +1,6 @@
 {
   "name": "plain-diff",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Adds /plain-diff: a pane that lists each changed file with a short plain-English note beside its diff.",
   "author": { "name": "shivinate7" },
   "types": "./types/index.d.ts"

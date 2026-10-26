@@ -1,6 +1,6 @@
 {
   "name": "session-board",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Adds /board, a pane of every session on this machine with state and update-ready marks, and /safe-stop, which asks one session to write its handoff.",
   "author": { "name": "shivinate7" }
 }
