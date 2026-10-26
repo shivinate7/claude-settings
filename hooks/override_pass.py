@@ -18,7 +18,16 @@ writes, so a session cannot grant itself a pass. It is valid only while now < un
   nothing.
 A file that is missing, unreadable or corrupt is no pass. take() never raises into the guard: an
 error means no pass, so the refusal stands.
+
+A one-act pass is spent by creating its claim marker, <pass file>.<digest>.claim, with O_EXCL: of
+calls racing for one pass, exactly one creates it. A rename is no claim on Windows, where it acts on
+an open handle: two racers that opened the file both rename it, and both win (CI, run 40296652083).
+The digest names the pass's own bytes, and each grant writes a new id, so a marker spends only the
+pass it was made for. The spent pass file stays until a grant replaces it: a delete would make it
+unreadable to a Windows racer mid-delete (CI, run 40303298492). grant() deletes markers older
+than CLAIM_KEEP.
 """
+import hashlib
 import json
 import os
 import re
@@ -26,6 +35,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act pass waits for its act
+CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's pass has ended
 PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 LOG_REASON_MAX = 300
@@ -72,13 +82,43 @@ def grant(session_id, prompt, at):
         until = at + (timedelta(hours=int(number)) if unit and unit.lower() == "h"
                       else timedelta(minutes=int(number)))
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    _sweep_claims(os.path.dirname(path))
     scratch = "%s.%s.tmp" % (path, uuid.uuid4().hex)  # a new file always replaces the old, unread
     with open(scratch, "w", encoding="utf-8") as handle:
-        json.dump({"kind": kind, "until": until.astimezone(timezone.utc).isoformat()}, handle)
+        json.dump({"kind": kind, "until": until.astimezone(timezone.utc).isoformat(),
+                   "id": uuid.uuid4().hex}, handle)  # the id gives each pass its own claim marker
     os.replace(scratch, path)
     if reason and kind == "once":
         _log_reason(session_id, reason, at)
     return kind, until
+
+
+def _sweep_claims(folder):
+    """Delete claim markers older than CLAIM_KEEP. A newer one may still stop a racer that read its
+    pass before the pass was spent."""
+    import time
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".claim"):
+            marker = os.path.join(folder, name)
+            try:
+                if time.time() - os.path.getmtime(marker) > CLAIM_KEEP:
+                    os.remove(marker)
+            except OSError:
+                pass
+
+
+def _claim(path, raw):
+    """True for the one call that creates this pass's claim marker, else False."""
+    marker = "%s.%s.claim" % (path, hashlib.sha256(raw).hexdigest()[:32])
+    try:
+        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return False  # another call claimed it first, or the marker cannot be made: no pass
+    return True
 
 
 def _log_reason(session_id, reason, at):
@@ -92,14 +132,15 @@ def _log_reason(session_id, reason, at):
 
 def take(session_id, agent_id, at):
     """PASSED when the pass lifts this refusal (a one-act pass is spent), UNREAD when the file exists
-    but cannot be read, else None. A one-act pass is spent by a rename to a unique name, so of two
-    calls racing for it only one wins."""
+    but cannot be read, else None. Of calls racing for one one-act pass, only the one that creates
+    its claim marker wins."""
     path = _path(session_id)
     if path is None:
         return None
     try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        data = json.loads(raw.decode("utf-8"))
         kind = data["kind"]
         until = datetime.fromisoformat(data["until"])
         if kind not in ("once", "timed") or until.tzinfo is None:
@@ -112,13 +153,6 @@ def take(session_id, agent_id, at):
         return None
     if kind == "timed":
         return PASSED
-    spent = "%s.%s.used" % (path, uuid.uuid4().hex)
-    try:
-        os.rename(path, spent)
-    except OSError:
-        return None  # another call spent it first
-    try:
-        os.remove(spent)
-    except OSError:
-        pass
+    if not _claim(path, raw):
+        return None
     return PASSED

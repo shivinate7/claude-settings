@@ -14480,6 +14480,72 @@ def ov_parallel_check(workers=6, rounds=5):
     return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
 
 
+OV_TAKE_CHILD = (
+    "import sys\n"
+    "from datetime import datetime\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import override_pass\n"
+    "print(override_pass.take(sys.argv[2], None, datetime.fromisoformat(sys.argv[3])))\n"
+)
+
+
+def ov_take_race_check(workers=6, rounds=30):
+    """Processes that call take() on one one-act pass at once: exactly one gets it. A Windows rename
+    acts on an open handle, so a rename claim let two racers win (2 of 40 rounds, run 40296652083)."""
+    config = ov_config("take-race")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
+    for n in range(rounds):
+        session = "ov-take-race-%d" % n
+        note = ov_type(config, session, "override")
+        got = [None] * workers
+        start = threading.Barrier(workers)
+
+        def worker(i):
+            start.wait()
+            run = subprocess.run([sys.executable, "-c", OV_TAKE_CHILD, os.path.dirname(GUARD), session,
+                                  ov_clock(60)], capture_output=True, text=True, env=env, timeout=60)
+            got[i] = run.stdout.strip() if run.returncode == 0 else "error: " + run.stderr.strip()[-80:]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if got.count("override") != 1 or got.count("None") != workers - 1:
+            return False, "round %d: %d processes raced take(), results %r, want one override; %s" % (
+                n, workers, got, note or "typed")
+    return True, "%d rounds of %d racing take() calls, one winner each" % (rounds, workers)
+
+
+def ov_late_reader_check():
+    """A call that read the pass before another call spent it is refused. Its bytes come back as the
+    pass file here, which is what it sees. A new `override` typed at the same instant still lifts one act."""
+    config, session = ov_config("late-reader"), "ov-late-reader"
+    rule = "machine-wide-kill"
+    note = ov_type(config, session, "override")
+    path = ov_pass_path(config, session)
+    try:
+        with open(path, "rb") as handle:
+            seen = handle.read()
+    except OSError as error:
+        return False, "no pass file after `override`: %s; %s" % (error, note or "typed")
+    ok, why = ov_story([("the first call", lambda: ov_kill(config, session, 60), "allow", rule)], note)
+    if not ok:
+        return False, why
+    with open(path, "wb") as handle:
+        handle.write(seen)
+    ok, why = ov_story([("a call that read the pass before it was spent",
+                         lambda: ov_kill(config, session, 90), "deny", rule)], note)
+    if not ok:
+        return False, why
+    os.remove(path)
+    note = ov_type(config, session, "override") or note
+    ok, why = ov_story([("a new pass typed at the same instant",
+                         lambda: ov_kill(config, session, 120), "allow", rule)], note)
+    if not ok:
+        return False, why
+    return True, "the spent pass stayed spent for a late reader, and a new pass lifted one act"
+
+
 def ov_agent_once_check():
     """A subagent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
     config, session = ov_config("agent-once"), "ov-agent-once"
@@ -14739,6 +14805,9 @@ for _label, _check in (
      ov_corrupt_check),
     ("override: a pass covers only the session that typed it", ov_scope_check),
     ("override: two calls racing for one one-act pass, exactly one gets it", ov_parallel_check),
+    ("override: processes racing take() for one one-act pass, exactly one gets it",
+     ov_take_race_check),
+    ("override: a call that read a one-act pass before it was spent is refused", ov_late_reader_check),
     ("override: a subagent never spends a one-act pass", ov_agent_once_check),
     ("override: a timed pass reaches a subagent until it ends", ov_agent_timed_check),
     ("override: frozen-path and git-env-set stay refused under a one-act pass",
@@ -15604,6 +15673,9 @@ WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
 # load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx
 # and a process snapshot) that no Linux run exercises.
 WINDOWS_CHECKERS.update(LB_CHECKS)
+# override: a one-act pass claimed by a rename let two Windows racers win (run 40296652083), and no
+# Linux run shows it, so the claim cases run in the Windows slice.
+WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 
 
 # --------------------------------------------------------------------------- the simulator boot rules

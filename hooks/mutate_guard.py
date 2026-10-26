@@ -47,6 +47,7 @@ DECISION = os.path.join(HERE, "decision_watch.py")
 DECISION_SUITE = os.path.join(HERE, "test_decision_watch.py")
 RULING = os.path.join(HERE, "ruling_home.py")
 RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
+OVERRIDE = os.path.join(HERE, "override_pass.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -55,6 +56,7 @@ TARGETS = {
     "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
     "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
+    "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override_pass"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1537,6 +1539,15 @@ MUTATIONS = [
      'stop and report to the owner which layer refused and its exact ',
      'stop and report to the owner the exact ',
      "guard", 'hand-made worktree: the refusal text'),
+    # THE ONE-ACT PASS (hooks/override_pass.py). A spend that skips the claim lifts a second act.
+    ("override: a one-act pass is spent with no claim, so a late reader is let through",
+     '    if not _claim(path, raw):\n        return None\n',
+     '',
+     "override", 'override: a call that read a one-act pass before it was spent is refused'),
+    ("override: the claim marker names the session, not the pass, so a new pass is refused",
+     'marker = "%s.%s.claim" % (path, hashlib.sha256(raw).hexdigest()[:32])',
+     'marker = "%s.claim" % path',
+     "override", 'override: a call that read a one-act pass before it was spent is refused'),
 ]
 
 
@@ -1624,7 +1635,17 @@ def run_mutant(sources, work: str, entry):
         if target == "decision":
             mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
-    if target != "guard":
+    if target == "override":
+        # The guard family, local_time.py and the mutated override_pass.py share one folder: the
+        # copied guard and the suite's grant child both import the pass module beside guard.py.
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        mutate_shared.guard_tree(tree)
+        for helper in ("local_time.py", "_nowindow.py"):
+            shutil.copy(os.path.join(HERE, helper), tree)
+        with open(os.path.join(tree, "override_pass.py"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(mutated)
+        copy_path = os.path.join(tree, "guard.py")
+    elif target != "guard":
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
