@@ -23,7 +23,9 @@ A one-act pass is spent by creating its claim marker, <pass file>.<digest>.claim
 calls racing for one pass, exactly one creates it. A rename is no claim on Windows, where it acts on
 an open handle: two racers that opened the file both rename it, and both win (CI, run 40296652083).
 The digest names the pass's own bytes, and each grant writes a new id, so a marker spends only the
-pass it was made for. grant() deletes markers older than CLAIM_KEEP.
+pass it was made for. The spent pass file stays until a grant replaces it: a delete would make it
+unreadable to a Windows racer mid-delete (CI, run 40303298492). grant() deletes markers older
+than CLAIM_KEEP.
 """
 import hashlib
 import json
@@ -153,11 +155,4 @@ def take(session_id, agent_id, at):
         return PASSED
     if not _claim(path, raw):
         return None
-    try:
-        with open(path, "rb") as handle:
-            same = handle.read() == raw
-        if same:
-            os.remove(path)  # a newer pass the owner typed meanwhile stays
-    except OSError:
-        pass  # the marker already spent this pass
     return PASSED
