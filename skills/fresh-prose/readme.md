@@ -49,4 +49,5 @@ Drop a section that is empty.
 - List every claim you deleted, every claim you replaced with a link, and every claim you
   left unchecked, with the reason.
 
-If a fact about the repo is unclear, ask. Never guess it.
+Read a fact about the repo from the code, never guess it (`building-never-guess-answer`). If
+the code cannot answer, ask the owner, and say what you do meanwhile (`questions-go-to-owner`).

@@ -59,9 +59,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push
    starts no notice. Never run `gh run watch`: one watch made 131 API calls a minute (decision
    ci-wait-reads-run-status, CI waits read the run status). Never poll with a sleep loop. A repeated `gh run view` or
-   `gh pr checks` without `--watch` is a poll. (Decision
-   agents-wait-with-monitor: of 468 measured refusals of `sleep` waits, about 130 were real
-   loops. Agents wait with the Monitor tool.) See `snippets.md`.
+   `gh pr checks` without `--watch` is a poll. To wait for any other condition, use the Monitor
+   tool (decision agents-wait-with-monitor, agents wait with the Monitor tool). See `snippets.md`.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
    A pipe hides a gate's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
@@ -76,10 +75,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `concurrency` group (step 4), or the skipped draft run cancels an in-progress ready run.
     Run `gh pr ready` only after the draft run shows in `gh run list`. A ready sent seconds
     after the PR opens can give both runs `draft=false`. One then cancels the other, and
-    its cancelled check runs can block the merge, even for an admin (PR 381).
+    its cancelled check runs can block the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head
     that ran, or dispatch one. See `snippets.md`, section 5b. Never mark ready in the same second
-    as the create. (The merge tool refuses an all-skipped head. Incidents: PRs 352 and 360.)
+    as the create. (The merge tool refuses an all-skipped head. Incidents: PR 352, per-file
+    checkout in a worktree, and PR 360, rm rules beside a redirect.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs (private repos).** Each job bills whole minutes, rounded up, plus its own setup. Put checks
@@ -91,14 +91,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a
     public repo. Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    `lint/test_windows_split.py` checks that each suite runs in exactly one job. In PR 293's CI run 37675874835 (2026-10-07), the longest
+    `lint/test_windows_split.py` checks that each suite runs in exactly one job. In the CI run 37675874835 (2026-10-07) of PR 293, the Windows merge-test slice, the longest
     Windows job took 6m24s.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's `if:`, `shell:` and
-    `!cancelled()`, with no env override (`MERGE_TESTS` gap, review of PR 293). A job-level `if:`
+    `!cancelled()`, with no env override (`MERGE_TESTS` gap, review of PR 293, the Windows merge-test slice). A job-level `if:`
     names only its own scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full
-    suite on main and nightly. Measured: the Windows merge slice took 1m13s in PR 293's own CI
-    run 37675874835.
+    suite on main and nightly. Measured: the Windows merge slice took 1m13s in CI run
+    37675874835 of PR 293.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
     the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved
     about 9% (merge test setup).
@@ -142,8 +142,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Records:
-- Opt-in templates: decision opt-in-ci-templates-composite (composite actions).
+Record: decision opt-in-ci-templates-composite (opt-in CI templates are composite actions).
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 
