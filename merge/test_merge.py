@@ -2,6 +2,9 @@
 """Fixture suite for merge/merge.py, the git and GitHub halves.
 
 Run: python3 merge/test_merge.py
+MERGE_TESTS=windows-slice runs only the marked tests. MERGE_SHARD=<i>/<n> then runs every n-th test,
+starting at the i-th (1-based): the n shards are disjoint and together hold every test, so CI can split
+the suite across jobs and drop none.
 No network, no real repo. Every run uses a local bare origin in a temp dir, the real
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
@@ -35,6 +38,20 @@ def select_tests(suite, mode):
             or getattr(getattr(t, t._testMethodName), "_windows_slice", False)]
     if not keep:
         raise SystemExit("MERGE_TESTS=windows-slice: no test is marked. Nothing ran.")
+    return unittest.TestSuite(keep)
+
+def select_shard(suite, value):
+    """"" keeps every test. "<i>/<n>" (1 <= i <= n) keeps every n-th test from index i-1. Anything else stops the run."""
+    if value == "":
+        return suite
+    m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not m or int(m.group(1)) > int(m.group(2)):
+        raise SystemExit(f"MERGE_SHARD={value!r}: want <i>/<n> with 1 <= i <= n. Nothing ran.")
+    i, n = int(m.group(1)), int(m.group(2))
+    keep = list(iter_tests(suite))[i - 1::n]
+    if not keep:
+        raise SystemExit(f"MERGE_SHARD={value!r}: this shard holds no test. Nothing ran.")
+    print(f"MERGE_SHARD={value}: {len(keep)} tests run in this shard", file=sys.stderr)
     return unittest.TestSuite(keep)
 
 def sh(cwd, *cmd):
@@ -4627,6 +4644,36 @@ class SliceSelector(unittest.TestCase):
         self.assertIn("MERGE_TESTS", r.stdout + r.stderr)
         self.assertNotIn("Ran ", r.stdout + r.stderr)
 
+class ShardSelector(unittest.TestCase):
+    """MERGE_SHARD=<i>/<n> splits a selection into n disjoint shards that together hold every test."""
+    def all_tests(self):
+        return unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+
+    def ids(self, suite):
+        return [t.id() for t in iter_tests(suite)]
+
+    def test_the_shards_are_disjoint_and_hold_every_test(self):
+        for base in (self.all_tests, lambda: select_tests(self.all_tests(), "windows-slice")):
+            full = self.ids(base())
+            for n in (1, 2, 3, 4):
+                shards = [self.ids(select_shard(base(), f"{i}/{n}")) for i in range(1, n + 1)]
+                self.assertEqual(sorted(sum(shards, [])), sorted(full), n)
+                self.assertTrue(all(abs(len(a) - len(b)) <= 1 for a in shards for b in shards), n)
+
+    def test_no_value_keeps_every_test(self):
+        self.assertEqual(self.ids(select_shard(self.all_tests(), "")), self.ids(self.all_tests()))
+
+    def test_a_bad_value_fails_loudly_and_runs_nothing(self):
+        for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3"):
+            with self.assertRaises(SystemExit) as cm:
+                select_shard(self.all_tests(), bad)
+            self.assertIn("MERGE_SHARD", str(cm.exception))
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)], capture_output=True, text=True,
+                           env=dict(os.environ, MERGE_SHARD="2/1"), timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("MERGE_SHARD", r.stdout + r.stderr)
+        self.assertNotIn("Ran ", r.stdout + r.stderr)
+
 class TimedLines(io.StringIO):
     """stdout that stamps each `merge: ` line with the fake clock at the moment it is written."""
     def __init__(self, clock):
@@ -6876,5 +6923,6 @@ if __name__ == "__main__":
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
-            return select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", ""))
+            return select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
+                                os.environ.get("MERGE_SHARD", ""))
     unittest.main(testLoader=Slicer())

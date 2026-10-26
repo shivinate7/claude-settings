@@ -12,6 +12,10 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_SHARD=<i>/<n> runs every n-th selected case, starting at the i-th (1-based), after the other
+filters. The n shards of one selection are disjoint and together hold every case, so CI can split
+the suite across jobs and drop none. A malformed value stops the run before a case runs.
+
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
 
@@ -104,6 +108,25 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+
+
+def parse_shard(value):
+    """(i, n) from GUARD_SHARD's "<i>/<n>", 1 <= i <= n; (1, 1) when unset. Anything else stops the run."""
+    if not value:
+        return 1, 1
+    m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not m or int(m.group(1)) > int(m.group(2)):
+        sys.exit("GUARD_SHARD=%r: want <i>/<n> with 1 <= i <= n. Nothing ran." % value)
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_of(items, shard):
+    """The items of one shard: every n-th item, starting at index i-1."""
+    i, n = shard
+    return items[i - 1::n]
+
+
+GUARD_SHARD = parse_shard(os.environ.get("GUARD_SHARD", ""))
 FAMILY = "misc"  # set at each section header below
 # TEMP_DIR is the temp folder the guard reads for the cases added while it is set, or None for the
 # system temp. add() records it, and decide() puts it in TMPDIR, TEMP and TMP for that guard run.
@@ -15235,6 +15258,31 @@ for _short, _tool in LB_TOOLS:
 lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
+def shard_split_check():
+    """GUARD_SHARD: the n shards of a list are disjoint, hold every item, and differ in size by one at most;
+    a malformed value stops the run."""
+    for size in (0, 1, 7, 3900):
+        items = list(range(size))
+        for n in range(1, 6):
+            shards = [shard_of(items, (i, n)) for i in range(1, n + 1)]
+            if sorted(sum(shards, [])) != items or max(map(len, shards)) - min(map(len, shards)) > 1:
+                return False, "%d items in %d shards split as %s" % (size, n, [len(x) for x in shards])
+    for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2"):
+        try:
+            parse_shard(bad)
+        except SystemExit:
+            continue
+        return False, "GUARD_SHARD=%r was accepted" % bad
+    if parse_shard("") != (1, 1) or parse_shard("2/3") != (2, 3):
+        return False, "parse_shard misread an empty or a well-formed value"
+    return True, "shards of 0 to 3900 items in 1 to 5 shards are disjoint and whole; bad values stop"
+
+
+LOG_CHECKS_EXTRA.append(("GUARD_SHARD: the shards are disjoint and hold every case", shard_split_check))
+LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
+FIXTURELESS_CHECKS.add(shard_split_check)
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -15718,9 +15766,14 @@ def run_cases():
     if mode and not total:
         print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
         return 2
+    # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
+    picked = shard_of(cases + logs, GUARD_SHARD)
+    cases = [c for c in picked if isinstance(c, dict)]
+    logs = [c for c in picked if not isinstance(c, dict)]
     print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
     print("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
           % (mode or "(unset)", fam or "(unset)", total))
+    print("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
     print("fixtures under " + ROOT)
     print()
     failed = 0
@@ -15780,10 +15833,11 @@ def run_cases():
             os.kill(orphan, signal.SIGTERM)
         except OSError:
             pass
-    if (mode or fam or only) and not ran:
-        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s "
-              "matched none, or matched only skips: %d skipped)" % (
-                  mode or "(unset)", fam or "(unset)", only or "(unset)", skipped))
+    if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
+        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
+              "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
+                  mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
+                  skipped))
         return 1
     if failed:
         print("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
