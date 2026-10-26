@@ -18,5 +18,7 @@ everything else stands.
 3. Batch 4 (kill guard, c27) runs in its own session on the Mac, beside this one. On Windows,
    skip it; do not wait for it.
 
-Batch 3: the owner answers the 18:05 question directly in this session. Until then, park batch 3
-only, per the stop point.
+Batch 3: the owner did not see whether the Oct 25 18:05 question alerted them (not watching).
+Rerun the check on purpose: tell the owner in your first report that a test question comes in
+5 minutes, with the app minimized and the phone nearby, then ask one AskUserQuestion test. The
+owner says what fired: desktop banner, phone push, or nothing. Park batch 3 only until then.
