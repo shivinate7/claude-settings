@@ -770,6 +770,97 @@ class CutBranch(Env):
         self.assertIn("local-only commits", out)
         self.assertTrue(self.exists())
 
+class CutBranchTree(Env):
+    """cut_branch when a worktree holds the merged branch. A clean tree whose HEAD is in the merged default branch goes,
+    with its folder and its branch. Any other tree stays, with one `merge: feat kept here: ...` line that says why."""
+
+    def setUp(self):
+        super().setUp()
+        self.wt = os.path.join(self.t, "wt-feat")
+        self.old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, self.old_cwd)
+
+    def merged_feat(self):
+        """Put feat's tip on origin/main, as a merge would, and move the local main onto it. -> the merged sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge feat", "origin/feat")
+        sh(o, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge", "-q", "--ff-only", "origin/main")
+        return sh(self.co, "git", "rev-parse", "origin/main")
+
+    def worktree(self):
+        """A worktree on local feat, at origin/feat. Returns nothing; the caller edits it."""
+        sh(self.co, "git", "branch", "feat", "origin/feat")
+        sh(self.co, "git", "worktree", "add", "-q", self.wt, "feat")
+        self.assertIn(self.wt, sh(self.co, "git", "worktree", "list"), "subject: the worktree must exist first")
+
+    def cut(self, merged):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            merge.cut_branch(self.co, "feat", merged)
+        return out.getvalue()
+
+    def exists(self):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", "refs/heads/feat"], capture_output=True).returncode == 0
+
+    def listed(self):
+        return sh(self.co, "git", "worktree", "list")
+
+    def kept_lines(self, out):
+        return [l for l in out.splitlines() if l.startswith("merge: feat kept here:")]
+
+    def assertKept(self, out, why):
+        lines = self.kept_lines(out)
+        self.assertEqual(len(lines), 1, f"one kept line, got: {out!r}")
+        self.assertRegex(lines[0], why)
+        self.assertTrue(os.path.isdir(self.wt), f"the tree was removed; out: {out!r}")
+        self.assertIn(self.wt, self.listed())
+        self.assertTrue(self.exists(), f"the branch was deleted; out: {out!r}")
+
+    def test_clean_merged_tree_is_removed_with_its_branch(self):
+        merged = self.merged_feat()
+        self.worktree()
+        out = self.cut(merged)
+        self.assertFalse(os.path.exists(self.wt), f"the worktree folder is still there; out: {out!r}")
+        self.assertNotIn(self.wt, self.listed())
+        self.assertFalse(self.exists(), f"the local branch feat was not deleted; out: {out!r}")
+        self.assertIn("feat here: deleted", out)
+
+    def test_dirty_tree_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        put(os.path.join(self.wt, "scratch.txt"), "an uncommitted edit\n")
+        self.assertKept(self.cut(merged), r"feat kept here: .*dirty")
+
+    def test_head_with_a_commit_the_default_branch_lacks_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        put(os.path.join(self.wt, "local-only.txt"), "x\n")
+        sh(self.wt, "git", "add", "-A"); sh(self.wt, "git", "commit", "-q", "-m", "local only")
+        self.assertKept(self.cut(merged), r"feat kept here: .*(local-only|not in)")
+
+    def test_tree_whose_cwd_is_inside_it_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        os.chdir(self.wt)
+        self.assertKept(self.cut(merged), r"feat kept here: .*(cwd|current directory|working directory)")
+
+    def test_tree_locked_by_a_live_agent_is_kept(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))  # the process-start read the lock's verdict uses
+        import git_reads
+        merged = self.merged_feat()
+        self.worktree()
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        started = git_reads._process_start_ms(child.pid)
+        self.assertIsNotNone(started, "could not read the child's start time")
+        start = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(started / 1000))
+        sh(self.co, "git", "worktree", "lock", "--reason", f"claude agent agent-x (pid {child.pid} start {start})", self.wt)
+        self.assertKept(self.cut(merged), r"feat kept here: .*lock")
+
 # ------------------------------------------------------------------ the lanes of a batch
 # One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
 LANE_KEPT = "merge: lane origin/{b}: kept: {why}"
