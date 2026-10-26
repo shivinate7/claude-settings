@@ -94,13 +94,6 @@ pin commit: every install at or past #566 (batch-oct23a, where the STE hooks lef
 means delete both files, their stub cases in lint/test_settings_matcher.py, and the debt. Any
 install older, or unknown: keep them and say why.
 
-## Batch 6. Merged work leaves no worktrees or branches behind (c44). Added Oct 26.
-
-Full brief: briefs/c44-merged-work-cleans-up.md in the advisor repo (step c44's Ask). Owner agreed
-Oct 25. Its lane 3 (the report offers the fast cleanup command) edits the same report rule as batch 2:
-if batch 2 has not merged, carry lane 3 in batch 2; otherwise it rides here. Lanes 1 and 2 touch the
-merge tool and the sweep, which no other batch touches, so they may start as drafts at once.
-
 ## Not in this goal
 
 - c33 (home gets a small CI) and c42 (home-app names its merge checks): each is a short session in
