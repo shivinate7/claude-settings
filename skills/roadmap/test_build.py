@@ -3,6 +3,7 @@
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -44,6 +45,8 @@ TODAY_STUB = """<script>
 })();
 </script>
 """
+# sha256 of roadmap/page/index.html on the roadmap branch at 496ddbc, the page the old builder used.
+TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
 
@@ -129,6 +132,16 @@ class TodaysPage(Fixture):
         template = (HERE / "page" / "index.html").read_text(encoding="utf-8")
         data = {"steps": {"c1": STEP}, "topics": {"t01": {"title": "x", "order": 1}}, "meta": {"cull": {"stopRule": "s"}}}
         self.assertEqual(BLOCK.sub("", page), today_page(BLOCK.sub("", template), data))
+
+    def test_template_outside_the_blocks_is_todays(self):
+        template = (HERE / "page" / "index.html").read_text(encoding="utf-8")
+        self.assertEqual(hashlib.sha256(BLOCK.sub("", template).encode("utf-8")).hexdigest(), TODAY_TEMPLATE_SHA256)
+
+    def test_comment_opener_in_data_cannot_reach_the_page_script(self):
+        self.write_step("c1", dict(STEP, note="<!-- <script> x"))
+        git(self.repo, "commit", "-qam", "note")
+        page, _ = self.build_from_main()
+        self.assertNotIn("<!-- <script>", page)
 
     def test_template_holds_build_blocks(self):
         template = (HERE / "page" / "index.html").read_text(encoding="utf-8")
@@ -288,6 +301,41 @@ class RecordsAndHealth(Fixture):
         debts = self.records(page)["debts"]
         self.assertIsNone(debts["count"])
         self.assertTrue(debts["why"].startswith("unknown"))
+
+    def test_uncommitted_entries_are_said_not_skipped(self):
+        (self.repo / "decisions" / "loose.md").write_text("# Loose\n", encoding="utf-8")
+        page, _ = self.build_from_main()
+        row = self.records(page)["decisions"]
+        self.assertEqual(row["count"], 9)
+        self.assertIn("1 of 9 entries have no add commit", row["newestWhy"])
+        panel = {p["name"]: p for p in build_info(page)["panels"]}["Decisions"]
+        self.assertIn("not yet committed", panel["read"])
+
+    def test_clean_home_stamp_has_no_edit_note(self):
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "hidden file")
+        page, _ = self.build_from_main()
+        panel = {p["name"]: p for p in build_info(page)["panels"]}["Decisions"]
+        self.assertNotIn("not yet committed", panel["read"])
+
+    def test_non_ascii_and_renamed_entries_are_dated(self):
+        (self.repo / "decisions" / "é x.md").write_text("# Accent\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "accent")
+        git(self.repo, "mv", "decisions/d0.md", "decisions/renamed.md")
+        git(self.repo, "commit", "-q", "-m", "rename")
+        page, _ = self.build_from_main()
+        row = self.records(page)["decisions"]
+        self.assertEqual([n["name"] for n in row["newest"][:2]], ["renamed.md", "é x.md"])
+        self.assertIsNone(row["newestWhy"])
+        self.assertIn("%C3%A9%20x.md", row["newest"][1]["url"])
+
+    def test_a_home_that_is_a_file_has_no_count(self):
+        (self.repo / "plans").write_text("x", encoding="utf-8")
+        page, _ = self.build_from_main()
+        row = self.records(page)["plans"]
+        self.assertIsNone(row["count"])
+        self.assertIn("not a folder", row["why"])
 
     def test_shallow_clone_newest_reads_unknown(self):
         clone = pathlib.Path(self.tmp.name) / "shallow"

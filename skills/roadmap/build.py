@@ -32,6 +32,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.parse
 
 NOTE_WORDS = 250
 STALE_DAYS = 5
@@ -56,6 +57,8 @@ EXTRAS = "roadmap/extras.json"
 GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
 COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
 BOARD_WHY = "unknown (Deferred: where live worker state is read from is still open for the owner)"
+
+HEADER = re.compile(r"^@[0-9a-f]{40,64} \S+$")
 
 HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
@@ -124,12 +127,14 @@ class Ref:
             return {}
         raw, at, found = done.stdout, 0, {}
         for name in names:
-            end = raw.index(b"\n", at)
-            head = raw[at:end].split()
+            end = raw.find(b"\n", at)
+            if end < 0:  # cat-file stopped early; the rest reads as missing
+                break
+            head = raw[at:end]
             at = end + 1
-            if len(head) < 3 or head[1] == b"missing":
+            if head.endswith(b" missing"):
                 continue
-            size = int(head[2])
+            size = int(head.rsplit(b" ", 1)[1])
             found[name] = raw[at:at + size].decode("utf-8", errors="replace")
             at += size + 1
         return found
@@ -329,11 +334,14 @@ def records(repo, found, slug, branch):
     here = {kind: found[kind][0] for kind in LISTED if found.get(kind, (None,))[0]}
     added, cut = {}, set()
     if here:
-        out = git(repo, "log", "HEAD", "--diff-filter=A", "--format=@%H %cI", "--name-only", "--", *here.values()) or ""
+        # -z keeps non-ASCII names unquoted; --no-renames counts a file renamed in as added.
+        out = git(repo, "log", "HEAD", "--diff-filter=A", "--no-renames", "-z", "--format=@%H %cI", "--name-only",
+                  "--", *here.values()) or ""
         cut = shallow_edge(repo)
         when, rank, skip = None, 0, False
-        for line in out.splitlines():
-            if line.startswith("@"):
+        for line in out.split("\0"):
+            line = line.strip("\n")
+            if HEADER.match(line):
                 sha, when = line[1:].split(" ", 1)
                 rank, skip = rank + 1, sha in cut
             elif line and not skip:
@@ -350,19 +358,34 @@ def records(repo, found, slug, branch):
                          "why": "unknown (%s)" % found.get(kind, (None, "no such kind"))[1]})
             continue
         folder = repo / home
-        entries = sorted(e for e in os.listdir(folder) if not e.startswith(".")) if folder.is_dir() else []
+        if not folder.is_dir():
+            rows.append({"kind": kind, "name": name, "home": home, "count": None, "newest": [],
+                         "why": "unknown (%s is not a folder)" % home})
+            continue
+        entries = sorted(e for e in os.listdir(folder) if not e.startswith("."))
         # git log lists newest first, so a lower rank is a newer add, and same-second commits keep their order.
         dated = sorted((added[home + "/" + e], e) for e in entries if home + "/" + e in added)
         newest = []
         for (_, at), entry in dated[:NEWEST]:
             rel = home + "/" + entry
             newest.append({"name": entry, "title": title_of(folder / entry), "added": at,
-                           "url": "https://github.com/%s/blob/%s/%s" % (slug, branch, rel) if slug else None})
+                           "url": blob_url(slug, branch, rel)})
+        undated = len(entries) - len(dated)
+        why = None
+        if undated:
+            why = "%d of %d entries have no add commit here (%s), so the list leaves them out" % (
+                undated, len(entries), "a shallow clone, or not yet committed" if cut else "not yet committed")
+            if not newest:
+                why = "unknown (%s)" % why
         rows.append({"kind": kind, "name": name, "home": home, "count": len(entries), "newest": newest,
-                     "why": None if folder.is_dir() else "unknown (%s is not a folder)" % home,
-                     "newestWhy": "unknown (a shallow clone: its history stops before these files were added)"
-                     if cut and not newest and entries else None})
+                     "why": None, "newestWhy": why})
     return rows
+
+
+def blob_url(slug, branch, rel):
+    if not slug:
+        return None
+    return "https://github.com/%s/blob/%s/%s" % (slug, urllib.parse.quote(branch), urllib.parse.quote(rel))
 
 
 def health(repo, extra, where, slug, branch):
@@ -376,7 +399,7 @@ def health(repo, extra, where, slug, branch):
     else:
         last = (git(repo, "log", "-1", "--format=%h", "--", path) or "").strip()
         repo_map = {"name": "Repo map", "home": path, "read": last or "unknown (git has no commit for it)",
-                    "url": "https://github.com/%s/blob/%s/%s" % (slug, branch, path) if slug else None}
+                    "url": blob_url(slug, branch, path)}
     return [repo_map, {"name": "Compliance scores", "home": None, "read": COMPLIANCE_WHY},
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
@@ -394,13 +417,21 @@ def build_info(repo, source, why):
     head = short(repo, "HEAD")
     panels = [steps]
     found = homes(repo)
+    there = [found[kind][0] for kind, _ in HOMES if found[kind][0]]
+    # The homes are read from the working tree, so a home with uncommitted or untracked files says so.
+    status = git(repo, "status", "--porcelain=v1", "-z", "-uall", "--", *there) if there else ""
+    dirty = [n[3:] for n in (status or "").split("\0") if len(n) > 3]
     for kind, name in HOMES:
         path, missing = found[kind]
         if path is None:
             panels.append({"name": name, "kind": kind, "home": None, "read": "unknown (%s)" % missing})
-        else:
-            panels.append({"name": name, "kind": kind, "home": path,
-                           "read": head or "unknown (git could not name the commit)"})
+            continue
+        read = head or "unknown (git could not name the commit)"
+        if status is None:
+            read += " (unknown whether it has edits not yet committed)"
+        elif head and any(n == path or n.startswith(path + "/") for n in dirty):
+            read += " with edits not yet committed"
+        panels.append({"name": name, "kind": kind, "home": path, "read": read})
     return {"repo": repo.name, "builtAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "panels": panels}
 
@@ -431,7 +462,8 @@ BUILD_BLOCK = "<!-- build:info -->\n<script>\nwindow.ROADMAP_BUILD = %s;\n</scri
 
 
 def as_script(value):
-    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+    """JSON for inside a <script>: no `</` to end it and no `<!--` to change how the browser reads it."""
+    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "\\u003c!--")
 
 
 def render(data, info):

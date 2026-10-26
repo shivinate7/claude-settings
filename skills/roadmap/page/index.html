@@ -882,7 +882,7 @@ function unavailable(){
       : '<p class="lead unk">Health: unknown. This page was not built by the roadmap builder.</p>'}</section>`
     + (recs.length ? recs.map(r => `<section class="card"><header><h3>${esc(r.name)}</h3><span class="lbl">${r.home ? `<span class="id">${esc(r.home)}</span>` : ''}</span></header>
       ${r.count == null ? `<p class="lead unk">${esc(r.why || 'unknown')}</p>`
-        : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map(n => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join('')}</ul>` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(r.newestWhy)}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
+        : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map(n => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join('')}</ul>${r.newestWhy ? `<p class="asof">${esc(r.newestWhy)}</p>` : ''}` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(r.newestWhy)}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
       </section>`).join('')
       : '<section class="card"><p class="lead unk">Records: unknown. This page was not built by the roadmap builder.</p></section>');
   const inner = setView;
