@@ -23,7 +23,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-orchestrator-never-builds` | Orchestrate: every other job. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-worker` | Each worker is one role: builder, reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the advisor, and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -88,8 +88,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `output-never-paste-passing-output` | Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-bring-decisions-as-question` | Bring my decisions as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-answer-has-a-home` | An answer to a question I bring is a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
-| `questions-go-to-owner` | Bring each question to me. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
+| `questions-ask-advisor-first` | When you have a question for me, run ListAgents first. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-order-of-labels` | Done, Deviations, Decided by the advisor, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -102,6 +102,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-branch-is-redundant-by-patch-not-by-ancestry` | The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. | [`decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md`](../decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md) |
 | `a-kill-by-pid-needs-an-owned-pid` | Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. | [`decisions/a-kill-by-pid-needs-an-owned-pid.md`](../decisions/a-kill-by-pid-needs-an-owned-pid.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`decisions/adoptions-declined-2026-09-28.md`](../decisions/adoptions-declined-2026-09-28.md) |
+| `advisor-answers-questions` | Owner, 2026-10-22: a session with a question for the owner first runs `ListAgents`. | [`decisions/advisor-answers-questions.md`](../decisions/advisor-answers-questions.md) |
 | `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops. | [`decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`decisions/agent-worktree-discard-is-noted.md`](../decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`decisions/agents-wait-with-monitor.md`](../decisions/agents-wait-with-monitor.md) |
@@ -161,7 +162,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`decisions/predicate-is-the-act.md`](../decisions/predicate-is-the-act.md) |
 | `premise-format` | A premise is a claim, not a fact. | [`decisions/premise-format.md`](../decisions/premise-format.md) |
 | `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`decisions/question-reviewer-agent-hook.md`](../decisions/question-reviewer-agent-hook.md) |
-| `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`decisions/questions-go-to-owner.md`](../decisions/questions-go-to-owner.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `reply-judge-samples-never-blocks` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`decisions/reply-judge-samples-never-blocks.md`](../decisions/reply-judge-samples-never-blocks.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
