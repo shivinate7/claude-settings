@@ -74,12 +74,18 @@ def worktree_remove_forced(args) -> bool:
 # A branch deletion always denies here, never asks: the branch ref lives in the COMMON git
 # directory, the same one every worktree of the clone reads, so which checkout the delete runs
 # from limits nothing about what is lost. This mirrors PUSH_DENY_REASON's own reasoning for the
-# stash stack.
+# stash stack. The remedy hands over the one lossless fix as commands, so a session runs it and
+# asks no one: the archive push puts the tip under a remote ref, which the remote-contains test
+# reads. `archive/` keeps the copy out of the live branch names, and is the janitor's documented
+# protected prefix. `<branch>` is a placeholder (rule git-remedy-never-names-target).
 BRANCH_DELETE_DENY_REASON = (
     "Rule (shared trees): this branch holds work that exists nowhere else. It is not an "
     "ancestor of the repository's default branch, its patches are not already on that branch, "
     "and no remote ref contains it. Deleting it loses the only copy. "
-    "Remedy: push the branch, or merge it, before it is deleted."
+    "Remedy: archive it on origin, then delete it. Run "
+    "`git push origin <branch>:refs/heads/archive/<branch>`, then `git branch -D <branch>`, "
+    "with <branch> the name you are deleting. The push keeps the work, so this rule then "
+    "allows the delete. Nothing is lost, so this needs no question to the owner."
 )
 # A worktree removal always denies here too. The tree it deletes is not the tree the command RUNS
 # in, so the running checkout's own worktree-ness (the split every other arm in this rule reads)

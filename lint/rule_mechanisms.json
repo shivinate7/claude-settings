@@ -155,6 +155,13 @@
       },
       "test": "hooks/test_guard.py::worktree: a hard reset in the shared checkout denies"
     },
+    "shared-trees-archive-then-delete": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "shared-tree"
+      },
+      "test": "hooks/test_guard.py::branch: the refusal's handed remedy, once run, makes the rule allow the delete"
+    },
     "shared-trees-no-machine-wide-kill": {
       "mechanism": {
         "kind": "guard",
