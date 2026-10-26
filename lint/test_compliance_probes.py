@@ -199,5 +199,36 @@ class LaneCap(unittest.TestCase):
         self.assertNotIn("todo.md", out)
 
 
+
+PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
+
+
+class ProbesText(unittest.TestCase):
+    """probes.md commands, as a session copies them into a shell."""
+
+    def text(self):
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_probes_fall_back_to_python(self):
+        text = self.text()
+        self.assertIn("PY=$(command -v python3 || command -v python)", text)
+        self.assertNotRegex(text, r"`python3? \$P/")
+
+    def test_cite_probe_finds_each_id_form(self):
+        # Each pattern is unescaped as a shell does in double quotes, then run through grep.
+        row = next(line for line in self.text().splitlines() if line.startswith("| Speak plainly |"))
+        first = row.split("finds numbered")[0]
+        patterns = re.findall(r'-e "([^"]+)"', first)
+        self.assertTrue(patterns, row)
+        args = ["grep", "-cE"] + [x for p in patterns for x in ("-e", re.sub(r'\\([`"$\\])', r"\1", p))]
+        for line in ("See D12.", "See D-570.", "Decision draft-until-reviewed holds.", "See D`one-layout-every-repo`.",
+                     "See D `one-layout-every-repo`."):
+            done = subprocess.run(args, input=line + "\n", capture_output=True, text=True)
+            self.assertEqual(done.stdout.strip(), "1", line)
+        done = subprocess.run(args, input="Deploy `one-layout` today.\n", capture_output=True, text=True)
+        self.assertEqual(done.stdout.strip(), "0")
+
+
 if __name__ == "__main__":
     unittest.main()

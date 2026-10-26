@@ -50,7 +50,7 @@ LANE_CAP = re.compile(
     r"\b(at most|no more than|up to|max(imum)?( of)?|cap(ped)? (at|of)|limit(ed)? (to|of|at)) " + RANGE + " " + WHO
     + r"|\b" + RANGE + " " + WHO + r"( max(imum)?\b| at a time\b| at once\b| in parallel\b)"
     + r"|\b" + NUM + r" or " + NUM + r" at a time\b", re.I)
-# An owner-named cap carries its source, as the repos write a ruling: "(owner, 2026-10-12)".
+# An owner-named cap carries its source, as the repos write a ruling: "(owner, <date>)".
 OWNER_NAMED = re.compile(r"\((owner|ruling)\b|\b(owner|ruling)\b[^.]*\d{4}-\d{2}-\d{2}", re.I)
 QUOTES = {"\"": "\"", "'": "'", "`": "`", "\u201c": "\u201d", "\u2018": "\u2019"}  # a cap in quotes is cited, not set
 
