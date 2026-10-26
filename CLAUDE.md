@@ -6,7 +6,7 @@ stale, name the entry and the sentence. Measure the claim, or say "unmeasured". 
 outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> A failing test is a claim, not law. Re-point it, red then green, or fix the
 defect it found. If it may be stale and no ruling covers it, use the protocol
 above.<!-- rule:outcomes-tests-are-claims --> My word covers the act it names, never a
-variant. A ruling covers each test and path that expects exactly what it ruled out; cite it
+variant. My ruling covers each test and path that expects exactly what it ruled out; cite it
 with its time.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written.<!-- rule:outcomes-mechanize-rules -->
 

@@ -27,7 +27,7 @@ A test is a claim, not law. When your change breaks one, sort the failure into o
 then green. (b) The failure found a real defect. Fix the code. (c) The rule may be stale.
 STOP. Bring the owner the entry id, its gloss, and the stale sentence. Name the outcome it
 protected and what protects it now. Propose a fix. Wait for their word.
-(d) A ruling in your brief or the repo's records already ruled this behaviour out. Do not ask
+(d) An owner ruling in your brief or the repo's records already ruled this behaviour out. Do not ask
 again. The ruling covers every test that expects exactly that behaviour. Find those tests in one
 pass: search, then run them. Report each test change the lane needs, with the ruling and its
 time, for the test-author to re-point red then green. A test that pins a behaviour next to the
