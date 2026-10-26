@@ -1,0 +1,9 @@
+{
+  "title": "Child repos' CI runs the same claude-settings tools as local sessions, so a stale pin never costs a lane",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.36,
+  "why": "Your gripe, Oct 26 (\"doesn't this just mean CI is old? why would we conform\"): a degen session spent two CI runs on a sentence that only the old pinned linter refused, nearly dropped the iPhone Duo record lane, then asked you to choose.",
+  "note": "Finding, Oct 26 (degen, Duo batch PR 263): degen's CI pinned the claude-settings ste-lint action at 95ada63 (Oct 9), before the 30-word ruling (decision plain-prose-lint, Oct 22); the local linter is current. A 28-word sentence passed locally and failed CI twice, and rule git-integration-branch-merge drops a lane on its second form red. The session then moved the pin itself (reviewed, merged into the batch). Pins of claude-settings actions, read from this container's clones of each repo: banchi ef49dde, q_max 8abab8d and 9d577ab, degen and ios-adblock 95ada63, joyous 873704e; home-app, adblock-lists and mailaudit pin none. claude-settings part, one cloud lane, needs no answer from you: (1) amend git-integration-branch-merge so a form red caused by a pin older than the local tool does not count toward the drop, and the session moves the pin without asking; (2) the local tools a session runs, or a check, name the version CI pins and say when the two differ; (3) choose how pins stay current (Dependabot for actions, a bot bump PR like ios-adblock's pin-bump, or a compliance-check probe); whether Dependabot bumps a SHA pin to another repo's branch is unknown. Child-repo part (bump each repo's pins, add the chosen updater) deferred (shiv, Oct 26): you check each repo's plan first; it rides with the roll-out visits (r1). Port: yes, every repo that pins these actions. Placed ahead of o13 (triage, Oct 26): it burns CI runs and risks dropping a lane in every child repo now.",
+  "updatedAt": "2026-10-26T20:15:00Z"
+}
