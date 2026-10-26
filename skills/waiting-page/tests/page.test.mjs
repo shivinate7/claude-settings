@@ -33,7 +33,7 @@ const TASK = {
 };
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, answers }) {
+function stubDb({ items, answers, failDelete }) {
   const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, meta: {} };
   const subs = { items: [], answers: [] };
   window.__log = [];
@@ -45,7 +45,7 @@ function stubDb({ items, answers }) {
       onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
       doc: (id) => ({
         set: async (body) => { window.__log.push(["set", name, id, body]); data[name][id] = body; setTimeout(() => fire(name), 0); },
-        delete: async () => { window.__log.push(["delete", name, id]); delete data[name][id]; setTimeout(() => fire(name), 0); },
+        delete: async () => { if (failDelete) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete data[name][id]; setTimeout(() => fire(name), 0); },
         onSnapshot: (cb) => { setTimeout(() => cb({ exists: false, data: () => null }), 0); return () => {}; },
       }),
     }),
@@ -57,7 +57,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], answers = {} } = {}) {
+async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage();
@@ -66,7 +66,7 @@ async function open(t, { items = [DECISION, TASK], answers = {} } = {}) {
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html", body: html }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers });
+  await page.addInitScript(stubDb, { items, answers, failDelete });
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   if (Object.keys(answers).length) await page.check("#showDone"); // an answered item hides by default
@@ -129,4 +129,36 @@ test("Clear deletes a task's done mark too", async (t) => {
   await card(page, TASK).getByRole("button", { name: "Clear" }).click();
   await page.waitForFunction((id) => !(id in window.__answers()), TASK.id);
   assert.equal(await card(page, TASK).getByRole("button", { name: "Mark done" }).count(), 1);
+});
+
+const SAVED_A = { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:00:00Z", choice: "a", note: "" } };
+
+test("Clear shows as soon as the owner types a note, and clears it", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await page.fill(`#n-${DECISION.id}`, "a thought");
+  await c.getByRole("button", { name: "Clear" }).click();
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "");
+});
+
+test("a Clear the store refuses keeps the pick and says so", async (t) => {
+  const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("b) Blue").click();
+  await c.getByRole("button", { name: "Clear" }).click();
+  await c.getByText("Not cleared (denied)", { exact: false }).waitFor();
+  const draft = JSON.parse(await page.evaluate(() => localStorage.getItem("waiting.draft")));
+  assert.equal(draft[DECISION.id] && draft[DECISION.id].choice, "b", "the draft went although the answer stayed");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-b`), true);
+  assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
+});
+
+test("a saved none note does not ride along when the owner picks an option", async (t) => {
+  const page = await open(t, { answers: { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:00:00Z", choice: "none", note: "Green" } } });
+  if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("b) Blue").click();
+  await c.getByRole("button", { name: "Update answer" }).click();
+  await page.waitForFunction((id) => window.__answers()[id].choice === "b", DECISION.id);
+  assert.equal((await answers(page))[DECISION.id].note, "");
 });

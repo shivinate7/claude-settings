@@ -57,7 +57,8 @@ item open: `ArtifactData list answers`.
 - A cleared answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner cleared it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
-  it as step 4 of "Route and close" says.
+  it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
+  answer for item 27.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
   later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
 - Never write `answers/`. Only the owner's Save or Clear changes it. A session that writes it forges the
@@ -66,16 +67,19 @@ item open: `ArtifactData list answers`.
 
 ## Route and close
 
+Sort the answer first. A `none` answer takes step 3 only. Any other answer that is not clear takes
+step 4 only. A clear answer takes steps 1 and 2.
+
 1. Move the answer to the item's home: the decision entry, the roadmap step or the PR, as rule
    `output-answer-has-a-home` (an answer has a home) says.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
-3. If the answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to its
-   version), and leave the item open. Say in the terminal what was not clear.
-4. If the answer is `none`, skip steps 1 and 2. Write new `options`, `pick` and `why` from the
+3. If the answer is `none`, write new `options`, `pick` and `why` from the
    owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If the note is not
    enough to write them, ask in the terminal what the owner wants.
+4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
+   its version), and leave the item open. Say in the terminal what was not clear.
 
 ## Make a repo's page
 

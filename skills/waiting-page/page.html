@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px soli
 </div></div>
 
 <script>
-const state = { items: [], answers: {}, meta: null, draft: {}, db: null, showDone: false };
+const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, showDone: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
 const $ = (id) => document.getElementById(id);
@@ -118,7 +118,12 @@ function card(it) {
     (it.options || []).forEach((o) => {
       const lab = el("label", "opt" + (chosen === o.key ? " picked" : ""));
       const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = o.key; r.id = "o-" + it.id + "-" + o.key; r.checked = chosen === o.key;
-      r.addEventListener("change", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: o.key }); saveDraft(); render(); });
+      r.addEventListener("change", () => {
+        const next = Object.assign({}, state.draft[it.id], { choice: o.key });
+        // A saved "none" note says what the owner wants instead. It does not carry over to an option.
+        if (ans && ans.choice === NONE && next.note == null) next.note = "";
+        state.draft[it.id] = next; saveDraft(); render();
+      });
       const head = el("span", "lab", o.key + ") " + o.label);
       if (o.key === it.pick) head.append(el("span", "tag", "my pick"));
       lab.append(r, head);
@@ -153,19 +158,23 @@ function card(it) {
     return choice === NONE ? !note.value.trim() : !choice && !note.value;
   };
   btn.disabled = !state.db || blocked();
-  note.addEventListener("input", () => { btn.disabled = !state.db || blocked(); });
-  const st = el("span", "status" + (ans ? " ok" : ""), ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + choiceText(ans.choice) : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner);
+  note.addEventListener("input", () => { btn.disabled = !state.db || blocked(); clr.hidden = false; });
+  const notice = state.notice[it.id];
+  const st = el("span", "status" + (ans && !notice ? " ok" : ""), notice || (ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + choiceText(ans.choice) : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner));
   btn.addEventListener("click", async () => { await save(it, btn, st); });
   // Clear removes the draft and the saved answer. A cleared item reads as unanswered.
   const clr = el("button", "ghost", "Clear"); clr.type = "button";
   clr.hidden = !ans && !d.choice && !d.note;
+  // The draft goes only once the saved answer is gone, so a failed Clear leaves the card as it was.
   clr.addEventListener("click", async () => {
-    delete state.draft[it.id]; saveDraft();
+    delete state.notice[it.id];
     if (ans) {
-      if (!state.db) { st.className = "status"; st.textContent = "Not cleared: this view cannot reach the page's store."; return; }
-      try { await state.db.collection("answers").doc(it.id).delete(); delete state.answers[it.id]; }
-      catch (e) { st.className = "status"; st.textContent = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; return; }
+      try {
+        if (!state.db) throw { code: "no store" };
+        await state.db.collection("answers").doc(it.id).delete(); delete state.answers[it.id];
+      } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; render(); return; }
     }
+    delete state.draft[it.id]; saveDraft();
     render();
   });
   foot.append(note, btn, clr, st);
@@ -183,7 +192,7 @@ async function save(it, btn, st) {
   btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
   try {
     await state.db.collection("answers").doc(it.id).set(body);
-    delete state.draft[it.id]; saveDraft();
+    delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
   } catch (e) {
     btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
   }
