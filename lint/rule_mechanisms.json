@@ -133,7 +133,7 @@
     "parallelism-no-mid-task-talk": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by the SendMessage prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the SendMessage wording judge (model claude-sonnet-5-5, in hooks/sendmessage_state.py); it moves to a mechanism after the judge makes a real catch."
       }
     },
     "parallelism-no-guessed-lane-cap": {
@@ -145,7 +145,7 @@
     "parallelism-keep-going": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "A check would need the queue at turn end and each item's open questions; no file holds them. The owner deferred a Stop check that refuses an idle turn end until the gap repeats (step c59, Oct 26)."
+        "reason": "A check would need the queue at turn end, each item's open questions, and which follow-ups the session found; no file holds them. The owner deferred a Stop check that refuses an idle turn end until the gap repeats (step c59, Oct 26)."
       }
     },
     "parallelism-argue-max-parallelism": {

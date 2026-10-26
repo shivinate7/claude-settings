@@ -38,7 +38,7 @@ HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_bri
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
-TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer"]
+TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "designer", "design-reviewer"]
 
 # Full scope line per type, pinned verbatim. Edit here only when the hook's text changes on purpose.
 SCOPE_LINE = {
@@ -47,6 +47,8 @@ SCOPE_LINE = {
     "reviewer": "- Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "- Scope: Explore. Never edit. Read and search only.",
     "record-writer": "- Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
+    "designer": "- Scope: designer. Edit files in the repo's design folder only. Report any other change needed.",
+    "design-reviewer": "- Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
                 "a test-author never edits product code; a reviewer and Explore never edit; "
@@ -281,14 +283,14 @@ def line_set_check(expected):
     return check
 
 
-for _t in ["builder", "test-author", "record-writer"]:
+for _t in ["builder", "test-author", "record-writer", "designer"]:
     add("line set: %s gets the nine-line set" % _t, "context", payload(_t),
         line_set_check(WRITER_RULES))
 add("line set: a general (unknown) type gets the nine-line set", "context",
     payload("some-new-agent"), line_set_check(WRITER_RULES))
 add("line set: a missing agent type gets the nine-line set", "context", payload(),
     line_set_check(WRITER_RULES))
-for _t in ["reviewer", "Explore", "Plan", "claude-code-guide"]:
+for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
@@ -363,7 +365,7 @@ add("case: explore gets the five-line set", "context", payload("explore"), line_
 
 # The push, trailer and record-path lines are for the write-capable types and the general
 # case, and never for reviewer or Explore.
-for _t in ["builder", "test-author", "record-writer"]:
+for _t in ["builder", "test-author", "record-writer", "designer"]:
     add("brief lines: %s gets the push, trailer and record-path lines" % _t, "context",
         payload(_t), brief_lines_check(True))
 add("brief lines: a missing agent type (general case) gets the push, trailer and record-path lines",

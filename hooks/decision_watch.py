@@ -9,7 +9,7 @@ file diff cannot make: whether an approval for this exact change is visible in t
 
 THE CHEAP PATH, FIRST. `changed_paths` reads this turn's dirty files from `git status
 --porcelain` against HEAD, scoped by mtime against the last human message the same way
-the old markdown sweep did (see `decisions/predicate-is-the-act.md`: a shape list of
+the old markdown sweep did (see `docs/decisions/predicate-is-the-act.md`: a shape list of
 write commands can only grow, so this hook reads the filesystem's own act instead of
 parsing Bash text). `looks_protected` then asks, per file, whether the name or location
 marks it a decision, a gate, a CLAUDE.md, or a settings file. Settings files use
@@ -96,7 +96,7 @@ else:
 from shared_names import STATE_DIR_NAME  # noqa: E402  stdlib only
 
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
-# (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
+# (docs/decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 from _transcript import last_human_epoch, head_moved_since, is_last_human  # noqa: E402
 
@@ -260,7 +260,7 @@ def chat_text_after(records, idx, limit=6000):
 # ------------------------------------------------------------------ this turn's changed files
 #
 # git's own dirty-file list, scoped by mtime against the last human message.
-# See decisions/predicate-is-the-act.md. A git failure here (including "not
+# See docs/decisions/predicate-is-the-act.md. A git failure here (including "not
 # a git work tree at all") is read as UNKNOWN rather than falling back to a plain walk: this
 # hook's job is a security read, not a lint, and an unscoped walk over a non-repo directory
 # is not an honest substitute for "what did this turn change".
@@ -574,7 +574,7 @@ JUDGE_INSTRUCTIONS = (
 # `--tools` alone does not claim to reach.
 #
 # Copying `os.environ` and subtracting names cannot
-# be complete, the same shape `decisions/predicate-is-the-act.md` already names for a
+# be complete, the same shape `docs/decisions/predicate-is-the-act.md` already names for a
 # shape list that can only grow. `JUDGE_ENV_ALLOWLIST` inverts it: the child's environment
 # holds only the named variables the runtime genuinely needs to execute and reach the API
 # host, built fresh, never copied from the parent and never carrying a name this list does
@@ -596,7 +596,7 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
 # path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See decisions/reply-judge-samples-never-blocks.md.
+# scrubs the token from any error text it returns. See docs/decisions/reply-judge-samples-never-blocks.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
@@ -665,7 +665,7 @@ def _judge_isolation():
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
 
 
-def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE):
+def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
     `verdict_dict` is `{"verdict": "ALLOW"}` or `{"verdict": "FLAG", "why": "..."}` on
@@ -675,6 +675,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
 
     `shape` is the caller's accepted answer: one key and the values it may hold. The default
     is this hook's own ALLOW/FLAG verdict. `hooks/reply_judge.py` passes `{"ok": (True, False)}`.
+    `effort` None passes no --effort, so the model runs at its default, as a prompt hook does.
     """
     try:
         root, env = _judge_isolation()
@@ -687,7 +688,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             [
                 "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,
-                "--effort", "xhigh",
+            ] + (["--effort", effort] if effort else []) + [
                 "--output-format", "json",
                 "--tools", "",
                 "--safe-mode",
@@ -867,7 +868,7 @@ LINT_DIR = os.path.join(HERE, "..", "lint")
 
 def _shared_transcript():
     """Return `lint/_transcript.py`, the one home of the transcript readers
-    (decisions/hooks-share-the-transcript-reader.md). This section reads through it, never through
+    (docs/decisions/hooks-share-the-transcript-reader.md). This section reads through it, never through
     the older copies above."""
     if LINT_DIR not in sys.path:
         sys.path.insert(0, LINT_DIR)
