@@ -398,6 +398,26 @@ def case_override_context_line():
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
 
 
+def case_opus_context_line():
+    # The Opus word prints one line naming the pass, its role and its end; `opus off` names the end of
+    # the pass, and `override off` leaves an Opus pass in place.
+    cfg = ov_cfg()
+    for prompt, want in (("opus 3h", "16:00"), ("opus builders 2h", "builder spawns"),
+                         ("opus off", "Opus pass: ended.")):
+        proc = ov_type(cfg, prompt)
+        lines = proc.stdout.splitlines() if proc else []
+        check("opus: `%s` prints one line that names the Opus pass and %s" % (prompt, want),
+              sum(l.startswith("Opus pass:") for l in lines) == 1 and any(want in l for l in lines)
+              and any(LINE_FULL.fullmatch(l) for l in lines),
+              "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+    cfg = ov_cfg()
+    ov_type(cfg, "opus 2h")
+    ov_type(cfg, "override off")
+    check("opus: `override off` leaves an Opus pass in place",
+          os.path.exists(os.path.join(cfg, "state", "override", "opus", OV_SESSION + ".json")),
+          "files %r" % ov_pass_files(cfg))
+
+
 def case_override_off():
     cfg = ov_cfg()
     ov_type(cfg, "override 15m")
@@ -603,6 +623,7 @@ def main():
         case_override_grants()
         case_override_context_line()
         case_override_off()
+        case_opus_context_line()
         case_override_takes_words()
         case_override_reason_goes_through_the_log_writer()
         case_override_reason_with_a_lone_surrogate()
