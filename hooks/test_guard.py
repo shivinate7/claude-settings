@@ -1670,6 +1670,21 @@ CLONE_SETTINGS = slash(os.path.join(CLONE, "settings.json"))
 PY_PATH = os.path.dirname(sys.executable)
 
 
+def _program_folder(name):
+    """The folder that holds `name`, found on this process's own PATH. A raise when there is none: a case that needs the program on the
+    guard's narrow PATH cannot run without it."""
+    found = shutil.which(name, path=os.environ.get("PATH"))
+    if not found:
+        raise RuntimeError("test_guard: %r is not on this process's PATH, and the cases that read the current branch need it on the guard's" % name)
+    return os.path.dirname(found)
+
+
+# c53: a merge that names no pull request reads the branch of the working directory, so Host.pr_number runs `git rev-parse` (the old
+# `gh pr view` ran git itself). The guard's narrow PATH is the fake gh's folder and the interpreter's, and on CI the interpreter's folder
+# (the toolcache) has no git: those cases add git's own folder.
+GIT_PATH = _program_folder(VCS)
+
+
 # =========================================================================== 1. shared trees
 #
 # Ported from job-cost-reporting harness/test_guard.py. The cases about that repository's read-only
@@ -7160,7 +7175,7 @@ sh("merge: an unreadable base is allowed once the head checks read green",
    "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHBLANK + os.pathsep + PY_PATH,
    config=MERGECFG)
 sh("merge: no number is allowed, and reads the pull request of the current branch", "gh pr merge", "allow",
-   cwd=CURREPO, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+   cwd=CURREPO, env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH, config=MERGECFG)
 add("merge: a call of the merge tool on a green head is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
@@ -7274,9 +7289,9 @@ sh("merge-checks: a branch name over a pending head denies", "gh pr merge feat -
 sh("merge-checks: a branch with no open pull request is unknown, and denies", "gh pr merge other --squash", "deny", "merge-checks",
    carries="other", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
 sh("merge-checks: no number on a branch with no open pull request is unknown, and denies", "gh pr merge", "deny", "merge-checks",
-   carries="main", cwd=GITMAIN, env_path=GREEN_ON, config=MERGECFG)
+   carries="main", cwd=GITMAIN, env_path=GREEN_ON + os.pathsep + GIT_PATH, config=MERGECFG)
 sh("merge-checks: no number outside a checkout is unknown, and denies", "gh pr merge", "deny", "merge-checks",
-   carries="branch", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+   carries="branch", cwd=NOGIT, env_path=GREEN_ON + os.pathsep + GIT_PATH, config=MERGECFG)
 # No -R: the URL alone names the repo, so every call must go to repos/y/x (GHNEED breaks any call that names another repo).
 sh("merge-checks: a pull request URL names its number and its repo", "gh pr merge https://github.com/y/x/pull/12 --squash", "allow", silent=True,
    cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
