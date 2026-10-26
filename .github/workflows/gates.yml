@@ -449,9 +449,9 @@ jobs:
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
       # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
-      # all-on arm of harness-scope.sh, so a change there runs this job.
+      # all-on arm of harness-scope.sh, so a change there runs this job. A red shoot suite above
+      # skips this step; it runs again once that suite is green.
       - name: waiting page suite
-        if: ${{ !cancelled() }}
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
 
