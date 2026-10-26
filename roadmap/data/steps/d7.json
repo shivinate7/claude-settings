@@ -1,9 +1,9 @@
 {
-  "note": "Added Oct 20: container queries inside shared components (a card adapts to its box, not the screen), so one component serves a sidebar and a main column with no copy (o11). Page layout stays on a few layout primitives and screen breakpoints. Swift uses its own tools (ViewThatFits, size classes). Limit: each container breakpoint is one more state to screenshot, so add one only where a component changes shape. Not started; no change since Oct 20.",
+  "note": "Added Oct 20: container queries inside shared components (a card adapts to its box, not the screen), so one component serves a sidebar and a main column with no copy (o11). Page layout stays on a few layout primitives and screen breakpoints. Swift uses its own tools (ViewThatFits, size classes). Limit: each container breakpoint is one more state to screenshot, so add one only where a component changes shape. Not started; no change since Oct 20. Your word, Oct 26: banchi's rules must not spread; the ratchet idea stays only if it earns its own case.",
   "order": 255,
   "phase": "design",
   "status": "todo",
   "title": "Space with containers, not margins",
-  "updatedAt": "2026-10-26T05:30:00Z",
-  "why": "gap on parents, a few layout primitives, clamp() tokens for fluid spacing, and banchi's per-file ratchet. This is the direct fix for centering and gap problems."
+  "updatedAt": "2026-10-26T05:10:00Z",
+  "why": "gap on parents, a few layout primitives, clamp() tokens for fluid spacing, and a per-file ratchet (seen in banchi; weighed on its own case, not copied). This is the direct fix for centering and gap problems."
 }
