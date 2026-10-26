@@ -13,9 +13,14 @@ Owner, 2026-10-21: block the hand-made lane worktree fully, and record which lay
 
 Why: an agent spawned with no isolation starts in the main clone, and no hook payload field ties it to a hand-made tree, so `worktree-home` (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop) cannot fence it. Without the hand-made tree, the workaround has nothing to brief the agent into.
 
-Named limit: a tree that already exists outside `.claude/worktrees/` (the owner's own, or one made before this rule) can still be named in a brief. No incident has shown that.
+Named limits, each a form Claude rarely writes:
 
-Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only a subagent's call. The Agent prompt hook in `settings.json` judges brief contents, and its block names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded.
+- A tree that already exists outside `.claude/worktrees/` (the owner's own, or one made before this rule) can still be named in a brief.
+- A `git worktree add` inside `bash -c`, `sh -c`, `eval` or `powershell -c` passes: the guard leaves those strings unparsed, a known gap.
+- A repo named only by `--git-dir`, and a target that holds a variable (`$HOME/wt`), read as unknown and pass.
+- A hand-typed read-only checkout (a review or a "before" image) is denied. EnterWorktree serves that need too.
+
+Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only a subagent's call. The Agent prompt hook in `settings.json` judges brief contents, and its block names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two lane agents wrote into the main clone. Landed 2026-10-26.
 
