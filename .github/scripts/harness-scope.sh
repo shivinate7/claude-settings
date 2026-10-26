@@ -40,7 +40,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*) on="$on code shoot " ;;
       # merge.py: guard.py loads it. check_record_slugs.py: guard.py reads it. check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/check_record_slugs.py) on="$on $W $X code guard " ;;
