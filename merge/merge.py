@@ -1037,9 +1037,60 @@ def ff_main(root, base, commit):
         raise Stop(f"the local main did not move in {where}. {kept}\nFast-forward {base} there by hand.")
     say(f"merge: local {base} is at {commit[:9]}.")
 
+def _keep_words(reason):
+    """The sweep's keep reason in plain words for the `kept here` line."""
+    if reason.startswith("dirty"):
+        return "dirty: it has uncommitted changes."
+    if reason.startswith(("unmerged", "unpushed")):
+        return "its HEAD is not in the merged head, so it holds local-only commits."
+    if reason.startswith("locked"):
+        return "the worktree has a lock (" + reason + ")."
+    if reason.startswith("live-session"):
+        return "a live Claude session works in it."
+    if reason.startswith("process-inside"):
+        return "a process runs inside it (" + reason + ")."
+    if reason.startswith("unreadable"):
+        return "a read on it failed, so it is not judged removable."
+    return reason + "."
+
+def remove_held_tree(root, branch, held, merged):
+    """Remove the one worktree `held` that holds `branch`, by the janitor sweep's fast path
+    (janitor/sweep.py `decide_worktree`, `remove_worktree`): one home for what may go, no --force.
+    -> True when the tree is gone and the caller may delete the branch; False when it stays, after one
+    `kept here` line. The caller's cwd inside the tree, a primary checkout and any failed read keep it."""
+    def keep(why):
+        say(f"merge: {branch} kept here: {why}")
+        return False
+    try:
+        here, tree = os.path.realpath(os.getcwd()), os.path.realpath(held)
+        if here == tree or here.startswith(tree + os.sep):
+            return keep(f"the current directory (cwd) is inside {held}.")
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
+        import sweep  # janitor/sweep.py: the one home of the worktree keep rule and the removal
+        entry = next((e for e in sweep.parse_worktree_list(root) or [] if os.path.realpath(e["path"]) == tree), None)
+        if entry is None:
+            return keep(f"checked out in {held}, whose entry could not be read.")
+        if sweep._is_primary_checkout(held) is not False:
+            return keep(f"checked out in {held}, the primary checkout or a tree not proven linked.")
+        batch = sweep.merged_batch(root, merged)
+        if batch is None:
+            return keep(f"checked out in {held}; which commits are merged could not be read.")
+        decision = sweep.decide_worktree(root, entry, attended=True, fast=True, batch=batch)
+        if decision["action"] != "reap":
+            return keep(_keep_words(decision["reason"]))
+        sweep.remove_worktree(root, held, decision)
+        if decision.get("error") or os.path.exists(held):
+            return keep("it could not be removed: " + str(decision.get("error", "the folder is still there")))
+    except Exception as e:  # any failed import or read keeps the tree; the merge is done
+        return keep(f"checked out in {held}; the janitor read failed ({type(e).__name__}: {e}).")
+    say(f"merge: worktree {held} removed.")
+    return True
+
 def cut_branch(root, branch, merged):
-    """Delete the head branch on origin, and here unless a worktree holds it or it has local-only
-    commits (its tip must be an ancestor of `merged`, the head that merged). Never fails the merge."""
+    """Delete the head branch on origin, and here unless it has local-only commits (its tip must be an
+    ancestor of `merged`, the head that merged). A worktree that holds the branch goes first when the
+    janitor sweep's fast path judges it removable (`remove_held_tree`); otherwise it stays, with one
+    line why. Never fails the merge."""
     c, out = git(root, "push", "-q", "origin", "--delete", branch)
     # A gone remote ref is a deleted branch: the repo may set delete_branch_on_merge.
     gone = c and "remote ref does not exist" in out
@@ -1047,9 +1098,9 @@ def cut_branch(root, branch, merged):
     if git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0]:
         return
     held = holder(root, branch)
-    if held:
-        say(f"merge: {branch} kept here: checked out in {held}.")
-    elif git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+    if held and not remove_held_tree(root, branch, held, merged):
+        return
+    if git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
         say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
