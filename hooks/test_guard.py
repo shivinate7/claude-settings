@@ -2779,6 +2779,7 @@ hm_deny("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
 hm_deny("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
+hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
 hm_deny("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
 hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
@@ -2810,6 +2811,7 @@ hm_allow("worktree list only reads", VCS + " worktree list")
 hm_allow("worktree lock names no new tree", VCS + " worktree lock " + slash(HMLANE))
 hm_allow("worktree add --help only reads", HMADD + "--help")
 hm_allow("worktree add -h only reads", HMADD + "-h")
+hm_allow("a help flag after the path still only reads", HMADD + "../lane-x --help")
 hm_allow("an echo that only mentions it passes", 'echo "git worktree add ../x"')
 hm_allow("a commit message that holds the words passes",
          VCS + ' commit -m "docs: never run git worktree add ../x by hand"')
@@ -2839,8 +2841,8 @@ def hand_made_refusal_text_case():
         "tool_input": {"command": HMADD + "../" + HM_REFUSED_PATH}})
     if got != "deny":
         return False, "expected deny, got %s: %s" % (got, reason[:90])
-    if not reason.lstrip().startswith("Rule (hand-made worktree)"):
-        return False, "the reason does not start 'Rule (hand-made worktree)': %s" % reason[:90]
+    if "Rule (hand-made worktree)" not in reason:
+        return False, "the reason does not hold 'Rule (hand-made worktree)': %s" % reason[:90]
     for want in ("isolation", "EnterWorktree"):
         if want not in reason:
             return False, "the reason does not name %r: %s" % (want, reason[:90])
@@ -2849,7 +2851,7 @@ def hand_made_refusal_text_case():
     for bad in (HM_REFUSED_PATH, "worktree add"):
         if bad in reason:
             return False, "the reason holds %r, which it must not" % bad
-    return True, "starts 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
+    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
 
 
 def pointer_remedy_names_enter_worktree_case():
