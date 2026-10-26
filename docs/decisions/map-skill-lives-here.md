@@ -23,7 +23,7 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
 - The skill's tests live in `skills/plain-english-map/tests/`, with a small fixture
   repository. The `gates` workflow runs them after `npm ci`.
 
-## Holes, named
+## Safety holes, named
 
 Debts: `skill-copy-no-typescript` (a copy of the skill outside the clone finds no `typescript`: a cloud install, or a refused symlink. An offline `npm ci` re-install also wipes `node_modules`), `gitignore-skips-map-tests` (a change to only `.gitignore` skips the map skill tests), `upgrade-strips-name-port` (the version 2 upgrade strips a port after a code-file name, such as `node.js:18`).
 

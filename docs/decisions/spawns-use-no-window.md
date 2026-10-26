@@ -13,7 +13,7 @@ Outcome protected: the owner's screen stays still while hooks and tools run.
 - `lint/test_no_window_spawn.py` fails on any product spawn that goes around the helper. A site that needs a console carries a `# nowindow:` marker with its reason. Today that is `bin/merge`, `bin/ste-changed`, `merge/launch.py` and the afterMerge call in `merge/merge.py`. Each one prints straight to the terminal, and the flag would hide that output.
 - A hook that cannot import the helper falls back to plain `subprocess`. A missing helper must never stop a guard. The popups return, but the guard still judges.
 
-## Holes, named
+## Safety holes, named
 
 - (a) `bin/verdict`, `bin/ste-changed` and `merge/launch.py` import the helper with no fallback. A copy-mode install that lands `bin/` before `hooks/` makes them fail loudly. Debt: `nowindow-bin-no-fallback`.
 - (b) A fallback logs nothing, so the popups return unseen. No test loads the fallback sites with the helper removed. Debt: `nowindow-fallback-silent`.

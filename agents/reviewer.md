@@ -57,7 +57,7 @@ Check for:
   a model above the role's row in `subagent-model-cap` (the model-per-role table) that no owner grant
   or standing grant covers.
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
-  Do not flag a style finding a linter catches. Do not flag a nitpick a senior engineer would skip.
+  Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 
 If the repo has screens, the orchestrator runs design-review after a screen change. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/ux/checklist.md`. The house design values are in `~/.claude/ux/tokens.md`.
 

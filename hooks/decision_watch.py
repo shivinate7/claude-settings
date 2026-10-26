@@ -746,7 +746,7 @@ def run(hook, model_call=invoke_model, expect_key=None):
 
     `expect_key` is the key phase 1 printed (the mod's `--key`). A live key that differs means
     the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
-    (HOLE 1 of decision decision-watch-mod-limits).
+    (SAFETY HOLE 1 of decision decision-watch-mod-limits).
     """
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):

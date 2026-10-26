@@ -26,7 +26,7 @@ Three rounds. Round 3 passed. Net safety value is positive: the change adds one 
 Kind: process
 Home: hooks/guard_push_delete.py
 
-## Holes, named
+## Safety holes, named
 
 - (a) `npm prune`, `dedupe`, `audit fix`, `rebuild` and `link` are not judged. Owner ruling 2026-10-20: a follow-up lane `npm-readonly-allowlist` replaces the command list with a read-only allow list. Debt: `npm-audit-fix-linked`.
 - (b) `-w`, `--workspace` and `--prefix` are not read. A bypass and a false alarm both. Debt: `linked-nm-prefix-workspace`.
