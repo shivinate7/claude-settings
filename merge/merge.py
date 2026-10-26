@@ -1007,23 +1007,41 @@ def cut_branch(root, branch, merged):
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
 def lane_tips(wt, base_ref, sha):
-    """The tips the batch took in: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
-    (a merge of the base into the branch has a base commit as its second parent). Read before the merge.
+    """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
+    (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
+    merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
+    undoes it, so an odd chain is a revert. Read before the merge.
     A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
     try:
-        c, out = git(wt, "log", "--merges", "--format=%P", f"{base_ref}..{sha}")
+        c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
         if c:
             raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
-        tips = dict.fromkeys(t for line in out.splitlines() for t in line.split()[1:])
-        return [t for t in tips if git(wt, "merge-base", "--is-ancestor", t, base_ref)[0]]
+        undone, took = {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in
+        for rec in out.split("\0"):
+            parts = rec.strip().split("\x01", 2)
+            if len(parts) != 3:
+                continue
+            h, parents, body = parts
+            for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
+                undone[r] = h
+            for t in parents.split()[1:]:
+                took.setdefault(t, []).append(h)
+        def reverted(h):
+            n, seen = 0, set()
+            while h in undone and h not in seen:
+                seen.add(h)
+                h, n = undone[h], n + 1
+            return n % 2 == 1
+        tips = [t for t in took if git(wt, "merge-base", "--is-ancestor", t, base_ref)[0]]
+        return tips, {t for t in tips if all(reverted(h) for h in took[t])}
     except Exception as e:
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
-        return []
+        return [], set()
 
-def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
+def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
     One line per lane, never a silent drop. A lane tip that no head sits at has moved or is gone. Kept, with a line why:
-    a name in `keep`; one whose open PR is at another sha than its tip, or at its tip with a base that is neither `base`,
+    a name in `keep`; a head at a tip in `dropped`, whose merge into the batch was reverted on the batch; one whose open PR is at another sha than its tip, or at its tip with a base that is neither `base`,
     the batch's base, nor a lane of this batch (a backport); none when the open-PR read fails; one whose tip is in
     `commit` neither by id nor by patch, or whose proof could not run; the base of an open PR whose head is no lane of
     this batch at its tip (a partial stack), and the base of a lane that is itself kept, to a fixpoint. A PR is done when
@@ -1042,7 +1060,9 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
             if tip not in heads.values():
                 say(f"merge: lane {tip[:9]}: no head on origin sits at this tip: it moved or is gone.")
         heads = {b: t for b, t in heads.items() if b not in skip}
-        kept = {b: "kept: it is in merge.keepBranches." for b in heads if b in keep}  # b -> the line's words
+        kept = {b: "kept: its merge into the batch was reverted on the batch." for b, t in heads.items() if t in dropped}  # b -> the line's words
+        kept.update({b: "kept: it is in merge.keepBranches." for b in heads if b in keep})
+        shown = set(kept)
         for b in kept:
             say(f"merge: lane origin/{b}: {kept[b]}")
         if len(kept) == len(heads):
@@ -1092,7 +1112,7 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=()):
                     kept[b] = line
                     changed = True
         for b in heads:
-            if b in kept and b not in keep:
+            if b in kept and b not in shown:
                 say(f"merge: lane origin/{b}: {kept[b]}")
         rest = [b for b in heads if b not in kept]
         order = []
@@ -1472,7 +1492,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
-            lanes = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else []  # read before the merge: after it the lane tips are on the base
+            lanes, dropped = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
@@ -1495,7 +1515,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if m.get("deleteBranch"):
             cut_branch(root, branch, sha)
             if lanes:
-                cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []))
+                cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []), dropped)
         return 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:

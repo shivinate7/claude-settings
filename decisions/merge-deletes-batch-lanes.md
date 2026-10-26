@@ -39,6 +39,8 @@ Built on branch `merge-cuts-lanes` (commit 1cae7c63), in `merge/merge.py`: `lane
 - It keeps a lane, with a line, when an open PR whose head is not a lane of this batch has the lane as its base
   (a partial stack).
 - It keeps a lane, with a line, when an open PR at its tip aims at any other base (a backport).
+- It keeps a lane, with a line, when every merge that took its tip into the batch was reverted on the batch (a
+  "This reverts commit" message, counted through reverts of reverts). A dropped lane needs its branch to rejoin.
 - It keeps a head whose open PR has a head sha that differs from the tip.
 - A head with two or more open PRs is judged on all their bases, by the rules above.
 - `Host.open_heads` raises on a failed read, or on 1000 or more rows. Then no head is deleted.
