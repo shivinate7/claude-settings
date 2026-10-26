@@ -107,6 +107,13 @@ class GuardTreeTests(unittest.TestCase):
                          ["git_reads.py", "guard.py", "guard_x.py", "shared_names.py"])
         self.assertEqual(read_file(self.dest, "guard_x.py"), "beta-anchor\n")
 
+    def test_guard_tree_copies_a_new_shared_module_but_no_suite_or_harness(self):
+        # A module the guard starts to import must reach the copy, or every mutant dies on the import.
+        write_files(self.src, {"new_shared.py": "X = 1\n", "prove_x.py": "p\n", "notes.md": "n\n"})
+        mutate_shared.guard_tree(self.dest)
+        self.assertEqual(sorted(os.listdir(self.dest)),
+                         ["git_reads.py", "guard.py", "guard_x.py", "new_shared.py", "shared_names.py"])
+
     def test_a_mutant_anchored_in_git_reads_mutates_git_reads(self):
         # The git and session reads the guard once held now live in git_reads.py, and the guard
         # mutants anchored on them must still land: a mutant no module holds reads STALE.

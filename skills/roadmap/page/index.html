@@ -1,0 +1,896 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>claude-settings Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   THEME TOKENS: the only block a repo edits to re-skin this page.
+   A repo supplies: --repo-name, --accent (+ -ink, -soft, on-accent),
+   fonts and radii, in light and in dark. Status colours (good / warn /
+   bad) are shared by all repos.
+   ===================================================================== */
+:root{
+  --repo-name:"claude-settings";
+  --accent:#3b4fd8; --accent-ink:#2a3aa8; --accent-soft:#e8ebfc; --on-accent:#ffffff;
+  --font-ui:"IBM Plex Sans",system-ui,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,monospace;
+  --radius-s:3px; --radius-m:6px;
+  --bg:#f4f4f1; --surface:#ffffff; --surface-2:#f9f9f7; --line:#e2e2dc; --line-2:#cfcfc7;
+  --ink:#1b1c1f; --ink-2:#45474d; --muted:#6c6e75;
+  --good:#1f7a43; --good-soft:#e3f2e8; --warn:#9a6200; --warn-soft:#fbf0d9; --bad:#b4271f; --bad-soft:#fbe5e3;
+  --chart-grid:#e6e6e0;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --accent:#8c9bff; --accent-ink:#b3bdff; --accent-soft:#232848; --on-accent:#10132b;
+    --bg:#111214; --surface:#191a1d; --surface-2:#1e1f23; --line:#2b2d32; --line-2:#3a3d44;
+    --ink:#ececee; --ink-2:#c3c4c9; --muted:#9a9ca4;
+    --good:#5fcb8a; --good-soft:#16301f; --warn:#e9b44c; --warn-soft:#33270f; --bad:#ff8a80; --bad-soft:#3a1a18;
+    --chart-grid:#2a2c31;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --accent:#8c9bff; --accent-ink:#b3bdff; --accent-soft:#232848; --on-accent:#10132b;
+  --bg:#111214; --surface:#191a1d; --surface-2:#1e1f23; --line:#2b2d32; --line-2:#3a3d44;
+  --ink:#ececee; --ink-2:#c3c4c9; --muted:#9a9ca4;
+  --good:#5fcb8a; --good-soft:#16301f; --warn:#e9b44c; --warn-soft:#33270f; --bad:#ff8a80; --bad-soft:#3a1a18;
+  --chart-grid:#2a2c31;
+  color-scheme:dark;
+}
+/* ===================== end of theme tokens ===================== */
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font-ui)}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+button:disabled{cursor:default}
+a{color:var(--accent-ink)}
+.num,.id{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-s)}
+.muted{color:var(--muted)}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:12px;min-height:48px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+.brand{display:flex;align-items:baseline;gap:8px;min-width:0}
+.brand b{font-family:var(--font-num);font-weight:600;font-size:15px}
+.brand b::before{content:var(--repo-name)}
+.brand span{color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-m);padding:2px}
+.tabs button{padding:4px 10px;border-radius:calc(var(--radius-m) - 2px);font-size:13px;color:var(--ink-2)}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line-2)}
+.tabs .ct{font-family:var(--font-num);font-size:11px;color:var(--accent-ink);margin-left:4px}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:var(--radius-s);overflow:hidden}
+.seg button{font-size:12px;padding:3px 8px;color:var(--ink-2)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* where-you-are band */
+.now{display:grid;grid-template-columns:1.1fr 1.4fr 1.6fr 1.6fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius-m);overflow:hidden;margin:14px 0 10px}
+.now>div{background:var(--surface);padding:10px 12px;min-width:0}
+.now h2{margin:0 0 6px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;justify-content:space-between;gap:8px}
+.now h2 .plain{text-transform:none;letter-spacing:0;font-weight:400}
+.now .big{font-size:18px;font-weight:600;line-height:1.2}
+.now .sub{font-size:12px;color:var(--ink-2)}
+.now ol,.now ul{margin:0;padding:0;list-style:none}
+.now li{display:flex;gap:8px;align-items:baseline;padding:2px 0;font-size:13px;min-width:0}
+.now li .id{flex:none}
+.now li .tx{min-width:0}
+.now li button.tx{color:var(--ink)}
+.now li button.tx:hover{text-decoration:underline}
+.now li .g{align-self:center}
+.ix{font-family:var(--font-num);font-size:11px;color:var(--muted);flex:none;width:12px}
+.off li .ic{color:var(--bad);flex:none;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border:1px solid currentColor;border-radius:3px;padding:0 4px;height:16px;line-height:14px;margin-top:2px;min-width:62px;text-align:center}
+.off .link{display:block;font-size:12px;color:var(--accent-ink);margin-top:1px}
+.off .link:hover{text-decoration:underline}
+.off .link .id{font-size:12px}
+.notice{grid-column:1/-1;padding:16px 12px}
+.notice h3{margin:0 0 4px;font-size:15px}
+.notice p{margin:0;color:var(--ink-2)}
+
+html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
+.bar{height:6px;border-radius:3px;overflow:hidden;display:flex;gap:2px}
+.bar i{display:block;flex:1;height:100%;background:var(--line);border-radius:1px}
+.bar i.done{background:var(--accent)}
+.bar i.act{background:var(--accent);opacity:.45}
+.bar i.blk{background:var(--bad)}
+
+/* phase selector */
+.rail{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+.rail button{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);padding:7px 9px;min-width:0}
+.rail button:hover{border-color:var(--line-2)}
+.rail button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}
+.rail .nm{display:flex;justify-content:space-between;gap:6px;font-size:12px;font-weight:600;margin-bottom:5px;white-space:nowrap}
+.rail .nm .num{font-weight:400;color:var(--muted)}
+.rail .here{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-left:5px;vertical-align:2px}
+
+/* layout */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start;padding-bottom:40px}
+.side{position:sticky;top:62px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);min-width:0}
+.card>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.card>header h3{margin:0;font-size:13px;font-weight:600}
+.card>header .lbl{text-transform:none;letter-spacing:0}
+
+/* phase card */
+.phase{margin-bottom:16px;scroll-margin-top:64px}
+.ph-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.ph-head h2{margin:0;font-size:15px;font-weight:700}
+.ph-head .pill{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--accent);color:var(--on-accent)}
+.ph-head .prog{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:12px;color:var(--ink-2)}
+.ph-head .prog .bar{width:90px}
+.asof{font-size:11px;color:var(--muted);padding:0 12px 8px}
+.howto{font-size:11px;color:var(--accent-ink);font-weight:600;margin-left:4px}
+.howbody{font-size:12px;color:var(--ink-2);padding:0 12px 10px}
+.foot{font-size:11px;color:var(--muted);padding:6px 12px;border-bottom:1px solid var(--line)}
+.hint{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:6px 12px;border-bottom:1px solid var(--line)}
+
+/* number tiles */
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tile{background:var(--surface-2);padding:9px 11px 8px;min-width:0;display:flex;flex-direction:column;gap:3px;text-align:left}
+.tile:hover{background:var(--surface)}
+.tile .tl{font-size:11.5px;color:var(--ink-2);line-height:1.25;min-height:2.5em}
+.tile .row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.tile .v{font-family:var(--font-num);font-size:20px;font-weight:600;letter-spacing:-.02em;line-height:1.1;overflow-wrap:anywhere}
+.tile .v small{font-size:13px;color:var(--muted);font-weight:400}
+.tile .goal{font-size:11px;color:var(--muted)}
+.tile svg{display:block;width:100%;height:30px;overflow:visible}
+.tile .ft{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.tile .rule{display:none;font-size:11.5px;color:var(--ink-2);border-top:1px dashed var(--line-2);padding-top:5px;margin-top:2px}
+.tile[aria-expanded="true"] .rule{display:block}
+.tiles .empty{grid-column:1/-1;background:var(--surface-2);padding:12px;font-size:12px;color:var(--muted)}
+.dl{font-family:var(--font-num);font-size:11px;font-weight:500;padding:0 4px;border-radius:var(--radius-s);white-space:nowrap}
+.dl.good{color:var(--good);background:var(--good-soft)}
+.dl.bad{color:var(--bad);background:var(--bad-soft)}
+.dl.flat{color:var(--muted);background:var(--surface)}
+.meter{display:flex;gap:2px;height:8px;margin:11px 0}
+.meter i{flex:1;background:var(--line);border-radius:2px}
+.meter i.on{background:var(--accent)}
+.one{font-size:11px;color:var(--muted);min-height:30px;display:flex;align-items:center;gap:6px}
+.one::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+/* step rows */
+.steps{list-style:none;margin:0;padding:0}
+.st{border-top:1px solid var(--line)}
+.st:first-child{border-top:0}
+.rw{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:stretch}
+.sp{display:grid;place-items:center;padding-left:8px;min-height:36px}
+.sp:hover .g svg{transform:scale(1.15)}
+.sp:disabled{opacity:.7}
+.tg{display:grid;grid-template-columns:44px minmax(0,1fr) auto 14px;gap:8px;align-items:center;width:100%;padding:7px 12px 7px 4px;min-height:36px}
+.rw:hover{background:var(--surface-2)}
+.g{width:14px;height:14px;display:grid;place-items:center;flex:none}
+.g svg{width:14px;height:14px;transition:transform .12s}
+.st .ttl{min-width:0;overflow-wrap:anywhere}
+.st .meta{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);white-space:nowrap}
+.chev{color:var(--muted);transition:transform .15s;font-size:10px}
+.st.open .chev{transform:rotate(90deg)}
+.st.active .rw{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.st.active .ttl{font-weight:600}
+.st.blocked .rw{box-shadow:inset 3px 0 0 var(--bad)}
+.tag{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:999px;line-height:17px;white-space:nowrap}
+.tag.t-now{background:var(--accent);color:var(--on-accent)}
+.tag.next{border:1px solid var(--accent);color:var(--accent-ink)}
+.tag.blk{background:var(--bad-soft);color:var(--bad)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block;flex:none}
+.st.done .ttl{text-decoration:line-through;text-decoration-color:var(--line-2);color:var(--muted)}
+.st.done .id{color:var(--muted)}
+.body{display:none;padding:2px 12px 12px 80px;font-size:13px;color:var(--ink-2)}
+.st.open .body{display:block}
+.body dl{margin:0;display:grid;grid-template-columns:44px minmax(0,1fr);gap:6px 10px}
+.body dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding-top:2px}
+.body dd{margin:0;overflow-wrap:anywhere;min-width:0}
+.ask{display:flex;gap:8px;align-items:flex-start;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 8px;font-family:var(--font-num);font-size:12px;color:var(--ink)}
+.ask span{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:12em;overflow:auto}
+.copy{flex:none;font-family:var(--font-ui);font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--radius-s);background:var(--accent);color:var(--on-accent)}
+.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.more{font-size:11.5px;font-weight:600;color:var(--accent-ink);margin-top:2px}
+.emptyrow{padding:12px;font-size:13px;color:var(--muted)}
+.donefold>button{display:flex;gap:8px;align-items:center;width:100%;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+.donefold>button:hover{color:var(--ink)}
+.donefold.open>button .chev{transform:rotate(90deg)}
+.donefold .fb{display:none;border-top:1px solid var(--line)}
+.donefold.open .fb{display:block}
+
+/* pager */
+.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px;border-top:1px solid var(--line);background:var(--surface-2)}
+.pager .pc{font-size:12px;color:var(--ink-2);text-align:center}
+.pager button{font-size:12px;font-weight:600;color:var(--accent-ink);border:1px solid var(--line-2);background:var(--surface);border-radius:var(--radius-s);padding:4px 10px;min-height:30px;white-space:nowrap}
+.pager button:disabled{color:var(--muted);opacity:.5}
+.card>.pager:last-child{border-radius:0 0 var(--radius-m) var(--radius-m)}
+
+/* side cards */
+.trend{padding:8px 12px 10px;display:grid;gap:8px}
+.tr{display:grid;grid-template-columns:96px minmax(0,1fr) 64px;gap:8px;align-items:center}
+.tr .k{font-size:12px;color:var(--ink-2);line-height:1.2}
+.tr svg{width:100%;height:30px;display:block;overflow:visible}
+.tr .r{text-align:right;line-height:1.15}
+.tr .r .num{font-size:13px;font-weight:600;display:block}
+.legend{display:flex;gap:12px;font-size:11px;color:var(--muted);padding:0 12px 10px;flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;border-top:1px dashed var(--muted);vertical-align:middle;margin-right:4px}
+.burn{padding:8px 12px 10px}
+.burn svg{width:100%;height:110px;display:block;overflow:visible}
+.feed{list-style:none;margin:0;padding:0}
+.feed li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;padding:6px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.feed li:first-child{border-top:0}
+.feed .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:1px}
+.feed .what{min-width:0}
+.feed .what .id{color:var(--accent-ink);font-size:12px}
+.kind{font-size:11px;color:var(--muted)}
+.kind.done{color:var(--good)}
+.kind.active{color:var(--accent-ink)}
+.kind.blocked{color:var(--bad)}
+.morelink{display:block;width:100%;padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--accent-ink);font-weight:600}
+
+/* changes view */
+.day h3{margin:0;padding:9px 12px;font-size:13px;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.day:not(:first-child) h3{border-top:1px solid var(--line)}
+.day h3 .lbl{text-transform:none;letter-spacing:0;font-weight:400}
+.ev{display:grid;grid-template-columns:56px 16px minmax(0,1fr);gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+.ev:first-of-type{border-top:0}
+.ev .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:2px}
+.ev .g{margin-top:3px}
+.ev .gist{color:var(--ink-2);font-size:12.5px;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ev button .id{color:var(--accent-ink)}
+.ev button:hover .t{text-decoration:underline}
+.ev.done .t{text-decoration:line-through;text-decoration-color:var(--line-2)}
+
+/* reference */
+.ref{margin-bottom:16px}
+.ref ol{margin:0;padding:0 0 0 18px;font-size:13px}
+.ref ol li{padding:2px 0}
+.tp>button{display:grid;grid-template-columns:30px minmax(0,1fr) 14px;gap:8px;width:100%;padding:8px 12px;border-top:1px solid var(--line);align-items:baseline}
+.tp:first-of-type>button{border-top:0}
+.tp>button:hover{background:var(--surface-2)}
+.tp .sm{display:block;font-size:12px;color:var(--muted)}
+.tp .tb{display:none;padding:0 12px 12px 50px;min-width:0}
+.tp.open .tb{display:block}
+.tp.open .chev{transform:rotate(90deg)}
+.tp ul{margin:0;padding-left:16px;font-size:13px;color:var(--ink-2)}
+.tp ul li{margin:3px 0}
+.tp .ask{margin-top:6px}
+.tp .ask span{max-height:16em}
+.src{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;margin-top:8px}
+.lead{padding:10px 12px;margin:0;font-size:13px;color:var(--ink-2)}
+
+.view[hidden]{display:none}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--ink);color:var(--bg);font-size:11.5px;padding:4px 7px;border-radius:var(--radius-s);max-width:240px;opacity:0;transition:opacity .08s;left:0;top:0}
+#tip.on{opacity:1}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--bg);font-size:13px;padding:8px 14px;border-radius:var(--radius-m);max-width:calc(100vw - 32px);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+#toast[hidden]{display:none}
+
+@media (max-width:1000px){
+  .cols{grid-template-columns:minmax(0,1fr)}
+  .side{position:static}
+  .now{grid-template-columns:1fr 1fr}
+}
+@media (max-width:640px){
+  .top .wrap{gap:8px}
+  .tools{margin-left:0;width:100%;justify-content:flex-end}
+  .tabs{order:3;width:100%}
+  .tabs button{flex:1;text-align:center}
+  .now{grid-template-columns:1fr}
+  .rail{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+  .rail button{padding:6px 5px}
+  .rail .nm{flex-direction:column;gap:0;font-size:11px;white-space:normal;line-height:1.2}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rw{grid-template-columns:30px minmax(0,1fr)}
+  .sp{padding-left:6px;align-items:start;padding-top:11px}
+  .tg{grid-template-columns:34px minmax(0,1fr) 12px;gap:6px;padding:8px 10px 8px 2px}
+  .st .meta{grid-column:2;grid-row:2;margin-top:-2px;flex-wrap:wrap}
+  .body{padding:2px 10px 12px 10px}
+  .ph-head .prog{margin-left:0;width:100%}
+  .ph-head .prog .bar{flex:1}
+  .tp .tb{padding:0 12px 12px 12px}
+  .ev{grid-template-columns:48px 14px minmax(0,1fr);gap:6px}
+}
+</style>
+<!-- build:style -->
+<style>
+/* Panels the roadmap builder adds: read-at stamps and landed marks. */
+.stamps{display:flex;flex-wrap:wrap;gap:4px 14px;margin:-4px 2px 12px;font-size:11px;color:var(--muted)}
+.stamps .sk{text-transform:uppercase;letter-spacing:.06em}
+.stamps .unk{color:var(--warn)}
+.tag.landed{color:var(--good);background:var(--good-soft)}
+#rec .card{margin-bottom:16px}
+.hl,.rc{list-style:none;margin:0;padding:0}
+.hl li,.rc li{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+.hl li:first-child,.rc li:first-child{border-top:0}
+.hl .k{color:var(--ink-2);font-weight:600}
+.hl .unk,.rc .unk{color:var(--warn)}
+.rc li{grid-template-columns:72px minmax(0,1fr)}
+.rc .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:2px}
+.rc a,.hl a{color:var(--accent-ink);text-decoration:none}
+.rc a:hover,.hl a:hover{text-decoration:underline}
+.rc .nm{display:block;font-family:var(--font-num);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.count{font-family:var(--font-num);font-size:22px;font-weight:600;padding:10px 12px 2px}
+@media (max-width:560px){ .hl li{grid-template-columns:minmax(0,1fr);gap:2px} }
+</style>
+<!-- /build:style -->
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><b></b><span>roadmap</span></div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" aria-selected="true" data-view="plan">Plan</button>
+      <button role="tab" aria-selected="false" data-view="log">Changes</button>
+      <button role="tab" aria-selected="false" data-view="ref">Reference</button>
+<!-- build:tab -->
+<button role="tab" aria-selected="false" data-view="rec">Records</button>
+<!-- /build:tab -->
+    </nav>
+    <div class="tools">
+      <span class="lbl">Theme</span>
+      <div class="seg" id="modeSeg" role="group" aria-label="Light or dark">
+        <button aria-pressed="true" data-mode="">Auto</button>
+        <button aria-pressed="false" data-mode="light">Light</button>
+        <button aria-pressed="false" data-mode="dark">Dark</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="now" id="now" aria-label="Where you are"><div class="notice"><p class="muted">Loading the plan…</p></div></section>
+<!-- build:stamps -->
+<p class="stamps" id="stamps" aria-label="Where each panel was read"></p>
+<!-- /build:stamps -->
+  <nav class="rail" id="rail" aria-label="Phases"></nav>
+
+  <div class="view" id="v-plan">
+    <div class="cols">
+      <div id="phases"></div>
+      <aside class="side" id="side"></aside>
+    </div>
+  </div>
+
+  <div class="view" id="v-log" hidden>
+    <div class="cols">
+      <div id="days"></div>
+      <aside class="side" id="side2"></aside>
+    </div>
+  </div>
+
+  <div class="view" id="v-ref" hidden>
+    <div class="cols">
+      <div id="ref"></div>
+      <aside class="side"><div class="card"><header><h3>About this area</h3></header><p class="lead">Reference is not a phase. It holds the hand-off guide for a new advisor thread and the reasoning behind the plan. Steps point here; nothing here is a to-do.</p></div></aside>
+    </div>
+  </div>
+<!-- build:view -->
+<div class="view" id="v-rec" hidden>
+  <div class="cols">
+    <div id="rec"></div>
+    <aside class="side"><div class="card"><header><h3>About this area</h3></header><p class="lead">Health and records are read from the repo when the page is built. Each card says the commit it read. A card that could not be read says unknown, and why.</p></div></aside>
+  </div>
+</div>
+<!-- /build:view -->
+</main>
+<div id="tip" role="tooltip"></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+/* The five phases, in the order the work happens. Steps carry one of these ids in their `phase` field. */
+const PH = [
+  {k:'cleanup',n:'Clean up'},{k:'organize',n:'Organize'},{k:'design',n:'Design'},{k:'rollout',n:'Roll out'},{k:'later',n:'Later'}
+];
+const ORDER = ['todo','active','done','blocked'];
+// one cell per step: done, then in progress, then blocked, then the rest
+const segs = (d,a,b,n) => ['done','act','blk'].map((c,k)=>`<i class="${c}"></i>`.repeat([d,a,b][k])).join('') + '<i></i>'.repeat(Math.max(0,n-d-a-b)) + (n?'':'<i></i>');
+const LABEL = {todo:'To do',active:'In progress',done:'Done',blocked:'Blocked'};
+/* The four fields of each meta/cull reading, and how to read them. */
+const CULL_KEYS = [
+  {k:'debts',n:'Debt files'},
+  {k:'decisions',n:'Decision files'},
+  {k:'hooks',n:'Hook lines'},
+  {k:'words',n:'CLAUDE.md words'}
+];
+/* Which step each clean-up warning points to. A link is left out when that step no longer exists. */
+const OFF_TRACK_LINKS = {hooks:'c18', debts:'c10', stop:'c2'};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => typeof n==='number' ? n.toLocaleString('en-US') : (n==null||n==='' ? '—' : String(n));
+const isNum = v => typeof v==='number' && isFinite(v);
+const when = iso => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d : null; };
+const dayKey = d => d.toLocaleDateString('en-CA');
+const dayLabel = d => d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+const timeLabel = d => d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}).replace(/\s/g,'').toLowerCase();
+const ago = iso => { const d=when(iso); if(!d) return ''; const h=(Date.now()-d)/36e5; if(h<1) return 'just now'; if(h<24) return Math.round(h)+'h ago'; return Math.round(h/24)+'d ago'; };
+const fresh = iso => { const d=when(iso); return !!d && dayKey(d)===dayKey(new Date()); };
+const firstSentence = t => { if(!t) return ''; const m=String(t).match(/^.*?[.!?](\s|$)/); return (m?m[0]:String(t)).trim(); };
+const pct = (a,b) => (a-b)/b*100;
+const pctS = v => (v>0?'+':'')+v.toFixed(1)+'%';
+const phaseName = k => (PH.find(p=>p.k===k)||{}).n || k;
+
+/* Status marks: shape and colour together, never colour alone. */
+const GLYPH = {
+  done:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--accent)"/></svg>',
+  todo:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked:'<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--bad)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>'
+};
+const glyph = s => `<span class="g">${GLYPH[s]||GLYPH.todo}</span>`;
+
+/* ---------- state ---------- */
+let db = null, steps = [], topics = null, cull = null, phases = null, advisor = null;
+const got = {steps:false, topics:false, advisor:false};
+const ui = {view:'plan', phase:null, page:{}, donePage:{}, logPage:0, open:new Set(), tiles:new Set(), folds:new Set(), notes:new Set(), tps:new Set(), how:false};
+try { const r = JSON.parse(localStorage.getItem('rm-view')||'null'); if(r && typeof r==='object'){ if(['plan','log','ref'].includes(r.v)) ui.view=r.v; if(PH.some(p=>p.k===r.p)) ui.phase=r.p; } } catch(e) { /* nothing remembered */ }
+const saveView = () => { try { localStorage.setItem('rm-view', JSON.stringify({v:ui.view, p:ui.phase})); } catch(e) { /* not kept */ } };
+const mq = window.matchMedia('(max-width:640px)');
+/* Rows per page follow the window: as many collapsed rows as fit in one screen, less room for the
+   header and pager. rowH is measured from the rendered rows, so a phone's two-line rows count right. */
+let rowH = 38;
+const pageSize = () => Math.max(5, Math.min(20, Math.floor((window.innerHeight - 150) / rowH)));
+function measureRows(){
+  const rs=[...document.querySelectorAll('#phases > section > .steps > .st:not(.open)')];
+  if(!rs.length) return false;
+  const h=rs.reduce((t,r)=>t+r.offsetHeight,0)/rs.length;
+  if(Math.abs(h-rowH)<2) return false;
+  rowH=h; return true;
+}
+
+/* ---------- derived from the db ---------- */
+const byOrder = (a,b) => (isNum(a.order)?a.order:1e9)-(isNum(b.order)?b.order:1e9) || String(a.id).localeCompare(String(b.id));
+/* Work order: active steps first, then everything else by its `order` field. */
+const workOrder = list => [...list.filter(s=>s.status==='active').sort(byOrder), ...list.filter(s=>s.status!=='active').sort(byOrder)];
+const byPhase = k => steps.filter(s=>s.phase===k);
+const openList = k => workOrder(byPhase(k).filter(s=>s.status!=='done'));
+const doneList = k => byPhase(k).filter(s=>s.status==='done').sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')) || byOrder(a,b));
+function curPhase(){ for(const p of PH){ if(byPhase(p.k).some(s=>s.status!=='done')) return p; } return PH[PH.length-1]; }
+function nextUp(){ return workOrder(byPhase(curPhase().k)).filter(s=>s.status==='todo').slice(0,3); }
+
+function cullInfo(){
+  if(!cull || typeof cull!=='object') return null;
+  const base = cull.baseline || {}, batches = Array.isArray(cull.batches) ? cull.batches.filter(b=>b&&typeof b==='object') : [];
+  const pts = [{label:'Start'+(base.at?' ('+base.at+')':''), v:base}, ...batches.map((b,i)=>({label:b.label||b.at||('Reading '+(i+2)), v:b}))];
+  // The cull's own batches are labelled "Cull ..."; later re-measures on main are not. The last "Cull" batch is where it ended.
+  let closeIx = -1; pts.forEach((p,i)=>{ if(i>0 && /^cull\b/i.test(p.label)) closeIx=i; });
+  const last = pts[pts.length-1], prev = pts.length>1 ? pts[pts.length-2] : null;
+  return {base, batches, pts, closeIx, last, prev};
+}
+function series(ci,k){ const out=[]; ci.pts.forEach((p,i)=>{ if(isNum(p.v[k])) out.push({v:p.v[k], label:p.label, i}); }); return out; }
+
+function offTrack(){
+  const items = [], ci = cullInfo();
+  const link = key => { const id=OFF_TRACK_LINKS[key]; return steps.some(s=>s.id===id) ? id : null; };
+  if(ci && ci.batches.length){
+    const b=ci.base, l=ci.last.v;
+    if(isNum(b.hooks) && isNum(l.hooks) && l.hooks>b.hooks) items.push({t:`Hook lines ${fmt(l.hooks)}, ${pctS(pct(l.hooks,b.hooks))} vs start. The rule says they only go down.`, k:'Growing', id:link('hooks')});
+    const c = ci.closeIx>0 && ci.closeIx<ci.pts.length-1 ? ci.pts[ci.closeIx].v : null;
+    if(c && isNum(c.debts) && isNum(l.debts) && l.debts>c.debts) items.push({t:`Debt files back up ${fmt(c.debts)} → ${fmt(l.debts)} since the cull ended.`, k:'Back up', id:link('debts')});
+  }
+  if(cull && /time box/i.test(String(cull.closed||''))) items.push({t:`The cull's stop rule was not met; it ended on the time box${cull.timebox?' ('+cull.timebox+')':''}.`, k:'Missed', id:link('stop')});
+  workOrder(steps.filter(s=>s.status==='blocked')).forEach(s=>items.push({t:`Blocked in ${phaseName(s.phase)}.`, k:'Blocked', id:s.id}));
+  return items;
+}
+
+/* ---------- small chart helpers ---------- */
+function spark(vals,{w=200,h=30,labels=[],markIx=null,fmtv=fmt}={}){
+  const min=Math.min(...vals), max=Math.max(...vals), r=(max-min)||1;
+  const x=i=> vals.length===1? w/2 : i*(w/(vals.length-1));
+  const y=v=> h-2-((v-min)/r)*(h-6);
+  const pts=vals.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  let s=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Trend: ${esc(vals.map(fmtv).join(', '))}">`;
+  s+=`<line x1="0" x2="${w}" y1="${h-1}" y2="${h-1}" stroke="var(--chart-grid)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  if(markIx!=null && markIx>=0 && markIx<vals.length-1){ const mx=(x(markIx)+x(markIx+1))/2; s+=`<line x1="${mx}" x2="${mx}" y1="0" y2="${h}" stroke="var(--muted)" stroke-dasharray="2 2" stroke-width="1" vector-effect="non-scaling-stroke"/>`; }
+  s+=`<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  s+=`<circle cx="${x(vals.length-1)}" cy="${y(vals[vals.length-1])}" r="3" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  const bw=w/Math.max(vals.length,1);
+  vals.forEach((v,i)=>{ s+=`<rect x="${Math.max(0,x(i)-bw/2)}" y="0" width="${bw}" height="${h}" fill="transparent" data-tip="${esc((labels[i]||'')+': '+fmtv(v))}"/>`; });
+  return s+'</svg>';
+}
+function delta(cur,ref,{downGood=true,pctMode=false,neutral=false}={}){
+  if(!isNum(cur)||!isNum(ref)) return '';
+  const d=cur-ref; if(d===0) return `<span class="dl flat">±0</span>`;
+  const cls = neutral ? 'flat' : ((downGood ? d<0 : d>0) ? 'good' : 'bad');
+  const txt = pctMode ? pctS(pct(cur,ref)) : (d>0?'▲':'▼')+fmt(Math.abs(d));
+  return `<span class="dl ${cls}">${txt}</span>`;
+}
+
+/* ---------- where you are ---------- */
+function renderNow(){
+  const cur=curPhase(), ss=byPhase(cur.k), done=ss.filter(s=>s.status==='done').length, act=ss.filter(s=>s.status==='active').length;
+  const tot=steps.length, tdone=steps.filter(s=>s.status==='done').length;
+  const active=workOrder(steps.filter(s=>s.status==='active')), nu=nextUp(), off=offTrack();
+  const w = n => ss.length ? n/ss.length*100 : 0;
+  const latestActive = active.map(s=>s.updatedAt).filter(Boolean).sort().pop();
+  $('#now').innerHTML = `
+  <div><h2>Phase <span class="num">${PH.indexOf(cur)+1}/${PH.length}</span></h2>
+    <div class="big">${esc(cur.n)}</div>
+    <div class="sub"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act?` · <span class="num">${act}</span> in progress`:''}</div>
+    <div class="bar" style="margin-top:7px">${segs(done,act,0,ss.length)}</div>
+    <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
+  </div>
+  <div><h2>Doing now</h2><ul>${active.map(s=>`<li>${glyph('active')}<span class="id">${esc(s.id)}</span><button class="tx" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join('')||'<li class="sub">Nothing in progress. Pick the first step up next.</li>'}</ul>
+    </div>
+  <div><h2>Up next <span class="plain">in work order</span></h2><ol>${nu.map((s,i)=>`<li><span class="ix">${i+1}</span><span class="id">${esc(s.id)}</span><button class="tx" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join('')||'<li class="sub">Nothing left to start in this phase.</li>'}</ol></div>
+  <div class="off"><h2>Off track <span class="num" style="color:${off.length?'var(--bad)':'var(--muted)'}">${off.length}</span></h2><ul>${off.map(o=>{ const s=o.id&&steps.find(x=>x.id===o.id);
+    return `<li><span class="ic">${esc(o.k||'Off')}</span><span class="tx">${esc(o.t)}${s?`<button class="link" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button>`:''}</span></li>`; }).join('')||'<li class="sub">Nothing off track.</li>'}</ul></div>`;
+}
+
+function renderRail(){
+  const cur=curPhase(), shown=shownPhase();
+  $('#rail').innerHTML = PH.map(p=>{
+    const ss=byPhase(p.k), d=ss.filter(s=>s.status==='done').length, a=ss.filter(s=>s.status==='active').length, b=ss.filter(s=>s.status==='blocked').length;
+    const w=n=>ss.length?n/ss.length*100:0;
+    return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
+      <div class="bar">${segs(d,a,b,ss.length)}</div></button>`;
+  }).join('');
+}
+const shownPhase = () => ui.phase && PH.some(p=>p.k===ui.phase) ? ui.phase : curPhase().k;
+
+/* ---------- number tiles ---------- */
+function cullTiles(ci){
+  if(!ci) return `<div class="empty">No clean-up numbers saved yet.</div>`;
+  const stop = cull.stopRule ? 'Stop rule: '+cull.stopRule : '';
+  const rules = {debts:stop, decisions:stop, hooks:'Rule: hook lines only go down.', words:'Watched for regrowth.'};
+  return CULL_KEYS.map((m,ki)=>{
+    const sr=series(ci,m.k); if(!sr.length) return `<div class="tile"><span class="tl">${m.n}</span><span class="v">—</span></div>`;
+    const v=sr.map(x=>x.v), cur=v[v.length-1], start=ci.base[m.k];
+    const markIx = ci.closeIx>0 ? sr.findIndex(x=>x.i===ci.closeIx) : -1;
+    const key='cleanup:'+ki;
+    return `<button class="tile" data-tile="${key}" aria-expanded="${ui.tiles.has(key)}">
+      <span class="tl">${m.n}</span>
+      <span class="row"><span class="v">${fmt(cur)}</span>${v.length>1?delta(cur,start,{pctMode:true})+delta(cur,v[v.length-2]):''}</span>
+      ${v.length>1?spark(v,{labels:sr.map(x=>x.label),markIx}):'<span class="one">1 reading so far. The trend starts at the next measure.</span>'}
+      <span class="ft"><span>start <span class="num">${fmt(start)}</span></span><span>${v.length} reading${v.length===1?'':'s'}</span></span>
+      <span class="rule">${esc(rules[m.k]||'')} The % is against the start; ▲▼ is against the reading before.${markIx>=0&&markIx<v.length-1?' The dashed line is where the cull ended.':''}</span>
+    </button>`;
+  }).join('');
+}
+function metaTiles(k){
+  const data = phases && phases[k], list = data && Array.isArray(data.metrics) ? data.metrics.filter(m=>m&&typeof m==='object') : [];
+  if(!list.length) return `<div class="empty">No numbers saved for this phase yet.</div>`;
+  return list.map((m,i)=>{
+    const of = typeof m.value==='string' && m.value.match(/^\s*(\d+)\s+of\s+(\d+)\s*$/);
+    const sr = Array.isArray(m.series) ? m.series.filter(isNum) : [];
+    const tNum = m.target!=null && /^\s*\d+(\.\d+)?\s*$/.test(String(m.target)) ? +m.target : null;
+    let viz;
+    if(sr.length>1){
+      const cur=isNum(m.value)?m.value:sr[sr.length-1];
+      const downGood = tNum!=null ? cur>tNum : true;
+      viz = spark(sr,{labels:sr.map((_,j)=>'Reading '+(j+1))}) + `<span class="ft"><span>was <span class="num">${fmt(sr[0])}</span></span>${delta(sr[sr.length-1],sr[sr.length-2],{downGood,neutral:tNum==null})}</span>`;
+    } else if(of){
+      const n=+of[1], t=+of[2];
+      viz = t>0 && t<=30 ? `<span class="meter" aria-hidden="true">${Array.from({length:t},(_,j)=>`<i class="${j<n?'on':''}"></i>`).join('')}</span><span class="ft"><span>${Math.max(t-n,0)} to go</span><span>1 reading</span></span>` : `<span class="one">${Math.max(t-n,0)} to go.</span>`;
+    } else if(isNum(m.value)){
+      viz = `<span class="one">1 reading so far. The trend starts at the next measure.</span>`;
+    } else {
+      viz = `<span class="one">No number yet.</span>`;
+    }
+    const val = of ? `${of[1]}<small> of ${of[2]}</small>` : esc(fmt(m.value));
+    const key=k+':'+i;
+    return `<button class="tile" data-tile="${key}" aria-expanded="${ui.tiles.has(key)}"><span class="tl">${esc(m.label||'Number')}</span>
+      <span class="row"><span class="v">${val}</span>${m.target!=null&&m.target!==''?`<span class="goal">goal ${esc(m.target)}</span>`:''}</span>${viz}
+      ${m.rule?`<span class="rule">${esc(m.rule)}</span>`:''}</button>`;
+  }).join('');
+}
+
+/* ---------- steps ---------- */
+function stepRow(s, nextIds){
+  const ni = nextIds.indexOf(s.id);
+  const tags = (s.status==='active'?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
+  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id);
+  const lbl = LABEL[s.status]||LABEL.todo;
+  return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
+    <div class="rw">
+      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(s.status)}</button>
+      <button class="tg" data-row="${esc(s.id)}" aria-expanded="${open}"><span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title||'Untitled step')}</span>
+        <span class="meta">${tags}</span><span class="chev" aria-hidden="true">▶</span></button>
+    </div>
+    <div class="body"><dl>
+      <dt>Status</dt><dd>${lbl}</dd>
+      ${s.why?`<dt>Why</dt><dd>${esc(s.why)}</dd>`:''}
+      ${s.note?`<dt>Note</dt><dd><div class="${noteOpen?'':'clamp'}">${esc(s.note)}</div>${String(s.note).length>260?`<button class="more" data-more="${esc(s.id)}">${noteOpen?'Show less':'Show all'}</button>`:''}</dd>`:''}
+      ${s.ask?`<dt>Ask</dt><dd><div class="ask"><span>${esc(s.ask)}</span><button class="copy" data-copy="${esc(s.ask)}">Copy</button></div></dd>`:''}
+      ${d?`<dt>When</dt><dd><span class="num" style="font-size:12px">${dayLabel(d)}, ${timeLabel(d)}</span></dd>`:''}
+    </dl></div></li>`;
+}
+function pager(scope, page, pages, total, noun){
+  if(pages<=1) return '';
+  return `<div class="pager"><button data-pg="prev" data-scope="${scope}" ${page<=0?'disabled':''}>← Previous</button>
+    <span class="pc">Page <span class="num">${page+1}</span> of <span class="num">${pages}</span><span class="muted"> · ${total} ${noun}</span></span>
+    <button data-pg="next" data-scope="${scope}" ${page>=pages-1?'disabled':''}>Next →</button></div>`;
+}
+function clampPage(p, pages){ return Math.max(0, Math.min(p, pages-1)); }
+function defaultPage(list){ const ix=list.findIndex(s=>s.status!=='done'); return ix<0 ? 0 : Math.floor(ix/pageSize()); }
+
+function renderPhase(){
+  const k=shownPhase(), p=PH.find(x=>x.k===k), ss=byPhase(k), cur=curPhase();
+  const open=openList(k), done=doneList(k), d=done.length, a=ss.filter(s=>s.status==='active').length;
+  const nextIds = nextUp().map(s=>s.id), size=pageSize();
+  const pages=Math.max(1,Math.ceil(open.length/size));
+  if(ui.page[k]==null) ui.page[k]=defaultPage(open);
+  const pg = ui.page[k] = clampPage(ui.page[k], pages);
+  const dPages=Math.max(1,Math.ceil(d/size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k]||0, dPages);
+  const w=n=>ss.length?n/ss.length*100:0;
+  let asof='', foot='', tiles='';
+  if(k==='cleanup'){
+    const ci=cullInfo();
+    tiles=cullTiles(ci);
+    if(ci){
+      asof = ['Clean-up numbers', cull.closed?'cull ended '+cull.closed:'', ci.batches.length?'latest reading: '+ci.last.label:'no batch reported yet'].filter(Boolean).map(esc).join(' · ')
+        + (cull.note?` <button class="howto" data-how aria-expanded="${ui.how}">${ui.how?'Hide how these are counted':'How these are counted'}</button>`:'');
+    }
+  } else {
+    const pd = phases && phases[k];
+    tiles=metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ''; foot = pd && pd.foot ? esc(pd.foot) : '';
+  }
+  $('#phases').innerHTML = `<section class="card phase" id="p-${k}">
+    <div class="ph-head"><span class="lbl">Phase ${PH.indexOf(p)+1}</span><h2>${esc(p.n)}</h2>
+      <div class="prog"><span class="num">${d}/${ss.length}</span><div class="bar">${segs(d,a,0,ss.length)}</div><span>done</span></div></div>
+    ${asof?`<div class="asof">${asof}</div>`:''}
+    ${k==='cleanup'&&ui.how&&cull&&cull.note?`<div class="howbody">${esc(cull.note)}</div>`:''}
+    <div class="tiles">${tiles}</div>
+    ${foot?`<div class="foot">${foot}</div>`:''}
+    <div class="hint"><span>${open.length} open step${open.length===1?'':'s'}, in work order</span><span>${db&&!db.readOnly?'Tap a status mark to change it':'Read only'}</span></div>
+    <ul class="steps">${open.slice(pg*size,(pg+1)*size).map(s=>stepRow(s,nextIds)).join('') || `<li class="emptyrow">${ss.length?'Every step in this phase is done.':'No steps in this phase yet.'}</li>`}</ul>
+    ${pager('open',pg,pages,open.length,'open steps')}
+    ${d?`<div class="donefold${ui.folds.has(k)?' open':''}"><button data-fold="${k}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+      <div class="fb"><ul class="steps">${done.slice(dpg*size,(dpg+1)*size).map(s=>stepRow(s,nextIds)).join('')}</ul>${pager('done',dpg,dPages,d,'done')}</div></div>`:''}
+  </section>`;
+}
+
+/* ---------- side cards ---------- */
+function trendCard(){
+  const ci=cullInfo(); if(!ci || ci.pts.length<2) return '';
+  return `<div class="card"><header><h3>Clean-up numbers over time</h3><span class="lbl">${ci.pts.length} readings</span></header>
+    <div class="trend">${CULL_KEYS.map(m=>{ const sr=series(ci,m.k); if(sr.length<2) return ''; const v=sr.map(x=>x.v), cur=v[v.length-1];
+      const markIx = ci.closeIx>0 ? sr.findIndex(x=>x.i===ci.closeIx) : -1;
+      return `<div class="tr"><span class="k">${m.n}</span>${spark(v,{w:160,labels:sr.map(x=>x.label),markIx})}<span class="r"><span class="num">${fmt(cur)}</span>${delta(cur,ci.base[m.k],{pctMode:true})}</span></div>`; }).join('')}</div>
+    <div class="legend">${ci.closeIx>0&&ci.closeIx<ci.pts.length-1?'<span><i></i>cull ended</span>':''}<span>% against the start · down is good</span></div></div>`;
+}
+function burnCard(){
+  if(!steps.length) return '';
+  const today=new Date(), days=[];
+  for(let i=4;i>=0;i--){ const d=new Date(today); d.setDate(d.getDate()-i); days.push(d); }
+  const keys=days.map(dayKey);
+  const doneK=steps.filter(s=>s.status==='done').map(s=>{ const d=when(s.updatedAt); return d?dayKey(d):''; });
+  const touched=keys.map(k=>steps.filter(s=>{ const d=when(s.updatedAt); return d&&dayKey(d)===k; }).length);
+  const cum=keys.map(k=>doneK.filter(x=>x<=k).length);
+  const W=300,H=110,max=Math.max(steps.length,1),bw=W/days.length,tmax=Math.max(...touched,1);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps done by day">`;
+  [0,.5,1].forEach(f=>{const y=H-16-(H-26)*f; s+=`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--chart-grid)"/>`;});
+  days.forEach((d,i)=>{
+    const x=i*bw+bw/2, hC=(H-26)*cum[i]/max, hT=(H-26)*0.45*touched[i]/tmax;
+    s+=`<rect x="${x-14}" y="${H-16-hC}" width="12" height="${Math.max(hC,1)}" rx="2" fill="var(--accent)"/>`;
+    s+=`<rect x="${x+2}" y="${H-16-hT}" width="12" height="${Math.max(hT,1)}" rx="2" fill="var(--line-2)"/>`;
+    s+=`<text x="${x-8}" y="${H-19-hC}" font-size="10" text-anchor="middle" fill="var(--ink-2)" font-family="var(--font-num)">${cum[i]}</text>`;
+    s+=`<text x="${x}" y="${H-3}" font-size="10" text-anchor="middle" fill="var(--muted)" font-family="var(--font-num)">${d.toLocaleDateString('en-US',{weekday:'short'})}</text>`;
+    s+=`<rect x="${i*bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-tip="${esc(dayLabel(d))}: ${cum[i]} done in total · ${touched[i]} steps changed that day"/>`;
+  });
+  s+='</svg>';
+  return `<div class="card"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num">${cum[cum.length-1]}</span> of <span class="num">${steps.length}</span></span></header>
+    <div class="burn">${s}</div><div class="legend"><span><span class="dot" style="border-radius:2px"></span> done so far</span><span><span class="dot" style="background:var(--line-2);border-radius:2px"></span> steps changed that day</span></div></div>`;
+}
+const KIND = s => s.status==='done'?'Done':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
+function feedCard(n=8){
+  const recent=steps.filter(s=>when(s.updatedAt)).sort((a,b)=>when(b.updatedAt)-when(a.updatedAt)).slice(0,n);
+  if(!recent.length) return '';
+  return `<div class="card"><header><h3>Latest changes</h3><span class="lbl">${dayLabel(new Date())}</span></header>
+    <ul class="feed">${recent.map(s=>`<li><span class="when">${fresh(s.updatedAt)?timeLabel(when(s.updatedAt)):ago(s.updatedAt)}</span><span class="what"><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join('')}</ul>
+    <button class="morelink" data-view-go="log">All changes by day →</button></div>`;
+}
+function renderSide(){
+  $('#side').innerHTML = (shownPhase()==='cleanup'?trendCard():'')+feedCard()+burnCard();
+  $('#side2').innerHTML = trendCard()+burnCard();
+}
+
+/* ---------- changes view ---------- */
+function renderLog(){
+  const ev=steps.filter(s=>when(s.updatedAt)).map(s=>({d:when(s.updatedAt),s})).sort((a,b)=>b.d-a.d);
+  if(!ev.length){ $('#days').innerHTML=`<section class="card"><p class="lead">No changes recorded yet.</p></section>`; return; }
+  const perDay={}; ev.forEach(e=>{ const k=dayKey(e.d); perDay[k]=(perDay[k]||0)+1; });
+  const size=pageSize(), pages=Math.max(1,Math.ceil(ev.length/size)), pg=ui.logPage=clampPage(ui.logPage,pages);
+  const slice=ev.slice(pg*size,(pg+1)*size), before=pg>0?dayKey(ev[pg*size-1].d):null;
+  const groups=[]; slice.forEach(e=>{ const k=dayKey(e.d); let g=groups[groups.length-1]; if(!g||g.k!==k){ g={k,d:e.d,list:[]}; groups.push(g);} g.list.push(e); });
+  $('#days').innerHTML = `<section class="card">${groups.map((g,gi)=>{
+    const all=ev.filter(e=>dayKey(e.d)===g.k), nd=all.filter(e=>e.s.status==='done').length, cont = gi===0 && before===g.k;
+    return `<div class="day"><h3><span>${dayLabel(g.d)}${cont?' <span class="lbl">continued</span>':''}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k]===1?'':'s'}${nd?` · <span style="color:var(--good)">${nd} done</span>`:''}</span></h3>
+    ${g.list.map(e=>{ const s=e.s;
+      return `<div class="ev ${s.status}"><span class="when">${timeLabel(e.d)}</span>${glyph(s.status)}<div><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+        <div class="gist">${esc(firstSentence(s.note)||firstSentence(s.why))}</div></div></div>`; }).join('')}</div>`;
+  }).join('')}${pager('log',pg,pages,ev.length,'changes')}</section>
+  <p class="lead" style="padding:8px 2px">Each step shows once, on the day it last changed.</p>`;
+}
+
+/* ---------- reference view ---------- */
+function renderRef(){
+  const copyBlock=text=>`<div class="ask"><span>${esc(text)}</span><button class="copy" data-copy="${esc(text)}">Copy</button></div>`;
+  const tp=(key,num,title,sub,body)=>`<div class="tp${ui.tps.has(key)?' open':''}"><button data-tp="${esc(key)}" aria-expanded="${ui.tps.has(key)}"><span class="id">${esc(num)}</span><span>${esc(title)}<span class="sm">${esc(sub)}</span></span><span class="chev" aria-hidden="true">▶</span></button><div class="tb">${body}</div></div>`;
+  const a=advisor;
+  let guide;
+  if(!got.advisor) guide=`<p class="lead">Loading…</p>`;
+  else if(!a) guide=`<p class="lead">No hand-off guide saved yet.</p>`;
+  else {
+    const setup=Array.isArray(a.setup)?a.setup:[], each=Array.isArray(a.each)?a.each:[];
+    guide = (setup.length?tp('g1','1','Set up once',`${setup.length} steps`,`<ol>${setup.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>`):'')
+      + (each.length?tp('g2','2','Every time',`${each.length} habits`,`<ol>${each.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>`):'')
+      + (a.prompt?tp('g3','3','Project instructions','The advisor guide, ready to paste',copyBlock(a.prompt)):'');
+  }
+  const list=Array.isArray(topics)?topics:[];
+  const tbody = t => `<ul>${(Array.isArray(t.points)?t.points:[]).map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`
+    + (Array.isArray(t.blocks)?t.blocks:[]).filter(b=>b&&b.text).map(b=>`${b.label?`<div class="lbl" style="margin-top:10px">${esc(b.label)}</div>`:''}${copyBlock(b.text)}`).join('')
+    + (()=>{ const l=(Array.isArray(t.sources)?t.sources:[]).filter(x=>x&&/^https:\/\//.test(x.url||'')); return l.length?`<div class="src"><span class="muted">Sources:</span>${l.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.label||x.url)}</a>`).join('')}</div>`:''; })();
+  $('#ref').innerHTML = `<section class="card ref"><header><h3>Hand-off guide</h3><span class="lbl">for a new advisor chat</span></header>${guide}</section>
+    <section class="card ref"><header><h3>Reasoning topics</h3><span class="lbl"><span class="num">${list.length}</span> topics</span></header>
+    ${!got.topics?'<p class="lead">Loading…</p>':topics===null?'<p class="lead">Topics could not be read.</p>':list.length?list.map(t=>tp('t:'+t.id,t.id,t.title||'Topic',t.summary||'',tbody(t))).join(''):'<p class="lead">No topics saved yet.</p>'}</section>`;
+}
+
+/* ---------- render ---------- */
+function renderPlan(){ if(!got.steps) return; renderNow(); renderRail(); renderPhase(); renderSide(); renderLog(); }
+function renderAll(){ renderPlan(); renderRef(); }
+
+function setView(v){
+  ui.view=v;
+  document.querySelectorAll('.tabs [role=tab]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===v)));
+  ['plan','log','ref'].forEach(k=>$('#v-'+k).hidden = k!==v);
+  saveView();
+}
+function goStep(id){
+  const s=steps.find(x=>x.id===id); if(!s) return;
+  if(PH.some(p=>p.k===s.phase)) ui.phase=s.phase;
+  const size=pageSize();
+  if(s.status==='done'){ ui.folds.add(s.phase); ui.donePage[s.phase]=Math.floor(doneList(s.phase).findIndex(x=>x.id===id)/size); }
+  else ui.page[s.phase]=Math.floor(openList(s.phase).findIndex(x=>x.id===id)/size);
+  ui.open.add(id);
+  setView('plan'); renderPlan();
+  const li=document.getElementById('s-'+id);
+  if(li){ li.scrollIntoView({behavior:'smooth',block:'center'}); const b=li.querySelector('.tg'); if(b) b.focus({preventScroll:true}); }
+}
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast.h); toast.h=setTimeout(()=>{t.hidden=true;},2800); }
+
+async function cycle(id){
+  const s=steps.find(x=>x.id===id); if(!s) return;
+  if(!db){ toast('You can view this plan but not change it.'); return; }
+  const prev={status:s.status, updatedAt:s.updatedAt};
+  const next=ORDER[(ORDER.indexOf(s.status)+1)%ORDER.length];
+  s.status=next; s.updatedAt=new Date().toISOString();
+  renderPlan();
+  const b=document.querySelector(`[data-cycle="${CSS.escape(id)}"]`);
+  if(b) b.focus({preventScroll:true});
+  toast(`${id} is now ${LABEL[next].toLowerCase()}.${b?'':next==='done'?' It moved to the done fold.':' It moved in the list.'}`);
+  try { await db.doc('steps/'+id).update({status:next, updatedAt:s.updatedAt}); }
+  catch(e){
+    const live=steps.find(x=>x.id===id); if(live){ live.status=prev.status; live.updatedAt=prev.updatedAt; }
+    renderPlan();
+    const denied = e && (e.code==='permission_denied' || /permission|denied|read.?only|forbidden/i.test(String(e.message||e)));
+    toast(denied ? 'You can view this plan but not change it.' : 'That change did not save. Try again.');
+  }
+}
+
+function copy(btn){
+  const txt=btn.dataset.copy, label=btn.textContent;
+  const ok=()=>{ btn.textContent='Copied'; setTimeout(()=>btn.textContent=label,1400); };
+  const pick=()=>{ const span=btn.previousElementSibling; if(span){ const r=document.createRange(); r.selectNodeContents(span); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast('Selected. Copy it with your keyboard.'); };
+  try { navigator.clipboard.writeText(txt).then(ok,pick); } catch(e){ pick(); }
+}
+
+document.addEventListener('click',e=>{
+  const t=e.target;
+  const hit = sel => t.closest(sel);
+  let n;
+  if((n=hit('[data-cycle]'))){ cycle(n.dataset.cycle); return; }
+  if((n=hit('[data-copy]'))){ copy(n); return; }
+  if((n=hit('[data-more]'))){ const id=n.dataset.more, c=n.previousElementSibling, open=c.classList.toggle('clamp'); open?ui.notes.delete(id):ui.notes.add(id); n.textContent=open?'Show all':'Show less'; return; }
+  if((n=hit('[data-go]'))){ goStep(n.dataset.go); return; }
+  if((n=hit('[data-view-go]'))){ setView(n.dataset.viewGo); window.scrollTo({top:0}); return; }
+  if((n=hit('[data-view]'))){ setView(n.dataset.view); return; }
+  if((n=hit('[data-phase]'))){ ui.phase=n.dataset.phase; setView('plan'); renderPlan(); const f=document.querySelector(`[data-phase="${ui.phase}"]`); if(f) f.focus(); return; }
+  if((n=hit('[data-mode]'))){ applyTheme(n.dataset.mode); try{ localStorage.setItem('rm-theme', n.dataset.mode); }catch(err){ /* not kept */ } return; }
+  if((n=hit('[data-pg]'))){
+    const sc=n.dataset.scope, dir=n.dataset.pg==='next'?1:-1, k=shownPhase();
+    if(sc==='log') ui.logPage+=dir; else if(sc==='done') ui.donePage[k]=(ui.donePage[k]||0)+dir; else ui.page[k]=(ui.page[k]||0)+dir;
+    if(sc==='log') renderLog(); else renderPhase();
+    const btn=document.querySelector(`[data-scope="${sc}"][data-pg="${n.dataset.pg}"]:not(:disabled)`) || document.querySelector(`[data-scope="${sc}"][data-pg]:not(:disabled)`);
+    if(btn) btn.focus({preventScroll:true});
+    const top = sc==='log' ? $('#days') : $('#phases .steps');
+    if(top && top.getBoundingClientRect().top < 60) top.scrollIntoView({block:'start'});
+    return;
+  }
+  if((n=hit('[data-how]'))){ ui.how=!ui.how; renderPhase(); const h=$('[data-how]'); if(h) h.focus(); return; }
+  if((n=hit('[data-tile]'))){ const k=n.dataset.tile, o=n.getAttribute('aria-expanded')!=='true'; n.setAttribute('aria-expanded',String(o)); o?ui.tiles.add(k):ui.tiles.delete(k); return; }
+  const toggle=(btn,set,key)=>{ const p=btn.parentElement.closest('.st,.tp,.donefold'); const o=!p.classList.contains('open'); p.classList.toggle('open',o); btn.setAttribute('aria-expanded',String(o)); o?set.add(key):set.delete(key); };
+  if((n=hit('[data-row]'))){ toggle(n,ui.open,n.dataset.row); return; }
+  if((n=hit('[data-tp]'))){ toggle(n,ui.tps,n.dataset.tp); return; }
+  if((n=hit('[data-fold]'))){ toggle(n,ui.folds,n.dataset.fold); return; }
+});
+const tip=$('#tip');
+document.addEventListener('pointerover',e=>{ const el=e.target.closest&&e.target.closest('[data-tip]'); if(!el){tip.classList.remove('on');return;} tip.textContent=el.dataset.tip; tip.classList.add('on'); });
+document.addEventListener('pointermove',e=>{ if(!tip.classList.contains('on')) return; const x=Math.min(e.clientX+12, innerWidth-tip.offsetWidth-8); tip.style.left=Math.max(8,x)+'px'; tip.style.top=(e.clientY+14)+'px'; });
+const _renderPlan=renderPlan;
+renderPlan=function(){ _renderPlan(); if(measureRows()){ ui.page={}; _renderPlan(); } };
+let lastSize=pageSize(), sizeT=null;
+const onSize=()=>{ clearTimeout(sizeT); sizeT=setTimeout(()=>{ measureRows(); const n=pageSize(); if(n===lastSize) return; lastSize=n; ui.page={}; if(got.steps) renderPlan(); },150); };
+window.addEventListener('resize',onSize);
+
+function applyTheme(m){
+  const root=document.documentElement;
+  if(m==='light'||m==='dark') root.setAttribute('data-theme',m); else root.removeAttribute('data-theme');
+  document.querySelectorAll('#modeSeg [data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===((m==='light'||m==='dark')?m:''))));
+}
+try { applyTheme(localStorage.getItem('rm-theme')||''); } catch(e) { applyTheme(''); }
+setView(ui.view);
+
+function unavailable(){
+  $('#now').innerHTML=`<div class="notice"><h3>Your steps and numbers appear here</h3><p>The plan is saved with this page. Open it on claude.ai while signed in to see it: five phases, from cleaning up claude-settings to rolling it out to your other repos, each step with a status you can change.</p></div>`;
+  $('#rail').innerHTML=''; $('#phases').innerHTML=''; $('#side').innerHTML=''; $('#side2').innerHTML='';
+  $('#days').innerHTML=`<section class="card"><p class="lead">Changes appear here once the plan can be read.</p></section>`;
+  $('#ref').innerHTML=`<section class="card"><p class="lead">The hand-off guide and topics appear here once the plan can be read.</p></section>`;
+}
+
+(async () => {
+  const c=window.ROADMAP_DB||window.claude;
+  try { db = c && typeof c.use==='function' ? await c.use('db') : null; } catch(e) { db=null; }
+  if(!db){ unavailable(); return; }
+  db.collection('steps').orderBy('order').onSnapshot(snap=>{
+    steps=snap.docs.map(d=>({id:d.id, ...d.data()})).map(s=>({...s, status:ORDER.includes(s.status)?s.status:'todo'}));
+    got.steps=true; renderPlan();
+  }, ()=>unavailable());
+  db.collection('topics').orderBy('order').onSnapshot(snap=>{ topics=snap.docs.map(d=>({id:d.id, ...d.data()})); got.topics=true; renderRef(); },
+    ()=>{ topics=null; got.topics=true; renderRef(); });
+  db.doc('meta/advisor').onSnapshot(d=>{ advisor=d.exists?d.data():null; got.advisor=true; renderRef(); }, ()=>{ advisor=null; got.advisor=true; renderRef(); });
+  db.doc('meta/phases').onSnapshot(d=>{ phases=d.exists?d.data():null; renderPlan(); }, ()=>renderPlan());
+  db.doc('meta/cull').onSnapshot(d=>{ cull=d.exists?d.data():null; renderPlan(); }, ()=>renderPlan());
+  renderRef();
+})();
+</script>
+<!-- build:script -->
+<script>
+/* Read-at stamps from window.ROADMAP_BUILD, which the roadmap builder writes. */
+(() => {
+  const b = window.ROADMAP_BUILD, el = document.getElementById('stamps');
+  if(!el) return;
+  if(!b || !Array.isArray(b.panels)){ el.innerHTML = '<span class="unk">Read at: unknown. This page was not built by the roadmap builder.</span>'; return; }
+  const at = new Date(b.builtAt);
+  const built = isNaN(at) ? 'unknown' : at.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  el.innerHTML = `<span><span class="sk">Built</span> <span class="num">${esc(built)}</span></span>` + b.panels.map(p=>{
+    const unk = String(p.read).startsWith('unknown');
+    return `<span${unk?' class="unk"':''}><span class="sk">${esc(p.name)}</span> ${p.home?`<span class="id">${esc(p.home)}</span> `:''}read at <span class="num">${esc(p.read)}</span></span>`;
+  }).join('');
+})();
+/* "Landed in #N" on each open step a merged Step: trailer names, until triage closes it. */
+(() => {
+  const marks = (window.ROADMAP_BUILD && window.ROADMAP_BUILD.landed) || {}, box = document.getElementById('phases');
+  if(!box || !Object.keys(marks).length) return;
+  const tag = () => Object.entries(marks).forEach(([id, where]) => {
+    const meta = document.querySelector(`#s-${CSS.escape(id)} .meta`);
+    if(meta && !meta.querySelector('.landed')) meta.insertAdjacentHTML('beforeend', `<span class="tag landed" title="Merged; waiting for triage to close the step">Landed in ${esc(where.join(', '))}</span>`);
+  });
+  tag();
+  new MutationObserver(tag).observe(box, {childList:true, subtree:true});
+})();
+/* The Records view: Health, then the count and newest entries of each listed record kind. */
+(() => {
+  const b = window.ROADMAP_BUILD || {}, el = document.getElementById('rec'), view = document.getElementById('v-rec');
+  if(!el || !view) return;
+  const unk = v => String(v).startsWith('unknown');
+  const link = (url, text) => url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
+  const day = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); };
+  const health = Array.isArray(b.health) ? b.health : [];
+  const recs = Array.isArray(b.records) ? b.records : [];
+  el.innerHTML = `<section class="card"><header><h3>Health</h3><span class="lbl">read when built</span></header>
+    ${health.length ? `<ul class="hl">${health.map(h => `<li><span class="k">${esc(h.name)}</span><span${unk(h.read)?' class="unk"':''}>${h.home ? link(h.url, `<span class="id">${esc(h.home)}</span>`) + ', changed at ' : ''}<span class="num">${esc(h.read)}</span></span></li>`).join('')}</ul>`
+      : '<p class="lead unk">Health: unknown. This page was not built by the roadmap builder.</p>'}</section>`
+    + (recs.length ? recs.map(r => `<section class="card"><header><h3>${esc(r.name)}</h3><span class="lbl">${r.home ? `<span class="id">${esc(r.home)}</span>` : ''}</span></header>
+      ${r.count == null ? `<p class="lead unk">${esc(r.why || 'unknown')}</p>`
+        : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map(n => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join('')}</ul>${r.newestWhy ? `<p class="asof">${esc(r.newestWhy)}</p>` : ''}` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(r.newestWhy)}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
+      </section>`).join('')
+      : '<section class="card"><p class="lead unk">Records: unknown. This page was not built by the roadmap builder.</p></section>');
+  const inner = setView;
+  setView = function(v){ inner(v); view.hidden = v !== 'rec'; };
+  try { const r = JSON.parse(localStorage.getItem('rm-view') || 'null'); if(r && r.v === 'rec') ui.view = 'rec'; } catch(e) { /* nothing remembered */ }
+  setView(ui.view);
+})();
+</script>
+<!-- /build:script -->
+
+</body></html>

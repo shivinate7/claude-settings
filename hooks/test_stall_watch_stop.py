@@ -1030,5 +1030,80 @@ def table_taskstop_forms():
     return table_rows(TASKSTOP_ROWS)
 
 
+def log_job(job_id, command, cwd=None):
+    """A background call whose command sends its output to a log, and its result. cwd, when given,
+    is the call record's working directory, as the transcript holds it."""
+    cid = "toolu_" + job_id
+    rec = call(cid, command, background=True)
+    if cwd is not None:
+        rec["cwd"] = cwd
+    return [rec, started(cid, job_id, win_path(job_id), False)]
+
+
+def log_at(path, idle):
+    with open(path, "wb") as f:
+        f.write(b"merge: waiting on checks\n")
+    os.utime(path, (NOW - idle, NOW - idle))
+    return path
+
+
+@case
+def open_job_whose_named_log_grows_is_not_listed():
+    """S20a. a merge.py-like job: its output file quiet 600 s, the log its command names by
+    redirection changed 10 s ago: not listed. A relative log resolves against the call's cwd"""
+    base, d = new_dir(), new_dir()
+    output_file(base, "bmlog600", 600)
+    output_file(base, "bmrel600", 600)
+    output_file(base, "bmopen600", 600)
+    log = log_at(os.path.join(d, "merge.log"), 10)
+    log_at(os.path.join(d, "rel.log"), 10)
+    recs = (log_job("bmlog600", "python3 merge.py 586 --confirm > '%s' 2>&1" % log)
+            + log_job("bmrel600", "python3 merge.py 586 >> rel.log 2>&1", cwd=d) + moved("bmopen600"))
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("bmlog600" not in msg, f"a job whose named log grows is listed: {msg!r}")
+    problems += expect("bmrel600" not in msg, f"a job whose relative named log grows is listed: {msg!r}")
+    problems += listed_once(msg, "bmopen600")
+    return problems
+
+
+@case
+def open_job_whose_named_log_is_quiet_is_listed():
+    """S20b. the same job whose named log is also quiet 600 s is listed; so is a job that names a log
+    only inside quotes or a comment, though that file changed 10 s ago"""
+    base, d = new_dir(), new_dir()
+    output_file(base, "bmquiet600", 600)
+    output_file(base, "bmquote600", 600)
+    quiet = log_at(os.path.join(d, "quiet.log"), 600)
+    fresh = log_at(os.path.join(d, "fresh.log"), 10)
+    recs = (log_job("bmquiet600", "python3 merge.py 586 > '%s' 2>&1" % quiet)
+            + log_job("bmquote600", "echo '> %s' \"--log %s\"; sleep 600 # >> %s" % (fresh, fresh, fresh)))
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bmquiet600")
+    problems += listed_once(msg, "bmquote600")
+    return problems
+
+
+@case
+def named_log_with_odd_cwd_keeps_the_report():
+    """S20c. a call record whose cwd is not a string, with a relative and a `--log=F` named log: the
+    report still lists the stale jobs, and a fresh absolute `--log=F` log still keeps its job off"""
+    base, d = new_dir(), new_dir()
+    output_file(base, "bmodd600", 600)
+    output_file(base, "bmflag600", 600)
+    fresh = log_at(os.path.join(d, "flag.log"), 10)
+    recs = (log_job("bmodd600", "python3 merge.py 586 &> rel.log", cwd=["x"])
+            + log_job("bmflag600", "python3 merge.py 586 --log='%s'" % fresh, cwd=5))
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bmodd600")
+    problems += expect("bmflag600" not in msg, f"a job whose --log= log grows is listed: {msg!r}")
+    return problems
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))

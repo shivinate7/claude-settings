@@ -45,6 +45,8 @@ FIXTURE_STEP = "Skill model rows fixture suite"
 sys.path.insert(0, HERE)
 from test_windows_split import all_jobs  # noqa: E402  one home for the gates.yml step parser
 from check_skill_model_rows import skill_names  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 PHRASE = "no model pin; runs on the caller's model"
 HEAD = "| Point | Model | Effort |\n|---|---|---|\n"
@@ -88,11 +90,9 @@ def run(files, locked=()):
     need_check()
     tree = tempfile.mkdtemp(prefix="skill_rows_")
     try:
-        os.makedirs(os.path.join(tree, "lint"))
+        tracked_tree.copy_tracked(tree, "lint")  # the layout and the check's imports
         script = os.path.join(tree, "lint", "check_skill_model_rows.py")
         shutil.copy(CHECK, script)
-        for name in ("layout.py", "layout.json"):  # the check reads its records folder from the layout
-            shutil.copy(os.path.join(os.path.dirname(CHECK), name), os.path.join(tree, "lint", name))
         for rel, text in files.items():
             path = os.path.join(tree, *rel.split("/"))
             os.makedirs(os.path.dirname(path), exist_ok=True)
