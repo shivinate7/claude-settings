@@ -12,11 +12,10 @@ hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 Sampling: the judge runs on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0. A skipped Stop returns
 at once with no model call and no output. The count is a file per session under the state folder.
 
-Input Needed: a reply that carries the label is judged on every Stop, besides the sample, so each
-handed-off step is checked for its reason and the check that showed the session cannot do it. The
-label is found by a string match in code, not by the model. The literal below is a copy of
-LABEL_ORDER in lint/report_gate.py: this hook runs from the config dir, where lint/ is absent, so
-an import would fail open and silently stop judging.
+Input Needed: a reply with an Input Needed item is judged on every Stop, besides the sample, so
+each handed-off step is checked for its reason and the check. The label is read in code, not by the
+model, from lint/report_gate.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
+import fails, the Stop is judged and one stderr line says so.
 
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
 first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <reason>`). The
@@ -30,6 +29,7 @@ session reads as a note on the next turn.
 import hashlib
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +40,9 @@ OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
 SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
-INPUT_NEEDED = "Input Needed"  # copy of the report label in lint/report_gate.py LABEL_ORDER; see the docstring
+LEAD = re.compile(r"^[\s>]*(?:\*\*)?\s*")
+TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
+EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
@@ -108,6 +110,37 @@ def count_this_stop(session_id):
     return n
 
 
+def has_input_needed(reply):
+    """True when the reply has an Input Needed label line with an item that is not empty or none.
+    A reply with no such words returns False before report_gate loads. If LABEL_ORDER cannot be
+    read, return True (judge this Stop) and print one stderr line."""
+    if "input needed" not in reply.casefold():
+        return False
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        from report_gate import LABEL_ORDER
+        want = next(l for l in LABEL_ORDER if "input" in l.casefold()).casefold()
+        labels = {l.casefold() for l in LABEL_ORDER}
+    except Exception as exc:
+        print("reply judge: cannot read LABEL_ORDER (%s: %s); judging this Stop" % (type(exc).__name__, exc),
+              file=sys.stderr)
+        return True
+    item, inside = [], False
+    for line in reply.splitlines():
+        head = LEAD.sub("", line, count=1)
+        hit = next((l for l in labels if head.casefold().startswith(l)), None)
+        rest = TAIL.sub("", head[len(hit):], count=1) if hit else ""
+        if hit and (head[len(hit):].lstrip().startswith(("**", ":")) or not rest):
+            inside = hit == want
+            if inside:
+                item.append(rest)
+        elif inside:
+            item.append(line.lstrip("> \t"))
+    return not EMPTY_ITEM.match(" ".join(item))
+
+
 def log_finding(session_id, stop_n, reason):
     """Write one guard.log line for a finding. Never raises."""
     try:
@@ -129,7 +162,7 @@ def main():
         if not isinstance(reply, str) or not reply.strip():
             return 0
         stop_n = count_this_stop(hook.get("session_id"))
-        if (stop_n - 1) % SAMPLE_EVERY and INPUT_NEEDED not in reply:
+        if (stop_n - 1) % SAMPLE_EVERY and not has_input_needed(reply):
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(

@@ -917,6 +917,25 @@ def case_no_input_needed_off_sample_is_not_judged():
     check("no Input Needed label: Stop 2 is silent", run.out == "" and run.code == 0, (run.code, run.out))
 
 
+def case_label_forms_judged_and_non_labels_not():
+    judged = {
+        "quoted lower-case": "Done: x.\n> **Input needed:**\n> - Delete the test App IDs.",
+        "colon inside bold": "Done: x.\n**Input Needed:** delete the test App IDs.",
+    }
+    for name, text in judged.items():
+        run, _ = second_stop(text, label="c45-form-" + name.split()[0])
+        check("label form (%s): judged off-sample" % name, len(run.calls) == 1, run.calls)
+    not_judged = {
+        "prose mention": "Done: x.\nThe Input Needed section is below the fold in the old layout.",
+        "none inline": "Done: x.\n**Input Needed:** none",
+        "none on next line": "Done: x.\n> **Input Needed**\n> None.\n> **Next**\n> Go on.",
+        "empty": "Done: x.\n**Input Needed**\n\n**Next**\nGo on.",
+    }
+    for name, text in not_judged.items():
+        run, _ = second_stop(text, label="c45-non-" + name.split()[0] + name[-2:])
+        check("not a label hand-off (%s): not judged off-sample" % name, not run.calls, run.calls)
+
+
 def case_prompt_asks_for_reason_and_check():
     run = run_hook(IN_BOLD, answer=OK_ANSWER)
     sentences = re.split(r"[.\n]", run.prompt().split("\n\nReply:\n")[0])
@@ -1010,6 +1029,7 @@ CASES = (
     table_write_and_remove,
     case_input_needed_label_is_judged_off_sample,
     case_no_input_needed_off_sample_is_not_judged,
+    case_label_forms_judged_and_non_labels_not,
     case_prompt_asks_for_reason_and_check,
     case_finding_writes_one_guard_log_line,
     case_finding_without_known_rule_logs_the_judge_id,
