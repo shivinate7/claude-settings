@@ -107,7 +107,8 @@ case "$*" in
     echo launch >> "$CALL_LOG"
     if [[ -n ${LAUNCH_FAIL:-} ]]; then echo "$LAUNCH_FAIL"; exit 1; fi ;;
   "xctrace record"*)
-    # XCTRACE_PLAN: one word per call. ok exits 0; boot prints the boot wait and exits 13; any other word fails with exit 7.
+    # XCTRACE_PLAN: one word per call. ok exits 0; boot prints the boot wait and exits 13; hang hangs in the save until
+    # the tool's timeout; any other word fails with exit 7.
     echo xctrace >> "$CALL_LOG"
     echo "xcrun $*" >> "$CALL_LOG.args"
     o=; prev=; for a in "$@"; do [[ $prev == --output ]] && o=$a; prev=$a; done
@@ -120,6 +121,7 @@ case "$*" in
       # XCTRACE_MAKE_OUTPUT=1: a boot failure leaves a partial trace at --output, which the retry must remove.
       boot) [[ -z ${XCTRACE_MAKE_OUTPUT:-} ]] || [[ -z $o ]] || mkdir -p "$o"
         echo "Waiting for device to boot..."; echo "Timed out waiting for device to boot"; exit 13 ;;
+      hang) echo "Recording completed. Saving output file..."; exec "$REAL_SLEEP" 30 ;;
       *) echo "Recording failed: $w"; exit 7 ;;
     esac ;;
   *) echo "xcrun $*" >> "$CALL_LOG" ;;
@@ -906,8 +908,20 @@ end_case "profile: a partial trace from a boot failure is removed before the ret
 XCTRACE_PLAN="boot other" prof --app AdBlock
 need "exit $rc, want 7" test "$rc" -eq 7
 need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
-need "no line says the phone may need unlocking or a cable" grep -qE 'unlock.*cable' "$out"
-end_case "profile: a retry that fails another way still exits with its code and names the cable"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a retry that fails another way exits with its code and names no cable"
+XCTRACE_PLAN="boot hang" STEP_TIMEOUT=1 prof --app AdBlock
+need "exit $rc, want 124" test "$rc" -eq 124
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "no line names the step and its 1 s timeout" grep -q 'step xctrace record timed out after 1s' "$out"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a retry that hangs in its save names the timeout and the step, and no cable"
+XCTRACE_PLAN="hang" STEP_TIMEOUT=1 prof --app AdBlock
+need "exit $rc, want 124" test "$rc" -eq 124
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace"
+need "no line names the step and its 1 s timeout" grep -q 'step xctrace record timed out after 1s' "$out"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a first try that hangs is not retried, and names the timeout and the step"
 XCTRACE_PLAN=ok DEVICE_UDID=FAKE-DEVICE-ENV1 prof --app Other
 need "exit $rc, want 0" test "$rc" -eq 0
 need "the env UDID or the named app was not used" args_have '--device FAKE-DEVICE-ENV1 .*--launch -- dev.example.Other$'
