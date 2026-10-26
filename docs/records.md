@@ -70,6 +70,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `tokens-point-brief-at-files` | Point a brief at files. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-read-report-not-transcript` | Read a sub-agent's report, never its transcript. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-compacting-keep-essentials` | When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running. | [`CLAUDE.md`](../CLAUDE.md) |
+| `tokens-folder-rules-load-by-path` | Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-never-guess-answer` | Never guess an answer the code should give you. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-surface-ambiguity` | Surface ambiguity instead of resolving it silently. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-never-drop-item-silently` | Never drop an item without saying so. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -82,6 +83,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `building-memory-is-short-term` | Memory stays on, as short-term notes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-comments-say-why` | Comment only what complex code does and why. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-cite-id-plus-gloss` | Give every id a short plain name the first time it appears, like "D12, short titles for records". | [`CLAUDE.md`](../CLAUDE.md) |
+| `speak-one-name-per-thing` | `GLOSSARY.md`, beside this file, gives each workflow thing one name. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-never-explain-in-paragraph` | Never explain a rule in a paragraph. | [`CLAUDE.md`](../CLAUDE.md) |
 | `speak-rewrite-superseded-in-place` | Rewrite superseded text in place. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-write-in-ste` | Write plainly: short sentences, one term per meaning, no filler. | [`CLAUDE.md`](../CLAUDE.md) |
