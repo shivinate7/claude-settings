@@ -1,6 +1,6 @@
 # c47. One account file for iOS shipping, and no wrapper scripts in the app repos
 
-Written by the advisor, Oct 26. Checked against claude-settings 149f4bc, home-app 0a3419b,
+Written by the advisor, Oct 26. Owner agreed Oct 26. Checked against claude-settings 149f4bc, home-app 0a3419b,
 ios-adblock b3d5eb6, degen e2635ca. Two parts, in this order: part 1 in claude-settings, then
 part 2 in each app repo after part 1 merges and the Mac has reinstalled.
 
