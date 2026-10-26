@@ -30,7 +30,8 @@ guard rule, so the watcher does the waiting and the session is told once.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line every 120 seconds.
-- A job that sends that line to a log it names is still writing, so it is no stall. Reason: on 2026-10-26
+- A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
+  2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
   scroll past a real one (guard-that-cries-wolf-is-spent). The hook reads the logs from the command itself
   (`named_logs`): the target of `> F`, `>> F`, `&> F`, `>& F`, each `tee` file, and `--log F`. shlex reads
