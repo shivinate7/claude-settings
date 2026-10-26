@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import contextlib, io, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import contextlib, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1650,7 +1650,14 @@ class RecordsPage(unittest.TestCase):
         self.assertTrue(any("docs/records.md" in p for p in got), got)
         self.assertEqual(C.generated_page(r.dir, "HEAD", {"docs/records.md"}), ("docs/records.md", False))
 
-    SHIPPED = ("check_silent_undo.py", "hook_catalog.py", "check_skill_model_rows.py")  # the generator imports the last
+    SHIPPED = ("check_silent_undo.py", "hook_catalog.py", "check_skill_model_rows.py", "layout.py", "layout.json")  # the generator imports the rest
+
+    @staticmethod
+    def without_debt_rows(text):
+        """The layout file's text with the debts kind no longer listed on the records page."""
+        layout = json.loads(text)
+        assert layout["kinds"]["debts"].pop("listed") is True  # a no-op edit would make a false red
+        return json.dumps(layout, indent=2) + "\n"
     KEEP = "# Keep the records index\n"
     DEBT = "**What.** Keep the page honest.\n"
     GONE = "| `d-gone` | Gone. | [`debts/d-gone.md`](../debts/d-gone.md) |\n"
@@ -1702,11 +1709,9 @@ class RecordsPage(unittest.TestCase):
         runs the head's checkout, so the head's generator is the oracle that the hole trusted."""
         r = self.fixture()
         r.sh("checkout", "-q", "-b", "oops")
-        with open(os.path.join(r.dir, "lint", "hook_catalog.py"), encoding="utf-8", newline="") as f:
+        with open(os.path.join(r.dir, "lint", "layout.json"), encoding="utf-8", newline="") as f:
             text = f.read()
-        old = 'RECORD_FOLDERS = ("decisions", "debts", "plans")'
-        self.assertIn(old, text)  # a no-op edit would make a false red
-        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "plans")')})
+        self.put_lf(r, {"lint/layout.json": self.without_debt_rows(text)})
         self.regenerate(r)
         self.commit_all(r, "drop the debts from the records page")
         with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
@@ -1760,14 +1765,12 @@ class RecordsPage(unittest.TestCase):
         r.push()
         self.assertNotIn("lint/hook_catalog.py", r.sh("ls-tree", "-r", "--name-only", "origin/main"))  # the base has no generator
         r.sh("checkout", "-q", "-b", "oops")
-        with open(self.TOOL, encoding="utf-8", newline="") as f:
-            text = f.read()
-        old = 'RECORD_FOLDERS = ("decisions", "debts", "plans")'
-        self.assertIn(old, text)  # a no-op edit would make a false red
-        with open(os.path.join(HERE, "check_skill_model_rows.py"), encoding="utf-8", newline="") as f:
-            skill_rows = f.read()  # the generator imports it; without it the head's generator crashes and fails closed
-        self.put_lf(r, {"lint/hook_catalog.py": text.replace(old, 'RECORD_FOLDERS = ("decisions", "plans")'),
-                        "lint/check_skill_model_rows.py": skill_rows})
+        head = {}
+        for name in ("hook_catalog.py", "check_skill_model_rows.py", "layout.py", "layout.json"):
+            with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
+                head["lint/" + name] = f.read()  # the generator imports the rest; without them it crashes and fails closed
+        head["lint/layout.json"] = self.without_debt_rows(head["lint/layout.json"])
+        self.put_lf(r, head)
         self.run_generator(r, os.path.join(r.dir, "lint", "hook_catalog.py"))
         with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8") as f:
             self.assertNotIn("d-one", f.read())  # the head's own page really lost the debt row

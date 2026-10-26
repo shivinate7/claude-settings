@@ -6589,7 +6589,9 @@ class RecordsPageHome(unittest.TestCase):
             homes = [n.value for n in ast.parse(f.read()).body
                      if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RECORDS_PAGE" for t in n.targets)]
         self.assertEqual(len(homes), 1, "lint/hook_catalog.py must assign RECORDS_PAGE exactly once")
-        self.assertEqual(merge.RECORDS_PAGE, ast.literal_eval(homes[0]))
+        # The generator reads the path from the layout file, the one home of every record path.
+        with open(os.path.join(os.path.dirname(merge.RECORDS), "layout.json"), encoding="utf-8") as f:
+            self.assertEqual(merge.RECORDS_PAGE, json.load(f)["kinds"]["records-index"]["path"])
 
 
 def assert_one_rate_wait_line(test, text, snapshots):
