@@ -7,7 +7,6 @@ Each group goes red on the gap it guards, and stays quiet on a repo that is fine
 folder, a vendored screenshot script, a generated token file, a cited cap and an owner-named cap.
 PROBES_UNDER_TEST names the script under test (default: the one beside this file).
 """
-import json
 import os
 import re
 import shutil
