@@ -1023,10 +1023,9 @@ def build_fixtures():
     # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
     # time: keep it above MERGE_READ_TIMEOUT.
     make_fake_gh(GHSLOW, "main", delay=20)
-    # 3.5s per call stands in for real gh latency (3.0-3.9s): slower than the 3s MERGE_READ_TIMEOUT,
-    # nowhere near a hang.
-    # c53: four REST calls * 3.5s = 14s, the whole MERGE_READ_TIMEOUT, so this case is red until that budget grows. The 3.5s was measured
-    # for gh's GraphQL calls on Windows (3.0-3.9s); the latency of a REST call is unmeasured, so the figure stays the measured one.
+    # 3.5s per call stands in for real gh latency (3.0-3.9s, measured on Windows for gh's GraphQL calls): nowhere near a hang.
+    # c53: the read makes four REST calls, 4 * 3.5s = 14s, which fits the 25s MERGE_READ_TIMEOUT (the slowest measured call, 3.9s,
+    # makes 15.6s). The latency of a REST call is unmeasured, so the figure stays the measured one.
     make_fake_gh(GHWARM, "main", delay_s=3.5)
     # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
     # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
@@ -7278,7 +7277,8 @@ sh("merge-checks: no number on a branch with no open pull request is unknown, an
    carries="main", cwd=GITMAIN, env_path=GREEN_ON, config=MERGECFG)
 sh("merge-checks: no number outside a checkout is unknown, and denies", "gh pr merge", "deny", "merge-checks",
    carries="branch", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
-sh("merge-checks: a pull request URL names its number", "gh pr merge https://github.com/y/x/pull/12 --squash -R y/x", "allow", silent=True,
+# No -R: the URL alone names the repo, so every call must go to repos/y/x (GHNEED breaks any call that names another repo).
+sh("merge-checks: a pull request URL names its number and its repo", "gh pr merge https://github.com/y/x/pull/12 --squash", "allow", silent=True,
    cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
 sh("merge-checks: a head as slow as real gh, but green, still allows",
    "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHWARM + os.pathsep + PY_PATH,

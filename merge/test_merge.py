@@ -2150,6 +2150,8 @@ try:
             locked = bool(git("ls-remote", "origin", "refs/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
+                pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
         pr.update(S.get("pr_raw") or {})  # a test's own raw fields, for the mapping table
         finish(one(pr, jq), 0, include)
@@ -3518,7 +3520,7 @@ class RestRoutes(Env):
     (the fake gh answers it that way, and a GraphQL call that reaches it fails the test). Each case pins one way a REST read could count a pending or
     red check as green, drop a check or a pull request, or merge a head nobody read. The fake behaves as gh does: a list read gives one page unless
     --paginate is given, object pages come back to back, and fields without -X make a POST. Not a GhHalf subclass: the GhHalf tests must not run twice."""
-    set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
+    set, calls, gh_host, go, gh_state, reverted = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state, GhHalf.reverted
 
     def setUp(self):
         super().setUp()
@@ -3699,6 +3701,65 @@ class RestRoutes(Env):
                     self.gh_host().merge(7, "merge", self.head())
                 self.assertIn(STATE_READ, self.calls())
 
+    # ---- the merge state: the old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself; the REST PUT does not,
+    # and a token that may bypass branch protection merges it. Host.merge reads the pull request right before the PUT.
+
+    def clear_calls(self):
+        pathlib.Path(self.state, "calls.log").unlink(missing_ok=True)
+
+    def test_a_merge_of_a_blocked_or_behind_pull_request_sends_no_put_and_is_a_refusal(self):
+        head = self.head()
+        for state in ("blocked", "behind"):
+            with self.subTest(state=state):
+                self.clear_calls()
+                self.set(pr_raw={"mergeable_state": state})
+                commit, msg = self.gh_host().merge(7, "merge", head)
+                self.assertIsNone(commit)  # a proven refusal: confirm reverts the claim on it
+                self.assertRegex(msg, "(?i)" + state)  # the message names the state
+                self.assertIn("GET pulls/7", self.calls())  # it was read, not assumed
+                self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertIsNone(self.gh_state("oid"))
+
+    def merged_in_state(self, state):
+        head = self.head()
+        self.set(pr_raw={"mergeable_state": state})
+        commit, msg = self.gh_host().merge(7, "merge", head)
+        self.assertEqual((commit, msg), (self.gh_state("oid"), ""))
+        lines = self.calls().splitlines()
+        puts = [i for i, line in enumerate(lines) if line.startswith(MERGE_CALL)]
+        self.assertEqual(len(puts), 1, lines)
+        self.assertIn("GET pulls/7", lines[:puts[0]])  # the pull request is read before the call, not taken from an earlier read
+
+    def test_a_merge_of_a_clean_pull_request_reads_it_and_then_sends_the_put(self):
+        self.merged_in_state("clean")
+
+    def test_a_merge_of_an_unstable_pull_request_reads_it_and_then_sends_the_put(self):
+        self.merged_in_state("unstable")  # a failing check that is not required: the old gh merged it too
+
+    def refused_under_the_lock(self, state):
+        self.set(merge_state_when_locked=state)  # the preview read says clean; every read after the lock is taken says `state`
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the merge was refused", out)
+        self.assertRegex(out, "(?i)" + state)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+        self.assertIsNone(self.gh_state("oid"))
+        self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
+
+    def test_a_pull_request_that_turns_blocked_after_the_preview_is_refused_and_the_claim_reverted(self):
+        self.refused_under_the_lock("blocked")
+
+    def test_a_pull_request_that_turns_behind_after_the_preview_is_refused_and_the_claim_reverted(self):
+        self.refused_under_the_lock("behind")
+
+    def test_a_pull_request_that_turns_unstable_after_the_preview_is_still_merged(self):
+        self.set(merge_state_when_locked="unstable")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
     # ---- mergeable is null while GitHub works it out
 
     def test_a_pull_request_whose_mergeable_is_null_is_read_again_until_it_answers(self):
@@ -3727,6 +3788,17 @@ class RestRoutes(Env):
                 self.assertEqual((info["head"], info["branch"], info["base"]), (self.head(), "feat", "main"))
         self.assertIn("GET pulls/7", self.calls())
         self.assertNotIn(LIST_CALL, self.calls())
+
+    def test_a_pull_request_url_routes_every_call_to_the_repo_in_the_url(self):
+        # A host with no repo and no -R reads the repo of the working directory. A URL names its own repo, so every call it makes goes there.
+        url = "https://github.com/acme/widgets/pull/7"
+        for name, read, least in (("pr", lambda h: h.pr(url), 1), ("head_read", lambda h: h.head_read(url), 3)):
+            with self.subTest(read=name):
+                pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
+                read(merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None))
+                used = pathlib.Path(self.state, "repos.log").read_text().split()
+                self.assertGreaterEqual(len(used), least, used)
+                self.assertEqual(set(used), {"acme/widgets"})
 
     def test_a_branch_name_resolves_through_the_open_pull_request_list(self):
         self.two_open_prs()
