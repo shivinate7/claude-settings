@@ -201,7 +201,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 ## Shipping iOS apps
 
 `bin/ios-ship` builds, signs and ships the owner's iOS apps from the Mac. It runs on macOS only, under `/bin/bash` 3.2.
-Each private app repo calls it from a thin wrapper and keeps its own settings in `tools/ios-ship.json`.
+Each private app repo keeps only what differs, in `tools/ios-ship.json`. The account values live once, on the Mac.
 
 **The App Store Connect API key**
 
@@ -210,11 +210,12 @@ Each private app repo calls it from a thin wrapper and keeps its own settings in
   This repo is public, so it holds no team ID, key ID, issuer ID or phone ID.
 * A command-line build needs the key. It cannot see the account that is signed in to the Xcode window, and it fails
   with "No Accounts".
-* Each app repo's `tools/ios-ship.json` holds the key path and the IDs. The tool checks that the key file exists. It
-  never reads the file.
+* The account file, `~/.config/ios-ship/account.json`, holds the key path and the IDs: `team_id`, `device_udid`,
+  `asc_key_path`, `asc_key_id`, `asc_issuer_id`. It lives only on the Mac. The tool checks that the key file exists.
+  It never reads the key file.
 
-**The config.** The top level holds `team_id`, `device_udid`, `asc_key_path`, `asc_key_id`, `asc_issuer_id`, `repo_url`
-(the install job clones it) and `apps`. Each app holds `name`, `scheme`, `bundle_id` and `project_dir`. These keys are
+**The repo config.** The top level holds `repo_url` (the install job clones it) and `apps`. It may also set an account
+key, as a variant for that repo. Each app holds `name`, `scheme`, `bundle_id` and `project_dir`. These keys are
 optional:
 
 * `project_yml`: the XcodeGen spec. Without it, the project is hand-written and XcodeGen does not run.
@@ -227,17 +228,20 @@ optional:
 * `after_archive`: commands that check the archive. They run in the repo root with `ARCHIVE` set. A command that fails
   fails the app. The testflight job only.
 
-An environment variable of the same name in capitals (`TEAM_ID`, `DEVICE_UDID`, `ASC_KEY_PATH`, `ASC_KEY_ID`,
-`ASC_ISSUER_ID`) wins over the config. A value that is unset in both is refused. The tool has no built-in IDs.
+Each account value comes from the first of: an environment variable of the same name in capitals (`TEAM_ID`,
+`DEVICE_UDID`, `ASC_KEY_PATH`, `ASC_KEY_ID`, `ASC_ISSUER_ID`), the repo config, the account file. A value that is unset
+in all three is refused, and the refusal names both files and the variable. The tool has no built-in IDs.
 
-**Run it.** A wrapper in the app repo passes its own config:
-`exec "${IOS_SHIP:-$HOME/.claude/bin/ios-ship}" <job> "$(cd "$(dirname "$0")" && pwd)/ios-ship.json" "$@"`.
+**Run it** from inside the app repo: `ios-ship testflight` or `ios-ship install`. With no `CONFIG`, the tool uses
+`tools/ios-ship.json` at the git toplevel of the current folder. Outside a git repo, or with no such file, it exits 2.
+The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
+`tools/ios-ship.json`.
 
-* `ios-ship testflight CONFIG [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
   It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
   stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
-* `ios-ship install CONFIG [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
+* `ios-ship install [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.
   An install that is more than 300 days old raises an overdue notice.
