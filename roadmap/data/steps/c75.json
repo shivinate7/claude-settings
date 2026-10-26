@@ -1,0 +1,9 @@
+{
+  "title": "A branch delete after its archive push is not re-asked by Claude Code's own auto-mode check",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.35,
+  "why": "Your gripe, Oct 26: sessions keep asking \"push as an archive, then delete?\" when that is always the right move. c70 fixed our guard; the platform's check still asks.",
+  "note": "Finding, Oct 26 (coordinator, from the Mac merge hand): after pushing archive/ copies of the c53 probe branches, the branch deletes were refused by Claude Code's built-in auto-mode safety check (\"Git Destructive\"), not by our guard, so you were asked again. c70 (a refusal with one lossless fix hands the session that fix) and rule shared-trees-archive-then-delete cover only our guard. Fix to find, one cloud lane, needs no answer from you: an allow rule or auto-mode guidance in the installed settings, so a branch delete counts as lossless once an archive/<branch> push at the same tip succeeded, or the branch is contained in main. First check: what auto-mode settings Claude Code reads today (docs, not memory). Port: yes, it ships through the install to every repo. Placed ahead of o13 (triage, Oct 26): the same gripe as c70, and it fires on every Mac cleanup.",
+  "updatedAt": "2026-10-26T20:05:00Z"
+}
