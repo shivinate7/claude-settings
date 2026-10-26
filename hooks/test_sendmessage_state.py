@@ -587,7 +587,7 @@ def claims(r):
 
 
 def case_override_pass_lifts_a_deny():
-    # decision owner-override-pass, owner 2026-10-26 ("Fix the hook"): an active pass lifts either judge.
+    # decision owner-override-pass: an active pass lifts either judge.
     both = {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG, "wording": FLAG}
     for label, override, inp, kwargs, lifted in (
         ("timed pass, both judges FLAG", (SID_A, TIMED), hook_input(), both, True),
