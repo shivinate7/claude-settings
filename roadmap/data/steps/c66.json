@@ -1,10 +1,10 @@
 {
   "title": "Windows merge tests read git's forward-slash paths",
   "phase": "cleanup",
-  "status": "active",
+  "status": "done",
   "order": 103.37,
   "why": "Main's push run stays red until the Windows merge tests compare paths the way git prints them.",
-  "note": "Status, Oct 26: #609 merged; ready to close. Result: test-only fix. A tree_listed helper in merge/test_merge.py compares realpath plus normcase on both sides; merge.py's remove_held_tree already compared realpath on both sides, so no product defect. Proof: red on main run 40325058256 (5 Windows merge shards), green on gates dispatch 40332792660 (all jobs). Placed ahead of c44 (triage, Oct 26): last thing between main and a green push run, c61's goal.",
+  "note": "Done: lane PR #609 landed on main d741cd5 in batch PR #608, Oct 26. Result: test-only fix. A tree_listed helper in merge/test_merge.py compares realpath plus normcase on both sides; merge.py's remove_held_tree already compared realpath on both sides, so no product defect. Proof: red on main run 40325058256 (5 Windows merge shards), green on gates dispatch 40332792660 (all jobs). Placed ahead of c44 (triage, Oct 26): last thing between main and a green push run, c61's goal.",
   "ask": "",
   "updatedAt": "2026-10-26T14:40:00Z"
 }
