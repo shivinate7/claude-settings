@@ -23,7 +23,7 @@ set -uo pipefail
 usage() { echo "usage: ios-ship testflight|install [CONFIG] [--app NAME]... [--export-only | --no-install --debug --force]" >&2; exit 2; }
 JOB=${1:-}
 case $JOB in testflight|install) shift ;; *) usage ;; esac
-if [[ $JOB == install && -n ${PHONE_APPS_JSON:-} ]]; then
+if [[ $JOB == install && -n ${PHONE_APPS_JSON+x} ]]; then
   echo "ios-ship: PHONE_APPS_JSON is no longer read; name the apps with --app and list them in tools/ios-ship.json" >&2; exit 2
 fi
 CONFIG=
@@ -44,8 +44,10 @@ while (( $# )); do
   shift
 done
 if [[ -z $CONFIG ]]; then
-  CONFIG=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)/tools/ios-ship.json
-  [[ -f $CONFIG ]] || { echo "ios-ship: no CONFIG given and no tools/ios-ship.json at the git toplevel of $PWD" >&2; exit 2; }
+  top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || top=
+  [[ -n $top ]] || { echo "ios-ship: no CONFIG given and $PWD is not in a git repo; pass CONFIG or run in a repo with tools/ios-ship.json" >&2; exit 2; }
+  [[ -f $top/tools/ios-ship.json ]] || { echo "ios-ship: no CONFIG given and no tools/ios-ship.json at the git toplevel of $PWD" >&2; exit 2; }
+  CONFIG=$top/tools/ios-ship.json
 fi
 [[ $CONFIG == /* ]] || CONFIG=$PWD/$CONFIG
 ROOT=$(git -C "$(dirname "$CONFIG")" rev-parse --show-toplevel 2>/dev/null) || ROOT=
@@ -57,15 +59,16 @@ cfg_get() { jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/dev/null; }
 app_get() { printf '%s' "$ENTRY" | jq -r --arg k "$1" '.[$k] // empty' 2>/dev/null; }
 
 # The account file holds the owner's IDs once for every repo. A missing or invalid file gives no values.
-ACCOUNT=${HOME:-}/.config/ios-ship/account.json
-account_get() { jq -r --arg k "$1" '.[$k] // empty' "$ACCOUNT" 2>/dev/null; }
+# With no HOME there is no account file, and ACCOUNT stays empty.
+ACCOUNT=; [[ -z ${HOME:-} ]] || ACCOUNT=$HOME/.config/ios-ship/account.json
+account_get() { [[ -n $ACCOUNT ]] || return 0; jq -r --arg k "$1" '.[$k] // empty' "$ACCOUNT" 2>/dev/null; }
 
 # resolve VAR KEY: VAR from the env, else from CONFIG's KEY, else from the account file's KEY. Unset in all three: refuse.
 resolve() {
   local v=${!1:-}
   [[ -n $v ]] || v=$(cfg_get "$2")
   [[ -n $v ]] || v=$(account_get "$2")
-  [[ -n $v ]] || refuse "config: $2 is unset; set it in $CONFIG or $ACCOUNT, or export $1"
+  [[ -n $v ]] || refuse "config: $2 is unset; set it in $CONFIG or ${ACCOUNT:-the account file (it needs HOME)}, or export $1"
   printf -v "$1" '%s' "$v"
 }
 
