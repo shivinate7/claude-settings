@@ -45,6 +45,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+  hand-made-worktree   deny. A real worktree add whose new tree lands outside
+                       `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
+                       (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
   cite-by-id           deny. A commit message or PR body that cites a record by its path.
@@ -625,6 +628,80 @@ def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
         judged = judged[1:]
     import tempfile   # lazy: only a silenced write reaches here
     return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
+
+
+# decision lanes-start-in-tool-worktrees: a lane tree comes only from the tool's own isolation.
+HAND_MADE_VALUE_OPTIONS = ("-b", "-B", "--reason")
+
+
+def worktree_add_target(args):
+    """The new-tree path of a `worktree add` call's arguments, else None (no path, or a help
+    flag). `-b`, `-B` and `--reason` take a value. `--orphan` is a flag in git 2.42 and later and
+    took a value before, so its next word is a value only when another path word follows. `--`
+    ends the options."""
+    words, ended, cursor = [], False, 0
+    while cursor < len(args):
+        arg = args[cursor]
+        cursor += 1
+        if ended or not arg.startswith("-") or arg == "-":
+            words.append(arg)
+        elif arg == "--":
+            ended = True
+        elif arg in ("-h", "--help"):
+            return None
+        elif arg in HAND_MADE_VALUE_OPTIONS:
+            cursor += 1
+        elif arg == "--orphan" and cursor < len(args) and not args[cursor].startswith("-"):
+            if len([a for a in args[cursor:] if not a.startswith("-")]) > 1:
+                cursor += 1
+    return words[0] if words else None
+
+
+def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
+    """The new-tree path when `segments[number]` is a real worktree add whose tree lands
+    outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
+    runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
+    and passes, so the repo is judged, never the target. Anything unreadable allows."""
+    tokens = segment_tokens(segments[number])
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return ""
+    target = None
+    for subcommand, args in git_calls(segments[number]):
+        if subcommand == "worktree" and args and args[0] == "add":
+            target = worktree_add_target(args[1:])
+            break
+    if target is None:
+        return ""
+    where = dir_before_segment(segments, number, cwd, ends)
+    named = _segment_git_c_target(tokens)
+    if named is not None:
+        where = None if _unexpanded(named) else shell_abs(named, where)
+    if not where or _unexpanded(target):
+        return ""
+    primary = primary_checkout(where)
+    if not primary:
+        return ""
+    import tempfile   # lazy: only a real worktree add reaches here
+    if path_is_inside(primary, tempfile.gettempdir()):
+        return ""
+    tree = shell_abs(target, where)
+    if tree is None:
+        return ""
+    if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:
+        return ""
+    return target
+
+
+WORKTREE_HAND_MADE_REASON = (
+    "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
+    "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
+    "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
+    "Remedy: start the lane with one of those two tools. If the tool's isolation was refused, "
+    "make no tree by hand: stop and report to the owner which layer refused and its exact "
+    "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
+    "harness's."
+)
 
 
 SILENT_WRITE_REDIRECT_REASON = (
@@ -2016,6 +2093,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "silent-write",
                    reason.format(step=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
+
+    # 1c2. A lane worktree made by hand, outside the tool's own folder.
+    for number, segment in enumerate(segments):
+        if segment.strip():
+            matched = hand_made_worktree_hit(segments, number, cwd, ends)
+            if matched:
+                refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)
