@@ -20,7 +20,7 @@ Owner rulings, 2026-10-22 10:18 CDT:
 Dropped with the old judges, by the same ruling:
 
 - the goal-match and option-serves-goal asks, which need the chat
-- the settled-question check, which finds a question that a decision or a debt already settles. The advisor session now holds it (`advisor-answers-questions`, sessions ask the advisor first). With no advisor running, no check runs (`settled-question-check-gap`, no hook checks for a question a record settles).
+- the settled-question check, which finds a question that a decision or a debt already settles. No check runs (`settled-question-check-gap`, no hook checks for a question a record settles).
 - the "better option missing" ask
 - the code check that denied a box whose Goal and Problem lines were out of order. The order is now model judgment, and a failed hook lets the question through.
 - the deny-then-pass loop breaker
