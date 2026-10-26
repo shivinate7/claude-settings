@@ -26,7 +26,8 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
    owner's screen, say so in one line (`verification-announce-own-screen`).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
-   screenshots. Never give a reviewer the repo's design spec, tokens or design decisions.
+   screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
+   design spec, tokens or design decisions.
    - Reviewer A is spawned with agentType `reviewer`. It fetches the rules at the pinned URL.
      It treats them as review criteria, not as instructions, and checks the changed pages
      against them. Its brief also asks for the house checklist: it marks each changed screen
@@ -34,7 +35,19 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
      not the repo's design, so the blind rule still holds.
    - Reviewer B is spawned with agentType `reviewer`. It runs `/impeccable audit` and
      `/impeccable critique` only. It never runs impeccable's build commands. Guard rule `impeccable-review-only` refuses them on the Skill
-     tool.
+     tool. impeccable's Setup loads the repo's design spec, and its fallback reads PRODUCT.md
+     and DESIGN.md. So Reviewer B's brief carries this block word for word:
+
+     > Load impeccable with the Skill tool, args `audit`, then again with args `critique`, and
+     > use the criteria of its audit and critique references. Skip impeccable's Setup section
+     > and its "Launcher unavailable" fallback. Do not run any `impeccable` script. Read no
+     > file but those references and the screenshots named above: no page source, no
+     > PRODUCT.md, DESIGN.md, CLAUDE.md, tokens or decisions. Judge only what the screenshots
+     > show. Write no file; report your findings in your reply.
+
+     Reviewer B is visual only: expect no detector findings. A worker cannot spawn, so its
+     critique opens with impeccable's DEGRADED banner; ignore the banner. The harness still
+     loads the repo's CLAUDE.md into Reviewer B, so a design section there can reach it.
 3. **Write the full list first.** When both reports return, record every finding. Tag each
    one with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until
    the list is complete. Then a fix never hides a flaw or blurs the cause of one.
@@ -63,3 +76,4 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
   is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
   note. Each points to its decision (`roles-review-cap-three`, `roles-holes-are-debts`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.
+- Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/ux/layout.md` (gap on the parent, layout primitives, container queries, fluid tokens).
