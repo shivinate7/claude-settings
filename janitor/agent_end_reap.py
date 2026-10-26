@@ -57,7 +57,6 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
 REPLACE_TRIES = 5  # tries at the log replace, 50 ms apart
-MAX_CLIMB = 64  # ponytail: fixed depth bound against a pid cycle, never a real tree this deep
 
 
 def log_path() -> str:
@@ -147,17 +146,6 @@ def target_worktree(payload: dict):
     return path
 
 
-def parent_pid(pid: int):
-    if sys.platform.startswith("win"):
-        return sweep._parent_pid_windows(pid)
-    try:
-        answer = _nowindow.run(["ps", "-o", "ppid=", "-p", str(pid)],
-                                capture_output=True, text=True, timeout=5)
-        return int(answer.stdout.strip()) if answer.returncode == 0 else None
-    except Exception:
-        return None
-
-
 BATCH_TIMEOUT = 30  # seconds for the one cwd batch read; the hook's own limit is 60
 
 
@@ -166,11 +154,11 @@ def tree_root_orphaned(pid: int, target: str, cwd_of=None):
     outside TARGET holds the tree. None when a read could not tell."""
     cwd_of = cwd_of or sweep.process_cwd
     current = pid
-    for _ in range(MAX_CLIMB):
+    for _ in range(sweep.MAX_CLIMB):
         orphan = sweep.is_orphan(current)
         if orphan is not False:
             return orphan
-        parent = parent_pid(current)
+        parent = sweep._parent_pid(current)
         cwd = cwd_of(parent) if parent else None
         if cwd is None:
             return None
