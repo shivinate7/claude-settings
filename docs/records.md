@@ -268,6 +268,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`debts/pr-ready-unguarded.md`](../debts/pr-ready-unguarded.md) |
 | `push-head-mismatch-trap` | `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. | [`debts/push-head-mismatch-trap.md`](../debts/push-head-mismatch-trap.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`debts/push-report-before-checks.md`](../debts/push-report-before-checks.md) |
+| `question-box-while-work-runs` | A session can open a question box while its agents, lanes or background commands run. | [`debts/question-box-while-work-runs.md`](../debts/question-box-while-work-runs.md) |
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`debts/refresh-lock-untested.md`](../debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`debts/refusal-route-around-guard.md`](../debts/refusal-route-around-guard.md) |
 | `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`debts/ruling-kind-vacuous-local-pass.md`](../debts/ruling-kind-vacuous-local-pass.md) |
