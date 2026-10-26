@@ -34,7 +34,15 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
      not the repo's design, so the blind rule still holds.
    - Reviewer B is spawned with agentType `reviewer`. It runs `/impeccable audit` and
      `/impeccable critique` only. It never runs impeccable's build commands. Guard rule `impeccable-review-only` refuses them on the Skill
-     tool.
+     tool. impeccable's Setup loads the repo's design spec, and its fallback reads PRODUCT.md
+     and DESIGN.md, so Reviewer B's brief carries this block word for word:
+
+     > Load impeccable with the Skill tool, args `audit`, then again with args `critique`, and
+     > use the criteria of its audit and critique references. Skip impeccable's Setup section
+     > and its "Launcher unavailable" fallback. Do not run any `impeccable` script. Read no
+     > file but those references and the screenshots named above: no page source, no
+     > PRODUCT.md, DESIGN.md, CLAUDE.md, tokens or decisions. Judge only what the screenshots
+     > show. Write no file; report your findings in your reply.
 3. **Write the full list first.** When both reports return, record every finding. Tag each
    one with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until
    the list is complete. Then a fix never hides a flaw or blurs the cause of one.
