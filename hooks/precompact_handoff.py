@@ -3,8 +3,8 @@
 
 Modes:
 - PreCompact: Before compaction, builds a digest of the session's user and assistant
-  text and records the outcome in the session's handoff state. Never blocks compaction.
-- --nudge: At Stop, blocks once each time the context size passes a new checkpoint, and
+  text and records the outcome in the session's handoff state. Never refuses compaction.
+- --nudge: At Stop, refuses once each time the context size passes a new checkpoint, and
   tells the session to rewrite its handoff. Silent on stop_hook_active or an error.
 - --reorient: At SessionStart after compact, clear or fork, tells the session to rewrite
   its handoff from the digest. After clear or fork, it also names the handoff of the prior
@@ -48,7 +48,7 @@ the desktop app has none.
   unusable pointers and stale .dir and .reread records (sweep()).
   Spec: docs/decisions/precompact-handoff.md, item 8.
 
-Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
+Never exits 2 and never refuses compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
 """
 import datetime
@@ -97,7 +97,7 @@ def handoff_path(session_id):
 
 def ensure_handoff_dir(session_id):
     """Create <config_dir>/handoffs/ so the session can write its handoff. Creates only;
-    never touches files in it. A failure never blocks."""
+    never touches files in it. A failure never refuses."""
     try:
         os.makedirs(os.path.dirname(handoff_path(session_id)), exist_ok=True)
     except Exception as e:

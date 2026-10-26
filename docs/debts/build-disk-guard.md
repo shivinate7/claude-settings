@@ -6,10 +6,10 @@
 
 **Decision.** `build-dirs-reaped-at-agent-end`, reap build folders at agent end (Part 1 is live). `guard-that-cries-wolf-is-spent` governs the threshold: a refusal on a disk with room is a false alarm.
 
-**Retire.** Take both measurements on the feed-build machine and get the owner's word on a threshold. Then build the guard against the feed-build incident of 2026-10-11, with cases that go red on the old guard:
+**Retire.** Take both measurements on the feed-build machine and get the owner's grant on a threshold. Then build the guard against the feed-build incident of 2026-10-11, with cases that go red on the old guard:
 
 - A build command below the threshold is refused. The same command above it is allowed.
-- A failed free-space read allows the build (a refusal on a read error blocks every build where the read breaks).
+- A failed free-space read allows the build (a refusal on a read error refuses every build where the read breaks).
 - The refusal reports the free space and the threshold, and names no path to delete.
 
 A build refused on a disk with room reopens this debt.

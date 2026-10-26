@@ -14,7 +14,7 @@
 - A failed or timed-out git read allows. The remedy gives `HEAD:<branch-name>` with a placeholder and names no branch.
 - Cost: 2 to 4 git reads, only on a push of HEAD; +20 ms measured.
 
-The check is a push of HEAD to a differing tracked name denied, and the allowed shapes above allowed.
+The check is a push of HEAD to a differing tracked name refused, and the allowed shapes above allowed.
 
 ## Ruling
 

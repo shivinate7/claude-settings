@@ -2047,7 +2047,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable", default="", help="comma-separated rule codes to run alone")
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
     parser.add_argument("--decisions-dir", default=None,
-                        help="folder of D-nnn decision entries, for gloss collapse in STE001 "
+                        help="folder of D-nnn decision records, for gloss collapse in STE001 "
                              "(default: the decisions folder of lint/layout.json; pass '' to turn "
                              "the collapse off)")
     parser.add_argument("--config-from", default=None, metavar="PATH",

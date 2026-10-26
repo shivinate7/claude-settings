@@ -727,7 +727,7 @@ await test('model table: a row names mods/decision-watch, and that row names hai
   assert.match(row, /\bhaiku\b/, 'the mods/decision-watch row does not name haiku')
 })
 
-// ---- the ping bug: $.model.complete returns { isAnswered, text, usage }
+// ---- the ping defect: $.model.complete returns { isAnswered, text, usage }
 
 await test('ping: a model object reply reaches python as its .text, and a string reply works too', async () => {
   const replies = [
@@ -945,7 +945,7 @@ await test('busy: a model call that never resolves frees the slot at the mod lim
   }
 })
 
-// The python side of the same hole: a python call that never returns (the finder, or either phase) holds the slot.
+// The python side of the same known limit: a python call that never returns (the finder, or either phase) holds the slot.
 // The slot must free within 60 s (a ceiling this file guesses, as MODEL_CEILING_MS is). Steps of 5 s, each with a
 // flush, so a deadline that starts after a microtask still fires inside the run.
 const HUNG = () => new Promise(() => {})

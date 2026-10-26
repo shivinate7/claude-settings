@@ -2,7 +2,7 @@
 """Reads ~/.claude/guard.log: one tab-separated line per guard verdict, written by
 hooks/guard_core.py record(). Nobody read it, so a rule that never fires, or fires too often, went unseen.
 Prints per-rule deny/ask/noted counts (a `fixed` rewrite line, written by the removed STE gate, counts as noted; an `override`
-line, a refusal an owner override pass lifted, adds an override column), denies per day,
+line, a refusal an owner override lifted, adds an override column), denies per day,
 other verdicts verbatim, bad-line count.
 --days all reads the whole log. --all-rules lists every rule id the guard and the gates can emit
 (rule_audit.emitted_rule_ids, the one home), 0 counts included, with the date of each rule's
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
-OVERRIDE = "override"  # a refusal an owner override pass lifted: counted, and a key only when present
+OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE gate wrote for several codes found at once
 UNKNOWN = "unknown session"

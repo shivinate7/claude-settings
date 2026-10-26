@@ -8,7 +8,7 @@ Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT:
 - Keep a reminder of 3 words or fewer where agents hit the guard often.
 - Never reword a kept rule.
 - Re-kind an `unmechanized` rule to `judgment` when its reason already says no check can judge it. `judgment` means no exact check can judge the rule. A model hook that comments on a reply is not an exact check. A reason that says no check reads the rule yet stays `unmechanized`.
-- Owner, 2026-10-17 02:28 CDT: merge the second lane although it scored zero net value at review round 3. Its one opened hole comes from the deleted rules themselves.
+- Owner, 2026-10-17 02:28 CDT: merge the second lane although it scored zero net value at review round 3. Its one opened safety hole comes from the deleted rules themselves.
 
 Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 

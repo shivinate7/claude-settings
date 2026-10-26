@@ -41,7 +41,7 @@ from guard_env import _substitutions
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. The earlier version was four bare
 # regexes over the whole command text, so the NAME tripped it wherever it sat: inside a quoted
 # grep pattern, on the far side of a pipe, in a comment. MEASURED: the owner's
-# `grep -n -i "...|make reap|pkill..." CLAUDE.md` was denied, though the command calls grep, not
+# `grep -n -i "...|make reap|pkill..." CLAUDE.md` was refused, though the command calls grep, not
 # pkill. `cat notes.md | grep pkill` and `echo "pkill -f node"` are the same defect: the word is
 # there, but nothing in the segment calls it.
 #
@@ -58,7 +58,7 @@ def kill_hit(tokens) -> str:
     `pkill` and `killall` deny outright: naming a process by pattern or by name always reaches
     every match, flags or none. `taskkill` and `Stop-Process` deny only with the flag that names
     a process by image or by name; `taskkill /PID` and `Stop-Process -Id` name one process and
-    pass. `lsof` denies only with a `-t`/`-ti` flag, which feeds a kill list; `lsof -i :3000`
+    pass. `lsof` refuses only with a `-t`/`-ti` flag, which feeds a kill list; `lsof -i :3000`
     asks which port is busy and kills nothing.
     """
     index = resolve_command(tokens)
@@ -216,7 +216,7 @@ def _kill_pids(tokens):
 
 
 def kills_group_pid(tokens) -> bool:
-    """True when a `kill` segment names pid 0, 1 or -1. No override pass lifts it."""
+    """True when a `kill` segment names pid 0, 1 or -1. No override lifts it."""
     return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
 
 
@@ -299,7 +299,7 @@ KILL_REASON = (
 # `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`, exits the subshell at
 # once. Pid 1 adopts the server, the harness never tracks it, and no pid is kept. Rule 2 above
 # refuses `pkill -f` and `lsof -t`, and its remedy needs a pid this session started, so the
-# server stays up. This rule denies the LAUNCH, before a session reaches a machine-wide kill.
+# server stays up. This rule refuses the LAUNCH, before a session reaches a machine-wide kill.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
 # every check below reads a segment's OWN tokens, from `segment_tokens`, quote-aware and
@@ -308,7 +308,7 @@ KILL_REASON = (
 # tokens `nohup`, `&`, or `disown` this file checks for, so it never fires here either.
 #
 # `nohup`/`setsid` MUST be read BEFORE `resolve_command` unwraps them: `nohup pkill foo` names a
-# real kill in command position, and rule 2 above already denies that on its own, unwrapped
+# real kill in command position, and rule 2 above already refuses that on its own, unwrapped
 # reading. This rule reads the wrapper word ITSELF, with `_skip_assignments_and_keywords`, the
 # same prefix skip `resolve_command` uses before it unwraps, so a plain detached launch such as
 # `nohup python3 server.py &` is caught here without duplicating rule 2's kill list.
@@ -341,7 +341,7 @@ def disown_after_background_hit(tokens) -> str:
     followed by `disown` in command position, else ''. Also "disown" when the segment's OWN
     command word is `disown`: MEASURED 2026-09-26 on Windows, `cmd &` then `disown` on the next
     line was allowed, and the server outlived the agent (the start-shapes entry, PR #144).
-    `disown` has no use but to detach a job, so it denies in command position anywhere."""
+    `disown` has no use but to detach a job, so it refuses in command position anywhere."""
     j = _skip_assignments_and_keywords(tokens)
     if j < len(tokens) and basename(tokens[j]) == "disown":
         return "disown"
@@ -359,8 +359,8 @@ def windows_detach_hit(tokens) -> str:
     """Return the matched word when a segment's command word is a PowerShell launch the
     harness cannot track, else ''.
 
-    `Start-Job` always denies: it hands the work to a job object in a separate PowerShell
-    process, and this session never holds a pid for it at all. `Start-Process` denies only
+    `Start-Job` always refuses: it hands the work to a job object in a separate PowerShell
+    process, and this session never holds a pid for it at all. `Start-Process` refuses only
     when neither `-Wait` (blocks until the child exits, so nothing outlives the turn) nor
     `-PassThru` (hands back the process object, whose `.Id` is the pid the remedy needs) is
     present, whatever else it carries, `-WindowStyle Hidden` included. MEASURED 2026-09-24

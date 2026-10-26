@@ -4,8 +4,8 @@
 Decision agents-get-standing-rules. Prints `hookSpecificOutput` with `hookEventName` "SubagentStart" and
 `additionalContext` (Claude Code hooks reference). The scope line varies by `agent_type` from
 the hook input; an unknown or missing type gets the general scope text.
-Advisory, fail-open by design: on any error it prints one stderr line and exits 0, so a bug here never
-blocks an agent from starting.
+Advisory, fail-open by design: on any error it prints one stderr line and exits 0, so a defect here never
+stops an agent from starting.
 """
 import json
 import os

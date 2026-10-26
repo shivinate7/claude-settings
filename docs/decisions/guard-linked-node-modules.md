@@ -21,7 +21,7 @@ A request from the q_max worklist session. A hand-run `npm ci` through a junctio
 
 ## Review
 
-Three rounds. Round 3 passed. Net safety value is positive: the change adds one deny and weakens nothing on main.
+Three rounds. Round 3 passed. Net safety value is positive: the change adds one refusal and weakens nothing on main.
 
 Kind: process
 Home: hooks/guard_push_delete.py

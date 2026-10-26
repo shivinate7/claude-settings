@@ -1336,7 +1336,7 @@ class RecordsHistory(Tree):
     def test_c14_limit_old_before_was_colon_flags_as_pinned(self):
         # NAMED LIMIT, pinned as the current behaviour. The "old" rule flags "was:" when "old" comes earlier in the same
         # block, so it cannot tell a description from overruled text. Contrast c12: "The flag was: on." has no "old" and
-        # passes. Debt: an entry in the debt store is still owed (debts/ is not a test path). A change here is a rule change.
+        # passes. Debt: a record in the debt store is still owed (debts/ is not a test path). A change here is a rule change.
         self.assert_history(with_records({"decisions/old.md": old_decision("The old flag was: on.")}), "decisions/old.md:7")
 
 

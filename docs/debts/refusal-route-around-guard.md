@@ -8,10 +8,10 @@
 
 **Retire.** Build when the owner asks for a forced guard, or a second route-around is measured. Two options:
 
-- Fix the base bug that decision names, so the diff check blocks at stop and commit for any route. This judges the result, as that decision requires.
+- Fix the base defect that decision names, so the diff check refuses at stop and commit for any route. This judges the result, as that decision requires.
 - Deny a shell command that names a path the same agent was refused. This judges commands, which that decision rejected.
 
-Closed when a red case writes a refused path by shell and the guard denies it.
+Closed when a red case writes a refused path by shell and the guard refuses it.
 
 ## Ruling
 

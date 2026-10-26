@@ -71,7 +71,7 @@ def worktree_remove_forced(args) -> bool:
     return False
 
 
-# A branch deletion always denies here, never asks: the branch ref lives in the COMMON git
+# A branch deletion always refuses here, never asks: the branch ref lives in the COMMON git
 # directory, the same one every worktree of the clone reads, so which checkout the delete runs
 # from limits nothing about what is lost. This mirrors PUSH_DENY_REASON's own reasoning for the
 # stash stack. The remedy hands over the one lossless fix as commands, so a session runs it and
@@ -89,7 +89,7 @@ BRANCH_DELETE_DENY_REASON = (
     "push succeeds, the work is kept, so this rule allows the delete. Nothing is lost, so this "
     "needs no question to the owner."
 )
-# A worktree removal always denies here too. The tree it deletes is not the tree the command RUNS
+# A worktree removal always refuses here too. The tree it deletes is not the tree the command RUNS
 # in, so the running checkout's own worktree-ness (the split every other arm in this rule reads)
 # says nothing about whether the loss is confined to one lane: it is confined to the REMOVED
 # tree's lane regardless, and that tree is never the one asking permission.
@@ -102,7 +102,7 @@ WORKTREE_REMOVE_DENY_REASON = (
 )
 # Pruning deletes no files: it drops the administrative record of a worktree whose directory is
 # already gone. The worst case is clearing another session's record of a tree it still means to
-# use, so this asks, never denies, whatever the run location.
+# use, so this asks, never refuses, whatever the run location.
 WORKTREE_PRUNE_ASK_REASON = (
     "Rule (shared trees): this drops the administrative record of a worktree whose directory no "
     "longer exists. It deletes no files, but the record it drops could belong to another "

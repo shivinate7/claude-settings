@@ -8,7 +8,7 @@ The state comes from `claude agents --json`, read by mods/session-board/hooks/re
 (lib.mjs is the one home of that read). One word: busy, idle, waiting or unseen.
 - idle: allow, no model call. The message starts a turn; it interrupts nothing.
 - waiting (on a permission answer): allow, no model call. The receiver is paused, not mid-task.
-- busy: one model call (decision_watch.invoke_model, the one model caller). FLAG denies.
+- busy: one model call (decision_watch.invoke_model, the one model caller). FLAG refuses.
 - unseen (main, an in-process teammate, no row, a duplicate name, node or claude missing): allow here.
   The wording judge, the SendMessage prompt hook in settings.json, covers that receiver.
 

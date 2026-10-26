@@ -180,7 +180,7 @@ its own.
 
 A single process this sweep cannot read is out of scope. That covers a
 process owned by another account, or one that is otherwise access-protected.
-The sweep counts it. It never acts on it. It never blocks a decision about
+The sweep counts it. It never acts on it. It never stops a decision about
 anything else because of it.
 
 ## Dead-rooted servers

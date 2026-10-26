@@ -267,6 +267,9 @@ jobs:
       - name: Glossary homes and avoided names
         run: python3 lint/check_glossary.py
 
+      - name: Retired names, one word per meaning
+        run: python3 lint/test_retired_names.py
+
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
 

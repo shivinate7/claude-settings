@@ -3,10 +3,10 @@
 ## The ruling
 
 A recovery control exists for the moment its own precondition is false. Gate it on that same state, and
-the gate blocks it exactly when it is needed. CLAUDE.md states the rule. Two behaviors in this repo
+the gate refuses it exactly when it is needed. CLAUDE.md states the rule. Two behaviors in this repo
 already follow it:
 
-- **Rule 1b, pointer-head.** The rule denies a command that moves HEAD off `main` in the pointer
+- **Rule 1b, pointer-head.** The rule refuses a command that moves HEAD off `main` in the pointer
   checkout. A move TO `main` is the recovery act, so it passes.
 - **The clone is not frozen.** Rule 7 freezes `hooks`, `lint`, `agents` and `state` under the config
   directory, and the live pinned checkout `<clone>-live` and the stamped worktree

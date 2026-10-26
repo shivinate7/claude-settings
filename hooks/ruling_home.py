@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost.
+"""At Stop, refuses once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost.
 
 `docs/decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
 closes: an orchestrator's auto-memory can hold an owner ruling that reaches no tracked file in
@@ -12,8 +12,8 @@ excepted) counts as written THIS SESSION when a `Write`, `Edit`, or `MultiEdit` 
 the last human message names it, OR a `Bash` tool use since the last human message names the
 memory folder in its command text (item 1). All sessions of one project share the memory
 folder, so a Bash-named file counts only when its own mtime is after the last human message: a
-read does not change mtime, so `cat`/`ls` never blocks, and a peer session's write this session
-never named never blocks either (item 2). A Bash command names the folder when its text holds
+read does not change mtime, so `cat`/`ls` never refuses, and a peer session's write this session
+never named never refuses either (item 2). A Bash command names the folder when its text holds
 the folder's absolute path, its `~` form, or its `$HOME` form; a name it also holds is matched
 as a whole path component, never a bare substring, so a write to `data.md` can never mark
 `a.md` (item 3). A write through `cd` and a relative path, a shell variable, a script, or

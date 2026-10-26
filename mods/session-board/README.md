@@ -50,7 +50,7 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - The mod stores no prompt text, no file content, and no folder path. It shows the repo folder name and the branch.
 - The recent list names a file only for the file tools: Read, Edit, Write, MultiEdit, NotebookEdit, Glob, and Grep. It stores the file name, never the folder. A Bash command and an MCP tool give the tool name only.
 - A name that looks secret shows as "(secret file)". The rule is the one in `mods/plain-diff`. Examples are `.env`, `*.pem`, `id_rsa`, and `credentials.json`. `.env.example` and `credentials.ts` keep their names.
-- A Grep or Glob path shows only when its last part has an extension. A folder named like a file still shows. That is a known hole.
+- A Grep or Glob path shows only when its last part has an extension. A folder named like a file still shows. That is a known limit.
 - Names on the board are plain text. Control characters, bidi marks, and the characters `< > & " backtick` are removed or replaced. Long names are cut. The mod reads store values back through the same check.
 - The mod shows no cost figure. The cost figure is not reliable.
 
@@ -67,7 +67,7 @@ The mod writes no handoff. The session does, by the hook's own rules.
 
 `/safe-stop plan` prints the prompt and sends nothing. If python or the hook is missing, `/safe-stop` prints what is missing and sends nothing.
 
-The origin check is a block-list. A run from a plugin, a peer session, a coordinator, a schedule, or an auto-continuation is refused. Other origins run, such as `unclassified`, `sdk`, and `bridge`. The check does not prove that a person typed the command.
+The origin check is a refusal list. A run from a plugin, a peer session, a coordinator, a schedule, or an auto-continuation is refused. Other origins run, such as `unclassified`, `sdk`, and `bridge`. The check does not prove that a person typed the command.
 
 The python call runs with `-I` and with the config folder as its working directory, never the session folder. A repo file named `json.py` cannot run. A path over 4000 characters is refused, not cut.
 
@@ -90,10 +90,10 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - The store file name carries the install: a `--plugin-dir` run wrote `session-board_inline-<hash>.json`. Sessions loaded two ways probably do not share one file. Load every session the same way.
 - The running agent count is as of the last turn end or heartbeat. It can lag by 30 s.
 - A denied permission clears when the tool call returns, the same as an approved one. Turn end also clears it.
-- Named hole, the sweep: it deletes day-old records only when `claude agents --json` gives a valid JSON list. A banner line, an object, or no output deletes nothing. A valid empty list `[]` counts as real, so day-old records of sessions with no live row go.
-- Named hole, the clear race: after `/clear` or a resume, a store write already held at the host can land late. The mod removes it again after it lands. The old entry can show for a short moment.
-- Named hole, the idle git read: the tree can change between reads, so a clean tree can read as clean for up to 5 minutes after an edit made outside the session. A turn end reads again.
-- Named hole, the config folder: under Git Bash, `HOME` is a path like `/c/Users/x`. `/safe-stop` uses `USERPROFILE` first when it starts with a drive letter. Another setup can pick the wrong folder. Set `CLAUDE_CONFIG_DIR` to be sure.
+- Known limit, the sweep: it deletes day-old records only when `claude agents --json` gives a valid JSON list. A banner line, an object, or no output deletes nothing. A valid empty list `[]` counts as real, so day-old records of sessions with no live row go.
+- Known limit, the clear race: after `/clear` or a resume, a store write already held at the host can land late. The mod removes it again after it lands. The old entry can show for a short moment.
+- Known limit, the idle git read: the tree can change between reads, so a clean tree can read as clean for up to 5 minutes after an edit made outside the session. A turn end reads again.
+- Known limit, the config folder: under Git Bash, `HOME` is a path like `/c/Users/x`. `/safe-stop` uses `USERPROFILE` first when it starts with a drive letter. Another setup can pick the wrong folder. Set `CLAUDE_CONFIG_DIR` to be sure.
 - A mod error is not shown in the session. It goes to the debug log (`claude --debug`), one line starting "session-board:".
 
 ## Try in the desktop app

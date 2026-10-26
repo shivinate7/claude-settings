@@ -697,7 +697,7 @@ def case_invoke_model_timeout_is_error():
     check("timeout: error names the failure", bool(error), error)
 
 
-# The one home for the child's isolation flags. Decision reply-judge-samples-never-blocks (the
+# The one home for the child's isolation flags. Decision reply-judge-samples-never-refuses (the
 # reply judge) and the reply judge row of subagent-model-cap: haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
     # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
@@ -956,7 +956,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/reply-judge-samples-never-blocks.md).
+# The one-year token file (decisions/reply-judge-samples-never-refuses.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this

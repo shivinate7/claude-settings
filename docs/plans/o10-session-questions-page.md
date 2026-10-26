@@ -84,7 +84,7 @@ and acts on the answers.
 - It needs no paste, and it does not depend on comments.
 - Only a writer can save. The owner is the writer, so this fits a page for one owner.
 - The answer is the owner's own act on the page. Whether a session may treat a page save as
-  the owner's word needs a ruling (see "Deferred for shiv", item 3).
+  the owner's grant needs a ruling (see "Deferred for shiv", item 3).
 - Path A's button stays on the page as the fallback.
 
 ## Path C: comments sent to Claude (Enterprise)
@@ -135,7 +135,7 @@ keeps path A.
    - (c) Add path C. Gain: answers live in threads. Loss: depends on Enterprise sharing,
      unknown today.
    - Recommendation: (b), after a local test shows whether a local session wakes too.
-3. **Whether a page save counts as the owner's word.**
+3. **Whether a page save counts as the owner's grant.**
    - (a) Yes, for the owner's own save on a page only the owner can write. Gain: path B works.
      Loss: a new rule to guard.
    - (b) No; only a typed message counts. Gain: no new rule. Loss: no path B.

@@ -265,7 +265,7 @@ WAITER_REASON = (
 # The roster is NAMED: "does this command ever end" cannot be resolved from the system, and a rule
 # for every background call would refuse the builds and test runs that end by themselves. A foreground
 # server that the harness timeout later moves to the background is NOT covered: its call never
-# carried run_in_background (named hole).
+# carried run_in_background (named safety hole).
 UNTIL_NOTE = re.compile(r"\buntil:[ \t]*(\S[^\r\n]*)", re.I)
 SCRIPT_RUNNERS = ("npm", "pnpm", "yarn", "bun", "npx", "pnpx", "bunx")
 SCRIPT_MANAGERS = ("npm", "pnpm", "yarn", "bun")
@@ -280,7 +280,7 @@ SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab",
                 "webpack": ("serve",), "astro": ("dev",), "rails": ("s", "server"),
                 "streamlit": ("run",)}
 SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
-# Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
+# Named safety holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
 # is checked for presence only, and some wrappers and forms are not read (debt notes).
 
 

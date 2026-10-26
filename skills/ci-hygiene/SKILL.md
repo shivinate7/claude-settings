@@ -55,7 +55,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    through the merge tool.
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
    lane passes its local checks at about the same time, offer one integration branch. A repo may
-   name one session to batch PRs and run each merge, on the owner's word.
+   name one session to batch PRs and run each merge, on the owner's grant.
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push
    starts no notice. Never run `gh run watch`: one watch made 131 API calls a minute (decision
    ci-wait-reads-run-status, CI waits read the run status). Never poll with a sleep loop. A repeated `gh run view` or
