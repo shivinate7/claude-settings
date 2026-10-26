@@ -1,0 +1,9 @@
+{
+  "title": "One thread publishes the roadmap page",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.25,
+  "why": "Build advisor, Oct 26: every thread republishes the roadmap page, so publishes collide and each takes about three tries.",
+  "note": "Measured by triage, Oct 26 (this thread's own publishes): of 5 publishes, 3 were refused before going through. Two causes. (1) A real race: another thread published a newer build in between (seen twice). (2) A handshake cost, not a race: the first publish to a page this session has not viewed is refused, and the same content sent again is refused until the saved copy is read; so even a clean publish takes up to three calls. Options: (a) one publisher, the triage thread: other threads push to the branch and do not publish; triage publishes at the branch head on each wake. Gain: no races. Loss: a note-only push by another thread shows on the page only at triage's next wake. (b) Every thread publishes, but only after pulling, building at the head, and checking that the live page equals an earlier commit's build. Gain: the page stays fresh. Loss: races stay and need retries. Triage pick: (a), plus a note in roadmap/README.md on the handshake (read the saved copy once, then publish). It changes who publishes, so the coordinator updates the project instructions. Placed after c55 (triage, Oct 26): same upkeep family, and it costs every thread calls today.",
+  "updatedAt": "2026-10-26T05:10:00Z"
+}
