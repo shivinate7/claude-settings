@@ -1,0 +1,10 @@
+{
+  "title": "Tasks and rulings a session catches land in tracked files, not only the handoff",
+  "phase": "organize",
+  "status": "todo",
+  "order": 140.5,
+  "why": "A handoff file dies with the session's machine; a tracked file survives it.",
+  "note": "Deferred (shiv, Oct 26): it changes where feedback_gate sends things, which is your call. From o5b's audit (plans/o5b-memory-hooks-audit.md): re-point feedback_gate's task and ruling homes from the handoff to tracked files (the repo's todo and decision records), then trim the handoff template's two rulings sections. No build until you say yes. Placed after o5b (triage, Oct 26): its direct follow-up.",
+  "ask": "",
+  "updatedAt": "2026-10-26T12:55:00Z"
+}
