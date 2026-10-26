@@ -11688,6 +11688,27 @@ def merge_import_exits_case():
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
 
 
+HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
+HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
+
+
+def guard_merge_read_timeout():
+    """MERGE_READ_TIMEOUT of the guard under test, parsed from the guard_merge.py beside it (an import
+    would run the module). None when the file or the assignment is not there or is not a plain number."""
+    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "guard_merge.py")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MERGE_READ_TIMEOUT" for t in node.targets)
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))
+                and not isinstance(node.value.value, bool)):
+            return float(node.value.value)
+    return None
+
+
 def merge_hang_timeout_case():
     """A `gh` that never answers must still end in a deny, and that deny must not depend on the
     hook's 60s budget being outlived first.
@@ -11695,9 +11716,13 @@ def merge_hang_timeout_case():
     The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
     checks), and this is pinned everywhere.
 
-    The wall-time half -- the read must finish well inside the 60s hook budget, bounded here at
-    ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
-    subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
+    The wall-time half -- the read must finish well inside the 60s hook budget -- is bounded in two
+    parts. The read ends within MERGE_READ_TIMEOUT (read from the guard under test) plus
+    HANG_MARGIN_S, so a read that outlives its own budget fails. And that budget plus its margin
+    stays under HANG_CEILING_S, on every OS, so a bound that follows the constant cannot bless a
+    budget that nears the hook's 60s. The first part is asserted on POSIX only. MEASURED on
+    Windows: GHHANG is a `.cmd` fake, and subprocess.run's kill on timeout only reaches the
+    cmd.exe it directly spawned, never the
     ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
     captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until
     ping's FULL configured wait elapses, not until the kill. That is a fixture artifact of
@@ -11707,6 +11732,13 @@ def merge_hang_timeout_case():
     `.cmd` fake can be killed on time here, so there is nothing truthful left to assert for wall
     time on Windows; skip it there, loudly, rather than fake a shorter wait or a looser bound.
     """
+    budget = guard_merge_read_timeout()
+    if budget is None:
+        return False, "MERGE_READ_TIMEOUT cannot be read as a number from the guard_merge.py beside the guard under test"
+    bound = budget + HANG_MARGIN_S
+    if bound > HANG_CEILING_S:   # no run: a read budget this long is not inside the hook's 60s, whatever the fake does
+        return False, ("MERGE_READ_TIMEOUT %gs plus %gs of margin is over %gs: a hung gh could outlive the hook's 60s budget"
+                       % (budget, HANG_MARGIN_S, HANG_CEILING_S))
     started = time.time()
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
@@ -11719,14 +11751,15 @@ def merge_hang_timeout_case():
         problems.append("expected deny, got %s" % got)
     elif "could not run" not in reason:
         problems.append("expected the could-not-run reason, got %r" % reason[:120])
-    if os.name != "nt" and elapsed >= 15:
-        problems.append("the judgement took %.1fs, at or past the 15s bound" % elapsed)
+    if os.name != "nt" and elapsed >= bound:
+        problems.append("the judgement took %.1fs, at or past the %gs bound (MERGE_READ_TIMEOUT %gs plus %gs)"
+                        % (elapsed, bound, budget, HANG_MARGIN_S))
     if problems:
         return False, "; ".join(problems)
     note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
             "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
             if os.name == "nt" else
-            "denied as unknown in %.1fs, inside the 60s hook budget" % elapsed)
+            "denied as unknown in %.1fs, inside the %gs bound and the 60s hook budget" % (elapsed, bound))
     return True, note
 
 
