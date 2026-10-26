@@ -467,6 +467,12 @@
         "test": "lint/test_gates.py::ReportGateTests.test_03_landed_code_fence_in_blockquote_blocks"
       }
     },
+    "reports-offer-sweep-after-merge": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether a session's last PR merged with no lane open, or whether the final report offered the sweep command."
+      }
+    },
     "reports-no-report-when-nothing-landed": {
       "mechanism": {
         "kind": "unmechanized",
