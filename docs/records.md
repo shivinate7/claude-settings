@@ -283,4 +283,5 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 
 | Slug | Gist | Link |
 |---|---|---|
+| `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`plans/o10-session-questions-page.md`](../plans/o10-session-questions-page.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`plans/shared-merge-tool.md`](../plans/shared-merge-tool.md) |
