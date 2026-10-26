@@ -2944,19 +2944,30 @@ def tag_orphan(env_entries=(), argv_extra=()):
     return None
 
 
-def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=()):
-    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped."""
+def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
+             **who):
+    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
+    is agent_id and agent_type, the payload fields that mark a subagent call."""
     pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
         sh(name, "kill %d" % pid, expected, "machine-wide-kill" if expected == "deny" else None,
-           cwd=NOGIT, session=session, config=SUBCFG, transcript=SUB_TRANSCRIPT, carries=carries)
+           cwd=NOGIT, session=session, config=SUBCFG, transcript=SUB_TRANSCRIPT, carries=carries,
+           **who)
     return pid
 
 
 TAG_LEADER = tag_case("kill: a PPID-1 pid whose environment holds this session's id", "allow",
                       env_entries=[TAG + "=" + SUB_SESSION])
+# Every subagent shares the main session's id, so the tag owns a pid for the main session only
+# (decision a-kill-by-pid-needs-an-owned-pid, owner 2026-10-26). A truthy agent_id or agent_type
+# marks a subagent call, which keeps the agent-worktree rule alone.
+for _who, _kw in (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
+                  ("agent_id only", dict(agent_id="tag-sub1")),
+                  ("agent_type only", dict(agent_type="general-purpose"))):
+    tag_case("kill: a PPID-1 pid with this session's id, called by a subagent (%s)" % _who, "deny",
+             env_entries=[TAG + "=" + SUB_SESSION], carries="did not start", **_kw)
 tag_case("kill: a PPID-1 pid whose environment holds another session's id", "deny",
          env_entries=[TAG + "=" + OTHER_SESSION], carries="did not start")
 tag_case("kill: a PPID-1 pid with no session id in its environment", "deny",
@@ -3668,8 +3679,8 @@ sh("playwright-install: grep for the install text in a README is allowed",
 sh("playwright-install: echo of the install text is allowed", "echo npx playwright install",
    "allow", cwd=NOGIT)
 # Rule 1: a subagent call that runs an install is denied whatever the form, including the Node 22
-# cli.js form, and whatever the role the subagent carries. The switch reads agent_id alone (guard.py
-# passes bool(payload["agent_id"])), so one row per outcome pins it: a plain install and the Node 22
+# cli.js form, and whatever the role the subagent carries. The switch reads agent_id or agent_type
+# (guard.py passes bool of either), so one row per outcome pins it: a plain install and the Node 22
 # cli.js form denied, and a test run allowed.
 sh("playwright-install: a subagent install is denied",
    "npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT,

@@ -91,7 +91,11 @@ HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECOND
 #   With the defaults above (10 * 2 + 25), that is 45 seconds. settings.json's SessionEnd entry
 # for this hook must set a timeout STRICTLY GREATER than HOOK_WORST_CASE_SECONDS, with margin for
 # process-start and interpreter-import overhead neither number above counts; it sets 55, a
-# 10-second margin over the 45-second worst case. Changing SWEEP_TIMEOUT_SECONDS (or a future
+# 10-second margin over the 45-second worst case. The scratchpad reap (up to REAP_PS_TIMEOUT_SECONDS
+# + REAP_CWD_TIMEOUT_SECONDS = 15 s) runs first and is NOT in that 45: its time counts as elapsed,
+# so remaining_sweep_timeout_seconds shortens the sweep to fit. The true worst case is
+# 15 + 20 + (55 - 3 - 35 = 17) = 52 s, which is
+# SESSION_END_CEILING_SECONDS - EXIT_MARGIN_SECONDS. Changing SWEEP_TIMEOUT_SECONDS (or a future
 # change to git_reads._git's own timeout) without also widening that settings.json entry is exactly
 # the drift HookBudgetFitsUnderItsHostCeiling exists to catch.
 
