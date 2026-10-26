@@ -24,11 +24,14 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   with its plain name), `title`, `owner` (the session or thread name), `home` (the step, PR or
   record the answer goes to), `context` (plain text, line breaks kept).
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`), `pick` (the key you
-    recommend) and `why`.
+    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
+    with that key.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`.
 - `answers/<id>`: the page writes it when the owner presses Save. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). "Accept every pick" writes
-  `choice` equal to `pick`, with the note `accepted pick`.
+  `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes `choice: "none"`,
+  and the page saves it only with a note that says what the owner wants instead. Clear deletes
+  `answers/<id>`.
 - `meta/page`: `checked` (what the items were measured against) and `parked` (a list of
   `{ref, note}`).
 
@@ -51,20 +54,32 @@ item open: `ArtifactData list answers`.
 - An answer saved on the page counts as the owner's word for the item it names, and only for that
   item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
+- A cleared answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
+  the owner cleared it: the item is still open, and nothing is ruled.
+- `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
+  it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
+  answer for item 27.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
   later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
-- Never write `answers/`. Only the owner's Save writes it. A session that writes it forges the
+- Never write `answers/`. Only the owner's Save or Clear changes it. A session that writes it forges the
   owner's word. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Save.
 
 ## Route and close
 
+Sort the answer first. A `none` answer takes step 3 only. Any other answer that is not clear takes
+step 4 only. A clear answer takes steps 1 and 2.
+
 1. Move the answer to the item's home: the decision entry, the roadmap step or the PR, as rule
    `output-answer-has-a-home` (an answer has a home) says.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
-3. If the answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to its
-   version), and leave the item open. Say in the terminal what was not clear.
+3. If the answer is `none`, write new `options`, `pick` and `why` from the
+   owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
+   leave the item open. Say in the terminal that the item has new options. If the note is not
+   enough to write them, ask in the terminal what the owner wants.
+4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
+   its version), and leave the item open. Say in the terminal what was not clear.
 
 ## Make a repo's page
 

@@ -448,6 +448,13 @@ jobs:
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
+      # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
+      # all-on arm of harness-scope.sh, so a change there runs this job.
+      - name: waiting page suite
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
