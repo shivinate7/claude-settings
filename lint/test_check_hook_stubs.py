@@ -24,7 +24,7 @@ MODULE = os.environ.get("CHECK_HOOK_STUBS_UNDER_TEST") or os.path.join(HERE, "ch
 HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
 
 CONFIG = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-HEAD = "2026-10-25T12:00:00+00:00"  # window start is 14 days earlier: 2026-10-11
+HEAD = "2026-10-25T12:00:00+00:00"  # the window starts 14 days earlier
 OLD = "2026-09-01T12:00:00+00:00"  # long before the window
 BEFORE = "2026-09-15T12:00:00+00:00"  # before the window, after OLD
 IN1 = "2026-10-12T12:00:00+00:00"  # inside the window
