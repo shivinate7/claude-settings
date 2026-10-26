@@ -14,7 +14,8 @@ On the same landed turns it also blocks (one block, all reasons joined) when a D
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
-named "role model" pair matches no spawn of that role (`reports-done-names-models`).
+named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
+a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 """
 import json
 import os
@@ -361,6 +362,18 @@ def done_models_problem(text, spawned):
     return ""
 
 
+# reports-name-unstarted-items: a builder spawn marks an orchestrator's turn. Its report holds an
+# `Unstarted:` line, inline after Next, after a `;` or `.`, or on its own line, in any case. It lists
+# the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the shape check refuses.
+UNSTARTED_RE = re.compile(
+    r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
+
+
+def unstarted_problem(text, spawned):
+    """True when a builder ran this turn and the report holds no `Unstarted:` line."""
+    return "builder" in spawned and not UNSTARTED_RE.search(block_text(text))
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -412,11 +425,17 @@ def main():
         reasons.append(
             "Report-shape gate: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
-    models = done_models_problem(text, spawn_models(after)) if shape_ok else ""
+    spawned = spawn_models(after)
+    models = done_models_problem(text, spawned) if shape_ok else ""
     if models:
         reasons.append(
             "Model-name gate: a Done item that subagents built or reviewed names each one's role "
             "and model, like \"(builder sonnet, reviewer sonnet)\". Here: " + models + ".")
+    if shape_ok and unstarted_problem(text, spawned):
+        reasons.append(
+            "Unstarted gate: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
+            "Name each queued item with every question answered that you left unstarted, with "
+            "its reason, or write \"Unstarted: none\".")
     cite = bare_cite(text)
     if cite:
         reasons.append(
