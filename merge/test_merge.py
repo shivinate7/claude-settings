@@ -58,6 +58,12 @@ def sh(cwd, *cmd):
     assert r.returncode == 0, (cmd, r.stdout, r.stderr)
     return r.stdout.strip()
 
+def tree_listed(cwd, path):
+    """-> True when `git worktree list` names `path`. Git prints C:/ paths on Windows, so both sides are normalized."""
+    norm = lambda p: os.path.normcase(os.path.realpath(p))
+    out = sh(cwd, "git", "worktree", "list", "--porcelain")
+    return norm(path) in {norm(l[9:]) for l in out.splitlines() if l.startswith("worktree ")}
+
 def put(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -851,7 +857,7 @@ class CutBranchTree(Env):
         """A worktree on local feat, at origin/feat. Returns nothing; the caller edits it."""
         sh(self.co, "git", "branch", "feat", "origin/feat")
         sh(self.co, "git", "worktree", "add", "-q", self.wt, "feat")
-        self.assertIn(self.wt, sh(self.co, "git", "worktree", "list"), "subject: the worktree must exist first")
+        self.assertTrue(tree_listed(self.co, self.wt), "subject: the worktree must exist first")
 
     def cut(self, merged):
         out = io.StringIO()
@@ -873,14 +879,14 @@ class CutBranchTree(Env):
         self.assertEqual(len(lines), 1, f"one kept line, got: {out!r}")
         self.assertRegex(lines[0], why)
         self.assertTrue(os.path.isdir(self.wt), f"the tree was removed; out: {out!r}")
-        self.assertIn(self.wt, self.listed())
+        self.assertTrue(tree_listed(self.co, self.wt), self.listed())
         self.assertTrue(self.exists(), f"the branch was deleted; out: {out!r}")
 
     def assert_clean_tree_removed(self, merged):
         self.worktree()
         out = self.cut(merged)
         self.assertFalse(os.path.exists(self.wt), f"the worktree folder is still there; out: {out!r}")
-        self.assertNotIn(self.wt, self.listed())
+        self.assertFalse(tree_listed(self.co, self.wt), self.listed())
         self.assertFalse(self.exists(), f"the local branch feat was not deleted; out: {out!r}")
         self.assertIn("feat here: deleted", out)
 
@@ -1578,7 +1584,7 @@ class CutLanes(Env):
         return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", f"refs/heads/{branch}"], capture_output=True).returncode == 0
 
     def tree_listed(self, path):
-        return path in sh(self.co, "git", "worktree", "list")
+        return tree_listed(self.co, path)
 
     def test_a_batch_takes_its_local_lane_branches_and_clean_trees_with_it(self):
         tips = lane_batch(self, "lane1", "lane2")
