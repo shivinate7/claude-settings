@@ -1,0 +1,9 @@
+{
+  "title": "Brakes keep working while a session waits on your answer",
+  "phase": "cleanup",
+  "status": "active",
+  "order": 103.32,
+  "why": "Your gripe, Oct 26: a local UI/UX session waited on your question while its background agents kept working; the Mac ran out of storage and they crashed. Once you answered, the session saw the brake at once.",
+  "note": "Finding, Oct 26 (shiv, Mac): the machine-load brake (c14) reads memory and disk only at the moment a lane is about to start, from the main session; nothing re-reads while that session waits on a question, and agents already running are not braked. Fix being built in thread \"Keep brakes working while a question waits\": brakes on background agents' own tool calls, a check that does not need the main session's turn, and a session with a pending question pauses or limits its background work. Conflict to settle (triage, Oct 26): c14's ruling (Oct 21) says the brake has no watcher, timer, per-call reading or log of its own; a read on each agent tool call or a check off the main turn re-opens that. A read only where a guard already runs for that call (no new process), only for writes that can fill disk, may fit it; anything else needs your word. Port: yes, the brake ships to every device through the install. Placed ahead of c75 (triage, Oct 26): it crashed the Mac and can lose work.",
+  "updatedAt": "2026-10-26T20:20:00Z"
+}
