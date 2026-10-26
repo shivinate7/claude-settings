@@ -1,0 +1,10 @@
+{
+  "title": "The blind design reviewer stays blind to the repo's design spec",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 104.5,
+  "why": "A second reviewer that has read the spec only repeats the first; its value is fresh eyes.",
+  "note": "Finding, Oct 26 (o12 lane, PR #610 body, \"Parked for the owner\"): impeccable's SKILL.md Setup step 1 runs `impeccable context`; guard rule impeccable-review-only refuses it; impeccable's fallback then reads the repo's PRODUCT.md and DESIGN.md directly. design-review step 2 says Reviewer B never sees the design spec, so in any repo with a DESIGN.md Reviewer B likely reads it, and every run hits one guard refusal. Unmeasured: no review was watched. Fix, one cloud lane: first run one design review in a fixture repo with a DESIGN.md and record what Reviewer B reads (red); then (a) Reviewer B's brief skips impeccable's Setup and fallback and judges only the screenshots, the lane's pick, or (b) Reviewer B runs in a scratch folder holding only the screenshots. Triage pick: (a), smaller and it keeps the guard's refusal from firing. Needs no answer from you: it makes design-review do what its own step 2 already says. Placed after c54 (triage, Oct 26): a real but unmeasured defect, below the CI and merge-path fixes.",
+  "ask": "",
+  "updatedAt": "2026-10-26T13:50:00Z"
+}
