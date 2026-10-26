@@ -30,9 +30,9 @@ A later o8 page may link to each live session page. This plan does not change o8
 ## What the platform offers
 
 Checked on 2026-10-26, in a claude.ai cloud project session on the owner's account. "Tool doc"
-means the Artifact, ArtifactComments and ArtifactData tool descriptions in that session. "Skill"
-means the `artifact-capabilities` skill, runtime contract 0.2.91, which lists the capabilities
-this account may declare.
+is the text of the Artifact, ArtifactComments and ArtifactData tool descriptions in that
+session. "Skill" is the `artifact-capabilities` skill, runtime contract 0.2.91. It lists the
+capabilities this account may declare.
 
 | Fact | State | Where checked |
 |---|---|---|
@@ -60,7 +60,7 @@ It works wherever a page can be published, and it needs no wake.
 1. **Publish.** When a session has its first open question, it writes one page and publishes
    it. It republishes the same file on each change, so the link stays the same.
 2. **What the page shows.**
-   - A header: the session name, the repo, the branch, and when the page was last published.
+   - A header: the session name, the repo, the branch, and the time of the last publish.
    - The plan: Done, Now, Next, one line each.
    - One card per open question: Goal, Problem, Based on, the options with what each gains and
      loses, the recommendation, and what the session does meanwhile.
@@ -112,9 +112,9 @@ No hook, timer or new process. A publish happens only when a question opens or c
 
 ## Rules and parts the build would need
 
-- A skill or output-style section that says when to publish the page and its shape. The build
-  names its home. This plan changes no rule.
-- A rule change only if the owner picks path B: a page save by the owner counts as the owner's
+- A skill or output-style section that gives the publish trigger and the page shape. The
+  build names its home. This plan changes no rule.
+- If the owner picks path B, a rule change: a page save by the owner counts as the owner's
   word.
 - A check that the page's question cards carry the same fields as the question box (Goal,
   Problem, Based on, options, recommendation).
@@ -138,7 +138,7 @@ keeps path A.
 3. **Whether a page save counts as the owner's word.**
    - (a) Yes, for the owner's own save on a page only the owner can write. Gain: path B works.
      Loss: a new rule to guard.
-   - (b) No; only a typed message counts. Gain: no new rule. Loss: path B is not possible.
+   - (b) No; only a typed message counts. Gain: no new rule. Loss: no path B.
    - Recommendation: (a).
 4. **Whether the terminal question box stays when a page exists.**
    - (a) Keep both; the box links to the page. Gain: no loss when the page fails. Loss: the
