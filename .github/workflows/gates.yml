@@ -772,8 +772,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
-    # 2x the slowest green step (382 s) is 764 s; 15 min with setup.
-    timeout-minutes: 15
+    # The full suite (push, schedule, dispatch) took 771 s on main bf084df and passed the 15 min cap once the merge
+    # reads went to REST (4 calls per read, a 25 s hang bound). 30 min until a green full run is measured.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
