@@ -7,7 +7,8 @@ artifact. Run it after each edit to roadmap/data/:  python roadmap/build.py
 Then republish roadmap/roadmap.html to the roadmap artifact (see roadmap/README.md).
 
 After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
-NOTE_WORDS words, open steps untouched for STALE_DAYS days, open steps with no note, and steps that
+NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
+open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line. Cost: one git
 process per build, no file written.
 """
@@ -83,12 +84,15 @@ def upkeep(steps):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
+    live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
     long_, stale, empty = [], [], []
     for k, d in open_:
         note = d.get("note") or ""
         words = len(note.split())
         if words > NOTE_WORDS:
             long_.append(f"{k} ({words})")
+        if d.get("phase") not in live:
+            continue
         if not note.strip():
             empty.append(k)
         try:
@@ -103,8 +107,8 @@ def upkeep(steps):
               and "Placed ahead of" not in (d.get("note") or "")]
     if not added:
         jumped = ["unknown (git log could not run)"]
-    rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days" % STALE_DAYS, stale),
-            ("no note", empty), ("new in top %d with no placement line" % TOP, jumped)]
+    rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
+            ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped)]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

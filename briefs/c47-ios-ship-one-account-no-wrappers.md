@@ -3,6 +3,9 @@
 Written by the advisor, Oct 26. Owner agreed Oct 26. Checked against claude-settings 149f4bc, home-app 0a3419b,
 ios-adblock b3d5eb6, degen e2635ca. Two parts, in this order: part 1 in claude-settings, then
 part 2 in each app repo after part 1 merges and the Mac has reinstalled.
+Part 1 can run in a cloud build thread: its tests stub xcodebuild, and the shell-macos CI job is the
+macOS proof. Part 2 needs the Mac: it writes ~/.config/ios-ship/account.json and runs real builds in
+home-app, ios-adblock and degen.
 
 ## Why
 
