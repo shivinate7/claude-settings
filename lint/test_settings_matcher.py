@@ -346,8 +346,8 @@ class SteHooksRemoved(unittest.TestCase):
         self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
 
 
-# The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
-# input (to, summary, message), so the state has to be read by code: a command or agent hook.
+# The SendMessage judges must see the receiver's busy state and the override. A prompt hook
+# sees only its tool input (to, summary, message), so both are read by code: a command hook.
 # `claude agents --json` rows carry name, sessionId, status (busy, idle, waiting), cwd.
 def pre_tool_hooks(matcher):
     return [h for e in json.load(open(SETTINGS))["hooks"]["PreToolUse"] if e["matcher"] == matcher
@@ -405,11 +405,13 @@ class JudgeModelRows(unittest.TestCase):
         self.assertTrue(hooks, "no judge hook found, so the check proves nothing")
         self.assertEqual(table_gaps(self.text, hooks), [])
 
-    def test_check_goes_red_when_the_sendmessage_row_is_missing(self):
-        # Mutation: take SendMessage out of the judge row. The check must name it.
-        self.assertTrue(any("SendMessage" in r[0] for r in judge_rows(self.text)), "the judge row changed; update this mutation")
-        gaps = table_gaps(self.text.replace("SendMessage", ""), list(judge_hooks()))
-        self.assertTrue(any(g.startswith("SendMessage:") for g in gaps), gaps)
+    def test_check_goes_red_when_the_agent_row_is_missing(self):
+        # Mutation: take Agent out of the judge row. The check must name it.
+        self.assertTrue(any("Agent" in re.findall(r"[A-Za-z]+", r[0]) for r in judge_rows(self.text)),
+                        "the judge row changed; update this mutation")
+        mutated = "\n".join(l.replace("Agent", "") if JUDGE_ROW in l else l for l in self.text.splitlines())
+        gaps = table_gaps(mutated, list(judge_hooks()))
+        self.assertTrue(any(g.startswith("Agent:") for g in gaps), gaps)
 
 
 if __name__ == "__main__":

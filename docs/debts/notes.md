@@ -1,5 +1,4 @@
 # Notes: findings too unlikely to hit to be debts
-- SendMessage prompt hook may never fire: check that a logged SendMessage call gets a verdict. Decision: haiku-prompt-hooks (refusing prompt hooks trial).
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
@@ -51,7 +50,6 @@
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
-- expired-lock-delete-race: the API cannot delete a ref only if it holds a value, so two runs can hold the merge lock for a few API calls (merge/merge.py)
 - fb-done-forms-unpinned: tests pin only a plain last line 'fb done'; colon, case, punctuation, CRLF, blank-line forms have no case, and fb and done on two last lines also close (hooks/local_time.py)
 - fb-done-unclosed-fence: a last line 'fb done' inside an unclosed code fence still closes capture (hooks/local_time.py CLOSE_LINE)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py, hooks/feedback_judge.py)
@@ -256,7 +254,9 @@
 - sb-safe-stop-origin: /safe-stop origin check is a refusal list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
 - schtasks-test-not-in-ci: janitor/test_install_schtasks.py is in no CI job; its skip never ran on Windows CI (janitor, CI)
 - sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
-- sendmessage-wording-judge-always: the SendMessage prompt hook makes a model call on every send; the state judge removes none (settings.json)
+- sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
+- sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)
+- sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override too; the busy judge removes none (hooks/sendmessage_state.py)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)
 - shell-write-miss-git-config-file: git config --file P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
@@ -376,7 +376,7 @@
 - awk-v-glob-cleared: an awk -v value holding a glob is cleared as a search pattern; test_guard.py pins it as an allow (hooks/guard_env.py). Decision: none
 - env-wrapper-shape-reopen: reopen the hooks/guard_env.py rules on a wrapper shape that test_guard.py does not pin, with a counted number of refusals in the weekly table (guard-log-read-weekly) (hooks/guard_env.py)
 - lane-number-unread-acts: old history is not checked, only new acts; reopen when a session number reaches main through an act the guard does not read, then widen the scan (hooks/guard.py LANE_NUMBER). Decision: lane-by-slug (a lane is named by its branch slug)
-- merge-lock-expired-delete-race: the expired-lock delete can remove a live lock, so two runs hold the lock; window is a few API calls, fix needs compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
+- merge-lock-expired-delete-race: GhLock (the Mac) deletes an expired lock with no compare-and-swap. So it can remove a live lock that another run just took, and then two runs hold the lock. The window is a few API calls. A cloud run releases the lock to an expired commit, never deletes it, so every Mac take after a cloud merge goes through this window. Fix: the Mac also uses GitLock, whose leased push is compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
 - merge-unborn-workflow-green: a workflow GitHub has not created yet reads as green; runs read and the settle read close most of the window, ceiling is a workflow that appears after SETTLE_SECONDS (merge/merge.py). Decision: none
 - purge-realpath-unverified: purge unverified for realpath on mapped or subst drives, git stderr text on other git versions, and realpath errors on older Python (janitor/sweep.py). Decision: none
 - records-header-copy-pinned: RECORDS_HEADER in hooks/guard_merge.py copies the first line of RECORDS_INTRO in lint/hook_catalog.py; a pin test compares them. Decision: records-index-at-merge (one records index page, rebuilt at merge time)
@@ -389,7 +389,7 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can refuse but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write) and the AskUserQuestion agent hook can refuse but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position

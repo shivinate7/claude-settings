@@ -1,0 +1,25 @@
+# <step id>: <plain name of the step>
+
+<Who runs it: a cloud build thread or a local session.> Base: <branch and commit>. Never rebase
+onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
+
+## Task
+
+<What to build, and the outcome for the person the software serves.>
+
+## Sources
+
+<The files, records and rulings to read. Point at them. Never paste them in.>
+
+## Fences
+
+<What not to change, by intent, with each exception named.>
+
+## Failure classes and proof
+
+<The checks that prove the task done, and who reviews the diff.>
+
+## Report
+
+Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
+no, and why". Send the green, reviewed head and branch to the build advisor. Do not merge.

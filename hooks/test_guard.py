@@ -56,6 +56,8 @@ REPO = os.path.dirname(HERE)
 # one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
+sys.path.insert(0, HERE)
+import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -517,13 +519,13 @@ def slash(path):
 
 
 def copy_guard_family(dest):
-    """guard.py, its guard_* siblings, shared_names.py and git_reads.py (which guard_core.py imports)
-    from GUARD's folder into `dest`. A copy without either crashes on import. git_reads.py is copied
-    by name, so a folder that lacks it stops the fixture instead of building a guard that cannot load."""
+    """Every module in GUARD's folder (mutate_shared.module_files) into `dest`: guard.py, its guard_*
+    siblings, and each module they may import, so a new shared module cannot crash the copy on import.
+    git_reads.py is copied by name, so a folder that lacks it stops the fixture instead of building a
+    guard that cannot load."""
     source = os.path.dirname(GUARD)
-    for name in os.listdir(source):
-        if (name.startswith("guard") and name.endswith(".py")) or name == "shared_names.py":
-            shutil.copy(os.path.join(source, name), dest)
+    for path in mutate_shared.module_files(source):
+        shutil.copy(path, dest)
     shutil.copy(os.path.join(source, "git_reads.py"), dest)
 
 
@@ -10635,6 +10637,34 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
+# ---- designer: the design folder only (decision design-agents). A designer writes mockups, not product code. The folder is the `design` kind of
+# lint/layout.json, read from the file. Failure classes: false allow (a path outside the folder, or a
+# near-miss name, slips through) and false deny (a mockup, its notes, or a scratch file is blocked).
+DZ = dict(agent_id="dz1", agent_type="designer", cwd=GITMAIN)
+DZ_RULE = "designer-scope"
+for _tool, _path in (("Write", "docs/design/robots.html"), ("Edit", "docs/design/robots-notes.md"),
+                     ("Write", os.path.join(GITMAIN, "docs", "design", "tabs", "a.css")),
+                     ("Write", "Docs/Design/x.html")):
+    add("designer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool, file_path=_path,
+        new_string="x", content="x", **DZ)
+for _tool in ("Edit", "Write"):
+    for _path in ("src/App.tsx", "docs/designs/x.html", "docs/design.md", "docs/design",
+                  "docs/design/../x.py", "CLAUDE.md", "hooks/guard.py", "x/docs/design/y.html"):
+        add("designer: %s of %s is refused" % (_tool, _path), "deny", rule=DZ_RULE,
+            carries=("design folder", "Report"), tool=_tool, file_path=_path, new_string="x",
+            content="x", **DZ)
+    add("designer: %s of a temp file in no repo is allowed" % _tool, "allow", tool=_tool,
+        file_path=os.path.join(ROOT, "outside", "shot.png"), content="x", new_string="x", **DZ)
+add("designer: a decoy mockup path does not hide a product path in another field", "deny",
+    rule=DZ_RULE, tool="NotebookEdit", file_path="docs/design/x.html", notebook_path="src/a.ipynb",
+    **DZ)
+# Controls: the design reviewer never writes, and the builder's own scope is unchanged by the new role.
+add("designer-control: a builder may still write docs/design/x.html", "allow", tool="Write",
+    file_path="docs/design/x.html", content="x", **dict(B, cwd=GITMAIN))
+add("designer-control: a design-reviewer Write is not a designer write", "allow", tool="Write",
+    file_path="src/App.tsx", content="x", agent_id="dr1", agent_type="design-reviewer",
+    cwd=GITMAIN)
+
 # ---- audit-high (owner ruling 2026-10-13): the test-author's own scratch writes.
 # A path in no repository was judged by its full path, so the session scratchpad and a temp file
 # were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
@@ -10811,6 +10841,52 @@ LOG_CHECKS_EXTRA.append(("record-writer-diff: a non-.md diff is logged at commit
                          rw_diff_logs_case))
 LOG_CHECKS_EXTRA.append(("record-writer-diff: an all-.md diff logs no writer-diff line",
                          rw_markdown_logs_case))
+
+
+# A designer's diff: a path outside the design folder logs `designer-diff` once each at commit, push and
+# stop; a diff inside the folder logs nothing (decision design-agents).
+DZ_RED = (("product-edit", _put("src/app.py", "x = 2\n")),)
+DZ_GREEN = (("design-only", lambda w: (write(os.path.join(w, "docs/design/robots.html"), "<p>x</p>\n"),
+                                       write(os.path.join(w, "docs/design/robots-notes.md"), "# x\n"))),)
+for _name, _change in DZ_RED + DZ_GREEN:
+    diff_repo("dz-" + _name, _change)
+
+
+def dz_diff_case(name, want):
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-dz-" + name),
+                                  os.path.join(DIFFROOT, "dz-" + name), "designer", "dz1")
+        hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "designer-diff"]
+        if out or len(hits) != want:
+            return False, "expected %d noted/designer-diff lines and silent allows, got %d, %r" % (
+                want, len(hits), out[:60])
+        return True, "%d designer-diff lines" % want
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("designer-diff: a product path is logged at commit, push and stop",
+                         dz_diff_case("product-edit", 3)))
+LOG_CHECKS_EXTRA.append(("designer-diff: a design-folder diff logs no designer-diff line",
+                         dz_diff_case("design-only", 0)))
+
+
+def dz_unread_layout_case():
+    """With no readable lint/layout.json the design folder is unknown, so a designer may write no repo
+    path: a false deny the designer reports, never a false allow. A readable layout still allows a mockup."""
+    guard = _load_guard_module()
+    empty = os.path.join(ROOT, "dz-no-layout")
+    os.makedirs(empty, exist_ok=True)
+    guard.settings_roots = lambda: [empty]
+    del guard._DESIGN_FOLDER[:]
+    if guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "an unread layout allowed a mockup path"
+    guard = _load_guard_module()
+    if not guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "a readable layout refused a mockup path"
+    return True, "an unread layout allows no path; a readable one allows the mockup"
+
+
+LOG_CHECKS_EXTRA.append(("designer-scope: an unread layout allows no path", dz_unread_layout_case))
 
 
 # An .xctestplan diff: a builder's ADDED skippedTests line is logged once each at commit, push and
@@ -11734,6 +11810,15 @@ add("ceiling: Agent Plan with model opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
 add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing grant)", "allow",
     tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
+# The designer and the design reviewer run Opus by the owner's standing grant
+# (decision design-agents). A near-miss role name earns no grant.
+for _role in ("designer", "design-reviewer"):
+    for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
+        add("ceiling: %s %s on %s is allowed (standing grant)" % (_tool, _role, _model), "allow",
+            tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type=_role)
+for _role in ("design", "designers", "design-review", "Designer"):
+    add("ceiling: Agent %s on opus asks (no standing grant)" % _role, "ask", CEILING,
+        tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
 add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")
@@ -11742,7 +11827,7 @@ add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing 
 add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is allowed",
     "allow", tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
     model="opus", subagent_type="builder")
-# A marker the role does not own, or one that is only prose, earns no word.
+# A marker the role does not own, or one that is only prose, earns no grant.
 for _role, _brief in (
         ("reviewer", "Try 3 of 3. Finish the fix."),
         ("general-purpose", "Try 3 of 3. Finish the fix."),
@@ -13491,7 +13576,7 @@ FAMILY = "fail-closed"
 
 def _guard_siblings(folder):
     """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed.
-    Test files start with test_, so they are never listed. _guard_copy copies this same set."""
+    Test files start with test_, so they are never listed. _guard_copy copies these and every other module in the folder."""
     return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
 
 
@@ -13503,18 +13588,15 @@ FAILCLOSED_CHECKS = []
 
 
 def _guard_copy(name, drop):
-    """A scratch folder with a copy of guard.py, every guard_* sibling, shared_names.py and git_reads.py,
-    but for `drop`."""
+    """A scratch folder with a copy of guard.py and every other module in its folder
+    (mutate_shared.module_files), but for `drop`."""
     source = os.path.dirname(GUARD)
     folder = os.path.join(ROOT, "failclosed", name)
     os.makedirs(folder, exist_ok=True)
+    for path in mutate_shared.module_files(source):
+        if os.path.basename(path) not in ("guard.py", drop):
+            shutil.copy(path, folder)
     shutil.copy(GUARD, os.path.join(folder, "guard.py"))
-    for module in _guard_siblings(source):
-        if module + ".py" != drop:
-            shutil.copy(os.path.join(source, module + ".py"), folder)
-    shutil.copy(os.path.join(source, "shared_names.py"), folder)
-    if drop != "git_reads.py":  # guard_core.py imports it, so a copy needs it unless it is the one dropped
-        shutil.copy(os.path.join(source, "git_reads.py"), folder)
     return folder
 
 
@@ -13732,8 +13814,9 @@ def _reload_copy_stamped(name, first_line_for):
         with open(src, encoding="utf-8") as handle:
             good[entry] = (first_line_for(entry) or "") + handle.read()
         _put_whole(os.path.join(folder, entry), good[entry])
-    shutil.copy(os.path.join(source, "shared_names.py"), folder)
-    shutil.copy(os.path.join(source, "git_reads.py"), folder)  # unstamped, like shared_names.py
+    for path in mutate_shared.module_files(source):  # shared_names.py, git_reads.py and the rest, unstamped
+        if os.path.basename(path) not in good:
+            shutil.copy(path, folder)
     return folder, good
 
 
@@ -15048,7 +15131,7 @@ def ov_no_module_check():
     the refusal path would otherwise reach the guard's crash handler, which fails open."""
     config, session = ov_config("no-module"), "ov-no-module"
     note = ov_type(config, session, "override 15m")
-    folder = _guard_copy("ov-no-module", None)
+    folder = _guard_copy("ov-no-module", "override.py")
     if os.path.exists(os.path.join(folder, "override.py")):
         return False, "the scratch copy holds override.py, so the case proves nothing"
     env = dict(os.environ)

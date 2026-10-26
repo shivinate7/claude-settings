@@ -82,7 +82,7 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
     Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing.
-    home is any non-empty text after `->`.
+    home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
 
 Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd. It reads the inbox and the
@@ -92,14 +92,23 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
   - No inbox, or an empty inbox: nothing on stdout.
   - A block is {"decision": "block", "reason": ...}. The reason names each offending id, or the
     message by its Central stamp or the start of its text. Offences: a captured message with no
-    items; an item with no kind, an unknown kind, or no home; an open item (ruling, task, standing)
-    whose id is not in the handoff as a whole token. A missing handoff file means every open id is
-    missing.
+    items; an item with no kind, an unknown kind, or no home; an open standing item whose id is
+    not in the handoff as a whole token. A missing handoff file means every open id is missing.
+  - Tracked homes (decision owner-feedback-inbox, "Kinds and homes"). A ruling or task item, open
+    or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
+    under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
+    keys decisions, rules, claude-md or agents-md; task under todo (a repo's extras key), debts or
+    debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
+    handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
+    names the layout keys, todo first for a task.
+  - Fail open: when the cwd is not in a git repo, or the layout or the repo's extras file cannot
+    be read, ruling and task homes pass unchecked and stdout carries one systemMessage line that
+    starts "Feedback gate: ruling and task homes not checked".
   - A malformed item line is an offence: a `- fb-` line whose id is not a token, such as
     `- fb- [task] -> x` or a bare `- fb-`. The reason quotes the line's text after the leading
     `- `, for example `fb- [task] -> x`. The gate does not crash on it.
   - An item line that ends with `[closed]` is closed. Its id is not required in the handoff. Its
-    kind and home are still checked.
+    kind and home are still checked, a ruling's or task's tracked home too.
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
@@ -110,7 +119,8 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
   path). Each of its two messages ends with an inbox note, or with nothing:
   - open ids (ruling, task, standing) in the inbox:
-    " Open feedback items: <ids>. Keep each in the handoff."
+    " Open feedback items: <ids>. Keep each standing item in the handoff, and give each ruling
+    and task its tracked home: a decision record or rule, or the repo's todo or debt store."
   - the open marker <session>.inbox.open exists: " Feedback capture is still open: the owner has not
     sent `fb done`."
   - both, items first. Neither: the message is unchanged. An unreadable inbox gives no note, one
@@ -170,14 +180,13 @@ SLOW = "2"  # seconds the stub judge takes, in the cases that read the child's o
 NOTE_ITEM = re.compile(r"- fb-auto-\S+ \[note\] -> judged not feedback")
 
 JOTTED_ITEMS = (
-    "- fb-0958-1 [ruling] -> handoff: NO HOME YET",
-    "- fb-0958-2 [task] -> handoff: next steps",
+    "- fb-0958-1 [ruling] -> decisions/a-ruling.md",
+    "- fb-0958-2 [task] -> debts/a-task.md",
     "- fb-0958-3 [question] -> answered",
     "- fb-0958-4 [note] -> noted",
     "- fb-0958-5 [standing] -> handoff: process-only",
 )
-JOTTED_HANDOFF = ("# Handoff\n- fb-0958-1 ruling, NO HOME YET\n- fb-0958-2 task\n"
-                  "- fb-0958-5 standing\n")
+JOTTED_HANDOFF = "# Handoff\n- fb-0958-5 standing\n"
 
 
 # Judge seam. Every run of local_time.py and of feedback_judge.py loads this sitecustomize first
@@ -352,9 +361,53 @@ def at(minutes):
     return (CLOCK_START + timedelta(minutes=minutes)).isoformat()
 
 
-def gate(cfg, sid, stop_active=False):
+def gate(cfg, sid, stop_active=False, cwd=None):
+    """Runs the gate. `cwd` is the session's folder in the payload: the shared fixture repo unless
+    a case names another."""
     return run(GATE_PATH, payload({"hook_event_name": "Stop", "session_id": sid,
-                                   "stop_hook_active": stop_active, "cwd": cfg}), cfg)
+                                   "stop_hook_active": stop_active,
+                                   "cwd": cwd or fixture_repo()}), cfg)
+
+
+GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+          "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main")
+
+
+def git(where, *args):
+    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30)
+    if cp.returncode != 0:
+        raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
+
+
+def make_repo(name, tracked=(), untracked=(), extras=None):
+    """A git repo under this run's scratch folder. `tracked` files are committed on main, with
+    the text "x"; `untracked` files are written and never added. `extras` (a string) is the
+    repo's .claude/layout-extras.json, committed."""
+    root = os.path.join(ROOT, "repos", name)
+    os.makedirs(root)
+    git(root, "init", "-q")
+    files = list(tracked) + ([".claude/layout-extras.json"] if extras is not None else [])
+    for rel in files:
+        write_file(os.path.join(root, *rel.split("/")),
+                   extras if rel == ".claude/layout-extras.json" else "x\n")
+    write_file(os.path.join(root, "README.md"), "fixture\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "fixture")
+    for rel in untracked:
+        write_file(os.path.join(root, *rel.split("/")), "x\n")
+    return root
+
+
+FIXTURE = []
+
+
+def fixture_repo():
+    """The shared fixture repo: not rolled out to the layout, so its homes sit at the legacy
+    paths claude-settings uses (decisions/, debts/), with a tracked decision and debt."""
+    if not FIXTURE:
+        FIXTURE.append(make_repo("fixture", tracked=(
+            "decisions/a-ruling.md", "debts/a-task.md", "CLAUDE.md")))
+    return FIXTURE[0]
 
 
 def marker_of(cfg, sid):
@@ -790,7 +843,7 @@ def case_gate_message_without_items_blocks_and_names_it():
     text_b = "second message, no items jotted"
     write_file(inbox_of(cfg, sid),
                render_block("first message", header="2026-10-13 10:04 CDT (UTC-05:00)",
-                            items=("- fb-0958-2 [task] -> handoff",))
+                            items=("- fb-0958-2 [standing] -> handoff",))
                + render_block(text_b, header="2026-10-13 10:09 CDT (UTC-05:00)"))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
     p = gate(cfg, sid)
@@ -819,11 +872,11 @@ def case_gate_item_without_kind_or_home_blocks():
 
 def case_gate_open_item_missing_from_handoff_blocks():
     cfg, sid = new_cfg(), "open-missing"
-    items = ("- fb-0958-2 [ruling] -> NO HOME YET", "- fb-0958-3 [task] -> handoff",
+    items = ("- fb-0958-2 [standing] -> handoff", "- fb-0958-3 [standing] -> handoff",
              "- fb-0958-4 [standing] -> handoff")
     write_file(inbox_of(cfg, sid), render_block("open ids burst", items=items))
-    write_file(handoff_of(cfg, sid), "- fb-0958-2 ruling, NO HOME YET\n")
-    expect_block("gate: open task and standing missing from the handoff", gate(cfg, sid),
+    write_file(handoff_of(cfg, sid), "- fb-0958-2 standing\n")
+    expect_block("gate: open standing items missing from the handoff", gate(cfg, sid),
                  named=("fb-0958-3", "fb-0958-4"), unnamed=("fb-0958-2",))
     expect_silent("gate: stop_hook_active gives nothing, even with missing open ids",
                   gate(cfg, sid, stop_active=True))
@@ -832,7 +885,7 @@ def case_gate_open_item_missing_from_handoff_blocks():
 def case_gate_id_match_is_a_whole_token():
     cfg, sid = new_cfg(), "boundary"
     write_file(inbox_of(cfg, sid),
-               render_block("boundary", items=("- fb-0958-2 [task] -> handoff",)))
+               render_block("boundary", items=("- fb-0958-2 [standing] -> handoff",)))
     write_file(handoff_of(cfg, sid), "- fb-0958-20 task, a different item\n")
     expect_block("gate: fb-0958-20 in the handoff does not count for fb-0958-2", gate(cfg, sid),
                  named=("fb-0958-2",))
@@ -841,9 +894,9 @@ def case_gate_id_match_is_a_whole_token():
 def case_gate_handoff_rewrite_that_drops_an_item_blocks():
     cfg, sid = new_cfg(), "rewrite"
     write_file(inbox_of(cfg, sid), render_block(
-        "two open items", items=("- fb-0958-2 [task] -> handoff",
-                                 "- fb-0958-3 [ruling] -> NO HOME YET")))
-    write_file(handoff_of(cfg, sid), "- fb-0958-2 task, kept\n")
+        "two open items", items=("- fb-0958-2 [standing] -> handoff",
+                                 "- fb-0958-3 [standing] -> handoff")))
+    write_file(handoff_of(cfg, sid), "- fb-0958-2 standing, kept\n")
     expect_block("gate: a handoff rewrite that drops fb-0958-3 blocks", gate(cfg, sid),
                  named=("fb-0958-3",), unnamed=("fb-0958-2",))
 
@@ -851,8 +904,8 @@ def case_gate_handoff_rewrite_that_drops_an_item_blocks():
 def case_gate_missing_handoff_counts_every_open_id_missing():
     cfg, sid = new_cfg(), "no-handoff"
     write_file(inbox_of(cfg, sid), render_block("no handoff yet",
-                                                items=("- fb-0958-2 [ruling] -> NO HOME YET",)))
-    expect_block("gate: open ruling with no handoff file blocks", gate(cfg, sid),
+                                                items=("- fb-0958-2 [standing] -> handoff",)))
+    expect_block("gate: open standing item with no handoff file blocks", gate(cfg, sid),
                  named=("fb-0958-2",))
 
 
@@ -872,7 +925,7 @@ def case_gate_scanner_text_yields_no_phantom_block_or_item():
 
 def case_gate_scanner_text_with_real_items_passes_silently():
     cfg, sid = new_cfg(), "scanner-real"
-    write_file(inbox_of(cfg, sid), render_block(SCANNER, items=("- fb-0958-2 [task] -> handoff",)))
+    write_file(inbox_of(cfg, sid), render_block(SCANNER, items=("- fb-0958-2 [standing] -> handoff",)))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
     expect_silent("gate: scanner text with real items passes (fake fb-0999-1 is not read)",
                   gate(cfg, sid))
@@ -881,8 +934,8 @@ def case_gate_scanner_text_with_real_items_passes_silently():
 def case_gate_malformed_item_line_blocks_and_names_it():
     cfg, sid = new_cfg(), "malformed-item"
     write_file(inbox_of(cfg, sid), render_block("malformed item beside a good one", items=(
-        "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff")))
-    write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
+        "- fb- [task] -> x", "- fb-0958-2 [standing] -> handoff")))
+    write_file(handoff_of(cfg, sid), "- fb-0958-2 standing\n")
     expect_block("gate: malformed `- fb- [task] -> x` beside a handed-off item", gate(cfg, sid),
                  named=("fb- [task] -> x",), unnamed=("fb-0958-2",))
     cfg, sid = new_cfg(), "malformed-bare"
@@ -892,24 +945,25 @@ def case_gate_malformed_item_line_blocks_and_names_it():
 
 def case_gate_closed_item_is_not_required_in_handoff():
     cfg, sid = new_cfg(), "closed-item"
-    write_file(inbox_of(cfg, sid), render_block("closed task and ruling", items=(
-        "- fb-0958-2 [task] -> handoff: done [closed]",
-        "- fb-0958-3 [ruling] -> NO HOME YET [closed]")))
+    write_file(inbox_of(cfg, sid), render_block("closed standing, task and ruling", items=(
+        "- fb-0958-1 [standing] -> handoff: done [closed]",
+        "- fb-0958-2 [task] -> debts/a-task.md [closed]",
+        "- fb-0958-3 [ruling] -> decisions/a-ruling.md [closed]")))
     write_file(handoff_of(cfg, sid), "# Handoff\n")
-    expect_silent("gate: closed task and ruling missing from the handoff pass silently",
+    expect_silent("gate: closed items with good homes, missing from the handoff, pass silently",
                   gate(cfg, sid))
     cfg, sid = new_cfg(), "closed-and-open"
     write_file(inbox_of(cfg, sid), render_block("one closed, one open", items=(
-        "- fb-0958-2 [task] -> handoff: done [closed]", "- fb-0958-4 [task] -> handoff")))
+        "- fb-0958-2 [standing] -> handoff: done [closed]", "- fb-0958-4 [standing] -> handoff")))
     write_file(handoff_of(cfg, sid), "# Handoff\n")
-    expect_block("gate: open task still required beside a closed one", gate(cfg, sid),
+    expect_block("gate: open standing item still required beside a closed one", gate(cfg, sid),
                  named=("fb-0958-4",), unnamed=("fb-0958-2",))
 
 
 def case_gate_notes_heading_is_plain_text():
     cfg, sid = new_cfg(), "notes-heading"
     write_file(inbox_of(cfg, sid), render_block("jotted burst", items=(
-        "- fb-0958-2 [task] -> handoff",)) + "### Notes\nsome notes the session wrote by hand\n")
+        "- fb-0958-2 [standing] -> handoff",)) + "### Notes\nsome notes the session wrote by hand\n")
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
     expect_silent("gate: a ### Notes heading after a jotted message passes silently",
                   gate(cfg, sid))
@@ -976,7 +1030,7 @@ def case_gate_unreadable_inbox_blocks_and_names_the_file():
 def case_gate_reads_only_its_own_session():
     cfg = new_cfg()
     write_file(inbox_of(cfg, "own"),
-               render_block("own jotted", items=("- fb-0958-2 [task] -> handoff",)))
+               render_block("own jotted", items=("- fb-0958-2 [standing] -> handoff",)))
     write_file(handoff_of(cfg, "own"), "- fb-0958-2 task\n")
     write_file(inbox_of(cfg, "other"),
                render_block("other incomplete", items=("- fb-0958-9 [ruling] -> NO HOME YET",)))
@@ -985,16 +1039,125 @@ def case_gate_reads_only_its_own_session():
                   gate(cfg, "own"))
 
 
+# --------------------------------------------------------------------------- tracked homes
+
+FAIL_OPEN = "Feedback gate: ruling and task homes not checked"
+
+
+def homed(cfg, sid, items, handoff_ids=(), cwd=None):
+    """Writes one jotted message and a handoff that holds `handoff_ids`, then runs the gate."""
+    write_file(inbox_of(cfg, sid), render_block("homes burst", items=items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
+    return gate(cfg, sid, cwd=cwd)
+
+
+def fail_open_line(p):
+    obj = gate_json(p)
+    msg = (obj or {}).get("systemMessage") or ""
+    return [ln for ln in msg.splitlines() if ln.startswith(FAIL_OPEN)]
+
+
+def case_gate_ruling_homed_to_handoff_blocks():
+    for label, item in (("NO HOME YET", "- fb-1 [ruling] -> handoff: NO HOME YET"),
+                        ("the handoff path", "- fb-1 [ruling] -> handoff"),
+                        ("closed, NO HOME YET", "- fb-1 [ruling] -> NO HOME YET [closed]")):
+        cfg = new_cfg()
+        expect_block("homes: a ruling homed to %s blocks, though its id is in the handoff" % label,
+                     homed(cfg, "r-handoff", (item,), handoff_ids=("fb-1",)), named=("fb-1",))
+
+
+def case_gate_task_homed_to_untracked_file_blocks():
+    repo = make_repo("untracked", tracked=("debts/old.md",), untracked=("debts/new.md",))
+    cfg = new_cfg()
+    expect_block("homes: a task homed to an untracked debt file blocks",
+                 homed(cfg, "t-untracked", ("- fb-2 [task] -> debts/new.md",),
+                       handoff_ids=("fb-2",), cwd=repo), named=("fb-2",))
+    cfg = new_cfg()
+    expect_block("homes: a task homed to a missing file blocks",
+                 homed(cfg, "t-missing", ("- fb-2 [task] -> debts/none.md",), cwd=repo),
+                 named=("fb-2",))
+
+
+def case_gate_home_outside_its_kind_blocks():
+    cfg = new_cfg()
+    expect_block("homes: a ruling homed to a tracked file outside the ruling homes blocks",
+                 homed(cfg, "r-readme", ("- fb-3 [ruling] -> README.md",)), named=("fb-3",))
+    cfg = new_cfg()
+    expect_block("homes: a task homed to a decision record blocks",
+                 homed(cfg, "t-decision", ("- fb-3 [task] -> decisions/a-ruling.md",)),
+                 named=("fb-3",))
+
+
+def case_gate_tracked_homes_pass_without_the_handoff():
+    cfg = new_cfg()
+    expect_silent("homes: a ruling homed to a tracked decision passes, id not in the handoff",
+                  homed(cfg, "r-tracked", ("- fb-4 [ruling] -> decisions/a-ruling.md",)))
+    cfg = new_cfg()
+    expect_silent("homes: wrapped and anchored homes pass (backticks, #anchor, trailing text)",
+                  homed(cfg, "r-forms", (
+                      "- fb-4 [ruling] -> `CLAUDE.md#rule:some-anchor`",
+                      "- fb-5 [task] -> debts/a-task.md: the second half",)))
+    lane = make_repo("lane", tracked=("decisions/x.md",))
+    git(lane, "checkout", "-q", "-b", "lane")
+    write_file(os.path.join(lane, "decisions", "new-ruling.md"), "x\n")
+    git(lane, "add", "-A")
+    git(lane, "commit", "-q", "-m", "lane record")
+    git(lane, "checkout", "-q", "main")
+    cfg = new_cfg()
+    expect_silent("homes: a record committed on a lane branch only, by absolute path, passes",
+                  homed(cfg, "r-lane", ("- fb-6 [ruling] -> %s" % os.path.join(
+                      lane, "decisions", "new-ruling.md"),)))
+
+
+def case_gate_standing_homed_to_handoff_passes():
+    cfg = new_cfg()
+    expect_silent("homes: a standing item homed to the handoff, id in it, passes (false alarm)",
+                  homed(cfg, "s-handoff", ("- fb-7 [standing] -> handoff: process-only",),
+                        handoff_ids=("fb-7",)))
+
+
+def case_gate_task_home_from_extras_todo_key():
+    extras = json.dumps({"kinds": {"todo": {"path": "specs/todo.md"}}})
+    repo = make_repo("rolled", tracked=("specs/todo.md", "docs/decisions/r.md"), extras=extras)
+    cfg = new_cfg()
+    expect_silent("homes: a task homed to the extras file's todo key passes",
+                  homed(cfg, "t-todo", ("- fb-8 [task] -> specs/todo.md",
+                                        "- fb-9 [ruling] -> docs/decisions/r.md"), cwd=repo))
+    bare = make_repo("no-task-home", tracked=("decisions/r.md",))
+    cfg = new_cfg()
+    p = homed(cfg, "t-none", ("- fb-8 [task] -> TODO.md",), cwd=bare)
+    expect_block("homes: a repo with no task home blocks", p, named=("fb-8", "todo"))
+
+
+def case_gate_unreadable_layout_fails_open_with_one_line():
+    cfg = new_cfg()
+    p = homed(cfg, "no-repo", ("- fb-10 [ruling] -> decisions/a.md",), cwd=cfg)
+    check("homes: a cwd outside any git repo does not block", block_reason(p) is None, p.desc())
+    check("homes: a cwd outside any git repo says so in one line", len(fail_open_line(p)) == 1,
+          p.desc())
+    repo = make_repo("bad-extras", tracked=("decisions/r.md",), extras="{not json")
+    cfg = new_cfg()
+    p = homed(cfg, "bad-extras", ("- fb-10 [ruling] -> decisions/r.md",), cwd=repo)
+    check("homes: an unreadable extras file does not block", block_reason(p) is None, p.desc())
+    check("homes: an unreadable extras file says so in one line", len(fail_open_line(p)) == 1,
+          p.desc())
+    cfg = new_cfg()
+    p = homed(cfg, "no-repo-standing", ("- fb-11 [standing] -> handoff",), cwd=cfg)
+    check("homes: no ruling or task item, no fail-open line", fail_open_line(p) == [], p.desc())
+
+
 # --------------------------------------------------------------------------- reorient note
 
 NOTE_CAPTURE = " Feedback capture is still open: the owner has not sent `fb done`."
+KEEP = (" Keep each standing item in the handoff, and give each ruling and task its tracked home:"
+        " a decision record or rule, or the repo's todo or debt store.")
 
 
 def case_reorient_lists_open_items_only():
     cfg = new_cfg()
     sid = "reo-items"
     write_file(inbox_of(cfg, sid), render_block(SCANNER, items=JOTTED_ITEMS))
-    note = " Open feedback items: fb-0958-1, fb-0958-2, fb-0958-5. Keep each in the handoff."
+    note = " Open feedback items: fb-0958-1, fb-0958-2, fb-0958-5." + KEEP
     for ok_state in (False, True):
         p = reorient(cfg, sid, ok_state)
         tag = state_tag(ok_state)
@@ -1025,7 +1188,7 @@ def case_reorient_items_and_capture_line_together():
     write_file(inbox_of(cfg, sid), render_block("two open items", items=(
         "- fb-0958-2 [task] -> handoff", "- fb-0958-3 [ruling] -> NO HOME YET")))
     write_file(marker_of(cfg, sid), "")
-    note = " Open feedback items: fb-0958-2, fb-0958-3. Keep each in the handoff." + NOTE_CAPTURE
+    note = " Open feedback items: fb-0958-2, fb-0958-3." + KEEP + NOTE_CAPTURE
     for ok_state in (False, True):
         p = reorient(cfg, sid, ok_state)
         check("reorient both (%s): items line, then the capture line" % state_tag(ok_state),
@@ -1038,7 +1201,7 @@ def case_reorient_malformed_line_keeps_the_note():
         "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff", "- fb-",
         "- fb-0958-3 [ruling] -> NO HOME YET")))
     write_file(marker_of(cfg, sid), "")
-    note = " Open feedback items: fb-0958-2, fb-0958-3. Keep each in the handoff." + NOTE_CAPTURE
+    note = " Open feedback items: fb-0958-2, fb-0958-3." + KEEP + NOTE_CAPTURE
     for ok_state in (False, True):
         p = reorient(cfg, sid, ok_state)
         tag = state_tag(ok_state)
@@ -1476,6 +1639,13 @@ CASES = (
     case_gate_reminder_follows_capture_state,
     case_gate_unreadable_inbox_blocks_and_names_the_file,
     case_gate_reads_only_its_own_session,
+    case_gate_ruling_homed_to_handoff_blocks,
+    case_gate_task_homed_to_untracked_file_blocks,
+    case_gate_home_outside_its_kind_blocks,
+    case_gate_tracked_homes_pass_without_the_handoff,
+    case_gate_standing_homed_to_handoff_passes,
+    case_gate_task_home_from_extras_todo_key,
+    case_gate_unreadable_layout_fails_open_with_one_line,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_judge_child_is_detached_hook_returns_first,  # last: it leaves a 5 s child running

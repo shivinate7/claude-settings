@@ -1,0 +1,266 @@
+<title>Waiting on Shiv</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of numbered cards, decisions then hands-on tasks, a sticky answer bar. */
+:root {
+  --bg: #f3f5f7; --surface: #ffffff; --ink: #18212b; --muted: #5a6776; --line: #d9dfe6;
+  --accent: #b45f06; --accent-soft: #fbeedd; --good: #2f7a4c; --good-soft: #e3f2e8; --chip: #eef1f5;
+  --display: "Newsreader", Georgia, serif; --body: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161c; --surface: #19212a; --ink: #e6ebf0; --muted: #98a5b3; --line: #2c3743;
+  --accent: #f0a14a; --accent-soft: #3a2a17; --good: #6cc48f; --good-soft: #193326; --chip: #222c37; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --ink: #e6ebf0; --muted: #98a5b3; --line: #2c3743;
+  --accent: #f0a14a; --accent-soft: #3a2a17; --good: #6cc48f; --good-soft: #193326; --chip: #222c37; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 120px; display: grid; gap: 22px; }
+header { display: grid; gap: 8px; }
+h1 { font: 600 2rem/1.15 var(--display); margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); margin: 0; max-width: 62ch; }
+.meta { font: 12px var(--mono); color: var(--muted); }
+.tally { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--chip); }
+.pill b { font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 14px; }
+h2 { font: 600 1.25rem var(--display); margin: 10px 0 0; }
+.list { display: grid; gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.card.answered { border-color: var(--good); }
+.top { display: flex; gap: 12px; align-items: baseline; }
+.num { font: 600 1.4rem var(--display); color: var(--accent); min-width: 1.6em; font-variant-numeric: tabular-nums; }
+.title { font-weight: 600; font-size: 16px; text-wrap: balance; }
+.ref { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 2px; }
+.ctx { white-space: pre-line; margin: 0; color: var(--ink); }
+.opts { display: grid; gap: 8px; }
+.opt { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.opt:hover { border-color: var(--muted); }
+.opt.picked { border-color: var(--accent); background: var(--accent-soft); }
+.opt input { margin-top: 4px; accent-color: var(--accent); }
+.opt .lab { font-weight: 600; }
+.opt .lab .tag { font: 500 11px var(--mono); color: var(--accent); margin-left: 6px; letter-spacing: .04em; text-transform: uppercase; }
+.opt .d { grid-column: 2; font-size: 14px; color: var(--muted); }
+.opt .d b { color: var(--ink); font-weight: 500; }
+.why { font-size: 14px; margin: 0; }
+.why b { color: var(--accent); }
+ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; font-size: 14px; }
+a { color: var(--accent); }
+.foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-top: 1px dashed var(--line); padding-top: 10px; }
+.foot input[type=text] { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; font-size: 14px; }
+button { font: 500 14px var(--body); padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { font-size: 13px; color: var(--muted); }
+.status.ok { color: var(--good); }
+.owner { font: 12px var(--mono); color: var(--muted); }
+.parked { font-size: 14px; color: var(--muted); margin: 0; padding-left: 20px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding-top: 10px; z-index: 5; }
+.bar .in { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color .2s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Waiting on you</h1>
+    <p class="lede">Everything your sessions have parked for your word, with the context, each option's trade and a pick. Choose an option and press Save, or reply in the thread with one line such as "1 a, 4 a, 18 done". Saved answers go to the thread that owns each item, and answered items drop off.</p>
+    <div class="meta" id="checked"></div>
+    <div class="tally" id="tally"></div>
+    <div class="controls">
+      <label><input type="checkbox" id="showDone"> Show answered items</label>
+    </div>
+  </header>
+  <section><h2>Decisions</h2><div class="list" id="decisions"><div class="empty">Loading the items waiting on you…</div></div></section>
+  <section><h2>Things only you can do</h2><div class="list" id="tasks"></div></section>
+  <section id="parkedSec" hidden><h2>Parked by you, nothing to answer</h2><ul class="parked" id="parked"></ul></section>
+</div>
+
+<div class="bar"><div class="in">
+  <button id="useAll" class="ghost" type="button">Accept every pick I haven't answered</button>
+  <button id="copy" type="button">Copy answers as one message</button>
+  <span class="status" id="barStatus"></span>
+  <textarea id="copyBox" rows="2" hidden readonly></textarea>
+</div></div>
+
+<script>
+const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, showDone: false };
+try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
+try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
+const $ = (id) => document.getElementById(id);
+const NONE = "none";
+const choiceText = (k) => (k === NONE ? "none of these" : k);
+$("showDone").checked = state.showDone;
+$("showDone").addEventListener("change", (e) => { state.showDone = e.target.checked; try { localStorage.setItem("waiting.showDone", e.target.checked ? "1" : "0"); } catch (x) {} render(); });
+
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function saveDraft() { try { localStorage.setItem("waiting.draft", JSON.stringify(state.draft)); } catch (e) {} }
+function isAnswered(it) { return !!state.answers[it.id] || it.status === "closed"; }
+function fmtTime(s) { try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (e) { return s; } }
+
+function card(it) {
+  const ans = state.answers[it.id];
+  const d = state.draft[it.id] || {};
+  const c = el("article", "card" + (ans ? " answered" : ""));
+  const top = el("div", "top");
+  top.append(el("div", "num", String(it.n)));
+  const tt = el("div"); tt.append(el("div", "title", it.title), el("div", "ref", it.ref)); top.append(tt);
+  c.append(top);
+  c.append(el("p", "ctx", it.context));
+  if (it.kind === "decision") {
+    const opts = el("div", "opts");
+    const chosen = d.choice || (ans && ans.choice) || "";
+    (it.options || []).forEach((o) => {
+      const lab = el("label", "opt" + (chosen === o.key ? " picked" : ""));
+      const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = o.key; r.id = "o-" + it.id + "-" + o.key; r.checked = chosen === o.key;
+      r.addEventListener("change", () => {
+        const next = Object.assign({}, state.draft[it.id], { choice: o.key });
+        // A saved "none" note says what the owner wants instead. It does not carry over to an option.
+        if (ans && ans.choice === NONE && next.note == null) next.note = "";
+        state.draft[it.id] = next; saveDraft(); render();
+      });
+      const head = el("span", "lab", o.key + ") " + o.label);
+      if (o.key === it.pick) head.append(el("span", "tag", "my pick"));
+      lab.append(r, head);
+      [["How it works", o.how], ["You gain", o.gain], ["You lose", o.lose]].forEach(([k, v]) => { const p = el("div", "d"); p.append(el("b", null, k + ": "), document.createTextNode(v)); lab.append(p); });
+      opts.append(lab);
+    });
+    {
+      // "none" is reserved: no item may use it as an option key (skill waiting-page, "Add an item").
+      const lab = el("label", "opt" + (chosen === NONE ? " picked" : ""));
+      const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = NONE; r.id = "o-" + it.id + "-" + NONE; r.checked = chosen === NONE;
+      r.addEventListener("change", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: NONE }); saveDraft(); render(); setTimeout(() => { const n = $("n-" + it.id); if (n) n.focus(); }, 0); });
+      lab.append(r, el("span", "lab", "None of these"));
+      lab.append(el("div", "d", "Say in the note what you want instead, or what is missing. The owning session comes back with new options."));
+      opts.append(lab);
+    }
+    c.append(opts);
+    const why = el("p", "why"); why.append(el("b", null, "My pick: " + it.pick + ". "), document.createTextNode(it.why)); c.append(why);
+  } else {
+    const ol = el("ol", "steps"); (it.steps || []).forEach((s) => ol.append(el("li", null, s))); c.append(ol);
+  }
+  if (it.links && it.links.length) { const l = el("div", "links"); it.links.forEach((k) => { const a = el("a", null, k.label + " ↗"); a.href = k.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); }); c.append(l); }
+  const foot = el("div", "foot");
+  const note = document.createElement("input"); note.type = "text"; note.id = "n-" + it.id; note.placeholder = it.kind === "task" ? "Optional note, e.g. what you saw" : (d.choice === NONE ? "Required: what you want instead" : "Optional note or your own answer");
+  note.value = d.note != null ? d.note : (ans && ans.note) || "";
+  note.addEventListener("input", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { note: note.value }); saveDraft(); });
+  const btn = el("button", null, it.kind === "task" ? (ans ? "Update" : "Mark done") : (ans ? "Update answer" : "Save answer"));
+  btn.type = "button";
+  // A decision saves with a choice or a note. "None of these" also needs a note.
+  const blocked = () => {
+    if (it.kind !== "decision") return false;
+    const choice = (state.draft[it.id] || {}).choice || (ans && ans.choice) || "";
+    return choice === NONE ? !note.value.trim() : !choice && !note.value;
+  };
+  btn.disabled = !state.db || blocked();
+  note.addEventListener("input", () => { btn.disabled = !state.db || blocked(); clr.hidden = false; });
+  const notice = state.notice[it.id];
+  const st = el("span", "status" + (ans && !notice ? " ok" : ""), notice || (ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + choiceText(ans.choice) : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner));
+  btn.addEventListener("click", async () => { await save(it, btn, st); });
+  // Clear removes the draft and the saved answer. A cleared item reads as unanswered.
+  const clr = el("button", "ghost", "Clear"); clr.type = "button";
+  clr.hidden = !ans && !d.choice && !d.note;
+  // The draft goes only once the saved answer is gone, so a failed Clear leaves the card as it was.
+  clr.addEventListener("click", async () => {
+    delete state.notice[it.id];
+    if (ans) {
+      try {
+        if (!state.db) throw { code: "no store" };
+        await state.db.collection("answers").doc(it.id).delete(); delete state.answers[it.id];
+      } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; render(); return; }
+    }
+    delete state.draft[it.id]; saveDraft();
+    render();
+  });
+  foot.append(note, btn, clr, st);
+  c.append(foot);
+  return c;
+}
+
+async function save(it, btn, st) {
+  if (!state.db) return;
+  const d = state.draft[it.id] || {};
+  const prev = state.answers[it.id] || {};
+  const body = { item: it.id, n: it.n, at: new Date().toISOString(), note: (d.note != null ? d.note : prev.note || "") };
+  if (it.kind === "decision") body.choice = d.choice || prev.choice || ""; else body.done = true;
+  if (body.choice === NONE && !body.note.trim()) { st.className = "status"; st.textContent = "Add a note saying what you want instead, then save."; const n = $("n-" + it.id); if (n) n.focus(); return; }
+  btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
+  try {
+    await state.db.collection("answers").doc(it.id).set(body);
+    delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
+  } catch (e) {
+    btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
+  }
+}
+
+function render() {
+  const open = state.items.filter((it) => state.showDone || !isAnswered(it)).sort((a, b) => a.n - b.n);
+  const dec = $("decisions"), tasks = $("tasks");
+  dec.replaceChildren(); tasks.replaceChildren();
+  const ds = open.filter((i) => i.kind === "decision"), ts = open.filter((i) => i.kind === "task");
+  if (!state.items.length) dec.append(el("div", "empty", state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing is waiting on you right now. Sessions add items here when they park something for your word."));
+  else if (!ds.length) dec.append(el("div", "empty", "No decisions waiting."));
+  ds.forEach((i) => dec.append(card(i)));
+  if (state.items.length && !ts.length) tasks.append(el("div", "empty", "No hands-on tasks waiting."));
+  ts.forEach((i) => tasks.append(card(i)));
+  const all = state.items, ans = all.filter(isAnswered).length;
+  const t = $("tally"); t.replaceChildren();
+  [["Decisions open", all.filter((i) => i.kind === "decision" && !isAnswered(i)).length], ["Tasks open", all.filter((i) => i.kind === "task" && !isAnswered(i)).length], ["Answered", ans]].forEach(([k, v]) => { const p = el("span", "pill", k + " "); p.append(el("b", null, String(v))); t.append(p); });
+  if (state.meta) {
+    $("checked").textContent = "Checked against " + (state.meta.checked || "");
+    const pk = state.meta.parked || []; $("parkedSec").hidden = !pk.length;
+    const ul = $("parked"); ul.replaceChildren(); pk.forEach((p) => { const li = el("li"); li.append(el("b", null, p.ref + ": "), document.createTextNode(p.note)); ul.append(li); });
+  }
+  $("useAll").disabled = !state.db;
+}
+
+function answerLine() {
+  const parts = [];
+  state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+    if (it.status === "closed") return;
+    const a = state.answers[it.id], d = state.draft[it.id] || {};
+    const choice = d.choice || (a && a.choice); const note = d.note != null ? d.note : (a && a.note);
+    if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
+    else if (it.kind === "decision" && note) parts.push(it.n + ": " + note);
+    else if (it.kind === "task" && a && a.done) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
+  });
+  return parts.join(", ");
+}
+
+$("copy").addEventListener("click", async () => {
+  const text = answerLine() || "No answers yet.";
+  const box = $("copyBox");
+  try { await navigator.clipboard.writeText(text); $("barStatus").textContent = "Copied. Paste it in the thread."; box.hidden = true; }
+  catch (e) { box.hidden = false; box.value = text; box.select(); $("barStatus").textContent = "Select and copy the text below."; }
+});
+
+$("useAll").addEventListener("click", async () => {
+  if (!state.db) return;
+  const todo = state.items.filter((it) => it.kind === "decision" && !isAnswered(it) && !(state.draft[it.id] || {}).choice);
+  if (!todo.length) { $("barStatus").textContent = "Every open decision already has an answer."; return; }
+  if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
+  $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
+  $("barStatus").textContent = "Saving…";
+  for (const it of todo) {
+    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); }
+    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; return; }
+  }
+  $("barStatus").textContent = "Saved " + todo.length + " picks.";
+});
+
+render();
+(async () => {
+  let db = null;
+  try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
+  if (!db) { state.db = false; render(); return; }
+  state.db = db;
+  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); render(); }, () => {});
+  db.collection("answers").onSnapshot((s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); state.answers = m; render(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; render(); }, () => {});
+})();
+</script>

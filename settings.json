@@ -32,6 +32,12 @@
       "Edit(~/.claude/state/**)"
     ]
   },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Archived Branch Delete: Deleting a git branch is lossless, and allowed, once its tip is kept elsewhere. That holds in two cases. (1) Earlier in this session the agent pushed that same branch to an archive ref on the same remote, as `git push origin <branch>:refs/heads/archive/<branch>` (or a fallback name such as `archive/<branch>-2`, never with force), and made no commit, reset, rebase or amend on the branch since. Then `git branch -D <branch>`, `git branch -d <branch>`, `git push origin --delete <branch>` and `git push origin :<branch>` for that branch are allowed. (2) The branch is already in the default branch: `git branch -d <branch>` (git itself refuses an unmerged branch), or a delete of a branch whose pull request this session visibly merged. This is the owner's standing rule shared-trees-archive-then-delete in CLAUDE.md: once the archive push succeeds, delete with no question. Never covers deleting an `archive/` ref, the default branch, a tag or a release, a force push, or a branch whose archive push this session did not visibly run."
+    ]
+  },
   "fallbackModel": [
     "sonnet"
   ],
@@ -274,16 +280,9 @@
         "matcher": "SendMessage",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Judge this SendMessage call: $ARGUMENTS\nAnswer {\"ok\": true} at once for a resume, a status message, or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear something that changes its work). Judge by wording only: a separate state check handles a receiver on the session board. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "timeout": 30,
-            "model": "claude-sonnet-5-5",
-            "continueOnBlock": true
-          },
-          {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sendmessage_state.py\"; [ -f \"$g\" ] || { echo \"sendmessage state judge failed open: no script\" >&2; exit 0; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"sendmessage state judge failed open: no python\" >&2; exit 0",
-            "timeout": 45
+            "timeout": 50
           }
         ]
       },

@@ -22,8 +22,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
-AUDIT = os.path.join(HERE, "rule_audit.py")  # the check reads RULE_FILES and ANCHOR_RE from it
-HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 CLAUDE_MD = "# Rules\n\nOne rule.<!-- rule:one-rule -->\n"
 HEAD = "# Glossary\n\n## Terms\n\n| Term | Meaning | Home | Not |\n|---|---|---|---|\n"
@@ -47,11 +47,8 @@ class GlossaryTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_glossary.py")
         self.tree = tempfile.mkdtemp(prefix="gls_")
         self.addCleanup(rm_tree, self.tree)
-        os.makedirs(os.path.join(self.tree, "lint"))
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # rule_audit.py and the check's other imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_glossary.py"))
-        shutil.copyfile(AUDIT, os.path.join(self.tree, "lint", "rule_audit.py"))
-        os.makedirs(os.path.join(self.tree, "hooks"))
-        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
         self.put("CLAUDE.md", CLAUDE_MD)
         self.put("docs/handoff.md", "# Handoff\n")
         self.put("GLOSSARY.md", HEAD + ROWS)

@@ -665,7 +665,7 @@ def _judge_isolation():
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
 
 
-def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE):
+def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
     `verdict_dict` is `{"verdict": "ALLOW"}` or `{"verdict": "FLAG", "why": "..."}` on
@@ -675,6 +675,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
 
     `shape` is the caller's accepted answer: one key and the values it may hold. The default
     is this hook's own ALLOW/FLAG verdict. `hooks/reply_judge.py` passes `{"ok": (True, False)}`.
+    `effort` None passes no --effort, so the model runs at its default, as a prompt hook does.
     """
     try:
         root, env = _judge_isolation()
@@ -687,7 +688,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             [
                 "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,
-                "--effort", "xhigh",
+            ] + (["--effort", effort] if effort else []) + [
                 "--output-format", "json",
                 "--tools", "",
                 "--safe-mode",

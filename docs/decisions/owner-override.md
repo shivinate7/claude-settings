@@ -13,6 +13,8 @@ Owner words, 2026-10-18 CDT:
 - 15:34: `why cap it let me say`. A timed override has no cap. The owner picks the length.
 - 15:34: an act that a typed override lets through is not a safety hole under `roles-review-cap-three` (a change gets three review rounds).
 
+Owner, 2026-10-26 15:28 CDT, "Fix the hook": an active override lifts the SendMessage judges too. Both run in `hooks/sendmessage_state.py`, and its refusal goes through `refuse()`.
+
 Owner, 2026-10-26 (step c41, answer a): build an Opus-only override word. It lifts only the Opus spawn ask of `subagent-model-cap`, for the session and its subagents, until it ends.
 
 Owner, 2026-10-19 00:07 CDT, process-only: after round 3, a test-only re-point of mutation anchors lands with CI's mutation run as its proof, with no 4th review.
@@ -48,7 +50,7 @@ Orchestrator's call, not an owner grant: the required unit, the role list, and t
 - Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
 - Owner, 2026-10-18 16:25 CDT: the role and model guards (the settings-write ask of `subagent-model-cap`, `subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards).
 - Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps a subagent inside its own worktree (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop).
-- Orchestrator's call, because no override check reaches them: the missing-module refusal in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (`sendmessage_state`, the prompt judges, the question reviewer agent hook).
+- Orchestrator's call, because no override check reaches them: the missing-module refusal in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (the prompt judges, the question reviewer agent hook).
 
 Why: the owner needs a way to force through a refusal that stops real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
 

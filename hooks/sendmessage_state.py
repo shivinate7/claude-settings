@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Before a SendMessage, reads the receiver's state from the session board. Allows a message to an idle or waiting receiver. A model judges a message to a busy receiver and may deny it.
+"""Before a SendMessage, two model judges read the call. Either may refuse it, and an owner override
+lifts the refusal (decision owner-override), as it lifts every guard.
 
 Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear
-something that changes its work). Spec: docs/decisions/subagent-model-cap.md, the judge row.
+something that changes its work). Spec: docs/decisions/subagent-model-cap.md, the two SendMessage rows.
 
-The state comes from `claude agents --json`, read by mods/session-board/hooks/receiver-state.mjs
-(lib.mjs is the one home of that read). One word: busy, idle, waiting or unseen.
-- idle: allow, no model call. The message starts a turn; it interrupts nothing.
-- waiting (on a permission answer): allow, no model call. The receiver is paused, not mid-task.
-- busy: one model call (decision_watch.invoke_model, the one model caller). FLAG refuses.
-- unseen (main, an in-process teammate, no row, a duplicate name, node or claude missing): allow here.
-  The wording judge, the SendMessage prompt hook in settings.json, covers that receiver.
+- The wording judge reads every send, by wording only (WORDING_PROMPT). It lives here, not in a
+  settings.json prompt hook: a prompt hook sees only the call's JSON, so it cannot read the override
+  file, and a command hook cannot stop a sibling hook.
+- The busy judge reads the receiver's state from the session board: `claude agents --json`, read by
+  mods/session-board/hooks/receiver-state.mjs (lib.mjs is the one home of that read). One word:
+  busy, idle, waiting or unseen. Only busy gets a model call (build_prompt). idle and waiting are not
+  mid-task; unseen (main, an in-process teammate, no row, a duplicate name, node or claude missing)
+  is left to the wording judge.
+Both model calls go through decision_watch.invoke_model, the one model caller. The wording call runs
+in a thread beside the board read, so the two do not add their times.
 
-Fail open. Any error exits 0 with one stderr line. Deny: one PreToolUse deny JSON, exit 0.
+A refusal goes through guard_core.refuse(), the one home of the override check and the guard.log line.
+Fail open. Any judge error allows, with one stderr line. A refusal: one PreToolUse deny JSON, exit 0.
 receiver-state.mjs is found in the pointer checkout (a copy install has no mods/ beside hooks/),
 else beside this file's real path (a symlink install, a worktree). Neither found reads as unseen.
 """
@@ -23,6 +28,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
@@ -34,10 +40,23 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
-# THE TIME BUDGET. The reader allows 8 s and the model call MODEL_TIMEOUT, so the settings.json
-# PreToolUse entry for this hook carries "timeout": 45 = 8 + MODEL_TIMEOUT + 12 s margin.
+# THE TIME BUDGET. The board read (READER_TIMEOUT, plus up to 5 s for kill_tree) then the busy call
+# (MODEL_TIMEOUT) run beside the wording call (WORDING_TIMEOUT, joined 5 s later at most), so the
+# longest path is 12 + 5 + 25 = 42 s plus start-up. The settings.json PreToolUse entry for this hook
+# carries "timeout": 50.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
+WORDING_TIMEOUT = 30  # a prompt hook's default timeout
+WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/subagent-model-cap.md)
+RULE = "parallelism-no-mid-task-talk"
+WORDING_PROMPT = (
+    "Judge this SendMessage call: %s\nAnswer {\"ok\": true} at once for a resume, a status message, "
+    "or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only "
+    "when the branch must hear something that changes its work). Judge by wording only: a separate "
+    "state check handles a receiver on the session board. Block only on a clear breach; when unsure "
+    "answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": "
+    "\"<rule id and the fix, one line>\"}."
+)
 MESSAGE_MAX = 4000  # the prompt rides stdin (decision_watch.invoke_model), so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 
@@ -107,28 +126,79 @@ def build_prompt(to, message):
     )
 
 
+def build_wording_prompt(tool_input, message):
+    if isinstance(message, str):
+        shown = json.dumps({"tool_name": "SendMessage", "tool_input": dict(tool_input, message=message[:MESSAGE_MAX])},
+                           ensure_ascii=False)
+    else:  # a structured message: clip the whole call instead
+        shown = json.dumps({"tool_name": "SendMessage", "tool_input": tool_input}, ensure_ascii=False)[:MESSAGE_MAX + 1000]
+    return WORDING_PROMPT % shown
+
+
+def ask(answers, key, prompt, **kwargs):
+    """One judge call into answers[key]: (verdict, error). Never raises."""
+    try:
+        import decision_watch
+        answers[key] = decision_watch.invoke_model(prompt, shape=OK_SHAPE, **kwargs)
+    except Exception as exc:
+        answers[key] = (None, "%s: %s" % (type(exc).__name__, exc))
+
+
+def refuse(payload, to, reason):
+    """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
+    reason = reason.strip()
+    if reason.startswith(RULE):
+        reason = reason[len(RULE):].lstrip(" :-")
+    reason = reason or "the receiver must hear only what changes its work."
+    try:
+        import guard_core
+        guard_core.set_log_session(payload.get("session_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_veto(lambda: False)  # a SendMessage holds no act that no override lifts
+        guard_core.refuse("SendMessage", "deny", RULE, reason, to)
+    except Exception:  # no guard_core: no override can be read, so the refusal stands
+        pass
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                             "permissionDecision": "deny",
+                                             "permissionDecisionReason": RULE + ": " + reason}}))
+    return 0
+
+
 def main():
     try:
-        tool_input = json.load(sys.stdin).get("tool_input") or {}
+        payload = json.load(sys.stdin)
+        tool_input = payload.get("tool_input") or {}
         to, message = tool_input.get("to"), tool_input.get("message")
-        if not isinstance(to, str) or not to.strip() or not isinstance(message, str):
-            return 0
-        if receiver_state(to) != "busy":
-            return 0
-        import decision_watch
-        verdict, error = decision_watch.invoke_model(build_prompt(to, message), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
+        # A structured message or a non-string receiver still gets the wording judge; only a plain
+        # message to a named receiver gets the board read and the busy judge.
+        plain = isinstance(to, str) and bool(to.strip()) and isinstance(message, str)
     except Exception as exc:
-        error, verdict = "%s: %s" % (type(exc).__name__, exc), None
-    if error:
-        print("sendmessage state judge failed open: %s" % " ".join(error.split()), file=sys.stderr)
+        print("sendmessage state judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
+              file=sys.stderr)
         return 0
-    if verdict.get("ok") is False:
-        reason = verdict.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            reason = "parallelism-no-mid-task-talk: the receiver is busy; send only what changes its work."
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                                 "permissionDecision": "deny",
-                                                 "permissionDecisionReason": reason}}))
+    answers = {}
+    wording = threading.Thread(target=ask, daemon=True, args=(answers, "wording", build_wording_prompt(tool_input, message)),
+                               kwargs={"model": WORDING_MODEL, "timeout": WORDING_TIMEOUT, "effort": None})
+    wording.start()
+    try:
+        if plain and receiver_state(to) == "busy":
+            ask(answers, "busy", build_prompt(to, message), timeout=MODEL_TIMEOUT)
+    except Exception as exc:
+        answers["busy"] = (None, "%s: %s" % (type(exc).__name__, exc))
+    wording.join(WORDING_TIMEOUT + 5)
+    answers.setdefault("wording", (None, "the wording call did not return"))
+    reasons = []
+    for key, label in (("wording", "sendmessage wording judge"), ("busy", "sendmessage state judge")):
+        if key not in answers:
+            continue
+        verdict, error = answers[key]
+        if error:
+            print("%s failed open: %s" % (label, " ".join(error.split())), file=sys.stderr)
+        elif verdict.get("ok") is False:
+            reason = verdict.get("reason")
+            reasons.append(reason if isinstance(reason, str) else "")
+    if reasons:
+        return refuse(payload, to if isinstance(to, str) else "", next((r for r in reasons if r.strip()), ""))
     return 0
 
 

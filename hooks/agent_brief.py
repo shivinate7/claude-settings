@@ -23,7 +23,7 @@ COMMON = [
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
     (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
 ]
-READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide"}
+READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"}
 
 SCOPE = {
     "builder": "Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
@@ -31,6 +31,8 @@ SCOPE = {
     "reviewer": "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "Scope: Explore. Never edit. Read and search only.",
     "record-writer": "Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
+    "designer": "Scope: designer. Edit files in the repo's design folder only. Report any other change needed.",
+    "design-reviewer": "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }
 GENERAL = ("Scope: do only what your brief names. A builder never edits tests; "
            "a test-author never edits product code; a reviewer and Explore never edit; "

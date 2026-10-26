@@ -11,6 +11,8 @@ from pathlib import Path
 import os, shutil, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 URL = "https://github.com/shivinate7/claude-settings"
 
 def put(path, text):
@@ -41,10 +43,8 @@ class Launch(unittest.TestCase):
         self.work = os.path.join(self.t, "work")
         sh(self.t, "git", "init", "-q", "-b", "main", self.work, env=self.env)
         os.makedirs(os.path.join(self.work, "bin"))
-        os.makedirs(os.path.join(self.work, "merge"))
-        os.makedirs(os.path.join(self.work, "hooks"))
-        for f in ("bin/merge", "merge/launch.py", "hooks/_nowindow.py"):  # launch.py imports the helper from hooks/
-            shutil.copy(os.path.join(ROOT, f), os.path.join(self.work, f))
+        shutil.copy(os.path.join(ROOT, "bin", "merge"), os.path.join(self.work, "bin", "merge"))
+        tracked_tree.copy_tracked(self.work, "merge", "hooks")  # launch.py and its imports from hooks/
         # Same ignore rules as the real repo. launch.py imports the helper from the clone's hooks/, and
         # that import writes hooks/__pycache__ when bytecode is on (CI), which would read as a dirty tree.
         put(os.path.join(self.work, ".gitignore"), "__pycache__/\n*.pyc\n")

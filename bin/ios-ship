@@ -23,6 +23,7 @@
 #   a printed path under $TMPDIR, a 60 s retry wait. xctrace on a network-paired phone can fail with "Waiting for device
 #   to boot" while the phone is fine, and no device state predicts it, so that failure is retried once after the wait.
 #   Any other failure is not retried. A failure exits with xctrace's code (124 on the tool's timeout) and the log path.
+#   Only a second boot wait prints the unlock hint; a timeout names the step and its limit.
 #   No --app, two --app, or a bad option value: exit 2.
 set -uo pipefail
 
@@ -421,7 +422,7 @@ job_profile() {
   command -v jq >/dev/null || refuse "config: jq not found"
   select_apps
   ENTRY=${ENTRIES[0]}; check_entry
-  local bundle dir twice=0 rc try
+  local bundle dir twice=0 rc try secs
   bundle=$(app_get bundle_id); [[ -n $bundle ]] || refuse "config: $NAME: bundle_id is unset"
   resolve DEVICE_UDID device_udid
   if [[ -z $output ]]; then
@@ -434,9 +435,10 @@ job_profile() {
   LOG=$(mktemp "${TMPDIR:-/tmp}/ios-ship-profile-log.XXXXXX") || refuse "cannot make a log file"
   STEP_OUT=$LOG.step
   echo "ios-ship: $NAME: recording $template for ${time_limit}s to $output, log $LOG"
+  # The timeout covers the recording plus the launch and the save.
+  secs=${STEP_TIMEOUT:-$(( time_limit + 120 ))}
   for try in 1 2; do
-    # The timeout covers the recording plus the launch and the save.
-    tmo "${STEP_TIMEOUT:-$(( time_limit + 120 ))}" xcrun xctrace record --template "$template" --device "$DEVICE_UDID" \
+    tmo "$secs" xcrun xctrace record --template "$template" --device "$DEVICE_UDID" \
       --time-limit "${time_limit}s" --output "$output" --launch -- "$bundle" >"$STEP_OUT" 2>&1 </dev/null; rc=$?
     cat "$STEP_OUT" >> "$LOG" 2>/dev/null
     if (( rc == 0 )); then rm -f "$STEP_OUT"; echo "PROFILE OK: $NAME recorded to $output, log $LOG"; exit 0; fi
@@ -446,8 +448,10 @@ job_profile() {
     [[ ! -e $output ]] || rm -rf "$output"
     sleep "$retry_wait"
   done
+  # xctrace can hang in its save after a full recording, so a timeout names the step, not the phone.
+  if (( rc == 124 )); then echo "ios-ship: $NAME: step xctrace record timed out after ${secs}s; the limit covers the launch, the recording and the save"
+  elif (( twice )) && grep -q 'Waiting for device to boot' "$STEP_OUT"; then echo "ios-ship: the phone may need unlocking or a cable"; fi
   rm -f "$STEP_OUT"
-  (( twice )) && echo "ios-ship: the phone may need unlocking or a cable"
   echo "PROFILE FAIL: $NAME: xctrace exit $rc, see $LOG"
   exit "$rc"
 }

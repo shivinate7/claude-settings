@@ -20,7 +20,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
-HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 OK = "a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
@@ -49,12 +50,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
         self.tree = tempfile.mkdtemp(prefix="rsl_")
         self.addCleanup(rm_tree, self.tree)
-        os.makedirs(os.path.join(self.tree, "lint"))
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
-        for name in ("layout.py", "layout.json"):  # the check reads its records folder from the layout
-            shutil.copyfile(os.path.join(HERE, name), os.path.join(self.tree, "lint", name))
-        os.makedirs(os.path.join(self.tree, "hooks"))
-        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
 
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))
