@@ -139,8 +139,20 @@ class GlossaryTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
 
     def test_not_name_inside_a_longer_word_passes(self):
-        code, out = self.run_check("docs/handovers.md", "docs/rebundled.md")
+        code, out = self.run_check("docs/rebundled.md", "docs/handoverly.md")
         self.assertEqual(code, 0, out)
+
+    def test_plural_not_name_fails(self):
+        code, out = self.run_check("docs/handovers.md")
+        self.assertEqual(code, 1, out)
+        code, out = self.run_check("docs/batch-branches.md")
+        self.assertEqual(code, 1, out)
+
+    def test_camel_case_not_name_fails(self):
+        code, out = self.run_check("hooks/batchBranch.py")
+        self.assertEqual(code, 1, out)
+        code, out = self.run_check("hooks/HandoverNote.py")
+        self.assertEqual(code, 1, out)
 
     def test_multi_word_split_across_segments_passes(self):
         code, out = self.run_check("batch/branch.md")
