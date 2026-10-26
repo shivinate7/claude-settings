@@ -777,7 +777,7 @@ jobs:
       - name: c62 probe (temporary)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
-          C62_ROUNDS: "40"
+          C62_ROUNDS: "200"
         run: python hooks/c62_probe.py
 
       - name: Guard fixture suite

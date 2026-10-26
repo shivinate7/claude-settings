@@ -15333,6 +15333,9 @@ WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
 # load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx
 # and a process snapshot) that no Linux run exercises.
 WINDOWS_CHECKERS.update(LB_CHECKS)
+# override: a one-act pass claimed by a rename let two Windows racers win (run 40296652083), and no
+# Linux run shows it, so the claim cases run in the Windows slice.
+WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
