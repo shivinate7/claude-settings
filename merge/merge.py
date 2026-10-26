@@ -9,7 +9,8 @@
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
-the minute read and `gh pr merge --match-head-commit`.
+the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403.
+`gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
 """
 import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
@@ -73,7 +74,7 @@ def resolve_program(name, env=None):
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
-# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes three calls
+# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name)
 # for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
 _READ_DEADLINE = None
@@ -534,37 +535,75 @@ class Host:
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def _pr_args(self, n):
-        """The pull request selector: the number, or none for the current branch's."""
-        return ([str(n)] if n not in (None, "") else []) + self._repo_args()
+    def api(self, rel, *extra, method="GET", fields=None):
+        """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
+        `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
+        Windows .cmd shim of gh lets cmd.exe split an argument at '&'."""
+        route = f"repos/{self.repo}" if self.repo else "repos/{owner}/{repo}"
+        args = ["api", f"{route}/{rel}" if rel else route, "-X", method]
+        for key, value in (fields or {}).items():
+            args += ["-f", f"{key}={value}"]
+        return self.gh([*args, *extra], self.cwd)
+
+    def pages(self, rel, key=None, fields=None):
+        """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
+        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests."""
+        c, out = self.api(rel, "--paginate", "--slurp", fields={**(fields or {}), "per_page": 100})
+        try:
+            if c:
+                raise ValueError(out)
+            return [x for page in json.loads(out) for x in (page[key] if key else page)]
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"reading {rel} from GitHub failed: {e}")
+
+    # The old GraphQL values the rest of the tool reads, from the REST fields.
+    MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
+
+    def pr_number(self, selector):
+        """The pull request number of a selector: a number, a .../pull/<n> URL, a branch name, or none (the current branch).
+        A branch resolves through the open pull request list on head.ref; no open pull request, or two, is a Stop. A URL also names its repo."""
+        s = "" if selector is None else str(selector).strip()
+        if s.isdigit():
+            return int(s)
+        m = re.search(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)", s)
+        if m:
+            self.repo = m.group(1)
+            return int(m.group(2))
+        m = re.search(r"/pull/(\d+)", s)
+        if m:
+            return int(m.group(1))
+        branch = s
+        if not branch:
+            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd)
+            if c or not out.strip() or out.strip() == "HEAD":
+                raise Stop("no pull request is named, and the branch of the working directory cannot be read: " + out)
+            branch = out.strip()
+        hits = [d["number"] for d in self.pages("pulls", fields={"state": "open"}) if d["head"]["ref"] == branch]
+        if len(hits) != 1:
+            raise Stop(f"{len(hits)} open pull requests have the head {branch}: name the pull request by its number")
+        return hits[0]
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = self.gh(["pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft,body"], self.cwd)
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body}"""
+        c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
-            raise Stop("gh pr view failed: " + out)
+            raise Stop("reading the pull request failed: " + out)
         d = json.loads(out)
-        self.base = d["baseRefName"]  # the PR's own base drives required_names
-        return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
-                "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"], "draft": d["isDraft"], "body": d.get("body") or ""}
-
-    OPEN_LIMIT = 1000  # gh pr list stops at 30 rows without --limit
+        self.base = d["base"]["ref"]  # the PR's own base drives required_names
+        return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
+                "state": "MERGED" if d.get("merged") else d["state"].upper(),
+                "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
+                "draft": bool(d.get("draft")), "body": d.get("body") or ""}
 
     def open_heads(self):
-        """-> {head branch name: (head sha, PR base)} of the open pull requests. A failed read, or one that may be cut short,
-        raises Stop: never an empty set, which would say no PR is open. A head with two open PRs (a backport, or a fork's
-        branch of the same name) gets base None under its name, and every one of its rows is kept under name:index, a key no
-        branch can have, so every base still counts, in any row order."""
-        c, out = self.gh(["pr", "list", "--state", "open", "--json", "headRefName,headRefOid,baseRefName", "--limit", str(self.OPEN_LIMIT), *self._repo_args()], self.cwd)
-        if c:
-            raise Stop("gh pr list failed: " + out)
-        rows = json.loads(out)
-        if len(rows) >= self.OPEN_LIMIT:
-            raise Stop(f"gh pr list returned {len(rows)} open pull requests, the most it was asked for")
-        seen = [d["headRefName"] for d in rows]
+        """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
+        which would say no PR is open. A head with two open PRs (a backport, or a fork's branch of the same name) gets base None under
+        its name, and every one of its rows is kept under name:index, a key no branch can have, so every base still counts, in any row order."""
+        rows = self.pages("pulls", fields={"state": "open"})
+        seen = [d["head"]["ref"] for d in rows]
         heads = {}
         for i, d in enumerate(rows):
-            name, row = d["headRefName"], (d["headRefOid"], d["baseRefName"])
+            name, row = d["head"]["ref"], (d["head"]["sha"], d["base"]["ref"])
             if seen.count(name) > 1:
                 heads.setdefault(name, (row[0], None))
                 name = f"{name}:{i}"
@@ -589,18 +628,23 @@ class Host:
                        "The tool never merges with nothing to wait for. Name the checks.")
         return names
 
-    def checks(self, n, warn=True):
-        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code.
-        The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
+    # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
+    CONCLUSION_BUCKET = {"success": "pass", "neutral": "skipping", "skipped": "skipping", "cancelled": "cancel"}
+    STATE_BUCKET = {"success": "pass", "pending": "pending"}
+
+    def checks(self, n, warn=True, sha=None):
+        """-> {check name: [(bucket, link), ...]}, every entry kept: the check runs of the head AND its commit statuses, all pages of each. A check that
+        exists only as a status counts. The combined status is never read: its state says "pending" for a commit with no statuses.
+        `sha` is the head the caller already read; with none, the head of the pull request `n` is read. The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
         A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
         A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped."""
-        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link,startedAt,completedAt"], self.cwd)
-        try:
-            rows = json.loads(out)
-        except ValueError:
-            if "no checks reported" in out:
-                return {}
-            raise Stop("gh pr checks failed: " + out)
+        sha = sha or self.pr(n)["head"]
+        rows = []
+        for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
+            bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
+            rows.append({"name": r["name"], "bucket": bucket, "link": r.get("details_url"), "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")})
+        for s in self.pages(f"commits/{sha}/status", "statuses"):
+            rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "link": s.get("target_url")})
         try:
             flow = workflow_dir(self.cwd)
             caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
@@ -653,7 +697,7 @@ class Host:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
-            got = self.checks(n)
+            got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
             red, pending = self.settle(red, pending, *self.run_state(sha))
             if red:
@@ -749,13 +793,13 @@ class Host:
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        Its three `gh` calls share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
-        not three."""
+        not four."""
         try:
             with shared_deadline(SH_TIMEOUT):
                 info = self.pr(n)
-                got = self.checks(n, warn=False)
+                got = self.checks(n, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
@@ -780,20 +824,25 @@ class Host:
         self.pause(30)  # no gh call: the next pass reads the checks (decision ci-wait-reads-run-status)
 
     def merge(self, n, method, sha):
-        """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
+        """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
-        MERGED at head `sha` is this run's merge. MERGED at another head is not: Stop, no revert. An unreadable state,
+        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
         or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
+        say(f"merge: merging #{n} ...")  # the merge call can block
+        # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
+        # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
+        state_now = self.pr(n)["merge_state"]
+        if state_now in ("BLOCKED", "BEHIND"):
+            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
-        say(f"merge: merging #{n} ...")  # gh pr merge can block
         try:
-            c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
-            c2, view = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit,headRefOid"])
+            c2, view = self.api(f"pulls/{n}")
             d = json.loads(view) if not c2 else None
-            state, head, oid = d["state"], d["headRefOid"], d["mergeCommit"] and d["mergeCommit"]["oid"]
+            state, head, oid = "MERGED" if d["merged"] else d["state"].upper(), d["head"]["sha"], d["merged"] and d["merge_commit_sha"]
             if state == "MERGED" and not oid:
                 raise ValueError("MERGED with no merge commit")
         except (NetStop, ValueError, KeyError, TypeError) as e:
@@ -804,9 +853,9 @@ class Host:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted.\n{out}")
         if lost:
-            raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
+            raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
-            raise NetStop(f"`gh pr merge` of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
+            raise NetStop(f"the merge call of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
                           f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
         # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
         # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
@@ -988,19 +1037,77 @@ def ff_main(root, base, commit):
         raise Stop(f"the local main did not move in {where}. {kept}\nFast-forward {base} there by hand.")
     say(f"merge: local {base} is at {commit[:9]}.")
 
+def _keep_words(reason):
+    """The sweep's keep reason in plain words for the `kept here` line."""
+    if reason.startswith("dirty"):
+        return "dirty: it has uncommitted changes."
+    if reason.startswith(("unmerged", "unpushed")):
+        return "its HEAD is not in the merged head, so it holds local-only commits."
+    if reason.startswith("locked"):
+        return "the worktree has a lock (" + reason + ")."
+    if reason.startswith("live-session"):
+        return "a live Claude session works in it."
+    if reason.startswith("process-inside"):
+        return "a process runs inside it (" + reason + ")."
+    if reason.startswith("unreadable"):
+        return "a read on it failed, so it is not judged removable."
+    return reason + "."
+
+def remove_held_tree(root, branch, held, merged):
+    """Remove the one worktree `held` that holds `branch`, by the janitor sweep's fast path
+    (janitor/sweep.py `decide_worktree`, `remove_worktree`): one home for what may go, no --force.
+    -> True when the tree is gone and the caller may delete the branch; False when it stays, after one
+    `kept here` line. The caller's cwd inside the tree, a primary checkout and any failed read keep it."""
+    def keep(why):
+        say(f"merge: {branch} kept here: {why}")
+        return False
+    try:
+        here, tree = os.path.realpath(os.getcwd()), os.path.realpath(held)
+        if here == tree or here.startswith(tree + os.sep):
+            return keep(f"the current directory (cwd) is inside {held}.")
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor"))
+        import sweep  # janitor/sweep.py: the one home of the worktree keep rule and the removal
+        entry = next((e for e in sweep.parse_worktree_list(root) or [] if os.path.realpath(e["path"]) == tree), None)
+        if entry is None:
+            return keep(f"checked out in {held}, whose entry could not be read.")
+        if sweep._is_primary_checkout(held) is not False:
+            return keep(f"checked out in {held}, the primary checkout or a tree not proven linked.")
+        batch = sweep.merged_batch(root, merged)
+        if batch is None:
+            return keep(f"checked out in {held}; which commits are merged could not be read.")
+        decision = sweep.decide_worktree(root, entry, attended=True, fast=True, batch=batch)
+        if decision["action"] != "reap":
+            return keep(_keep_words(decision["reason"]))
+        sweep.remove_worktree(root, held, decision)
+        if decision.get("error") or os.path.exists(held):
+            return keep("it could not be removed: " + str(decision.get("error", "the folder is still there")))
+    except Exception as e:  # any failed import or read keeps the tree; the merge is done
+        return keep(f"checked out in {held}; the janitor read failed ({type(e).__name__}: {e}).")
+    say(f"merge: worktree {held} removed.")
+    return True
+
 def cut_branch(root, branch, merged):
-    """Delete the head branch on origin, and here unless a worktree holds it or it has local-only
-    commits (its tip must be an ancestor of `merged`, the head that merged). Never fails the merge."""
+    """Delete the head branch on origin, and here unless it has local-only commits (its tip must be an
+    ancestor of `merged`, the head that merged). A worktree that holds the branch goes first when the
+    janitor sweep's fast path judges it removable (`remove_held_tree`); otherwise it stays, with one
+    line why. Never fails the merge."""
     c, out = git(root, "push", "-q", "origin", "--delete", branch)
     # A gone remote ref is a deleted branch: the repo may set delete_branch_on_merge.
     gone = c and "remote ref does not exist" in out
     say(f"merge: origin/{branch}: " + ("deleted." if not c else "already deleted." if gone else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+    cut_local(root, branch, merged)
+
+def cut_local(root, branch, merged):
+    """The local half of a branch's cleanup, for the PR's branch and each lane branch: a worktree that holds it goes
+    first when the janitor sweep's fast path judges it removable (`remove_held_tree`), else the branch stays (that
+    function prints why). The branch is deleted only when its tip is an ancestor of `merged`; a tip outside it holds
+    local-only commits. No --force. A branch that is not here is a no-op."""
     if git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0]:
         return
     held = holder(root, branch)
-    if held:
-        say(f"merge: {branch} kept here: checked out in {held}.")
-    elif git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+    if held and not remove_held_tree(root, branch, held, merged):
+        return
+    if git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
         say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
@@ -1047,7 +1154,27 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
     this batch at its tip (a partial stack), and the base of a lane that is itself kept, to a fixpoint. A PR is done when
     its head sits at a lane tip of this batch; a base is a lane of this batch whether kept or not. A name in `skip` is
     no lane. Dependents are deleted before their base, each delete leased to the tip. A base whose dependent was not
-    deleted is kept, with a line. Each lane has its own try. Never fails the merge."""
+    deleted is kept, with a line. Each lane has its own try. Never fails the merge.
+    Then, whatever the origin read or the remote pass found (GitHub may have deleted the heads already), the local
+    side: every local branch, of any name, whose tip equals a lane tip not in `dropped`, except a name in `skip`,
+    gets `cut_local`'s cleanup. A branch at no lane tip is never touched. The local pass follows the remote pass: a
+    name in `keep` stays, and so does every local branch at the tip of a head the remote pass kept or failed to
+    delete, for any reason. It does not run when the heads or the open PRs could not be read."""
+    def local_pass(held):  # held: the tips whose remote head stays
+        try:
+            c, out = git(root, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads/")
+            if c:
+                return
+            live = {t for t in lanes if t not in dropped and t not in held}
+            for line in out.splitlines():
+                sha, _, name = line.partition(" ")
+                if sha in live and name not in skip and name not in keep:
+                    try:  # one lane's failure never stops the next lane
+                        cut_local(root, name, commit)
+                    except Exception as e:
+                        say(f"merge: {name} here: not deleted: {type(e).__name__}: {e}")
+        except Exception as e:
+            say(f"merge: the local lane cleanup stopped: {type(e).__name__}: {e}")
     try:
         import guard_core  # hooks/guard_core.py: the one home of the cherry test
         c, out = git(root, "ls-remote", "--heads", "origin")
@@ -1066,6 +1193,7 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
         for b in kept:
             say(f"merge: lane origin/{b}: {kept[b]}")
         if len(kept) == len(heads):
+            local_pass({heads[b] for b in kept})
             return
         try:
             # {head name: (head sha, PR base)}; a head with two PRs has a None base, and one name:index row per PR
@@ -1121,6 +1249,7 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
             order += ready
             rest = [b for b in rest if b not in ready]
         blocked = {}  # base -> the lane whose delete did not happen
+        stays = {heads[b] for b in kept}  # tips whose remote head stays
         for b in order:
             tip = heads[b]
             if b in blocked:
@@ -1135,9 +1264,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
                     say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
                     undone = True
             if undone:
+                stays.add(tip)
                 for n, _, pb in prs:
                     if n == b:
                         blocked.setdefault(pb, b)
+        if opened is not None:  # an unread PR list means nothing is known to be done
+            local_pass(stays)
     except Exception as e:  # a lane cleanup never fails a merge that landed
         say(f"merge: the lane cleanup stopped: {type(e).__name__}: {e}")
 
@@ -1158,18 +1290,21 @@ MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranc
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
-    c, out, n = retry_net(lambda: sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0, "`gh repo view`")
+    c, out, n = retry_net(lambda: sh(["gh", "api", "repos/{owner}/{repo}", "-X", "GET"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0, "`gh api repos`")
     if is_net(c, out):
-        raise NetStop(f"network error from `gh repo view`, still failing after {n} retries. Run again.\n{out}")
+        raise NetStop(f"network error from `gh api repos`, still failing after {n} retries. Run again.\n{out}")
     try:
         if c:
             raise ValueError(out)
-        return json.loads(out)["defaultBranchRef"]["name"]
+        name = json.loads(out)["default_branch"]
+        if not isinstance(name, str) or not name:
+            raise ValueError("no default_branch in the answer")
+        return name
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the default branch cannot be read from gh: {e}")
 
 def job_minutes(row):
-    """Minutes a `gh pr checks` row ran, from startedAt to completedAt. None when either is missing or the job has not finished (gh gives a pending one the zero time)."""
+    """Minutes a check row ran, from startedAt to completedAt. None when either is missing or the job has not finished (gh gives a pending one the zero time)."""
     try:
         a, b = (datetime.datetime.fromisoformat(row[k].replace("Z", "+00:00")) for k in ("startedAt", "completedAt"))
     except (KeyError, AttributeError, ValueError):
@@ -1356,7 +1491,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
-        f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
+        f"  then:   push HEAD:{info['branch']}, wait for the checks, PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page

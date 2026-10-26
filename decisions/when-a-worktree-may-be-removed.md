@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Four routes remove a worktree. One is the unattended `--confirm` run. Three remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap, the session-end sweep's agent rule, and a repo's own `reap:worktrees` script. That script keeps its own tests. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Five routes remove a worktree. One is the unattended `--confirm` run. Three remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap, the session-end sweep's agent rule, and a repo's own `reap:worktrees` script. That script keeps its own tests. The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 

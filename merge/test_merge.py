@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, unittest, unittest.mock
+import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -136,24 +136,64 @@ class PipeOut(io.TextIOWrapper):
         self.flush()
         return self.buffer.getvalue().decode("cp1252", errors="replace")
 
+def build_repos(t):
+    """In folder t: origin.git (main with the seed commit, feat one commit ahead of it), and two clones of it, co and other."""
+    bare = os.path.join(t, "origin.git")
+    sh(t, "git", "init", "-q", "--bare", "-b", "main", bare)
+    seed = os.path.join(t, "seed")
+    sh(t, "git", "clone", "-q", bare, seed)
+    sh(seed, "git", "checkout", "-q", "-b", "main")
+    put(os.path.join(seed, ".github/stamp.json"), json.dumps(CONFIG))
+    put(os.path.join(seed, "docs/decisions/first.md"), record("D-001", "first"))
+    sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "seed"); sh(seed, "git", "push", "-q", "origin", "main")
+    sh(seed, "git", "checkout", "-q", "-b", "feat")
+    put(os.path.join(seed, "docs/decisions/second.md"), record("pending", "second"))
+    sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "feat: second"); sh(seed, "git", "push", "-q", "origin", "feat")
+    for name in ("co", "other"):
+        sh(t, "git", "clone", "-q", bare, os.path.join(t, name))
+
+_TEMPLATE = []
+
+def copy_repos(t):
+    """Put build_repos(t)'s result in t without running git: copy a template built once per process, then point the two clones at the copy of origin.
+    Setup was 14 git starts per test (a clone is the slow one on Windows); a copy is files only. False when the copy cannot be made or checked: the caller builds with git."""
+    try:
+        if not _TEMPLATE:
+            root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-template-"))
+            atexit.register(shutil.rmtree, root, True)
+            build_repos(root)
+            _TEMPLATE.append(root)
+        tpl = _TEMPLATE[0]
+        for name in ("origin.git", "co", "other"):
+            shutil.copytree(os.path.join(tpl, name), os.path.join(t, name), symlinks=True)
+        for name in ("co", "other"):
+            cfg = os.path.join(t, name, ".git", "config")
+            with open(cfg, encoding="utf-8", newline="") as f:
+                text = f.read()
+            # the clone's url as git wrote it: the path as given, with a backslash doubled (config escaping), or with forward slashes
+            for form in (lambda p: p.replace("\\", "\\\\"), lambda p: p.replace("\\", "/"), lambda p: p):
+                was, now = (form(os.path.join(base, "origin.git")) for base in (tpl, t))
+                if text.count(was) == 1:
+                    break
+            else:
+                raise OSError(f"the config of the clone {name} does not name the template origin once: {text!r}")
+            with open(cfg, "w", encoding="utf-8", newline="") as f:
+                f.write(text.replace(was, now))
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"test_merge: the repo template could not be copied ({e}); building this test's repos with git", file=sys.stderr)
+        for name in os.listdir(t):
+            shutil.rmtree(os.path.join(t, name), True)
+        return False
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
         self.addCleanup(shutil.rmtree, self.t, True)
         self.bare = os.path.join(self.t, "origin.git")
-        sh(self.t, "git", "init", "-q", "--bare", "-b", "main", self.bare)
-        seed = os.path.join(self.t, "seed")
-        sh(self.t, "git", "clone", "-q", self.bare, seed)
-        sh(seed, "git", "checkout", "-q", "-b", "main")
-        put(os.path.join(seed, ".github/stamp.json"), json.dumps(CONFIG))
-        put(os.path.join(seed, "docs/decisions/first.md"), record("D-001", "first"))
-        sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "seed"); sh(seed, "git", "push", "-q", "origin", "main")
-        sh(seed, "git", "checkout", "-q", "-b", "feat")
-        put(os.path.join(seed, "docs/decisions/second.md"), record("pending", "second"))
-        sh(seed, "git", "add", "-A"); sh(seed, "git", "commit", "-q", "-m", "feat: second"); sh(seed, "git", "push", "-q", "origin", "feat")
         self.co, self.other = (os.path.join(self.t, n) for n in ("co", "other"))
-        for d in (self.co, self.other):
-            sh(self.t, "git", "clone", "-q", self.bare, d)
+        if not copy_repos(self.t):
+            build_repos(self.t)
         self.now = time.time()
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
@@ -770,6 +810,110 @@ class CutBranch(Env):
         self.assertIn("local-only commits", out)
         self.assertTrue(self.exists())
 
+class CutBranchTree(Env):
+    """cut_branch when a worktree holds the merged branch. A clean tree whose HEAD is in the merged default branch goes,
+    with its folder and its branch. Any other tree stays, with one `merge: feat kept here: ...` line that says why."""
+
+    def setUp(self):
+        super().setUp()
+        self.wt = os.path.join(self.t, "wt-feat")
+        self.old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, self.old_cwd)
+
+    def merged_feat(self):
+        """Put feat's tip on origin/main, as a merge would, and move the local main onto it. -> the merged sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge feat", "origin/feat")
+        sh(o, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge", "-q", "--ff-only", "origin/main")
+        return sh(self.co, "git", "rev-parse", "origin/main")
+
+    def worktree(self):
+        """A worktree on local feat, at origin/feat. Returns nothing; the caller edits it."""
+        sh(self.co, "git", "branch", "feat", "origin/feat")
+        sh(self.co, "git", "worktree", "add", "-q", self.wt, "feat")
+        self.assertIn(self.wt, sh(self.co, "git", "worktree", "list"), "subject: the worktree must exist first")
+
+    def cut(self, merged):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            merge.cut_branch(self.co, "feat", merged)
+        return out.getvalue()
+
+    def exists(self):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", "refs/heads/feat"], capture_output=True).returncode == 0
+
+    def listed(self):
+        return sh(self.co, "git", "worktree", "list")
+
+    def kept_lines(self, out):
+        return [l for l in out.splitlines() if l.startswith("merge: feat kept here:")]
+
+    def assertKept(self, out, why):
+        lines = self.kept_lines(out)
+        self.assertEqual(len(lines), 1, f"one kept line, got: {out!r}")
+        self.assertRegex(lines[0], why)
+        self.assertTrue(os.path.isdir(self.wt), f"the tree was removed; out: {out!r}")
+        self.assertIn(self.wt, self.listed())
+        self.assertTrue(self.exists(), f"the branch was deleted; out: {out!r}")
+
+    def assert_clean_tree_removed(self, merged):
+        self.worktree()
+        out = self.cut(merged)
+        self.assertFalse(os.path.exists(self.wt), f"the worktree folder is still there; out: {out!r}")
+        self.assertNotIn(self.wt, self.listed())
+        self.assertFalse(self.exists(), f"the local branch feat was not deleted; out: {out!r}")
+        self.assertIn("feat here: deleted", out)
+
+    def test_clean_merged_tree_is_removed_with_its_branch(self):
+        self.assert_clean_tree_removed(self.merged_feat())
+
+    def test_clean_merged_tree_is_removed_when_merged_is_the_pr_head(self):
+        # Production passes the PR head sha (merge.py `cut_branch(root, branch, sha)`), not origin/main.
+        head = sh(self.co, "git", "rev-parse", "origin/feat")
+        self.merged_feat()
+        self.assert_clean_tree_removed(head)
+
+    def test_dirty_tree_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        put(os.path.join(self.wt, "scratch.txt"), "an uncommitted edit\n")
+        self.assertKept(self.cut(merged), r"feat kept here: .*dirty")
+
+    def test_head_with_a_commit_the_default_branch_lacks_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        put(os.path.join(self.wt, "local-only.txt"), "x\n")
+        sh(self.wt, "git", "add", "-A"); sh(self.wt, "git", "commit", "-q", "-m", "local only")
+        self.assertKept(self.cut(merged), r"feat kept here: .*(local-only|not in)")
+
+    def test_tree_whose_cwd_is_inside_it_is_kept(self):
+        merged = self.merged_feat()
+        self.worktree()
+        os.chdir(self.wt)
+        self.assertKept(self.cut(merged), r"feat kept here: .*(cwd|current directory|working directory)")
+
+    def test_tree_locked_by_a_live_agent_is_kept(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))  # the process-start read the lock's verdict uses
+        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
+        import git_reads
+        merged = self.merged_feat()
+        self.worktree()
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        started = git_reads._process_start_ms(child.pid)
+        self.assertIsNotNone(started, "could not read the child's start time")
+        start = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(started / 1000))
+        sh(self.co, "git", "worktree", "lock", "--reason", f"claude agent agent-x (pid {child.pid} start {start})", self.wt)
+        import sweep  # janitor/sweep.py, the module merge.remove_held_tree imports
+        with unittest.mock.patch.object(sweep, "remove_worktree", wraps=sweep.remove_worktree) as remove:
+            out = self.cut(merged)
+        self.assertFalse(remove.called, f"the sweep removed a tree its own lock rule keeps; out: {out!r}")
+        self.assertKept(out, r"feat kept here: .*locked: claude agent agent-x")
+
 # ------------------------------------------------------------------ the lanes of a batch
 # One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
 LANE_KEPT = "merge: lane origin/{b}: kept: {why}"
@@ -828,7 +972,7 @@ class LaneHost(FakeHost):
     unreadable: stop (raises Stop), none (returns None) or error (raises ValueError). on_merged runs once the merge is on origin.
     open: {head name: (head sha, PR base)} of the open pull requests, the shape Host.open_heads returns.
     A PR at the lane tip is the lane's own only when its base is the batch's base.
-    prs: raw gh rows [(head name, head sha, PR base), ...], one per open PR, in the order gh lists them. When set, open_heads
+    prs: raw rows [(head name, head sha, PR base), ...], one per open PR, in the order GitHub lists them. When set, open_heads
     runs the real Host.open_heads over these rows, so a case does not pin the shape that read returns."""
     style, open, unreadable, on_merged, prs = "merge", {}, None, None, None
 
@@ -846,8 +990,14 @@ class LaneHost(FakeHost):
             raise ValueError("not json")
         if self.prs is not None:
             host = merge.Host()
-            rows = [{"headRefName": h, "headRefOid": s, "baseRefName": b} for h, s, b in self.prs]
-            host.gh = lambda args, cwd=None: (0, json.dumps(rows))
+            items = [REST.list_item(100 + i, s, h, b) for i, (h, s, b) in enumerate(self.prs)]
+
+            def gh(args, cwd=None):
+                assert args[:1] == ["api"], f"unexpected gh call: {args}"
+                method, path, params, flags, jq = REST.parse(args[1:])
+                assert method == "GET" and re.fullmatch(r"repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/pulls", path), (method, path)
+                return 0, REST.listing(items, None, params, flags, jq, 100)
+            host.gh = gh
             return host.open_heads()
         return dict(self.open)
 
@@ -1398,6 +1548,140 @@ class CutLanes(Env):
         self.assertNotEqual(self.head("stale"), "")
         self.assertNotIn("origin/stale", out)
 
+    # The local side of a lane: a local branch at a lane tip, and its worktree, go with the lane when the batch took it in.
+    def local_branch(self, branch, sha, tree=None):
+        """A local branch at `sha`, and a worktree on it at `tree` when given. -> the worktree path, or None."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "branch", branch, sha)
+        if tree is None:
+            return None
+        sh(self.co, "git", "worktree", "add", "-q", tree, branch)
+        return tree
+
+    def has_local(self, branch):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", f"refs/heads/{branch}"], capture_output=True).returncode == 0
+
+    def tree_listed(self, path):
+        return path in sh(self.co, "git", "worktree", "list")
+
+    def test_a_batch_takes_its_local_lane_branches_and_clean_trees_with_it(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.on_merged = lambda: [sh(self.other, "git", "push", "-q", "origin", "--delete", n) for n in ("lane1", "lane2")]  # GitHub deleted the heads
+        tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
+        self.local_branch("worktree-agent-x", tips["lane2"])
+        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
+        self.assertTrue(self.has_local("lane-a") and self.has_local("worktree-agent-x"), "subject: both local lane branches must exist first")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertFalse(self.tree_listed(tree), f"the lane's clean worktree is still listed; out: {out!r}")
+        self.assertFalse(os.path.exists(tree), f"the lane's clean worktree folder is still there; out: {out!r}")
+        self.assertFalse(self.has_local("lane-a"), f"local lane-a was not deleted; out: {out!r}")
+        self.assertFalse(self.has_local("worktree-agent-x"), f"local worktree-agent-x was not deleted; out: {out!r}")
+
+    def test_a_lane_tree_with_uncommitted_edits_keeps_its_branch_and_says_dirty(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
+        put(os.path.join(tree, "scratch.txt"), "an uncommitted edit\n")
+        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        kept = [l for l in out.splitlines() if l.startswith("merge: lane-a kept here:")]
+        self.assertEqual(len(kept), 1, f"one kept line for lane-a, got: {out!r}")
+        self.assertIn("dirty", kept[0])
+        self.assertTrue(os.path.isdir(tree), f"the dirty tree was removed; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), out)
+        self.assertTrue(self.has_local("lane-a"), f"the local branch of a kept tree was deleted; out: {out!r}")
+        self.assert_deleted(out, "lane1", "lane2")  # control: the lanes on origin still go
+
+    def test_a_dropped_lane_keeps_its_local_branch_and_clean_tree(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))  # lane1's merge is reverted on the batch: a dropped lane
+        tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
+        self.assertTrue(self.tree_listed(tree), "subject: the dropped lane's worktree must exist first")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertTrue(os.path.isdir(tree), f"the dropped lane's clean tree was removed; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), out)
+        self.assertTrue(self.has_local("lane-a"), f"the dropped lane's local branch was deleted; out: {out!r}")
+        self.assertNotEqual(self.head("lane1"), "", "control: origin/lane1 is kept as a dropped lane")
+        self.assert_deleted(out, "lane2")
+
+    def kept_local_lane(self, branch, tip):
+        """A local lane branch at `tip`, with a clean worktree on it. -> the worktree path. Both must exist before the merge."""
+        tree = self.local_branch(branch, tip, os.path.join(self.t, "wt-" + branch))
+        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
+        self.assertTrue(self.has_local(branch), "subject: the local lane branch must exist first")
+        return tree
+
+    def test_a_local_lane_in_keepBranches_keeps_its_branch_and_clean_tree(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["lane1"]))))
+        tips = lane_batch(self, "lane1", "lane2")
+        tree = self.kept_local_lane("lane1", tips["lane1"])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_kept(out, "lane1", "keep")  # the remote lane is kept by its name
+        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane1"), f"the local branch of a keepBranches lane was deleted; out: {out!r}")
+        self.assert_deleted(out, "lane2")  # control: the other lane still goes
+
+    def test_a_local_branch_of_a_lane_kept_for_an_open_pr_keeps_its_clean_tree(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("stack-top", self.head("main"), "lane1")]  # a partial stack: its base is lane1
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_kept_line(out, "lane1")  # the remote lane is kept for its open PR
+        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"the local branch of an open-PR base was deleted; out: {out!r}")
+        self.assert_deleted(out, "lane2")  # control: the other lane still goes
+
+    def test_a_local_lane_branch_is_untouched_when_the_open_pr_read_fails(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.unreadable = "error"  # the open-PR read raises
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to keep")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the open-PR read failed; out: {out!r}")
+
+    def test_a_local_lane_branch_is_untouched_when_the_origin_heads_read_fails(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to read")
+        real, merged = merge.sh, []
+        def failing(args, *a, **k):
+            if merged and "ls-remote" in args and "--heads" in args:
+                return 128, "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com"
+            return real(args, *a, **k)
+        self.host.on_merged = lambda: merged.append(True)
+        with unittest.mock.patch.object(merge, "sh", failing):
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the origin heads read failed; out: {out!r}")
+
+    def test_a_local_branch_at_no_lane_tip_is_untouched(self):
+        lane_batch(self, "lane1", "lane2")
+        base = sh(self.co, "git", "rev-parse", "origin/main")  # the base is no lane tip; it is an ancestor of the merge
+        self.local_branch("stray", base)
+        self.assertTrue(self.has_local("stray"), "subject: the stray local branch must exist first")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_deleted(out, "lane1", "lane2")
+        self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
+        self.assertNotIn("stray", out)
+
     def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_prs(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
@@ -1796,7 +2080,7 @@ class BaseAware(Env):
             def __init__(h):
                 super().__init__(["gates"], minute=60, now=lambda: 0, pause=lambda s: None)
                 h.in_wait, h.passes = False, 0
-            def pr(h, n):
+            def pr(h, n, *a, **k):
                 info = fake.pr(n)
                 if h.in_wait:
                     h.passes += 1
@@ -1805,9 +2089,9 @@ class BaseAware(Env):
                 h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
             def required_names(h): return ["gates"]
-            def checks(h, n): return {"gates": [("pass", "")]}
+            def checks(h, n, *a, **k): return {"gates": [("pass", "")]}
             def runs(h, sha): return []
-            def head_state(h, n): return "green"
+            def head_state(h, n, *a, **k): return "green"
             def wait_checks(h, *a, **k):
                 h.in_wait = True
                 try:
@@ -1907,100 +2191,369 @@ class GhLockTest(unittest.TestCase):
         self.lock.unlock("main")  # none left: fine
 
 
-FAKE_GH_PR = r"""#!/usr/bin/env python3
-import json, os, subprocess, sys
-d = os.environ["FAKE_GH_DIR"]; a = [x for x in sys.argv[1:] if x not in ("-i", "--include")]  # `gh api -i` asks for headers; this shim has none to give
+# The fake GitHub REST API behind `gh api`. One home for the routes the merge tool reads and writes (c53): the shim FAKE_GH_PR
+# below runs it as a program, and the in-process fakes (CapsHost, LaneHost) run it through rest_lib(). It models what `gh` does, not
+# what a builder hopes it does:
+#   - `-f`/`-F` fields with no `-X` make a POST (gh's own rule), so a GET that sends fields must say `-X GET`.
+#   - a list read returns ONE page (`per_page`, at most the shim's page_cap, 100 on GitHub) unless `--paginate` is given.
+#   - `--paginate` joins JSON-array pages into one array, and prints object pages back to back (`{...}{...}`, not valid JSON as a
+#     whole). `--slurp` (needs `--paginate`, refuses `--jq`) prints the pages as one array of pages.
+#   - `--jq` knows only: `.`  `.a.b`  `.a[]`  `.[]`  `.a[].b`  (applied to each page).
+#   - an argument holding `&` is refused: the Windows `.cmd` shim of this suite lets cmd.exe split the command there. Send query values with `-f`.
+#   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
+GH_REST_LIB = r'''
+import json, re
+
+GRAPHQL_403 = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
+TEST_MERGE_SHA = "e" * 40  # REST sets merge_commit_sha on an OPEN pull request too: the sha of GitHub's test merge
+
+class Refused(Exception):
+    """An answer the fake gives as a failure: .text is what gh prints, .code its exit status."""
+    def __init__(self, text, code=1):
+        super().__init__(text)
+        self.text, self.code = text, code
+
+def api_error(code, message):
+    """What `gh api` prints when GitHub answers an error: the JSON body with no newline after it, then gh's own line."""
+    body = json.dumps({"message": message, "documentation_url": "https://docs.github.com/rest", "status": str(code)}, separators=(",", ":"))
+    return "%sgh: %s (HTTP %d)" % (body, message, code)
+
+def parse(argv):
+    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params."""
+    method, path, params, flags, jq, typed = None, None, {}, set(), None, False
+    argv = [part for x in argv for part in (x.split("=", 1) if x.startswith("--") and "=" in x else [x])]  # --method=PUT is --method PUT
+    i = 0
+    while i < len(argv):
+        x = argv[i]
+        if "&" in x:
+            raise Refused("fake gh api: an argument holds '&' (%r). The Windows .cmd shim of this suite lets cmd.exe split the command there. Send query values with -f fields and -X GET." % x)
+        if x in ("-X", "--method"):
+            method = argv[i + 1]; i += 2
+        elif x in ("-f", "-F", "--raw-field", "--field"):
+            k, _, v = argv[i + 1].partition("="); params[k] = v; typed = True; i += 2
+        elif x in ("-q", "--jq"):
+            jq = argv[i + 1]; i += 2
+        elif x in ("-H", "--header"):
+            i += 2
+        elif x in ("-i", "--include"):
+            flags.add("include"); i += 1
+        elif x in ("--paginate", "--slurp"):
+            flags.add(x[2:]); i += 1
+        elif x.startswith("-"):
+            raise Refused("fake gh api: the flag %s is not one this fake knows" % x)
+        elif path is None:
+            path = x; i += 1
+        else:
+            raise Refused("fake gh api: a second path %r" % x)
+    if path is None:
+        raise Refused("fake gh api: no path")
+    path, _, query = path.lstrip("/").partition("?")
+    for pair in filter(None, query.split("&")):
+        k, _, v = pair.partition("="); params.setdefault(k, v)
+    if "slurp" in flags and "paginate" not in flags:
+        raise Refused("the `--slurp` option requires `--paginate`")
+    if "slurp" in flags and jq:
+        raise Refused("the `--slurp` option is not supported with `--jq` or `--template`")
+    return method or ("POST" if typed else "GET"), path, params, flags, jq
+
+def jq_lines(expr, value):
+    """The few jq programs the fake knows. -> the lines gh prints: a string raw, anything else as compact JSON."""
+    if not re.fullmatch(r"\.(?:[A-Za-z_]\w*|\[\])?(?:\.[A-Za-z_]\w*|\[\])*", expr):
+        raise Refused("fake gh api: --jq %r is not one of: .  .a.b  .a[]  .[]  .a[].b" % expr)
+    vals = [value]
+    for name, each in re.findall(r"\.([A-Za-z_]\w*)|(\[\])", expr):
+        vals = [v.get(name) if isinstance(v, dict) else None for v in vals] if name else [x for v in vals for x in (v if isinstance(v, list) else [])]
+    return [v if isinstance(v, str) else json.dumps(v, separators=(",", ":")) for v in vals]
+
+def listing(items, key, params, flags, jq, cap, top=None):
+    """The text gh prints for a list read. `items` is the whole list; `key` is None for a JSON array reply, else the object field that
+    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back."""
+    size = max(1, min(int(params.get("per_page", 30)), cap))
+    pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
+    if "paginate" in flags:
+        chosen = pages
+    else:
+        n = int(params.get("page", 1))
+        chosen = [pages[n - 1] if 1 <= n <= len(pages) else []]
+    bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
+    if jq:
+        return "\n".join(line for b in bodies for line in jq_lines(jq, b))
+    if "slurp" in flags:
+        return json.dumps(bodies)
+    if key is None:
+        return json.dumps([x for c in chosen for x in c])
+    return "".join(json.dumps(b) for b in bodies)
+
+def one(obj, jq):
+    """The text gh prints for a single object."""
+    return "\n".join(jq_lines(jq, obj)) if jq else json.dumps(obj)
+
+RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
+          "skipping": ("completed", "skipped"), "cancel": ("completed", "cancelled")}
+STATUS_OF = {"pass": "success", "fail": "failure", "pending": "pending", "error": "error"}
+
+def check_run(row, i, started=None, completed=None):
+    """One check run from a bucket row (name, bucket, link). An unknown bucket is taken as the raw conclusion."""
+    status, conclusion = RUN_OF.get(row[1], ("completed", row[1]))
+    return {"id": 1000 + i, "name": row[0], "status": status, "conclusion": conclusion, "details_url": row[2] or None,
+            "started_at": started, "completed_at": completed if status == "completed" else None}
+
+def status_entry(row, i):
+    return {"id": 2000 + i, "context": row[0], "state": STATUS_OF.get(row[1], row[1]), "target_url": row[2] or None, "description": ""}
+
+def combined_state(statuses):
+    """The combined status GitHub reports: "pending" when there are no statuses at all."""
+    states = {s["state"] for s in statuses}
+    return "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
+
+def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=False, mergeable=True, mergeable_state="clean", body="", merge_commit_sha=TEST_MERGE_SHA):
+    """A pull request as `GET pulls/<n>` returns it. An empty body is null, as on GitHub."""
+    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable,
+            "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
+            "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
+
+def list_item(number, head, head_ref, base_ref):
+    """An open pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state."""
+    full = pull(number, head, head_ref, base_ref)
+    return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
+'''
+
+FAKE_GH_PR = "#!/usr/bin/env python3\nimport os, sys\n" + GH_REST_LIB + r'''
+d = os.environ["FAKE_GH_DIR"]; a = sys.argv[1:]
 sp = os.path.join(d, "state.json"); S = json.load(open(sp))
 def save(): json.dump(S, open(sp, "w"))
-def log(): open(os.path.join(d, "calls.log"), "a").write(" ".join(a) + "\n")
-def git(*c): return subprocess.run(["git", *c], capture_output=True, text=True, cwd=S.get("other") if c[0] != "ls-remote" else None).stdout.strip()
-log()
-hold = S.get("hold")  # {"on": [...], "seconds": N}: the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
-if hold and a[:2] == hold["on"] and not os.path.exists(os.path.join(d, "held")):
-    open(os.path.join(d, "held"), "w").close()
-    subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % hold["seconds"]])
-if a[:2] == ["pr", "view"]:
-    if "headRefOid" in a[-1] and "mergeCommit" not in a[-1]:  # the wait's head read; a state read may ask for headRefOid too
-        head = git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]
-        lag = S.get("lag")
-        if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
-            lag["n"] -= 1; save(); head = lag["prior"]
-        vf = S.get("view_fail")  # {"n", "msg", "after"}: once the head is off `after` (the pre-claim head), the next n reads fail with msg
-        if vf and vf["n"] > 0 and head != vf["after"]:
-            vf["n"] -= 1; S["view_failed"] = S.get("view_failed", 0) + 1; save()
-            print(vf["msg"]); sys.exit(1)
-        bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
-        views = S.get("views", 0) + 1; S["views"] = views; save()  # draft_from_view=N: read N and later ones see a draft
-        draft = bool(S.get("draft")) or (S.get("draft_from_view") is not None and views >= S["draft_from_view"])
-        print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
-                          "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN",
-                          "isDraft": draft, "body": S.get("body", "")}))  # set draft=True in a test; false by default. body: the PR body text
-    else:  # the state read. state_read_fail: its plain-text failure. state_head: the head GitHub reports (default: the branch head)
-        if S.get("state_read_fail"):
-            print(S["state_read_fail"]); sys.exit(1)
-        print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None,
-                          "headRefOid": S.get("state_head") or git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]}))
-elif a[:2] == ["pr", "checks"] and S.get("checks_fail") and S["checks_fail"]["n"] > 0:  # {"n", "msg"}: the next n reads fail with msg, then it answers
-    S["checks_fail"]["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
-    print(S["checks_fail"]["msg"]); sys.exit(1)
-elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
-    print("HTTP 404: Not Found"); sys.exit(1)  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
-elif a[:2] == ["pr", "checks"]:
-    seq = S["checks_seq"]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; S["checks_calls"] += 1; save()
-    print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
-    sys.exit(0 if all(b in ("pass", "skipping") for _, b, _ in cur) else 8)
-elif a[:2] == ["run", "list"]:
-    rf = S.get("runs_fail_first")  # [text, ...]: the first len() calls fail, one text each, then it answers
-    if rf:
-        S["runs_fail_first"] = rf[1:]; S["runs_failed"] = S.get("runs_failed", 0) + 1; save()
-        print(rf[0]); sys.exit(1)
-    if S.get("runs_fail"):  # the text of every failing `gh run list`
-        print(S["runs_fail"]); sys.exit(1)
-    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
-    print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
-elif a[:2] == ["run", "watch"]:
-    pass
-elif a[:2] == ["pr", "merge"]:
-    sha = a[a.index("--match-head-commit") + 1]
-    if S.get("merge_fail"):
-        print(S["merge_fail"]); sys.exit(1)
-    seq = S.get("merge_replies") or []  # [msg, lands(, code)] per call, the last repeats. lands: the merge reaches the server first; msg: the reply ("" for none); code: the exit status, 1 unless given
-    ent = (seq.pop(0) if len(seq) > 1 else seq[0]) if seq else ["", True]
-    msg, lands, code = ent[0], ent[1], (ent[2] if len(ent) > 2 else 1)
-    if seq: save()
-    if not lands:
-        print(msg); sys.exit(code)
-    if git("ls-remote", "origin", "refs/heads/feat").split("\t")[0] != sha:
-        print("GraphQL: Head branch was modified. Review and try the merge again."); sys.exit(1)
-    B = S.get("base", "main")
-    git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
-    git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
-    S["oid"] = git("rev-parse", "HEAD"); save()
-    if msg: print(msg); sys.exit(code)
-elif a[:2] == ["pr", "list"]:  # open_heads: open_heads_fail is the text of a failing read, open_prs the [head name, head sha, PR base] rows of the open pull requests
-    if S.get("open_heads_fail"):
-        print(S["open_heads_fail"]); sys.exit(1)
-    print(json.dumps([{"headRefName": h, "headRefOid": s, "baseRefName": b} for h, s, b in S.get("open_prs", [])]))
-elif a[:2] == ["repo", "view"]:
-    print(json.dumps({"defaultBranchRef": {"name": S.get("default_branch", "main")}}))
-elif a[0] == "api" and a[1].endswith("/required_status_checks"):
-    af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
-    if af and S["checks_calls"] >= af["after_checks"]:
-        S["api_failed"] = S.get("api_failed", 0) + 1; save()
-        print(af["msg"]); sys.exit(1)
-    if S.get("contexts") is None:
-        print("HTTP 404: Branch not protected"); sys.exit(1)
-    print(json.dumps(S["contexts"]))
-else:
-    print("unhandled " + " ".join(a)); sys.exit(1)
-"""
+def note(name, line): open(os.path.join(d, name), "a").write(line + "\n")
+def git(*c):  # subprocess is imported here, not at the top: most calls never start git, and the import is a measurable part of a start (a Windows .cmd shim pays it per call)
+    import subprocess
+    return subprocess.run(["git", *c], capture_output=True, text=True, cwd=S["other"]).stdout.strip()  # the "other" clone shares origin with the test's checkout, and gh runs wherever the caller does
+def ref(name):
+    """The object id of a ref on origin, "" when there is none. Read from the files of the bare repo (a loose ref, else packed-refs), so a read starts no git process:
+    the same answer as `git ls-remote origin <name>`, at a cost that matters when a Windows .cmd shim answers hundreds of calls."""
+    bare = S["bare"]
+    try:
+        return open(os.path.join(bare, *name.split("/"))).read().strip()
+    except OSError:
+        pass
+    try:
+        for line in open(os.path.join(bare, "packed-refs")):
+            if line.rstrip("\n").endswith(" " + name):
+                return line.split()[0]
+    except OSError:
+        pass
+    return ""
+def feat_head(): return ref("refs/heads/feat")
+def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
+    h = S.get("hold")
+    if h and h["on"] == kind and not os.path.exists(os.path.join(d, "held")):
+        open(os.path.join(d, "held"), "w").close()
+        import subprocess
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
+def finish(text, code, include=False):
+    if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
+        got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
+        sys.stdout.buffer.write(("HTTP/2.0 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n\r\n" % (got, "Error" if code else "OK")).encode())
+    print(text)
+    sys.exit(code)
+def graphql():
+    note("graphql.log", " ".join(a))
+    print(GRAPHQL_403); sys.exit(1)
+
+if a[:1] != ["api"]:
+    note("calls.log", " ".join(a))
+    hold(" ".join(a[:2]))
+    if a[:2] == ["run", "list"]:
+        rf = S.get("runs_fail_first")  # [text, ...]: the first len() calls fail, one text each, then it answers
+        if rf:
+            S["runs_fail_first"] = rf[1:]; S["runs_failed"] = S.get("runs_failed", 0) + 1; save()
+            print(rf[0]); sys.exit(1)
+        if S.get("runs_fail"):  # the text of every failing `gh run list`
+            print(S["runs_fail"]); sys.exit(1)
+        seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+        print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
+        sys.exit(0)
+    if a[:2] == ["run", "watch"]:
+        sys.exit(0)
+    graphql()  # gh pr ..., gh repo view, any other command: GraphQL
+
+include = False
+try:
+    method, path, params, flags, jq = parse(a[1:])
+    include = "include" in flags
+    if path.split("/")[0] == "graphql":
+        graphql()
+    m = re.match(r"^repos/(\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)(?:/(.*))?$", path)
+    if not m:
+        raise Refused(api_error(404, "Not Found"))
+    repo, rel = m.group(1), m.group(2) or ""
+    cap = S.get("page_cap", 100)
+    num = S.get("pr_number", 7)
+    rows = S.get("open_prs", [])
+    numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
+    canon = rel or "(repo)"
+    line = "%s %s%s%s" % (method, canon, "".join(" %s=%s" % kv for kv in sorted(params.items())), "".join(" --" + f for f in ("paginate", "slurp") if f in flags))
+    m_pr, m_put = re.fullmatch(r"pulls/(\d+)", rel), re.fullmatch(r"pulls/(\d+)/merge", rel)
+    m_run, m_sta = re.fullmatch(r"commits/([^/]+)/check-runs", rel), re.fullmatch(r"commits/([^/]+)/status", rel)
+    m_req = re.fullmatch(r"branches/(.+)/protection/required_status_checks", rel)
+    after = bool(S.get("put_done")) and bool(m_pr) and method == "GET"
+    note("calls.log", line + (" after-merge" if after else ""))
+    note("repos.log", repo)
+    kind = "merge" if m_put else "check-runs" if m_run else "status" if m_sta else "pr" if m_pr else "list" if rel == "pulls" else "repo" if not rel else "required" if m_req else "other"
+    hold(kind)
+    rf = (S.get("route_fail") or {}).get(kind)  # {kind: {"n", "msg"}}: the next n calls of that route fail with msg, then it answers
+    if rf and rf["n"] > 0:
+        rf["n"] -= 1; S["route_failed"] = dict(S.get("route_failed", {}), **{kind: S.get("route_failed", {}).get(kind, 0) + 1}); save()
+        raise Refused(rf["msg"])
+
+    if method == "GET" and not rel:
+        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
+
+    elif method == "GET" and rel == "pulls":
+        if S.get("open_heads_fail"):
+            raise Refused(S["open_heads_fail"])
+        if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
+            raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
+        items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
+        finish(listing(items, None, params, flags, jq, cap), 0, include)
+
+    elif method == "GET" and m_pr:
+        n = int(m_pr.group(1))
+        if n in numbered and n != num:
+            r = numbered[n]
+            finish(one(pull(n, r[1], r[0], r[2]), jq), 0, include)
+        if n != num:
+            raise Refused(api_error(404, "Not Found"))
+        head = feat_head()
+        if S.get("put_done"):  # a read after the merge call: the state read
+            if S.get("state_read_fail"):
+                raise Refused(S["state_read_fail"])
+            head = S.get("state_head") or head
+            merged = bool(S.get("oid"))
+            pr = pull(n, head, "feat", S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
+                      "unknown" if merged else "clean", S.get("body", ""), S["oid"] if merged else TEST_MERGE_SHA)
+        else:  # the head read
+            lag = S.get("lag")
+            if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
+                lag["n"] -= 1; save(); head = lag["prior"]
+            vf = S.get("view_fail")  # {"n", "msg", "after"}: once the head is off `after` (the pre-claim head), the next n reads fail with msg
+            if vf and vf["n"] > 0 and head != vf["after"]:
+                vf["n"] -= 1; S["view_failed"] = S.get("view_failed", 0) + 1; save()
+                raise Refused(vf["msg"])
+            seq = S.get("mergeable_seq")  # one value per head read, the last repeats: true, false or null (GitHub is still working it out)
+            if seq:
+                val = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+            else:
+                val = not (S.get("dirty_after_checks") is not None and S.get("checks_calls", 0) >= S["dirty_after_checks"])
+            locked = bool(ref("refs/merge-lock/main"))
+            draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
+            pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
+                pr["mergeable_state"] = S["merge_state_when_locked"]
+            S["shown"] = S.get("shown", []) + [head]; save()
+        pr.update(S.get("pr_raw") or {})  # a test's own raw fields, for the mapping table
+        finish(one(pr, jq), 0, include)
+
+    elif method == "PUT" and m_put and int(m_put.group(1)) == num:
+        S["put_done"] = True; save()
+        sha = params.get("sha")
+        if S.get("rival_at_merge") and not S.get("rival_done"):  # a push lands between the last read and the merge call
+            S["rival_done"] = True; save()
+            git("fetch", "-q", "origin"); git("checkout", "-q", "-B", "feat", "origin/feat")
+            open(os.path.join(S["other"], "rival.txt"), "w").write("someone else pushed\n")
+            git("add", "-A"); git("commit", "-q", "-m", "rival"); git("push", "-q", "origin", "feat")
+        if S.get("merge_fail"):
+            raise Refused(S["merge_fail"])
+        seq = S.get("merge_replies") or []  # [msg, lands(, code)] per call, the last repeats. lands: the merge reaches the server first; msg: the reply ("" for a success); code: the exit status, 1 unless given
+        ent = (seq.pop(0) if len(seq) > 1 else seq[0]) if seq else ["", True]
+        msg, lands, code = ent[0], ent[1], (ent[2] if len(ent) > 2 else 1)
+        if seq: save()
+        if not lands:
+            if code:
+                raise Refused(msg, code)
+            finish(msg, 0, include)
+        if sha is not None and feat_head() != sha:
+            raise Refused(api_error(409, "Head branch was modified. Review and try the merge again."))
+        B = S.get("base", "main")
+        git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
+        git("merge", "-q", "--no-ff", "-m", "merge", sha or feat_head()); git("push", "-q", "origin", B)
+        S["oid"] = git("rev-parse", "HEAD"); save()
+        if msg:
+            finish(msg, code, include)
+        finish(json.dumps({"sha": S["oid"], "merged": True, "message": "Pull Request successfully merged"}), 0, include)
+
+    elif method == "GET" and (m_run or m_sta):
+        sha = (m_run or m_sta).group(1)
+        if sha not in set(S.get("shown", [])) | {feat_head()}:
+            raise Refused(api_error(422, "No commit found for SHA: " + sha))
+        cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
+        if cf and cf["n"] > 0:
+            cf["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
+            raise Refused(cf["msg"])
+        key = "n_runs" if m_run else "n_status"
+        i = S.get(key, 0); S[key] = i + 1
+        # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
+        if S.get("checks_broken") and i >= S.get("broken_from", 0):
+            S[key] = i; save()
+            raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
+        if m_run:
+            S["checks_calls"] = S.get("checks_calls", 0) + 1
+        save()
+        raw = S.get("raw_checks")  # a round written as REST objects: {"check_runs": [...], "statuses": [...]}
+        if raw:
+            cur = raw[min(i, len(raw) - 1)]
+        else:
+            seq = S["checks_seq"]; rows_now = seq[min(i, len(seq) - 1)]
+            cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
+                   "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
+        if m_run:
+            finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
+        finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+
+    elif method == "GET" and m_req:
+        af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
+        if af and S.get("checks_calls", 0) >= af["after_checks"]:
+            S["api_failed"] = S.get("api_failed", 0) + 1; save()
+            raise Refused(af["msg"])
+        if S.get("contexts") is None:
+            raise Refused(api_error(404, "Branch not protected"))
+        finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
+
+    else:
+        raise Refused(api_error(404, "Not Found"))
+except Refused as e:
+    finish(e.text, e.code, include)
+'''
+
+
+def rest_lib():
+    """GH_REST_LIB as a namespace, for the fakes that run in this process (CapsHost, LaneHost)."""
+    ns = {}
+    exec(GH_REST_LIB, ns)
+    return types.SimpleNamespace(**{k: v for k, v in ns.items() if not k.startswith("__")})
+
+REST = rest_lib()
+rest_err = REST.api_error
+
+def install_gh_shim(test):
+    """Put the fake `gh` (FAKE_GH_PR) first on PATH for one test. Its state lives in test.state. A GraphQL call that reaches it fails the test."""
+    bindir = os.path.join(test.t, "bin"); os.makedirs(bindir)
+    put_shim(os.path.join(bindir, "gh"), FAKE_GH_PR)
+    test.state = os.path.join(test.t, "ghstate"); os.makedirs(test.state)
+    old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
+    os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = test.state
+    test.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
+    test.addCleanup(assert_no_graphql, test)
+
+def assert_no_graphql(test):
+    log = pathlib.Path(test.state, "graphql.log")
+    if log.exists():
+        test.fail("a GraphQL call reached gh, and a Claude Code cloud session answers it HTTP 403: " + "; ".join(log.read_text().splitlines()))
 
 # The text real gh prints for a network failure.
-NET_TLS = 'Post "https://api.github.com/graphql": net/http: TLS handshake timeout'
+NET_TLS = 'Get "https://api.github.com/repos/o/r/pulls/7": net/http: TLS handshake timeout'
 # Network texts NET_ERROR must match: a Windows socket, a deadline, a refused connect; git's name lookup.
-NET_WSARECV = 'Post "https://api.github.com/graphql": read tcp 10.0.0.5:51322->140.82.112.6:443: wsarecv: An existing connection was forcibly closed by the remote host'
-NET_DEADLINE = 'Post "https://api.github.com/graphql": context deadline exceeded'
-NET_REFUSED = 'Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: connection refused'
+NET_WSARECV = 'Get "https://api.github.com/repos/o/r/pulls/7": read tcp 10.0.0.5:51322->140.82.112.6:443: wsarecv: An existing connection was forcibly closed by the remote host'
+NET_DEADLINE = 'Get "https://api.github.com/repos/o/r/pulls/7": context deadline exceeded'
+NET_REFUSED = 'Get "https://api.github.com/repos/o/r/pulls/7": dial tcp 140.82.112.6:443: connect: connection refused'
 NET_HOST = "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Could not resolve host: github.com"
 
 # Rate-limit texts (`gh run list` answered HTTP 403). The request id and the
@@ -2026,6 +2579,17 @@ PLAIN_403_API = ('{"message":"Resource not accessible by integration","documenta
                  "gh: Resource not accessible by integration (HTTP 403)")
 # The GraphQL form on `gh pr checks`, `gh pr view` and `gh pr merge`: no HTTP status in the line.
 RATE_GQL_ALREADY = "GraphQL: API rate limit already exceeded for user ID 309471439."
+
+# c53: the merge tool reads and merges through the REST API (`gh api`), because a cloud session answers GraphQL with HTTP 403.
+# The fake gh logs one line per call: METHOD, the route under repos/<owner>/<repo>, the fields sorted, then --paginate or --slurp.
+# A read of the pull request after the merge call carries the suffix "after-merge".
+MERGE_CALL = "PUT pulls/7/merge"
+STATE_READ = "GET pulls/7 after-merge"
+LIST_CALL = "GET pulls "
+CHECKS_CALL = "GET commits/"
+REPO_CALL = "GET (repo)"
+NOT_MERGEABLE = rest_err(405, "Pull Request is not mergeable")
+NOT_FOUND = rest_err(404, "Not Found")
 
 # The rate waits, in seconds, when GitHub gives no reset time: one per retry. The last one is also the cap on any wait.
 # The retry count is 3. The ladder waits 21 minutes in all.
@@ -2086,19 +2650,14 @@ class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
     def setUp(self):
         super().setUp()
-        bindir = os.path.join(self.t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH_PR)
-        self.state = os.path.join(self.t, "ghstate"); os.makedirs(self.state)
-        old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
-        os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
-        self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
+        install_gh_shim(self)
         self.ticks, self.paused, self.at_pause = 0, [], []
         self.set(checks_seq=[[("gates", "pass", "")]])
 
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
         f = pathlib.Path(p)
-        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "checks_calls": 0}
+        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0}
         s.update(kw)
         f.write_text(json.dumps(s))
 
@@ -2106,7 +2665,7 @@ class GhHalf(Env):
         p = pathlib.Path(self.state, "calls.log")
         return p.read_text() if p.exists() else ""  # a case that makes no gh call leaves no log
 
-    def gh_host(self, required=("gates",), pause=None, ignore=None):
+    def gh_host(self, required=("gates",), pause=None, ignore=None, minute=60):
         def tick(s):
             self.ticks += 1
             self.paused.append(s)
@@ -2117,23 +2676,21 @@ class GhHalf(Env):
                 self.at_pause.append((s, self.now, cur[1] if cur else None))
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick, ignore=ignore)
+        return merge.Host(required if required == "protection" else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
-        # gh pr list stops at 30 rows unless --limit says more. A lane whose open PR is past row 30 would be deleted, and its PR closed.
+        # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
         # Each head comes with its sha and its PR's base, {name: (sha, base)}, so the cut can tell the lane's own PR
         # (base = the batch's base) from a backport, and see a stacked PR whose base is a lane.
         self.set(open_prs=[["lane2", "a" * 40, "main"], ["agent/lane1", "b" * 40, "release/1.0"]])
         got = self.gh_host().open_heads()
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
-        for part in ("pr list", "--state open", "--json headRefName,headRefOid,baseRefName"):
+        for part in (LIST_CALL, "state=open", "per_page=100", "--paginate"):  # one page holds 100 at most, and --paginate takes the rest
             self.assertIn(part, calls)
-        limit = re.search(r"--limit (\d+)", calls)
-        self.assertTrue(limit and int(limit.group(1)) > 30, calls)
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
         # An empty set means no PR is open, and every lane would go. A failure stops (merge.Stop) or answers None.
@@ -2145,13 +2702,13 @@ class GhHalf(Env):
         self.assertIsNone(got)
 
     def test_the_pr_body_gh_reports_reaches_the_silent_undo_check_at_preview(self):
-        # Host.pr reads the body in its `gh pr view --json` read, so a Drops-lines line in the body excuses its path.
+        # Host.pr reads the body in its read of the pull request (GET pulls/7), so a Drops-lines line in the body excuses its path.
         SilentUndo.stale_feat(self)
         self.set(body="Drops-lines: docs/decisions/first.md -- the lines are dead")
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
         self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
-        self.assertRegex(self.calls(), r"(?m)^pr view .*--json [^\n]*\bbody\b")
+        self.assertIn("GET pulls/7", self.calls())
 
     def test_a_batch_with_lanes_reads_the_open_prs_through_gh_and_keeps_those_lanes(self):
         # Ruling 1: the open PR's head is a newer commit than lane2's tip, so lane2 is kept. Origin's lane2 stays at the tip.
@@ -2159,7 +2716,7 @@ class GhHalf(Env):
         self.set(open_prs=[["lane2", self.head("main"), "main"]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertIn("pr list", self.calls())
+        self.assertIn(LIST_CALL, self.calls())
         lane_deleted_line(self, out, "agent/lane1")
         self.assertEqual(self.head("agent/lane1"), "")
         self.assertIn(LANE_KEPT.format(b="lane2", why=WHY["open"]), out)
@@ -2242,10 +2799,10 @@ class GhHalf(Env):
         lane_deleted_line(self, out, "lane2")
         self.assertEqual(self.head("lane2"), "", "lane2 is still on origin")
 
-    def test_a_batch_without_lanes_makes_no_pr_list_call(self):
+    def test_a_batch_without_lanes_makes_no_open_pr_list_call(self):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertNotIn("pr list", self.calls())
+        self.assertNotIn(LIST_CALL, self.calls())
 
     def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
         sh(self.other, "git", "fetch", "-q", "origin")
@@ -2272,7 +2829,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.gh_state("view_failed"), 1)
-        self.assertIn("pr merge 7", self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
         self.assertNotIn("reverted on", out)
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -2297,7 +2854,7 @@ class GhHalf(Env):
         self.assertNotIn("Revert", self.feat_subjects())  # the claim stands on the branch
         self.assertIn("Claim record numbers", self.feat_subjects())
         self.assertFalse(self.reverted())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
         self.set(view_fail=None)  # the network is back: the next run resumes the claim and merges
         rc, out = self.go()
@@ -2306,44 +2863,44 @@ class GhHalf(Env):
         self.assertEqual(self.claims("main"), 1)
 
     def test_a_real_refusal_in_the_wait_reverts_the_claim_and_is_not_retried(self):
-        self.set(view_fail={"n": 1, "msg": "GraphQL: Pull request is not mergeable", "after": self.head()})
+        self.set(view_fail={"n": 1, "msg": PLAIN_403_API, "after": self.head()})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("view_failed"), 1, out)  # tried once
         self.assertIn("reverted on feat", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
     def test_a_lost_merge_reply_then_not_mergeable_reads_merged_and_carries_on(self):
-        self.set(merge_replies=[[NET_TLS, True], ["GraphQL: Pull request is not mergeable: already closed", False]])  # the merge lands, its reply is lost
+        self.set(merge_replies=[[NET_TLS, True], [NOT_MERGEABLE, False]])  # the merge lands, its reply is lost
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertEqual(self.calls().count("pr merge"), 2)
-        self.assertIn("state,mergeCommit", self.calls())  # the retry's answer is not trusted: the PR state is read
+        self.assertEqual(self.calls().count(MERGE_CALL), 2)
+        self.assertIn(STATE_READ, self.calls())  # the retry's answer is not trusted: the PR state is read
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
 
     def test_a_lost_merge_reply_then_404_reads_merged_and_carries_on(self):
-        self.set(merge_replies=[[NET_TLS, True], ["HTTP 404: Not Found", False]])  # a stale ref on the retry
+        self.set(merge_replies=[[NET_TLS, True], [NOT_FOUND, False]])  # a stale ref on the retry
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertEqual(self.calls().count("pr merge"), 2)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertEqual(self.calls().count(MERGE_CALL), 2)
+        self.assertIn(STATE_READ, self.calls())
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
 
     def test_a_plain_already_merged_answer_on_the_first_merge_reads_the_state_and_carries_on(self):
-        self.set(merge_replies=[["Pull request #7 is already merged", True]])  # no network error before it
+        self.set(merge_replies=[[NOT_MERGEABLE, True]])  # no network error before it
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertEqual(self.calls().count("pr merge"), 1)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)
+        self.assertIn(STATE_READ, self.calls())
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
@@ -2355,15 +2912,15 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is red: EOF lint: fail", out)
         self.assertNotIn("network", out.lower())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.claims("feat"), 0)  # refused before the claim push
 
     def test_four_network_errors_on_the_merge_read_merged_and_carry_on(self):
         self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]])  # the first merge lands, its reply and the three retries are lost
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.calls().count("pr merge"), 4)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertEqual(self.calls().count(MERGE_CALL), 4)
+        self.assertIn(STATE_READ, self.calls())
         self.assertNotIn("reverted on", out)
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -2373,8 +2930,8 @@ class GhHalf(Env):
         self.set(merge_replies=[[NET_TLS, False]])  # nothing lands: four calls, all lost
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 4)
-        self.assertIn("state,mergeCommit", self.calls())  # the PR state is read: OPEN
+        self.assertEqual(self.calls().count(MERGE_CALL), 4)
+        self.assertIn(STATE_READ, self.calls())  # the PR state is read: OPEN
         self.assertNotIn("reverted on", out)
         self.assertIn("network", out.lower())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
@@ -2398,7 +2955,7 @@ class GhHalf(Env):
         rc, out = self.go_with_fetch_after_push(NET_TLS)  # the fetch of main loses its network
         self.assertEqual(rc, 1, out)
         self.assertNotIn("reverted on", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertIn("network", out.lower())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
@@ -2407,7 +2964,7 @@ class GhHalf(Env):
         rc, out = self.go_with_fetch_after_push(NET_HOST)
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
@@ -2417,7 +2974,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertIn("state,mergeCommit", self.calls())  # the PR state is read
+        self.assertIn(STATE_READ, self.calls())  # the PR state is read
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
@@ -2426,31 +2983,31 @@ class GhHalf(Env):
         self.lost_reply_reads_merged(NET_WSARECV)
 
     def test_a_network_error_then_a_real_not_mergeable_reply_reverts_the_claim(self):
-        self.set(merge_replies=[[NET_TLS, False], ["GraphQL: Pull Request is not mergeable", False]])  # the retry gets a real refusal
+        self.set(merge_replies=[[NET_TLS, False], [NOT_MERGEABLE, False]])  # the retry gets a real refusal
         rc, out = self.go()
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 2)  # the refusal is not retried
+        self.assertEqual(self.calls().count(MERGE_CALL), 2)  # the refusal is not retried
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
     def test_already_merged_at_another_head_is_not_this_runs_merge_and_stops_without_a_revert(self):
         before = self.head()  # the branch head before the claim push: not the proven sha
-        self.set(merge_replies=[["Pull request #7 is already merged", True]], state_head=before)
+        self.set(merge_replies=[[NOT_MERGEABLE, True]], state_head=before)
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
     def test_already_merged_then_a_plain_state_read_failure_reverts_nothing(self):
-        self.set(merge_replies=[["Pull request #7 is already merged", False]],
-                 state_read_fail="GraphQL: Could not resolve to a PullRequest with the number of 7.")
+        self.set(merge_replies=[[NOT_MERGEABLE, False]],
+                 state_read_fail=NOT_FOUND)
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
@@ -2461,7 +3018,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
@@ -2488,22 +3045,22 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 4, out)  # one try and three retries
+        self.assertEqual(self.calls().count(MERGE_CALL), 4, out)  # one try and three retries
         if rate:
             self.rate_waits_the_whole_ladder(out)
-        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def test_a_merge_reply_something_went_wrong_is_retried_then_stops_without_a_revert(self):
-        self.merge_reply_is_retried_then_stops("GraphQL: Something went wrong while executing your query on this domain.")
+    def test_a_merge_reply_server_error_502_is_retried_then_stops_without_a_revert(self):
+        self.merge_reply_is_retried_then_stops(rest_err(502, "Server Error"))
 
     def fetch_fails_after_the_claim_push(self, msg):
         """The fetch of main after the claim push fails with `msg`, a network-class error: the claim stays, nothing is reverted."""
         rc, out = self.go_with_fetch_after_push(msg)
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
@@ -2512,7 +3069,7 @@ class GhHalf(Env):
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
         self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]],  # the merge lands, its reply and the retries are lost
-                 state_read_fail="GraphQL: Could not resolve to a PullRequest with the number of 7.")
+                 state_read_fail=NOT_FOUND)
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
@@ -2521,11 +3078,11 @@ class GhHalf(Env):
         self.assertRegex(out, r"(?i)check (?:the|#7)")
 
     def test_a_real_first_refusal_reverts_the_claim_and_is_not_retried(self):  # pin: a proven refusal still reverts
-        self.set(merge_replies=[["GraphQL: Pull Request is not mergeable", False]])
+        self.set(merge_replies=[[NOT_MERGEABLE, False]])
         rc, out = self.go()
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 1)  # a refusal is not retried
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)  # a refusal is not retried
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
@@ -2538,7 +3095,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
         self.assertIn("network", out.lower())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
@@ -2569,7 +3126,7 @@ class GhHalf(Env):
             self.rate_waits_the_whole_ladder(out)
         else:
             self.assertIn("network", out.lower())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
@@ -2605,7 +3162,7 @@ class GhHalf(Env):
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
     def checks_read_fails(self, msg, n=99, rate=False):
-        """Every check is green and `gh pr checks` fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed.
+        """Every check is green and the checks read fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
         self.set(checks_fail={"n": n, "msg": msg})
         before = self.head()
@@ -2617,21 +3174,21 @@ class GhHalf(Env):
             self.rate_waits_the_whole_ladder(out)
         else:
             self.assertIn("network", out.lower())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
-    def test_a_pr_checks_http_429_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails("HTTP 429: Too Many Requests (https://api.github.com/graphql)", rate=True)  # a 429 is a rate limit: the whole ladder, then the network stop
+    def test_a_checks_read_http_429_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(rest_err(429, "Too Many Requests"), rate=True)  # a 429 is a rate limit: the whole ladder, then the network stop
 
-    def test_a_pr_checks_rate_limit_403_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails(RATE_GQL_403, rate=True)
+    def test_a_checks_read_secondary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(RATE_API_SECONDARY_403, rate=True)
 
-    def test_a_pr_checks_graphql_rate_limit_already_exceeded_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails(RATE_GQL_ALREADY, rate=True)  # owner's word: it retries like the 403
+    def test_a_checks_read_primary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(RATE_API_403, rate=True)  # owner's word: it retries like the 403 (the GraphQL form of this text is gone with GraphQL)
 
-    def test_a_retry_after_on_a_pr_checks_429_never_changes_the_rate_wait(self):
-        self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\nHTTP 429: Too Many Requests (https://api.github.com/graphql)"})
+    def test_a_retry_after_on_a_checks_429_never_changes_the_rate_wait(self):
+        self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\n" + rest_err(429, "Too Many Requests")})
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.gh_state("checks_failed"), 1)
@@ -2644,14 +3201,14 @@ class GhHalf(Env):
         self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
-        self.merge_reply_is_retried_then_stops(RATE_GQL_403, rate=True)
+        self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock lasts (3 * 1 + 10) * 60 = 780 s: the 60 s and 300 s waits fit its spare, the 900 s wait does not
-        self.set(merge_replies=[[RATE_GQL_403, False]] * 3 + [["", True]])  # three rate-limited merge tries, then the merge lands
+        self.set(merge_replies=[[RATE_API_SECONDARY_403, False]] * 3 + [["", True]])  # three rate-limited merge tries, then the merge lands
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.calls().count("pr merge"), 4, out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 4, out)
         self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER, out)  # no wait cut short, none past the cap
         self.assertEqual([w[0] for w in self.at_pause], RATE_LADDER, out)
         for wait, ends, expiry in self.at_pause:
@@ -2670,7 +3227,7 @@ class GhHalf(Env):
         self.assertEqual(self.paused, [])  # no retry pause
         self.assertIn("HTTP 403", out)  # the refusal's own text
         self.assertNotIn("network", out.lower())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)
         self.assertFalse(self.lock_ref())
 
@@ -2698,16 +3255,16 @@ class GhHalf(Env):
         self.assertEqual(hits, [1])  # the first read failed
         self.assertNotIn("cannot read the merge lock", out)
         self.assertEqual(rc, 0, out)
-        self.assertIn("pr merge", self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
         self.assertEqual(self.claims("main"), 1)
         self.assertFalse(self.lock_ref())
 
     def test_a_refusal_whose_text_names_an_http_502_title_reverts_and_is_not_retried(self):
-        self.set(merge_replies=[['GraphQL: Pull Request is not mergeable: #7 "Fix (HTTP 502 retry)"', False]])  # a real refusal; its text carries a 5xx-looking title
+        self.set(merge_replies=[[rest_err(405, 'Pull Request is not mergeable: #7 "Fix (HTTP 502 retry)"'), False]])  # a real refusal; its text carries a 5xx-looking title
         rc, out = self.go()
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.calls().count("pr merge"), 1)  # a refusal is not retried
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)  # a refusal is not retried
         self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
@@ -2720,7 +3277,7 @@ class GhHalf(Env):
         self.assertIn("a check is red: build: HTTP 500 guard: fail", out)
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
         self.assertNotIn("network", out.lower())
         self.assertTrue(self.reverted())
@@ -2733,9 +3290,9 @@ class GhHalf(Env):
         log = self.calls()
         self.assertNotIn("run watch", log)  # decision ci-wait-reads-run-status
         self.assertIn(30, self.paused)  # the wait between two reads of the checks
-        self.assertIn("pr merge 7 --merge --match-head-commit " + sh(self.co, "git", "rev-parse", "origin/main^2"), log)
-        self.assertNotIn("--admin", log)
-        self.assertNotIn("--delete-branch", log)
+        self.assertIn(MERGE_CALL + " merge_method=merge sha=" + sh(self.co, "git", "rev-parse", "origin/main^2"), log)
+        self.assertEqual(log.count("PUT "), 1)  # the one write is the merge
+        self.assertNotIn("DELETE", log)  # the branch is cut through git (cut_branch), never by the merge call
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
 
@@ -2744,7 +3301,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: gates: fail", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
@@ -2753,7 +3310,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: lint: fail", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
     @windows_slice
@@ -2766,14 +3323,14 @@ class GhHalf(Env):
             self.assertEqual(self.head(), before)  # nothing was pushed
             self.assertFalse(self.lock_ref())
             self.assertIn("no required checks are named", out)
-            self.assertNotIn("pr merge", self.calls())
+            self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_one_red_entry_under_a_name_makes_the_name_red(self):
         self.set(checks_seq=[[("gates", "fail", ""), ("gates", "pass", "")]])  # a last-entry-wins map would pass
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: gates: fail", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_name_is_green_only_when_every_entry_passed(self):
         self.set(checks_seq=[[("gates", "pending", ""), ("gates", "pass", "")]])  # pending then pass: never green
@@ -2792,7 +3349,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("still shows the head before the push", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     # Decision ci-wait-reads-run-status: block never runs `gh run watch`. It pauses 30 s, and the next pass of the wait loop reads.
     # The old spin guard ("a watch that returned at once pauses a full minute") went with the watch.
@@ -2811,7 +3368,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("went DIRTY", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
     def test_force_push_in_the_wait_reverts_nothing_and_merges_nothing(self):
@@ -2821,23 +3378,24 @@ class GhHalf(Env):
         self.assertEqual(rc, 1)
         self.assertIn("head moved", out)
         self.assertEqual(self.head(), rival[0])  # the rival's head stands: no revert on top of it
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
 
-    def test_match_head_commit_refuses_a_moved_head(self):
+    def test_the_merge_sha_refuses_a_moved_head(self):
         old = self.head()
         self.competitor_push()
         commit, msg = self.gh_host().merge(7, "merge", old)
         self.assertIsNone(commit)
         self.assertIn("Head branch was modified", msg)
+        self.assertIn(f"{MERGE_CALL} merge_method=merge sha={old}", self.calls())  # the sha is the head guard
 
     def test_protection_refusal_reverts_the_claim_and_prints_gh_whole(self):
-        self.set(merge_fail="GH006: Protected branch update failed for refs/heads/main. 2 of 2 required status checks are expected.")
+        self.set(merge_fail=rest_err(405, 'Required status check "gates" is expected.'))
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("the merge was refused", out)
-        self.assertIn("GH006: Protected branch update failed", out)
-        self.assertNotIn("--admin", self.calls())
+        self.assertIn('Required status check "gates" is expected.', out)
+        self.assertNotIn("DELETE", self.calls())
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
@@ -2864,7 +3422,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1)
         self.assertIn("gates: fail", out)
         self.assertEqual(self.head(), before)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
 
     def test_head_pending_then_red_pushes_no_claim(self):
@@ -2873,7 +3431,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertEqual(self.head(), before)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_head_pending_then_green_claims_and_waits_again(self):
         self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]])
@@ -2898,7 +3456,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_banchi_604_same_in_the_wait_after_the_claim_push(self):
         self.set(checks_seq=[[("gates", "pass", ""), ("design", "pass", "")], [("gates", "pass", ""), ("design", "pending", "")],
@@ -2906,7 +3464,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
     def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
@@ -2914,10 +3472,10 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertGreaterEqual(self.paused.count(60), 1)
-        self.assertIn("pr merge", self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("a", "skipping", ""), ("b", "pass", "")]])  # gh buckets neutral as pass
+        self.set(checks_seq=[[("gates", "pass", ""), ("a", "skipping", ""), ("b", "pass", "")]])  # skipped and neutral both land in the skipping bucket
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
@@ -3006,7 +3564,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertIn("no check ran on this head", out)
         self.assertIn("gh workflow run gates.yml --ref", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)
 
     def test_a_newer_skipped_run_on_the_wait_path_does_not_refuse_an_older_success(self):
@@ -3015,7 +3573,7 @@ class GhHalf(Env):
         self.set(checks_seq=[[("gates", "pass", "")]], runs_seq=[[("gates", "completed", "skipped"), ("gates", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertIn("pr merge", self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
         self.assertNotEqual(self.head(), before)
 
     def test_a_missing_required_check_beside_a_skipped_one_is_pending_not_red(self):
@@ -3030,7 +3588,7 @@ class GhHalf(Env):
         self.assertGreaterEqual(self.paused.count(60), 1, out)
         self.assertEqual(rc, 1, out)
         self.assertIn("no check ran on this head", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
         # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
@@ -3052,12 +3610,12 @@ class GhHalf(Env):
         self.assertNotIn("<branch>", out)
 
     def test_cancelled_and_unknown_buckets_stop_the_run(self):
-        for bucket in ("cancel", "startup_failure"):
-            self.set(checks_seq=[[("gates", "pass", ""), ("x", bucket, "")]])
+        for conclusion, bucket in (("cancelled", "cancel"), ("startup_failure", "fail")):  # the conclusion GitHub names, and the bucket it lands in
+            self.set(checks_seq=[[("gates", "pass", ""), ("x", conclusion, "")]])
             rc, out = self.go()
             self.assertEqual(rc, 1, bucket)
             self.assertIn(f"x: {bucket}", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_an_ignore_entry_without_a_reason_refuses_the_config(self):
         for bad in ({"name": "design"}, {"name": "design", "reason": "  "}, {"reason": "r"}):
@@ -3073,7 +3631,7 @@ class GhHalf(Env):
         rc, out = self.go(ignore={"design": "flaky upstream", "slow": "nightly"})
         self.assertEqual(rc, 0, out)
         self.assertIn("design (flaky upstream): fail", out)
-        self.assertIn("pr merge", self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
 
     def test_the_preview_lists_a_pending_check_that_is_not_required(self):
         self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")]])
@@ -3086,7 +3644,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1)
         self.assertIn("A required check is never ignored", out)
         self.assertEqual(self.head(), before)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_classify_keeps_an_absent_required_name_pending_even_when_ignored(self):
         red, pending, _ = merge.Host.classify({"a": [("pass", "")]}, ["a", "b"], {"b": "x"})
@@ -3123,7 +3681,7 @@ class GhHalf(Env):
         self.set(checks_seq=[[("gates", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("gh pr checks failed", out)
+        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")
         self.assertNotEqual(self.head(), before)  # the claim was pushed, then reverted
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
@@ -3134,12 +3692,12 @@ class GhHalf(Env):
         drop_config(self)
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
-        self.assertIn("gh pr merge --merge", out)  # method "merge"
+        self.assertRegex(out, r"merge_method=merge|--merge\b")  # method "merge"
         self.assertIn("run 0 afterMerge command(s)", out)  # afterMerge empty
         named = [l for l in out.splitlines() if ".github/stamp.json" in l]
         self.assertEqual(len(named), 1, out)
         self.assertIn("default", named[0].lower())
-        self.assertIn("repo view", self.calls())  # defaultBranch from the host
+        self.assertIn(REPO_CALL, self.calls())  # defaultBranch from the host
 
     def test_no_config_takes_the_default_branch_from_the_host(self):
         drop_config(self)
@@ -3155,7 +3713,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         log = self.calls()
         self.assertIn("branches/main/protection/required_status_checks", log)
-        self.assertIn("pr merge 7 --merge --match-head-commit", log)
+        self.assertIn(MERGE_CALL + " merge_method=merge sha=", log)
         self.assertEqual(self.claims(), 0)
         self.assertIn("id: pending", self.show("main", "docs/decisions/second.md"))
         named = [l for l in out.splitlines() if ".github/stamp.json" in l]
@@ -3165,10 +3723,10 @@ class GhHalf(Env):
     def test_no_config_waits_the_default_45_minutes(self):
         drop_config(self)
         self.set(contexts=["gates"], checks_seq=[[("gates", "pending", "")]])
-        rc, out = self.go(required="protection")
+        rc, out = self.go(required="protection", minute=900)  # a poll every 15 minutes of the fake clock: 3 reads reach the deadline, not 45 (each read is a few process starts)
         self.assertEqual(rc, 1)
         self.assertIn("the deadline of 45 minutes passed", out)
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
@@ -3188,7 +3746,7 @@ class GhHalf(Env):
             self.assertEqual(rc, 1, out)
             self.assertIn(remedy, out)
             self.assertEqual(self.head(), before)  # nothing was pushed
-            self.assertNotIn("pr merge", self.calls())
+            self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
         put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
@@ -3197,7 +3755,7 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         log = self.calls()
-        self.assertIn("pr merge 7 --squash --match-head-commit", log)  # method from the file
+        self.assertIn(MERGE_CALL + " merge_method=squash sha=", log)  # method from the file
         self.assertIn("branches/main/protection/required_status_checks", log)  # requiredChecks default
         filled = [l for l in out.splitlines() if all(f in l for f in ("deadlineMinutes", "requiredChecks", "afterMerge"))]
         self.assertEqual(len(filled), 1, out)  # one line names the fields it filled
@@ -3208,7 +3766,7 @@ class GhHalf(Env):
         self.set(default_branch="trunk")
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
-        self.assertIn("repo view", self.calls())
+        self.assertIn(REPO_CALL, self.calls())
         self.assertIn("main is not the default branch (trunk)", out)
 
     def assert_draft_refused(self, rc, out, before):
@@ -3219,8 +3777,8 @@ class GhHalf(Env):
         self.assertIn("draft", lines[0])
         self.assertEqual(self.refs(), before)  # no claim pushed
         self.assertEqual(self.ticks, 0, "waited on a draft")
-        self.assertNotIn("pr checks", self.calls())
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(CHECKS_CALL, self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
 
     def test_a_draft_pr_previews_with_the_undo_check_and_claims_nothing_or_waits(self):
@@ -3237,12 +3795,12 @@ class GhHalf(Env):
         self.assertEqual(seen, [("origin/main", self.head("feat"))])
         self.assertEqual(self.refs(), before)  # no claim pushed
         self.assertEqual(self.ticks, 0, "waited on a draft")
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
 
     def test_a_pr_that_turns_draft_after_the_preview_read_is_refused_at_confirm(self):  # guard: merge.py checks draft under the lock
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gates"]))))  # complete: no defaults notice in the output
-        self.set(draft_from_view=2)  # read 1 is main's read at the top of --confirm; read 2 is confirm's read under the lock
+        self.set(draft_when_locked=True)  # main's read at the top of --confirm sees a ready PR; confirm's read under the lock sees a draft
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_refused(rc, out, before)
@@ -3252,6 +3810,392 @@ class GhHalf(Env):
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_refused(rc, out, before)
+
+class RestRoutes(Env):
+    """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
+    (the fake gh answers it that way, and a GraphQL call that reaches it fails the test). Each case pins one way a REST read could count a pending or
+    red check as green, drop a check or a pull request, or merge a head nobody read. The fake behaves as gh does: a list read gives one page unless
+    --paginate is given, object pages come back to back, and fields without -X make a POST. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, calls, gh_host, go, gh_state, reverted = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state, GhHalf.reverted
+
+    def setUp(self):
+        super().setUp()
+        install_gh_shim(self)
+        self.ticks, self.paused, self.at_pause = 0, [], []
+        self.set(checks_seq=[[("gates", "pass", "")]])
+
+    # ---- the checks of a head are the check runs AND the commit statuses
+
+    def test_one_green_check_run_and_one_pending_status_is_not_green(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("gates", "completed", "success")]])
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "pending", detail)
+        self.assertIn("deploy", detail)
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Still pending: deploy", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_failed_or_errored_status_is_red(self):
+        for bucket in ("fail", "error"):  # the status states failure and error
+            with self.subTest(status=bucket):
+                self.set(checks_seq=[[("gates", "pass", ""), ("deploy", bucket, "https://x/s", "status")]])
+                verdict, detail = self.gh_host().head_read(7)
+                self.assertEqual(verdict, "red", detail)
+                self.assertIn("deploy", detail)
+                rc, out = self.go()
+                self.assertEqual(rc, 1, out)
+                self.assertIn("a check is red: deploy: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_required_check_that_exists_only_as_a_status_is_found(self):
+        self.set(checks_seq=[[("legacy-ci", "pass", "https://x/s", "status")]])
+        rc, out = self.go(required=("legacy-ci",))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Still pending", out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_no_statuses_and_a_pending_combined_state_is_green_when_the_check_runs_are_green(self):
+        sha = self.head()
+        c, out = self.gh_host().gh(["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/status", "-X", "GET"])
+        self.assertEqual(c, 0, out)
+        self.assertEqual((json.loads(out)["state"], json.loads(out)["statuses"]), ("pending", []))  # GitHub's own answer for a commit with no statuses
+        self.assertEqual(self.gh_host().checks(7, warn=False), {"gates": [("pass", "")]})  # the combined state adds no pending entry
+        self.set(runs_seq=[[("gates", "completed", "success")]])
+        self.assertEqual(self.gh_host().head_read(7), ("green", ""))
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+
+    def test_the_checks_are_read_at_the_head_the_pull_request_shows(self):
+        head = self.head()
+        self.gh_host().head_read(7)
+        calls = self.calls()
+        self.assertIn(f"GET commits/{head}/check-runs", calls)
+        self.assertIn(f"GET commits/{head}/status", calls)
+
+    # ---- a list read takes every page
+
+    def test_two_pages_of_check_runs_with_the_red_one_on_page_two_is_red(self):
+        self.set(page_cap=2, checks_seq=[[("lint", "pass", ""), ("gates", "pass", ""), ("e2e", "fail", "https://x/e2e")]])
+        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["e2e", "gates", "lint"])
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn("e2e", detail)
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: e2e: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_two_pages_of_commit_statuses_with_the_red_one_on_page_two_is_red(self):
+        self.set(page_cap=2, checks_seq=[[("gates", "pass", ""), ("a", "pass", "u", "status"), ("b", "pass", "u", "status"), ("c", "fail", "u", "status")]])
+        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["a", "b", "c", "gates"])
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn("c", detail)
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_two_pages_of_open_pull_requests_with_the_head_on_page_two_is_found(self):
+        lane = "c" * 40
+        self.set(page_cap=2, open_prs=[["one", "a" * 40, "main"], ["two", "b" * 40, "main"], ["lane", lane, "main"]])
+        self.assertEqual(self.gh_host().open_heads(), {"one": ("a" * 40, "main"), "two": ("b" * 40, "main"), "lane": (lane, "main")})
+
+    def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
+        self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
+        self.assertEqual(len(self.gh_host().open_heads()), 250)
+
+    # ---- every conclusion and state lands in one bucket
+
+    RUN_BUCKETS = [("completed", "success", "pass"), ("completed", "neutral", "skipping"), ("completed", "skipped", "skipping"),
+                   ("completed", "cancelled", "cancel"), ("completed", "failure", "fail"), ("completed", "timed_out", "fail"),
+                   ("completed", "action_required", "fail"), ("completed", "startup_failure", "fail"), ("completed", "stale", "fail"),
+                   ("completed", "a_conclusion_github_adds_later", "fail"), ("completed", None, "fail"),
+                   ("queued", None, "pending"), ("in_progress", None, "pending"), ("waiting", None, "pending"), ("queued", "failure", "pending")]
+    STATUS_BUCKETS = [("success", "pass"), ("pending", "pending"), ("failure", "fail"), ("error", "fail"), ("a_state_github_adds_later", "fail")]
+
+    def test_each_check_run_conclusion_and_status_state_maps_to_its_bucket(self):
+        runs = [{"id": i, "name": f"run {s}/{c}", "status": s, "conclusion": c, "details_url": f"https://x/run/{i}", "started_at": None, "completed_at": None}
+                for i, (s, c, _) in enumerate(self.RUN_BUCKETS)]
+        runs.append({"id": 90, "name": "run with no link", "status": "completed", "conclusion": "success", "details_url": None, "started_at": None, "completed_at": None})
+        statuses = [{"id": 50 + i, "context": f"status {st}", "state": st, "target_url": f"https://x/status/{i}", "description": ""} for i, (st, _) in enumerate(self.STATUS_BUCKETS)]
+        statuses.append({"id": 99, "context": "status with no link", "state": "success", "target_url": None, "description": ""})
+        self.set(raw_checks=[{"check_runs": runs, "statuses": statuses}])
+        got = self.gh_host().checks(7, warn=False)
+        want = {r["name"]: [(b, r["details_url"])] for r, (_, _, b) in zip(runs, self.RUN_BUCKETS)}
+        want.update({s["context"]: [(b, s["target_url"])] for s, (_, b) in zip(statuses, self.STATUS_BUCKETS)})
+        want.update({"run with no link": [("pass", "")], "status with no link": [("pass", "")]})
+        for name, rows in want.items():
+            with self.subTest(check=name):
+                self.assertEqual(got.get(name), rows)
+        self.assertEqual(sorted(got), sorted(want))
+
+    PR_FIELDS = [({"state": "open"}, {"state": "OPEN"}),
+                 ({"state": "closed", "merged": False}, {"state": "CLOSED"}),
+                 ({"state": "closed", "merged": True}, {"state": "MERGED"}),
+                 ({"mergeable": True, "mergeable_state": "clean"}, {"mergeable": "MERGEABLE", "merge_state": "CLEAN"}),
+                 ({"mergeable": False, "mergeable_state": "dirty"}, {"mergeable": "CONFLICTING", "merge_state": "DIRTY"}),
+                 ({"mergeable": None, "mergeable_state": "unknown"}, {"mergeable": "UNKNOWN", "merge_state": "UNKNOWN"}),
+                 ({"mergeable": None, "mergeable_state": None}, {"mergeable": "UNKNOWN", "merge_state": "UNKNOWN"}),
+                 ({"mergeable_state": "blocked"}, {"merge_state": "BLOCKED"}), ({"mergeable_state": "behind"}, {"merge_state": "BEHIND"}),
+                 ({"mergeable_state": "unstable"}, {"merge_state": "UNSTABLE"}), ({"mergeable_state": "has_hooks"}, {"merge_state": "HAS_HOOKS"}),
+                 ({"mergeable_state": "draft"}, {"merge_state": "DRAFT"}),
+                 ({"draft": True}, {"draft": True}), ({"draft": False}, {"draft": False}),
+                 ({"body": None}, {"body": ""}), ({"body": "Drops-lines: a -- b"}, {"body": "Drops-lines: a -- b"})]
+
+    def test_pull_request_fields_map_to_the_values_the_tool_reads(self):
+        head = self.head()
+        for raw, want in self.PR_FIELDS:
+            with self.subTest(raw=raw):
+                self.set(pr_raw=raw)
+                info = self.gh_host().pr(7)
+                for key, value in want.items():
+                    self.assertEqual(info[key], value, info)
+                self.assertEqual((info["head"], info["branch"], info["base"]), (head, "feat", "main"))
+
+    # ---- the merge: the head guard, and what counts as merged
+
+    def test_a_head_that_moves_between_the_last_read_and_the_merge_is_refused_and_nothing_merges(self):
+        self.set(rival_at_merge=True)  # a push lands after the wait's last read and before the merge call
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, out)  # GitHub answered 409: a refusal is not retried
+        sent = re.search(r"sha=([0-9a-f]{40})", self.calls()).group(1)
+        self.assertNotEqual(sent, self.head(), "the rival's push must have moved the head after the sha was fixed")
+        self.assertIn("Head branch was modified", out)
+        self.assertIn("the merge was refused", out)
+        self.assertIn("Nothing reverted", out)  # the head is not the claim any more: the revert path runs and leaves the rival's work
+        self.assertIsNone(self.gh_state("oid"), "the merge landed on a head nobody read")
+        self.assertFalse(self.lock_ref())
+
+    def test_a_merge_sends_the_method_and_the_head_it_was_given(self):
+        head = self.head()
+        self.set(merge_fail=NOT_MERGEABLE)
+        for method in ("merge", "squash", "rebase"):
+            with self.subTest(method=method):
+                commit, msg = self.gh_host().merge(7, method, head)
+                self.assertIsNone(commit)
+                self.assertIn("Pull Request is not mergeable", msg)
+                self.assertIn(f"{MERGE_CALL} merge_method={method} sha={head}", self.calls())
+
+    def test_a_merge_that_lands_returns_the_merge_commit_of_the_pull_request(self):
+        head = self.head()
+        commit, msg = self.gh_host().merge(7, "merge", head)
+        self.assertEqual((commit, msg), (self.gh_state("oid"), ""))
+        self.assertEqual(commit, sh(self.co, "git", "ls-remote", "origin", "refs/heads/main").split("\t")[0])
+        self.assertIn(STATE_READ, self.calls())
+
+    def test_a_merge_reply_with_no_merge_behind_it_is_not_a_merge(self):
+        # An OPEN pull request carries a merge_commit_sha on REST too (GitHub's test merge), and a lost or untrue reply can say merged. Only
+        # merged: true at the head that was sent counts.
+        untrue = json.dumps({"sha": "f" * 40, "merged": True, "message": "Pull Request successfully merged"})
+        for reply in ("", untrue):
+            with self.subTest(reply=reply[:24]):
+                self.set(merge_replies=[[reply, False, 0]])  # exit 0, nothing landed
+                with self.assertRaises(merge.NetStop):
+                    self.gh_host().merge(7, "merge", self.head())
+                self.assertIn(STATE_READ, self.calls())
+
+    # ---- the merge state: the old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself; the REST PUT does not,
+    # and a token that may bypass branch protection merges it. Host.merge reads the pull request right before the PUT.
+
+    def clear_calls(self):
+        pathlib.Path(self.state, "calls.log").unlink(missing_ok=True)
+
+    def test_a_merge_of_a_blocked_or_behind_pull_request_sends_no_put_and_is_a_refusal(self):
+        head = self.head()
+        for state in ("blocked", "behind"):
+            with self.subTest(state=state):
+                self.clear_calls()
+                self.set(pr_raw={"mergeable_state": state})
+                commit, msg = self.gh_host().merge(7, "merge", head)
+                self.assertIsNone(commit)  # a proven refusal: confirm reverts the claim on it
+                self.assertRegex(msg, "(?i)" + state)  # the message names the state
+                self.assertIn("GET pulls/7", self.calls())  # it was read, not assumed
+                self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertIsNone(self.gh_state("oid"))
+
+    def merged_in_state(self, state):
+        head = self.head()
+        self.set(pr_raw={"mergeable_state": state})
+        commit, msg = self.gh_host().merge(7, "merge", head)
+        self.assertEqual((commit, msg), (self.gh_state("oid"), ""))
+        lines = self.calls().splitlines()
+        puts = [i for i, line in enumerate(lines) if line.startswith(MERGE_CALL)]
+        self.assertEqual(len(puts), 1, lines)
+        self.assertIn("GET pulls/7", lines[:puts[0]])  # the pull request is read before the call, not taken from an earlier read
+
+    def test_a_merge_of_a_clean_pull_request_reads_it_and_then_sends_the_put(self):
+        self.merged_in_state("clean")
+
+    def test_a_merge_of_an_unstable_pull_request_reads_it_and_then_sends_the_put(self):
+        self.merged_in_state("unstable")  # a failing check that is not required: the old gh merged it too
+
+    def refused_under_the_lock(self, state):
+        self.set(merge_state_when_locked=state)  # the preview read says clean; every read after the lock is taken says `state`
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the merge was refused", out)
+        self.assertRegex(out, "(?i)" + state)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+        self.assertIsNone(self.gh_state("oid"))
+        self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
+
+    def test_a_pull_request_that_turns_blocked_after_the_preview_is_refused_and_the_claim_reverted(self):
+        self.refused_under_the_lock("blocked")
+
+    def test_a_pull_request_that_turns_behind_after_the_preview_is_refused_and_the_claim_reverted(self):
+        self.refused_under_the_lock("behind")
+
+    def test_a_pull_request_that_turns_unstable_after_the_preview_is_still_merged(self):
+        self.set(merge_state_when_locked="unstable")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    # ---- mergeable is null while GitHub works it out
+
+    def test_a_pull_request_whose_mergeable_is_null_is_read_again_until_it_answers(self):
+        self.set(mergeable_seq=[None, None, True])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(self.calls().count("GET pulls/7\n"), 3, self.calls())
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_null_mergeable_that_then_reads_conflicting_stops_the_merge(self):
+        self.set(mergeable_seq=[None, None, False])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"DIRTY|CONFLICTING")
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    # ---- the selector: a number, a URL, a branch name, or the current branch
+
+    def two_open_prs(self):
+        self.set(pr_number=41, open_prs=[["other", "d" * 40, "main", 40], ["feat", self.head(), "main", 41]])
+
+    def test_a_pr_number_or_url_is_the_route_number_and_reads_no_list(self):
+        for selector in (7, "7", "https://github.com/o/r/pull/7"):
+            with self.subTest(selector=selector):
+                info = self.gh_host().pr(selector)
+                self.assertEqual((info["head"], info["branch"], info["base"]), (self.head(), "feat", "main"))
+        self.assertIn("GET pulls/7", self.calls())
+        self.assertNotIn(LIST_CALL, self.calls())
+
+    def test_a_pull_request_url_routes_every_call_to_the_repo_in_the_url(self):
+        # A host with no repo and no -R reads the repo of the working directory. A URL names its own repo, so every call it makes goes there.
+        url = "https://github.com/acme/widgets/pull/7"
+        for name, read, least in (("pr", lambda h: h.pr(url), 1), ("head_read", lambda h: h.head_read(url), 3)):
+            with self.subTest(read=name):
+                pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
+                read(merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None))
+                used = pathlib.Path(self.state, "repos.log").read_text().split()
+                self.assertGreaterEqual(len(used), least, used)
+                self.assertEqual(set(used), {"acme/widgets"})
+
+    def test_a_branch_name_resolves_through_the_open_pull_request_list(self):
+        self.two_open_prs()
+        info = self.gh_host().pr("feat")
+        self.assertEqual((info["head"], info["branch"]), (self.head(), "feat"))
+        calls = self.calls()
+        self.assertIn(LIST_CALL, calls)
+        self.assertIn("GET pulls/41", calls)
+        self.assertNotIn("GET pulls/7", calls)
+
+    def test_an_empty_selector_is_the_pull_request_of_the_current_branch(self):
+        self.two_open_prs()
+        cur = os.path.join(self.t, "cur")
+        sh(self.t, "git", "clone", "-q", self.bare, cur)
+        sh(cur, "git", "checkout", "-q", "feat")
+        host = merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, cwd=cur)
+        for selector in ("", None):
+            with self.subTest(selector=selector):
+                info = host.pr(selector)
+                self.assertEqual((info["branch"], info["head"]), ("feat", self.head()))
+        self.assertIn("GET pulls/41", self.calls())
+
+    def test_the_guards_read_by_branch_name_judges_the_head_of_that_branchs_pull_request(self):
+        self.two_open_prs()
+        self.set(runs_seq=[[("gates", "completed", "success")]])
+        self.assertEqual(self.gh_host().head_read("feat"), ("green", ""))
+        self.assertIn(f"GET commits/{self.head()}/check-runs", self.calls())
+
+    def test_a_branch_with_no_open_pull_request_is_a_stop_and_the_guard_reads_it_as_unknown(self):
+        self.set(open_prs=[["other", "d" * 40, "main", 40]])
+        with self.assertRaises(merge.Stop):
+            self.gh_host().pr("feat")
+        verdict, detail = self.gh_host().head_read("feat")
+        self.assertEqual(verdict, "unknown", detail)
+
+    def test_a_branch_with_two_open_pull_requests_is_a_stop_and_the_guard_reads_it_as_unknown(self):
+        self.set(open_prs=[["feat", "a" * 40, "main", 40], ["feat", "b" * 40, "release", 41]])
+        with self.assertRaises(merge.Stop):
+            self.gh_host().pr("feat")
+        verdict, detail = self.gh_host().head_read("feat")
+        self.assertEqual(verdict, "unknown", detail)
+
+    # ---- no GraphQL, and the repo of every call
+
+    def test_a_graphql_call_is_refused_with_the_cloud_session_403(self):
+        host = self.gh_host()
+        for args in (["pr", "view", "7"], ["pr", "list"], ["pr", "checks", "7"], ["pr", "merge", "7"], ["repo", "view"], ["api", "graphql"]):
+            with self.subTest(args=args):
+                c, out = host.gh(args)
+                self.assertEqual(c, 1)
+                self.assertIn("GitHub GraphQL is not available from Claude Code sessions; use the REST API", out)
+        os.remove(os.path.join(self.state, "graphql.log"))  # these calls were the point of this test; any other GraphQL call fails its test
+
+    def test_every_call_names_the_repo_by_the_hosts_repo_or_the_working_directorys(self):
+        head = self.head()
+        self.set(merge_fail=NOT_MERGEABLE)
+        for repo, want in (("o/r", "o/r"), (None, "{owner}/{repo}")):
+            with self.subTest(repo=repo):
+                pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
+                host = merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, repo=repo)
+                host.pr(7)
+                host.open_heads()
+                host.checks(7, warn=False)
+                host.head_read(7)
+                host.merge(7, "merge", head)
+                used = pathlib.Path(self.state, "repos.log").read_text().split()
+                self.assertGreaterEqual(len(used), 8, used)
+                self.assertEqual(set(used), {want})
+
+    # ---- retries hold on every REST route
+
+    def read_calls(self):
+        return {"pr": lambda h: h.pr(7), "list": lambda h: h.open_heads(),
+                "check-runs": lambda h: h.checks(7, warn=False), "status": lambda h: h.checks(7, warn=False)}
+
+    def test_a_502_on_any_rest_read_is_retried_and_the_read_goes_through(self):
+        for kind, call in self.read_calls().items():
+            with self.subTest(route=kind):
+                self.set(route_fail={kind: {"n": 1, "msg": rest_err(502, "Server Error")}}, route_failed={})
+                call(self.gh_host())
+                self.assertEqual(self.gh_state("route_failed"), {kind: 1})
+
+    def test_four_502s_on_any_rest_read_are_a_network_stop(self):
+        for kind, call in self.read_calls().items():
+            with self.subTest(route=kind):
+                self.set(route_fail={kind: {"n": 9, "msg": rest_err(502, "Server Error")}}, route_failed={})
+                with self.assertRaises(merge.NetStop):
+                    call(self.gh_host())
+                self.assertEqual(self.gh_state("route_failed"), {kind: 4})  # one try and three retries
+
+    def test_a_rate_limit_403_on_the_pull_request_read_waits_the_ladder_and_goes_through(self):
+        self.set(route_fail={"pr": {"n": 1, "msg": RATE_API_403}})
+        self.gh_host().pr(7)
+        self.assertEqual(self.paused, RATE_LADDER[:1])
+
+    def test_a_permission_403_on_the_pull_request_read_is_a_stop_and_is_not_retried(self):
+        self.set(route_fail={"pr": {"n": 1, "msg": PLAIN_403_API}})
+        with self.assertRaises(merge.Stop) as raised:
+            self.gh_host().pr(7)
+        self.assertNotIsInstance(raised.exception, merge.NetStop)
+        self.assertEqual((self.paused, self.gh_state("route_failed")), ([], {"pr": 1}))
 
 def put_base_config(env, text):
     """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
@@ -4207,7 +5151,7 @@ class RateLimitWait(unittest.TestCase):
     waits merge.NET_PAUSE. Before each rate wait the call runs Host.before_wait (confirm sets it to the lock's extend_for): it
     extends the lock past the wait, or raises NetStop, and then the call stops in place of the wait.
     Headers are read only from a `gh api -i` block: the reply starts with a status line, then the headers (gh_i builds one, in the shape gh 2.98.0
-    prints). A header-like line anywhere else is text. Real `gh run list`, `gh pr checks`, `gh pr merge` and `gh repo view` have no -i, so on them the
+    prints). A header-like line anywhere else is text. Real `gh run list` has no -i, so on it the
     ladder is the only wait. These scan gh's output, not source text, so the string-opener cases of building-scanner-respects-strings do not apply."""
     NOW = 1000.0
 
@@ -4656,12 +5600,12 @@ class ClockedHost(merge.Host):
         """Each fake gh read costs READ_SECONDS of fake time, as a real call does."""
         self.clock[0] += READ_SECONDS
 
-    def pr(self, n):
+    def pr(self, n, *a, **k):
         self.read()
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
 
-    def checks(self, n):
+    def checks(self, n, *a, **k):
         self.read()
         return self.checks_at(self.clock[0])
 
@@ -4737,12 +5681,7 @@ class SilentWait(Env):
 
     def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
         Env.setUp(self)
-        bindir = os.path.join(self.t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH_PR)
-        self.state = os.path.join(self.t, "ghstate"); os.makedirs(self.state)
-        old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
-        os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
-        self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
+        install_gh_shim(self)
         self.ticks, self.paused, self.at_pause = 0, [], []
         self.set(checks_seq=[[("gates", "pass", "")]])
 
@@ -4784,13 +5723,13 @@ class SilentWait(Env):
         self.assertRegex(last, r"(?i)waiting|checking|merging", f"while `{step}` was held the last line was {last!r}; printed so far: {seen!r}")
 
     def test_a_held_check_read_names_its_step_before_it_blocks(self):
-        seen, _, _ = self.hold_run(["pr", "checks"], 12, self.gh_host())
-        self.assert_names_the_held_step(seen, "gh pr checks")
+        seen, _, _ = self.hold_run("check-runs", 12, self.gh_host())
+        self.assert_names_the_held_step(seen, "the check runs read")
 
     def test_a_held_merge_call_names_its_step_before_it_blocks(self):
-        seen, rc, out = self.hold_run(["pr", "merge"], 12, self.gh_host())
+        seen, rc, out = self.hold_run("merge", 12, self.gh_host())
         self.assertEqual(rc, 0, out)
-        self.assert_names_the_held_step(seen, "gh pr merge")
+        self.assert_names_the_held_step(seen, "the merge call")
 
     def test_red_required_check_beside_skipped_jobs_refuses_at_once(self):
         self.set(checks_seq=[[("gates", "fail", "https://x/gates"), ("scope", "skipping", ""), ("gate-windows", "skipping", "")]],
@@ -4799,7 +5738,7 @@ class SilentWait(Env):
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is red", out)
         self.assertEqual(self.paused, [], "a red head waited before it refused")
-        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_zero_contexts_and_a_required_name_with_no_run_say_what_they_wait_on(self):
         self.set(checks_seq=[[]], runs_seq=[[("gate", "in_progress", None)]])
@@ -6454,22 +7393,37 @@ class GitLockExtendsForRateWaits(Env):
         self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], kept)
 
 class HostDefaultBranchRateRetry(unittest.TestCase):
-    """host_default_branch (`gh repo view`) on a rate-limit error. It retries like Host.gh:
+    """host_default_branch (`gh api repos/{owner}/{repo}`, run in the checkout's root) on a rate-limit error. It retries like Host.gh:
     the ladder (60, 300, 900 s), three retries, then NetStop. The function has no pause parameter, so the pauses are recorded by
     patching merge.time.sleep. A fix must call time.sleep at call time, or this test sleeps for real."""
     def patched(self, *seq):
-        """merge.sh answers `seq` in order (the last repeats). merge.time.sleep records. -> (gh calls, pauses)."""
-        seq, calls, pauses = list(seq), [], []
+        """merge.sh answers `seq` in order (the last repeats). merge.time.sleep records. -> (gh calls, pauses). self.cwds holds the folder of each call."""
+        seq, calls, pauses, self.cwds = list(seq), [], [], []
         def fake(args, cwd=None, input=None, env=None):
-            calls.append(args)
+            calls.append(args); self.cwds.append(cwd)
             return seq.pop(0) if len(seq) > 1 else seq[0]
         for target in ((merge, "sh", fake), (merge.time, "sleep", pauses.append)):
             p = unittest.mock.patch.object(*target)
             p.start(); self.addCleanup(p.stop)
         return calls, pauses
 
-    def test_a_rate_limited_repo_view_is_retried_and_returns_the_default_branch(self):
-        calls, pauses = self.patched((1, RATE_GQL_ALREADY), (0, '{"defaultBranchRef":{"name":"trunk"}}'))
+    def test_the_default_branch_is_one_rest_read_of_the_repo_in_the_checkout(self):
+        calls, pauses = self.patched((0, '{"default_branch":"trunk","full_name":"o/r"}'))
+        self.assertEqual(merge.host_default_branch("/repo"), "trunk")
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(calls[0][:3], ["gh", "api", "repos/{owner}/{repo}"], calls)  # REST: `gh repo view` is GraphQL
+        self.assertEqual(self.cwds, ["/repo"])
+        self.assertNotIn("graphql", " ".join(calls[0]))
+
+    def test_a_repo_answer_without_a_default_branch_is_a_stop(self):
+        for body in ('{"message":"Not Found"}', '{"default_branch":null}', "[]", "not json"):
+            with self.subTest(body=body):
+                self.patched((0, body))
+                with self.assertRaises(merge.Stop):
+                    merge.host_default_branch("/repo")
+
+    def test_a_rate_limited_repo_read_is_retried_and_returns_the_default_branch(self):
+        calls, pauses = self.patched((1, RATE_API_403), (0, '{"default_branch":"trunk"}'))
         try:
             got = merge.host_default_branch("/repo")
         except merge.Stop as e:
@@ -6478,7 +7432,7 @@ class HostDefaultBranchRateRetry(unittest.TestCase):
         self.assertEqual((len(calls), pauses), (2, RATE_LADDER[:1]))
 
     def test_a_rate_limit_that_never_clears_is_a_net_stop_after_three_retries(self):
-        calls, pauses = self.patched((1, RATE_GQL_ALREADY))
+        calls, pauses = self.patched((1, RATE_API_403))
         try:
             merge.host_default_branch("/repo")
         except merge.NetStop:
@@ -6489,6 +7443,12 @@ class HostDefaultBranchRateRetry(unittest.TestCase):
             self.fail("host_default_branch returned without a stop")
         self.assertEqual((len(calls), pauses), (4, RATE_LADDER))
 
+    def test_a_502_is_retried_after_the_normal_pause_and_then_a_net_stop(self):
+        calls, pauses = self.patched((1, rest_err(502, "Server Error")))
+        with self.assertRaises(merge.NetStop):
+            merge.host_default_branch("/repo")
+        self.assertEqual((len(calls), pauses), (4, [merge.NET_PAUSE] * 3))
+
     def test_a_permission_403_stops_at_once(self):
         calls, pauses = self.patched((1, PLAIN_403_API))
         with self.assertRaises(merge.Stop):
@@ -6496,13 +7456,13 @@ class HostDefaultBranchRateRetry(unittest.TestCase):
         self.assertEqual((len(calls), pauses), (1, []))
 
 # ------------------------------------------------------------------ CI time caps
-# The merge tool warns when a job has used over 70% of its cap. The job times come from the `gh pr checks`
-# read the tool already makes (startedAt and completedAt are added to its --json fields). A job's cap is read
+# The merge tool warns when a job has used over 70% of its cap. The job times come from the check runs
+# read the tool already makes (their started_at and completed_at). A job's cap is read
 # from the workflow files on disk. A job ended by its cap is a check cancelled after its full cap of minutes.
 # That verdict is "re-cap or split", not a test failure. When merge.deadlineMinutes is below the floor, load_config
 # waits the floor and prints one fix line. The floor is the largest job timeout-minutes in the base's workflows,
 # plus 5, clamped at 360. A provisional 60-minute cap counts.
-# CapsHost fails the test on any gh call other than the three the merge tool already makes.
+# CapsHost fails the test on any gh call other than the REST reads the merge tool makes (the pull request, the check runs, the statuses) and run list.
 from datetime import datetime, timedelta, timezone
 
 HEAD_SHA = "a" * 40
@@ -6547,7 +7507,7 @@ def at(minutes):
 
 
 def check(name, bucket, minutes):
-    """One row of `gh pr checks --json name,bucket,link,startedAt,completedAt`: the job ran from START for `minutes`."""
+    """One check run as a row of name, bucket, link, startedAt and completedAt: the job ran from START for `minutes`. CapsHost serves it as a REST check run."""
     return {"name": name, "bucket": bucket, "link": "https://github.com/shivinate7/claude-settings/actions/runs/100/job/200",
             "startedAt": at(0), "completedAt": at(minutes)}
 
@@ -6577,22 +7537,27 @@ def push_base(env, files):
 
 
 class CapsHost(merge.Host):
-    """A real Host whose only seam is `gh`. It serves fixture JSON for the three calls the merge tool already makes
-    (pr view, pr checks, run list), and answers pr checks with only the fields its --json asks for. Any other gh call fails."""
+    """A real Host whose only seam is `gh`. It serves fixture REST objects for the calls the merge tool makes: the pull request, the check runs of
+    its head (with started_at and completed_at) and the commit statuses (none), and run list. Any other gh call fails the test."""
     def __init__(self, cwd, checks, runs):
         super().__init__(required=["gates"], base="main", minute=60, pause=lambda s: None, cwd=cwd)
         self.fixture = {"checks": checks, "runs": runs}
 
     def gh(self, args, cwd=None):
-        key = tuple(args[:2])
-        if key == ("pr", "view"):
-            return 0, json.dumps({"headRefOid": HEAD_SHA, "headRefName": "feat", "baseRefName": "main", "state": "OPEN",
-                                  "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "body": ""})
-        if key == ("pr", "checks"):
-            want = args[args.index("--json") + 1].split(",")
-            return 0, json.dumps([{k: row[k] for k in want if k in row} for row in self.fixture["checks"]])
-        if key == ("run", "list"):
+        if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.fixture["runs"])
+        if args[:1] != ["api"]:
+            raise AssertionError(f"unexpected gh call: {args}")
+        method, path, params, flags, jq = REST.parse(args[1:])
+        m = re.fullmatch(r"repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/(.*)", path)
+        rel = m.group(1) if m else path
+        if method == "GET" and rel == "pulls/7":
+            return 0, REST.one(REST.pull(7, HEAD_SHA, "feat", "main"), jq)
+        if method == "GET" and rel == f"commits/{HEAD_SHA}/check-runs":
+            rows = [REST.check_run((r["name"], r["bucket"], r["link"]), i, r.get("startedAt"), r.get("completedAt")) for i, r in enumerate(self.fixture["checks"])]
+            return 0, REST.listing(rows, "check_runs", params, flags, jq, 100, {"total_count": len(rows)})
+        if method == "GET" and rel == f"commits/{HEAD_SHA}/status":
+            return 0, REST.listing([], "statuses", params, flags, jq, 100, {"state": "pending", "total_count": 0})  # GitHub's combined state for no statuses
         raise AssertionError(f"unexpected gh call: {args}")
 
 

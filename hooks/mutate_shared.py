@@ -58,9 +58,10 @@ def guard_files(folder: str):
 
 def anchor_files(folder: str):
     """Every file a guard mutant may be anchored in: the guard modules, then git_reads.py, which
-    holds the reads of the repository and of sessions that the guard and the janitor share."""
-    reads = os.path.join(folder, "git_reads.py")
-    return guard_files(folder) + ([reads] if os.path.exists(reads) else [])
+    holds the reads of the repository and of sessions that the guard and the janitor share, then
+    proc_env.py, the one home of the exec-environment session-tag read."""
+    shared = [os.path.join(folder, name) for name in ("git_reads.py", "proc_env.py")]
+    return guard_files(folder) + [path for path in shared if os.path.exists(path)]
 
 
 def guard_tree(dest: str) -> None:
