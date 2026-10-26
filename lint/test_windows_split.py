@@ -100,8 +100,11 @@ GUARD_JOB = "gates-windows-guard"
 # The guard mutation harness moves off `gates` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "gates-mutate-guard"
-# The scope flag each of the two cut-F jobs skips on (scope has no flag of its own for them).
-FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard"}
+# The bin/shoot suite and its browser install have their own Linux job, off the `gates` lint job.
+SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
+SHOOT_JOB = "gates-shoot"
+# The scope flag each job skips on when the flag is not its own name.
+FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot"}
 
 
 def key(st):
@@ -147,7 +150,7 @@ IF_PIN = {"python janitor/mutate_sweep.py":
 
 
 FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows",
-         "code", "guard", "sweep"]
+         "code", "guard", "sweep", "shoot"]
 
 
 def eval_if(expr, event, flag_value):
@@ -292,6 +295,29 @@ def mutate_problems(text):
     return problems
 
 
+def shoot_problems(text, required):
+    """The shoot suite runs in SHOOT_JOB on Linux and in no other job, with no step-level if, so a job
+    that runs cannot skip the suite and read green. No other job installs a browser. SHOOT_JOB is a
+    required check (`required`: stamp.json merge.requiredChecks)."""
+    jobs = all_jobs(text)
+    homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == SHOOT_CMD]
+    problems = []
+    if homes != [SHOOT_JOB]:
+        problems.append(f"{SHOOT_CMD!r} runs in {homes}, want exactly [{SHOOT_JOB!r}]")
+    job = jobs.get(SHOOT_JOB)
+    if job:
+        if not (job["os"] or "").startswith("ubuntu"):
+            problems.append(f"{SHOOT_JOB} runs on {job['os']}, want ubuntu-latest")
+        problems += [f"{SHOOT_JOB}: step {st} has a step-level if" for st in job["steps"] if "if" in st]
+    # The raw job text, so an install inside a `run: |` block counts too.
+    installs = [n for n in jobs if n != SHOOT_JOB and "playwright install" in (job_block(text, n) or "")]
+    if installs:
+        problems.append(f"a browser install runs outside {SHOOT_JOB}: {installs}")
+    if SHOOT_JOB not in required:
+        problems.append(f"{SHOOT_JOB} is not in merge.requiredChecks, so a red shoot suite blocks no merge")
+    return problems
+
+
 class WindowsSplit(unittest.TestCase):
     def setUp(self):
         with open(GATES, encoding="utf-8") as f:
@@ -304,6 +330,28 @@ class WindowsSplit(unittest.TestCase):
         # The mutation harness is placed
         # once in its own job. Named failure: a harness dropped or doubled, so mutants go unrun.
         self.assertEqual(mutate_problems(self.text), [])
+
+    def test_the_shoot_suite_has_its_own_required_job(self):
+        # Named failure: the browser install shares the `gates` cap again, or a red shoot suite blocks no merge.
+        with open(STAMP, encoding="utf-8") as f:
+            required = json.load(f)["merge"]["requiredChecks"]
+        self.assertEqual(shoot_problems(self.text, required), [])
+
+    def test_the_shoot_checker_sees_its_defects(self):
+        good = (f"jobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n      - name: lint\n        run: ruff\n"
+                f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest\n    steps:\n"
+                f"      - name: Install Chromium\n        run: playwright install chromium\n"
+                f"      - name: shoot fixture suite\n        run: {SHOOT_CMD}\n")
+        self.assertEqual(shoot_problems(good, [SHOOT_JOB]), [])
+        bad = {"back in gates": good.replace("        run: ruff\n", f"        run: ruff\n      - name: s\n        run: {SHOOT_CMD}\n"),
+               "install in gates": good.replace("run: ruff", "run: playwright install --with-deps chromium"),
+               "install in a gates block": good.replace("run: ruff", "run: |\n          ruff\n          playwright install chromium"),
+               "step-level if": good.replace(f"        run: {SHOOT_CMD}", f"        if: false\n        run: {SHOOT_CMD}"),
+               "on windows": good.replace(f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest", f"  {SHOOT_JOB}:\n    runs-on: windows-latest"),
+               "suite dropped": good.replace(f"        run: {SHOOT_CMD}\n", "        run: true\n")}
+        for label, text in bad.items():
+            self.assertTrue(shoot_problems(text, [SHOOT_JOB]), label)
+        self.assertTrue(shoot_problems(good, []), "not required")
 
     def test_scope_job_gates_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])

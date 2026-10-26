@@ -2,9 +2,9 @@
 
 ## The ruling
 
-`main` of shivinate7/claude-settings requires the ten checks that `.github/stamp.json`
+`main` of shivinate7/claude-settings requires the eleven checks that `.github/stamp.json`
 `merge.requiredChecks` names: scope, gates, gates-windows, gates-windows-guard, gates-mutate-guard,
-gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows.
+gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows, gates-shoot.
 
 - A merge needs a pull request and no approval.
 - `strict` is false: a PR need not carry main's newest commit.

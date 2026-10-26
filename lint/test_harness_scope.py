@@ -8,7 +8,7 @@ HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
              gates_windows_rest, gates_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags the steps inside a job read)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot gates the whole gates-shoot job)
 
 Run with:  python3 lint/test_harness_scope.py -v
 """
