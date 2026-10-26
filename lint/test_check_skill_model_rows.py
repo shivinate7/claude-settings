@@ -91,6 +91,8 @@ def run(files, locked=()):
         os.makedirs(os.path.join(tree, "lint"))
         script = os.path.join(tree, "lint", "check_skill_model_rows.py")
         shutil.copy(CHECK, script)
+        for name in ("layout.py", "layout.json"):  # the check reads its records folder from the layout
+            shutil.copy(os.path.join(os.path.dirname(CHECK), name), os.path.join(tree, "lint", name))
         for rel, text in files.items():
             path = os.path.join(tree, *rel.split("/"))
             os.makedirs(os.path.dirname(path), exist_ok=True)

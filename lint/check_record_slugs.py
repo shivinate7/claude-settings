@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a record file ADDED against origin/main has a slug over 32 characters.
 
-Records live in decisions/ and debts/. The UI crops long file names, so a slug is 32
+Records live in the folders lint/layout.json marks as records. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
     python3 lint/check_record_slugs.py [file ...]
@@ -11,10 +11,16 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
 MAX = 32
-DIRS = ("decisions/", "debts/")  # one line: hooks/guard.py reads it
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+try:
+    DIRS = tuple(folder + "/" for folder in layout.folders(ROOT, "record"))
+except layout.LayoutError as err:  # a check that cannot read its folders is red, never green
+    print("check_record_slugs: FAIL: " + str(err))
+    sys.exit(1)
 
 
 def added():

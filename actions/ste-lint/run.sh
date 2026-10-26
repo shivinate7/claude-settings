@@ -119,9 +119,16 @@ fi
 echo "ste-lint: ${#FILES[@]} file(s) in scope, $EXCLUDED_COUNT excluded"
 printf '  %s\n' ${FILES[@]+"${FILES[@]}"}
 
+# decisions-dir: empty is the folder lint/layout.json names, "off" turns the gloss collapse off.
+DECISIONS=()
+case "${DECISIONS_DIR:-}" in
+  "") ;;
+  off) DECISIONS=(--decisions-dir "") ;;
+  *) DECISIONS=(--decisions-dir "$DECISIONS_DIR") ;;
+esac
 JSON_OUT="$(mktemp)"
 python3 "$LINTER" --no-color --format json --fail-on never \
-  --decisions-dir "$DECISIONS_DIR" ${FILES[@]+"${FILES[@]}"} > "$JSON_OUT"
+  ${DECISIONS[@]+"${DECISIONS[@]}"} ${FILES[@]+"${FILES[@]}"} > "$JSON_OUT"
 
 if [ "$SCOPE" = "all" ]; then
   # Report-mode audit: whole-file findings, never fails the build.

@@ -89,7 +89,7 @@ export const codeNouns = (text) => bareNouns(codeOf(text));
 // ---- scanner 3, stamp: a near-miss cite in a doc. The fixture is the one the stamp suite uses for D`one`.
 const STAMP_CONFIG = join(ROOT, "actions", "stamp", "examples", "frontmatter-prefixed-cite.stamp.json");
 const STAMP_RECORD = {
-  path: "decisions/one.md",
+  path: "docs/decisions/one.md",
   text: "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
 };
 const git = (root, ...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });

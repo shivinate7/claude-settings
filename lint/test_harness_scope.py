@@ -118,8 +118,9 @@ class Scope(unittest.TestCase):
     def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
         self.assertFlags(run(["merge/merge.py"]), want_true=["gates_windows", "gates_macos", "guard", "gates_windows_merge"])
 
-    def test_record_slug_checker_change_turns_on_the_guard_suites(self):
-        self.assertFlags(run(["lint/check_record_slugs.py"]), want_true=["gates_windows", "gates_macos", "guard", "code"])
+    def test_layout_change_turns_on_the_guard_and_merge_suites(self):
+        for path in ("lint/layout.json", "lint/layout.py"):
+            self.assertFlags(run([path]), want_true=["gates_windows", "gates_macos", "guard", "code", "gates_windows_merge"])
 
     def test_janitor_launcher_change_turns_on_the_install_suite(self):
         # `guard` too: the janitor launcher turns the guard suite on.

@@ -243,6 +243,12 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      - name: Layout fixture suite
+        run: python3 lint/test_layout.py
+
+      - name: Layout readers hold no record path
+        run: python3 lint/check_layout.py
+
       - name: CLAUDE.md size fixture suite
         run: python3 lint/test_check_claude_md_size.py
 

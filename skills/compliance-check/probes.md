@@ -13,7 +13,7 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with `decisions/` or `debts/`.
+`check_record_slugs.py` matches only paths that start with a record folder of `lint/layout.json`, as claude-settings itself holds it: `decisions/` or `debts/` until claude-settings moves its records.
 For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
 file arguments. Its git diff reads this repo's tree, so it cannot target a child.
 

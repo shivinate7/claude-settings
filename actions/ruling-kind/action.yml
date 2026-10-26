@@ -1,6 +1,6 @@
 name: Ruling kind check
 description: >
-  Fails a pull request that adds or edits a *.md record in the records-dir folder (default decisions) with no valid Kind line
+  Fails a pull request that adds or edits a *.md record in the records-dir folder (default: the decisions folder of lint/layout.json) with no valid Kind line
   (Kind: build with Plan lines, or Kind: process with a Home line). Runs lint/check_ruling_kind.py
   from this repo against the caller's checkout and the pull request base. Fails closed: when the
   base cannot be read, the step is red, never green. A run with no pull request base is skipped.
@@ -9,9 +9,11 @@ description: >
   rule:<id> resolves against the caller's CLAUDE.md and this action's own CLAUDE.md.
 inputs:
   records-dir:
-    description: The folder, relative to the caller's checkout, that holds the decision records.
+    description: >
+      The folder, relative to the caller's checkout, that holds the decision records. Empty, the
+      default: the decisions folder that lint/layout.json names.
     required: false
-    default: decisions
+    default: ""
 runs:
   using: composite
   steps:

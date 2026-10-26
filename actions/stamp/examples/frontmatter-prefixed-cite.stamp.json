@@ -3,7 +3,7 @@
   "kinds": [
     {
       "id": "decision",
-      "folder": "decisions",
+      "folder": "docs/decisions",
       "prefix": "D",
       "pad": 0,
       "idTemplate": "{prefix}{n}",
@@ -16,7 +16,7 @@
     },
     {
       "id": "finding",
-      "folder": "findings",
+      "folder": "docs/findings",
       "prefix": "F",
       "pad": 0,
       "idTemplate": "{prefix}{n}",
@@ -29,7 +29,7 @@
     },
     {
       "id": "question",
-      "folder": "questions",
+      "folder": "docs/questions",
       "prefix": "Q",
       "pad": 0,
       "idTemplate": "{prefix}{n}",

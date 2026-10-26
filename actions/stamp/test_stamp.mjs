@@ -129,29 +129,29 @@ const prefixedCiteConfig = () => loadConfig(join(HERE, "examples/frontmatter-pre
 test("frontmatter-only, lowest_free: a gap in the taken numbers is filled before the max", () =>
   withTempDir((root) => {
     initRepo(root);
-    write(root, "decisions/one.md", "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
-    write(root, "decisions/three.md", "---\nid: D3\nslug: three\nkind: decision\nstatus: open\ndate: 2026-01-02\n---\n\nBody.\n");
-    write(root, "decisions/pending-one.md", "---\nid: pending\nslug: gap-fill\nkind: decision\nstatus: open\ndate: 2026-01-03\n---\n\nCited as D‹gap-fill›.\n");
+    write(root, "docs/decisions/one.md", "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "docs/decisions/three.md", "---\nid: D3\nslug: three\nkind: decision\nstatus: open\ndate: 2026-01-02\n---\n\nBody.\n");
+    write(root, "docs/decisions/pending-one.md", "---\nid: pending\nslug: gap-fill\nkind: decision\nstatus: open\ndate: 2026-01-03\n---\n\nCited as D‹gap-fill›.\n");
     commit(root, "one, three, and a pending record");
 
     const result = stamp(root, prefixedCiteConfig());
     assert.equal(result.problems.length, 0);
     assert.equal(result.assigned[0].id, "D2");
     // A "{id}" template writes the bare id, no gloss.
-    assert.equal(read(root, "decisions/pending-one.md").includes("Cited as D2."), true);
+    assert.equal(read(root, "docs/decisions/pending-one.md").includes("Cited as D2."), true);
   }));
 
 test("frontmatter-only cite: a citation naming the wrong kind's letter is left unresolved", () =>
   withTempDir((root) => {
     initRepo(root);
-    write(root, "decisions/one.md", "---\nid: D1\nslug: shared-slug\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
-    write(root, "findings/two.md", "---\nid: pending\nslug: other-slug\nkind: finding\nstatus: observed\ndate: 2026-01-02\n---\n\nCited wrongly as F‹shared-slug›.\n");
+    write(root, "docs/decisions/one.md", "---\nid: D1\nslug: shared-slug\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "docs/findings/two.md", "---\nid: pending\nslug: other-slug\nkind: finding\nstatus: observed\ndate: 2026-01-02\n---\n\nCited wrongly as F‹shared-slug›.\n");
     commit(root, "mismatched prefix");
 
     stamp(root, prefixedCiteConfig());
     // "shared-slug" is a D record. "F<shared-slug>" names the wrong letter, so it is left as
     // text rather than resolved to the D record's id.
-    assert.equal(read(root, "findings/two.md").includes("Cited wrongly as F‹shared-slug›."), true);
+    assert.equal(read(root, "docs/findings/two.md").includes("Cited wrongly as F‹shared-slug›."), true);
   }));
 
 // ---------------------------------------------------------------- format 2: frontmatter AND
@@ -878,21 +878,21 @@ test("cite.scanGlobs and cite.excludeGlobs: a scanned suffix is rewritten, an ex
 test("excludeFiles: a listed file in a record folder is not read as a record", () =>
   withTempDir((root) => {
     initRepo(root);
-    write(root, "decisions/_index.md", "# Index\n\nNo frontmatter here.\n");
-    write(root, "decisions/one.md", "---\nid: D1\nslug: one\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "docs/decisions/_index.md", "# Index\n\nNo frontmatter here.\n");
+    write(root, "docs/decisions/one.md", "---\nid: D1\nslug: one\ndate: 2026-01-01\n---\n\nBody.\n");
     commit(root, "a record and an index");
 
     assert.deepEqual(check(root, prefixedCiteConfig()), []);
     const config = prefixedCiteConfig();
     config.kinds[0].excludeFiles = [];
-    assert.equal(check(root, config).some((p) => p.includes("decisions/_index.md") && p.includes("malformed")), true);
+    assert.equal(check(root, config).some((p) => p.includes("docs/decisions/_index.md") && p.includes("malformed")), true);
   }));
 
 test("order \"filename\": pending records are numbered in filename order", () =>
   withTempDir((root) => {
     initRepo(root);
-    write(root, "questions/b.md", "---\nid: pending\nslug: bee\n---\n\nBody.\n");
-    write(root, "questions/a.md", "---\nid: pending\nslug: ay\n---\n\nBody.\n");
+    write(root, "docs/questions/b.md", "---\nid: pending\nslug: bee\n---\n\nBody.\n");
+    write(root, "docs/questions/a.md", "---\nid: pending\nslug: ay\n---\n\nBody.\n");
     commit(root, "two pending questions");
 
     const result = stamp(root, prefixedCiteConfig());
@@ -1513,7 +1513,7 @@ const NEAR_MISS = {
   // cite form D‹slug›: the stamp rewrites that form, so it is the correct cite here
   prefixed: {
     config: prefixedCiteConfig,
-    record: "decisions/one.md",
+    record: "docs/decisions/one.md",
     recordText: "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
     correct: "D‹one›",
   },
@@ -1527,7 +1527,7 @@ const NEAR_MISS = {
   // cite form D‹slug› with a slug that may hold dots, as the frontmatter-filename pattern allows
   dotted: {
     config: dottedCiteConfig,
-    record: "decisions/dotted.md",
+    record: "docs/decisions/dotted.md",
     recordText: "---\nid: D1\nslug: a.b\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
     correct: "D‹a.b›",
   },
