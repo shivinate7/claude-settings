@@ -1,0 +1,9 @@
+{
+  "title": "A follow-up with one safe answer starts without asking you",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 109.31,
+  "why": "Oct 26, three times in one day: sessions asked \"push then delete?\" (c70, c75), \"fix the sentence or drop the lane?\" (c76) and \"fix the CI waste in a lane after PR 263 merges?\", each with an obvious yes.",
+  "note": "Finding, Oct 26 (triage): rule parallelism-keep-going (from c59, on main be4b30e) starts only queued items the owner asked for, so a follow-up the session itself found, inside your goal, is still brought to you as a question. Fix to build, needs no answer from you since it follows your standing rule that undoable steps go ahead: amend parallelism-keep-going in place so a follow-up the session found, that can be undone and serves the goal you set, is queued and started like an asked item, and the report names it; only an irreversible step, a change to your goal, or another repo still asks. A degen session may not run main's rule yet (installs refresh at session start). c59's part 3 (a Stop check on idle turn ends) stays parked until an idle-end repeat. Port: yes, the rule is global.",
+  "updatedAt": "2026-10-26T20:30:00Z"
+}

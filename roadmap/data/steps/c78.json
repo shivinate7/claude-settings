@@ -1,0 +1,9 @@
+{
+  "title": "A CI fix found in one repo reaches the others: one shared browser-test setup",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.37,
+  "why": "Oct 26: degen's PR 263 went red when its browser setup timed out on Ubuntu's slow package mirror, the same cause claude-settings fixed for itself the same day (c64). The fix never reached the child repos.",
+  "note": "Checked Oct 26, degen main check.yml (app job): it caches the Playwright browser, but runs `playwright install-deps chromium` (apt) on every cache hit and `install --with-deps` on a miss, each capped at 15 min; that step timed out on PR 263. claude-settings' fix (c64, gates-shoot job, main 0b39053): no --with-deps, since the runner image already has Chromium's libraries; install 8 s against 20 to 31 s with apt. degen also runs its web tests on Swift-only changes (its own scope rules; the session's reading, not checked here). Fault: degen's own workflow; the claude-settings gap is that a CI fix has no way to reach other repos. claude-settings part, one cloud lane, needs no answer from you: a reusable action under actions/ for browser-test setup (pinned Playwright, browser cache, no apt step), used by gates-shoot first, so a later fix lands once; compliance-check flags a repo that installs Playwright with apt. Child-repo part deferred (shiv, Oct 26): degen's own fix (drop the apt step, skip web tests on native-only changes) and adopting the action wait for your plan check; the degen session plans that lane after PR 263 merges. Port: yes, every repo with browser tests (banchi, q_max, degen, joyous, mailaudit). Linked: c76 keeps the pins to this action current. Placed after c76, ahead of o13 (triage, Oct 26): same drift, and it reds batches now.",
+  "updatedAt": "2026-10-26T20:30:00Z"
+}
