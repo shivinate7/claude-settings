@@ -26,11 +26,12 @@ A test is a claim, not law. When your change breaks one, sort the failure into o
 (a) The subject still holds, and only its route changed. Re-point the check. Show it red,
 then green. (b) The failure found a real defect. Fix the code. (c) The rule may be stale.
 STOP. Bring the owner the entry id, its gloss, and the stale sentence. Name the outcome it
-protected and what protects it now. Propose a fix. Wait for their word. (d) The owner already
-ruled this behaviour out. Do not ask again. The ruling covers every test that expects the old
-behaviour. Find them all in one pass: search, then run them. Report each test change the lane
-needs, with the ruling and its time, for the test-author to re-point red then green. Class (c)
-is only for a behaviour with no ruling. Carry this 4-class list in your report.
+protected and what protects it now. Propose a fix. Wait for their word.
+(d) A ruling in your brief or the repo's records already ruled this behaviour out. Do not ask
+again. The ruling covers every test that expects exactly that behaviour. Find those tests in one
+pass: search, then run them. Report each test change the lane needs, with the ruling and its
+time, for the test-author to re-point red then green. A test that pins a behaviour next to the
+ruled one is class (c). Carry this 4-class list in your report.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
