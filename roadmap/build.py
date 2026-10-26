@@ -5,9 +5,20 @@ This script puts a small read-only stand-in for that database (window.ROADMAP_DB
 JSON file, in front of the page's own script, so the same viewer runs from disk and as the published
 artifact. Run it after each edit to roadmap/data/:  python roadmap/build.py
 Then republish roadmap/roadmap.html to the roadmap artifact (see roadmap/README.md).
+
+After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
+NOTE_WORDS words, open steps untouched for STALE_DAYS days, open steps with no note, and steps that
+entered the top TOP open places in the last day without a "Placed ahead of" line. Cost: one git
+process per build, no file written.
 """
+import datetime
 import json
 import pathlib
+import subprocess
+
+NOTE_WORDS = 250
+STALE_DAYS = 5
+TOP = 5
 
 ROOT = pathlib.Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -48,6 +59,56 @@ def main():
         raise SystemExit("page/index.html has no <body> tag")
     (ROOT / "roadmap.html").write_text(head + sep + "\n" + stub + rest, encoding="utf-8")
     print(f"roadmap.html: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
+    upkeep(data["steps"])
+
+
+def added_at():
+    """Each step's first-commit time, from one git log; empty when git cannot answer."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--diff-filter=A", "--format=@%aI", "--name-only", "--", "data/steps"],
+            capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return {}
+    seen, when = {}, None
+    for line in out.splitlines():
+        if line.startswith("@"):
+            when = datetime.datetime.fromisoformat(line[1:])
+        elif line.endswith(".json"):
+            seen.setdefault(pathlib.Path(line).stem, when)
+    return seen
+
+
+def upkeep(steps):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
+                   key=lambda kd: kd[1].get("order", 1e9))
+    long_, stale, empty = [], [], []
+    for k, d in open_:
+        note = d.get("note") or ""
+        words = len(note.split())
+        if words > NOTE_WORDS:
+            long_.append(f"{k} ({words})")
+        if not note.strip():
+            empty.append(k)
+        try:
+            at = datetime.datetime.fromisoformat(d.get("updatedAt", "").replace("Z", "+00:00"))
+        except ValueError:
+            at = None
+        if at is None or (now - at).days >= STALE_DAYS:
+            stale.append(k)
+    added = added_at()
+    jumped = [k for k, d in open_[:TOP]
+              if k in added and (now - added[k]).total_seconds() < 86400
+              and "Placed ahead of" not in (d.get("note") or "")]
+    if not added:
+        jumped = ["unknown (git log could not run)"]
+    rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days" % STALE_DAYS, stale),
+            ("no note", empty), ("new in top %d with no placement line" % TOP, jumped)]
+    print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
+    for label, v in rows:
+        if v:
+            print(f"  {label}: {', '.join(v)}")
 
 
 if __name__ == "__main__":
