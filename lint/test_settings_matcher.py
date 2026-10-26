@@ -231,11 +231,11 @@ def rubric_gaps(prompt):
     return [item for item, pats in RUBRIC.items() if not all(re.search(p, text, re.I) for p in pats)]
 
 
-# The hook prompt cannot point at decisions/, so it lists the premise kinds itself: a second copy of
-# the kinds table in decisions/premise-format.md. These cases keep the copy equal to the table.
+# The hook prompt cannot point at docs/decisions/, so it lists the premise kinds itself: a second copy of
+# the kinds table in docs/decisions/premise-format.md. These cases keep the copy equal to the table.
 # PREMISE_FORMAT_UNDER_TEST points the test at another copy of the table, as SETTINGS_UNDER_TEST does.
 PREMISE_FORMAT = os.environ.get("PREMISE_FORMAT_UNDER_TEST") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "decisions", "premise-format.md")
+    os.path.dirname(os.path.abspath(__file__)), "..", "docs", "decisions", "premise-format.md")
 KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
 KIND_LIST = re.compile(r"\bsource kinds?:\s*([a-z, ]+?)\s*(?:[(.;]|$)")
 
@@ -363,8 +363,8 @@ class SendMessageJudge(unittest.TestCase):
 
 
 # Every prompt or agent judge in settings.json must have a row in the model-per-role table
-# (decisions/subagent-model-cap.md), and that row's model must equal the hook's model.
-RECORD = os.path.join(os.path.dirname(SETTINGS), "decisions", "subagent-model-cap.md")
+# (docs/decisions/subagent-model-cap.md), and that row's model must equal the hook's model.
+RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "subagent-model-cap.md")
 JUDGE_ROW = "prompt-hook judges"
 
 

@@ -8,12 +8,12 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | Lint | Command | Reads |
 | --- | --- | --- |
 | `ste_lint.py` | `python3 $P/lint/ste_lint.py --fail-on error --quiet <child *.md>` | STE errors in child prose |
-| `check_record_slugs.py` | `cd <records parent> && python3 $P/lint/check_record_slugs.py decisions/*.md debts/*.md` | slugs over 32 characters |
+| `check_record_slugs.py` | `cd <records parent> && python3 $P/lint/check_record_slugs.py docs/decisions/*.md docs/debts/*.md` | slugs over 32 characters |
 | `check_claude_md_size.py` | `python3 $P/lint/check_claude_md_size.py` | a CLAUDE.md over 200 lines (warns only) |
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with a record folder of `lint/layout.json`, as claude-settings itself holds it: `decisions/` or `debts/` until claude-settings moves its records.
+`check_record_slugs.py` matches only paths that start with a record folder of `lint/layout.json`, as claude-settings itself holds it: `docs/decisions/` or `docs/debts/` until claude-settings moves its records.
 For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
 file arguments. Its git diff reads this repo's tree, so it cannot target a child.
 
@@ -42,8 +42,8 @@ session transcripts, not a repo.
 | Verification | `git grep -n sleep`; read each hit in its file and judge it | no waiter loop. A loop that sleeps to wait on a condition is a waiter. A lone delay is not |
 | Tokens | none: session practice | `n/a (session)` |
 | Building | `git ls-files '*test*'` against product files | each product module has a test |
-| Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
-| Speak plainly | `grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` finds numbered ids (D12, D-570) and keyword cites (Decision draft-until-reviewed). `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. `grep -rnE -e "#[0-9]+\b" -e "\b[Ll]ane [0-9]+\b" -e "\b[0-9a-f]{7,40}\b" --include=*.md .` finds PR, issue, lane and commit ids (skip hex words with no digit). Run all from the records parent | each cited id has a short plain name beside it |
+| Building | designs in `docs/` or `docs/plans/` with no record | each design has a record, or is marked abandoned |
+| Speak plainly | `grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` finds numbered ids (D12, D-570) and keyword cites (Decision draft-until-reviewed). `grep -rnwF -f <(basename -s .md docs/decisions/*.md) --include=*.md .` finds bare slugs. `grep -rnE -e "#[0-9]+\b" -e "\b[Ll]ane [0-9]+\b" -e "\b[0-9a-f]{7,40}\b" --include=*.md .` finds PR, issue, lane and commit ids (skip hex words with no digit). Run all from the records parent | each cited id has a short plain name beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_gate.py` covers it | `parent-covered` |
