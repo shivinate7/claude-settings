@@ -19,11 +19,11 @@ only when the change cannot move a verdict, one bounded command proves it, and t
 names both. A change that touches a rule's behaviour, a gate's verdict, or product code a
 reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
-or Explore,
-never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
+designer, design reviewer, or Explore, never two. A lane that touches a screen gets a designer before
+the builder and a design reviewer after it.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
-the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try
-(`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
+the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
+and a builder's third try (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
 wait for my word.<!-- rule:roles-opus-shaped-say-so --> Owner raises Opus. The guard asks before an env write raises the subagent model.<!-- rule:roles-opus-override-guarded --> A brief carries the task, the files, governing rulings, failure classes from
