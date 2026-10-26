@@ -182,6 +182,17 @@ class DecisionWatchSwap(unittest.TestCase):
         self.assertIn("reply_judge.py", names)
 
 
+# Mods reach each machine only through the marketplace (decision mods-install-via-marketplace). A
+# third-party marketplace never refreshes unless autoUpdate is true, so without it a mod stays at the
+# copy fetched on the first install.
+class ModsAutoUpdate(unittest.TestCase):
+    def test_claude_settings_marketplace_auto_updates(self):
+        with open(SETTINGS, encoding="utf-8") as f:
+            entry = json.load(f)["extraKnownMarketplaces"]["claude-settings"]
+        self.assertEqual(entry["source"], {"source": "github", "repo": "shivinate7/claude-settings"})
+        self.assertIs(entry.get("autoUpdate"), True)
+
+
 # The question reviewer: ONE agent hook on PreToolUse AskUserQuestion, model
 # pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
 # hooks/question_outcome.py. A failed or timed-out agent hook lets the question through, so no code

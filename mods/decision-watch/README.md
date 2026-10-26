@@ -11,7 +11,7 @@ A mod. It runs the decision watch on each completed turn (`turn.complete`) with 
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
   2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error. Then `--model-text` or `--model-error` gives the verdict.
-- Each python run (30 s) and each python finder (5 s) also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. A hung python, model or toast call frees the one-judge slot. The `$.env.get` reads have no timer.
+- Each python run (30 s) and each finder call (5 s, one name) also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. A hung python, model or toast call frees the one-judge slot. The `$.env.get` reads have no timer.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
 - Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
 - Under the split flags, the script prints `verdict` and `notices` as separate JSON fields. The mod does not parse joined text.
@@ -33,7 +33,7 @@ A mod. It runs the decision watch on each completed turn (`turn.complete`) with 
 
 - The script path is `CLAUDE_CONFIG_DIR/hooks/decision_watch.py`. With no `CLAUDE_CONFIG_DIR`, the mod uses `USERPROFILE` or `HOME`, then `.claude`.
 - The background judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Each holds its own "already judged" cache. A background verdict does not mute `/dw`.
-- The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub. It keeps that path until the mod reloads, and looks again after a run with it is rejected, times out, or exits non-zero with the file gone.
+- The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub. It asks the finder for one name at a time, because `which` and `where.exe` exit 1 when any name is missing, and a Mac has no `python`. It keeps that path until the mod reloads, and looks again after a run with it is rejected, times out, or exits non-zero with the file gone.
 
 ## /dw
 

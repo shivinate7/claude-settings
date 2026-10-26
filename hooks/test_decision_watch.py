@@ -283,11 +283,11 @@ def peer_record(body, ts):
         "isMeta": True,
         "timestamp": ts,
         "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                   "name": "advisor-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                   "name": "peer-cf", "fromSession": "local_fixture", "fromMode": "bypass",
                    "body": body},
         "message": {"role": "user", "content": "Another Claude session sent a message:\n"
                     '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                    'from-name="advisor-cf" from-mode="bypass">%s</cross-session-message>' % body},
+                    'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % body},
     }
 
 
@@ -296,7 +296,7 @@ def case_last_human_reader_skips_a_peer_record():
     t2 = "2026-09-22T10:00:09.000Z"
     records = [
         human_record("rename the gate", T0),
-        assistant_record(text="Asking the advisor."),
+        assistant_record(text="Asking a peer."),
         peer_record("Answer: yes, rename it.", t1),
         assistant_record(text="Renamed."),
     ]

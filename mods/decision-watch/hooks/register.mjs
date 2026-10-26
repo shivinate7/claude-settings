@@ -120,14 +120,17 @@ async function deriveStop($) {
 }
 
 // First python on PATH that is not the WindowsApps Store stub (settings.json's launcher does the same).
+// One name per finder call: where.exe and which both exit 1 when any name is missing, and a Mac has no python.
 async function pickPython($) {
-  for (const argv of [["where.exe", "python3", "python"], ["which", "-a", "python3", "python"]]) {
-    try {
-      const r = await deadline($.process.run(argv, { timeoutMs: FIND_MS }), FIND_MS + 1000);
-      const hit = r.stdout.split(/\r?\n/).map((s) => s.trim()).find((s) => s && !/WindowsApps/i.test(s));
-      if (r.exitCode === 0 && hit) return hit;
-    } catch {
-      // try the next finder
+  for (const finder of [["where.exe"], ["which", "-a"]]) {
+    for (const name of ["python3", "python"]) {
+      try {
+        const r = await deadline($.process.run([...finder, name], { timeoutMs: FIND_MS }), FIND_MS + 1000);
+        const hit = r.stdout.split(/\r?\n/).map((s) => s.trim()).find((s) => s && !/WindowsApps/i.test(s));
+        if (r.exitCode === 0 && hit) return hit;
+      } catch {
+        // try the next name or finder
+      }
     }
   }
   throw new Error("no python on PATH other than the WindowsApps stub");
@@ -296,7 +299,7 @@ const LOOKUP_MS = 500; // the transcript lookup, off the return path
 const SEEN_WAIT_MS = 500; // the most the handler waits for the STOP seen line
 const MODEL_MS = 50000;
 const PY_MS = 30000; // each python run (unmeasured; split mode calls no model); the mod's timer adds 1 s
-const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
+const FIND_MS = 5000; // each finder call (one name); the mod's timer adds 1 s
 const TOAST_MS = 5000;
 
 // Like within, but a late promise rejects, so the caller can fail the step and free its slot.

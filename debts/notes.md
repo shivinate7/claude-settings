@@ -178,9 +178,9 @@
 - mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (gates.yml)
 - mods-load-needs-new-session: a mod loads only in a session started after the change (marketplace load path)
 - mods-macos-untested: token-weather, desktop-statusline, plain-diff and session-board are untested on macOS (settings.json marketplace entry)
-- mods-marketplace-no-ref-pin: marketplace source follows the default branch with no ref pin; a bad merge reaches every machine (settings.json)
+- mods-marketplace-no-ref-pin: marketplace source follows the default branch with no ref pin, and auto-updates; a bad merge with a version bump reaches every machine within one session (settings.json)
 - mods-node-version-unpinned: runner Node version unknown; mod tests need Node 20.6 or later (gates.yml)
-- mods-refresh-cadence-unmeasured: marketplace refresh interval and open-session refresh are unmeasured (desktop app)
+- mods-refresh-cadence-unmeasured: the docs say auto-update runs up to 10 minutes after a session's first message and the new version loads at the next launch; unmeasured on the owner's machines (settings.json marketplace entry)
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs)
 - mods-step-order-unpinned: no test pins the mod test step as last in the gates job (gates.yml)
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
@@ -321,7 +321,7 @@
 - prune-symlink-probe-negative-only: the SYMLINK_CAPABLE probe and early-return are proven only on the no-privilege branch Decision: none
 - mutants-hidden-crashes: mutants other than the watch target are not audited for hidden crashes; the required-case-name field narrows it Decision: none
 - merge-notice-no-report: a turn that merges and writes no report still fires the merge notice; the safe side Decision: none
-- mod-step-unverified: zizmor on the Mod tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: none
+- mod-step-unverified: zizmor on the Mod and map-skill tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: none
 - verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: none
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
@@ -529,8 +529,15 @@
 - ios-ship-recheck-skips-untracked: bin/ios-ship require_untouched reads tracked files only, so a prebuild that writes an untracked, non-ignored file passes; the next run's clean check refuses it. Archive and after_archive steps are not re-checked. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
 - ios-ship-kill-misses-children: bin/ios-ship tf_kill signals the step process only, with no wait. A `bash -c "a && b"` step or an xcodebuild helper can outlive the tool, and a late export write could land after the EXIT .ipa scrub. Unmeasured with real xcodebuild. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
 - ios-ship-newline-splits-step: bin/ios-ship reads prebuild and after_archive with jq -r and read -r, so a step string with a newline runs as separate bash -c calls and loses cd/export state between them. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
+- ios-ship-test-env-leaks: lint/test_ios_ship.sh tool_exec scrubs the five ID variables and PHONE_APPS_JSON. A caller's exported REINSTALL_HOME, LOG_DIR or XCODEBUILD_* still reaches cases that do not set them. So an owner shell that exports one can turn cases red. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
 - merge-revert-by-message-only: merge/merge.py lane_tips finds a dropped lane only by git revert's "This reverts commit <full sha>" line. A hand-reworded revert message, or a revert of the lane's own commits instead of its merge, still deletes the lane branch; it can be rebuilt from the printed tip. Decision: merge-deletes-batch-lanes (the merge tool deletes the batch's lane branches)
 - merge-stacked-dropped-lane-kept: a dropped lane whose commits stay live through a later lane in the same batch is kept, one extra branch. Decision: merge-deletes-batch-lanes (the merge tool deletes the batch's lane branches)
 - merge-rest-windows-latency: hooks/guard_merge.py MERGE_READ_TIMEOUT (25 s) budgets 5 REST calls at the 3.5 s measured for GraphQL on Windows. REST latency on Windows is unmeasured; Linux cloud measured 0.3-0.7 s per call. Decision: standing-merge-grant (the merge grant and the merge tool)
 - merge-blocked-lag: merge/merge.py Host.merge refuses a PR that reads BLOCKED or BEHIND right before the PUT, as gh's own merge did. If GitHub's mergeable_state lags after the checks go green, the run reverts its claim and must run again; it never merges wrongly. The lag is unmeasured. Decision: standing-merge-grant (the merge grant and the merge tool)
 - merge-preread-stop-silent: when Host.merge's PR read before the PUT fails with no network error, the run stops, sends nothing and keeps the claim. Its text does not say so. A re-run resumes it. Decision: standing-merge-grant (the merge grant and the merge tool)
+- own-lock-frees-quiet-running-agent: janitor/sweep.py frees the caller's own agent lock from any sweep its session runs. A running agent whose tree is clean, merged and quiet 30 min loses its tree, and a resumed agent then stops. Same 30 min trade as the agent-end reap. Decision: the-janitor-is-one-machine-wide-sweep (the janitor is one machine-wide sweep)
+- own-lock-climb-reaches-parent-claude: the own-lock ancestor climb runs to pid 1, so a nested `claude -p` session's sweep also frees its parent session's locks, under the same clean, merged and idle tests. Decision: the-janitor-is-one-machine-wide-sweep (the janitor is one machine-wide sweep)
+- own-lock-reused-pid-no-start: an own lock with no start time whose pid an ancestor reuses is freed; the tree is still clean, merged and idle. Decision: the-janitor-is-one-machine-wide-sweep (the janitor is one machine-wide sweep)
+- own-lock-idle-floor-untested: no case pins the 30 min own-lock floor from above (31 min attended reaps), or a fast run with no batch keeping an own lock (janitor/test_sweep.py OwnAgentLockTests)
+- skill-fallback-unpinned: a non-.md path under skills/plain-english-map/, or package*.json, turns `mods` on only through harness-scope.sh's fallback to every flag. No test pins it. A narrower arm that forgets `mods` would skip the skill tests. Decision: none
+- inline-copy-names-skill-path: lint/test_windows_split.py INLINE_COPY flags any run command that names plain-english-map, so a later lint or copy step on that path is a false red. Decision: none

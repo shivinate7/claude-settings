@@ -70,9 +70,8 @@ POINTER_HEAD_REASON = (
     "every session on this machine runs its hooks, its lint and its agents through symlinks into "
     "it. Moving its HEAD off main makes unreviewed work the live gate for every session, "
     "including the sessions reviewing that work. Its HEAD stays main. "
-    "Remedy: build the change in a worktree of your own, on a branch that does not exist yet, "
-    "with `git worktree add -b <new-branch> <path>`. Git refuses a worktree for a branch this "
-    "checkout already holds, so a NEW branch name is the shape that works the first time."
+    "Remedy: build the change in a worktree of your own. Call the EnterWorktree tool to make one "
+    "on a new branch, because git refuses a worktree for a branch this checkout already holds."
 )
 
 

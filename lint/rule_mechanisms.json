@@ -22,13 +22,13 @@
     "outcomes-tests-are-claims": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, or possibly-stale is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 3-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
+        "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, possibly-stale, or already-ruled-out is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 4-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
       }
     },
     "outcomes-word-covers-named-act": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a stated act matches the literal word given, versus a variant of it, is a judgment call on wording. No hook parses an instruction and an action for a match."
+        "reason": "Whether a stated act matches the literal word given, versus a variant of it, and whether a test expects exactly the behaviour a ruling ruled out, are judgment calls on wording. No hook parses an instruction and an action for a match."
       }
     },
     "outcomes-mechanize-rules": {
@@ -467,6 +467,12 @@
         "test": "lint/test_gates.py::ReportGateTests.test_03_landed_code_fence_in_blockquote_blocks"
       }
     },
+    "reports-offer-sweep-after-merge": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether a session's last PR merged with no lane open, or whether the final report offered the sweep command."
+      }
+    },
     "reports-no-report-when-nothing-landed": {
       "mechanism": {
         "kind": "unmechanized",
@@ -511,10 +517,10 @@
         "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
       }
     },
-    "questions-ask-advisor-first": {
+    "questions-go-to-owner": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing checks that a question went to the advisor before the owner. A hook would read the session records for a running advisor session and judge whether the question is one only the owner answers. hooks/sendmessage_state.py only lets the message through."
+        "kind": "judgment",
+        "reason": "Whether a question names what the session does meanwhile, and whether the session kept working on what does not depend on the answer, is a content judgment."
       }
     },
     "style-cut-narration": {
@@ -574,7 +580,7 @@
     "output-never-hand-off-doable-step": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, 1 Stop in 5, never blocks) samples it. A block that mixes shells has no code check."
+        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check."
       }
     },
     "style-option-says-effect": {

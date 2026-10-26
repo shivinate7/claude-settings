@@ -226,27 +226,44 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"gates_windows", "gates_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows", "gates_macos", "code", "guard"})
 
-    # Mod tests run as a step of the `gates` job (Linux), gated on the `mods` flag. `mods` is in ALL, so
-    # every fail-safe case in the Scope class carries the mods check.
+    # Mod and map-skill tests run as a step of the gates, gates-windows and gates-macos jobs, gated on the
+    # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on gates_windows and
+    # gates_macos too, or a mod-only pull request starts neither job and the step never runs there.
+    # `mods` is in ALL, so every fail-safe case in the Scope class carries the mods check.
+    MOD_JOBS = ["gates_windows", "gates_macos"]
     def test_a_mods_path_sets_the_mods_flag(self):
         for p in ("mods/plain-diff/check.mjs", "mods/session-board/session-board.test.mjs"):
             with self.subTest(path=p):
                 self.assertEqual(run([p]).get("mods"), "true")
         self.assertEqual(run(["README.md", "mods/plain-diff/check.mjs"]).get("mods"), "true")
 
-    def test_a_mods_only_diff_sets_no_other_flag(self):
+    def test_a_mods_only_diff_sets_the_mod_jobs_and_no_other_flag(self):
         got = run(["mods/plain-diff/check.mjs"])
-        self.assertEqual(got.get("mods"), "true", got)
-        self.assertFlags(got, want_false=[n for n in ALL if n != "mods"])
+        self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS,
+                         want_false=[n for n in ALL if n not in ["mods"] + self.MOD_JOBS])
 
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
 
     # mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
-    # and the Mod tests run that test. The lint/* rule sets `code` only, so a diff naming only the lint
+    # and the mod-tests.sh step runs that test. The lint/* rule sets `code` only, so a diff naming only the lint
     # file would skip its test.
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
-        self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"])
+        self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"] + self.MOD_JOBS)
+
+    # Each arm that turns `mods` on starts both mod jobs, as a new file and as an edit. An edit leaves every
+    # other job flag off, so the set is exact. A new file under lint/ or skills/ is in a landed dir, which adds
+    # shell_macos and guard by its own rule, so a new file is checked for the jobs it must not start.
+    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md"]
+
+    def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
+        for p in self.MOD_ARMS:
+            with self.subTest(path=p, edit=True):
+                want = {"mods", "gates_windows", "gates_macos"} | ({"code"} if p.startswith("lint/") else set())
+                self.assertEqual(self.true_set(run([p], existing=[p])), want)
+            with self.subTest(path=p, edit=False):
+                self.assertFlags(run([p]), want_true=["mods"] + self.MOD_JOBS,
+                                 want_false=["gates_windows_merge", "gates_windows_rest", "pointer_windows"])
 
     # Any path under the map skill turns `mods` on, .md files included, as a new file or an edit.
     # The gates job runs the skill's tests only when `mods` is on. Those tests read SKILL.md and
@@ -259,7 +276,8 @@ class Scope(unittest.TestCase):
                   self.MAP_SKILL + "tests/fixture/docs/map/traces/home.md"):
             for existing in ((), (p,)):
                 with self.subTest(path=p, edit=bool(existing)):
-                    self.assertEqual(run([p], existing=existing).get("mods"), "true")
+                    got = run([p], existing=existing)
+                    self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS)
 
     # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm.
     def test_a_map_skill_script_change_still_turns_everything_on(self):
