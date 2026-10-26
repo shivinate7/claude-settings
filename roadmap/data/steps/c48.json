@@ -1,0 +1,10 @@
+{
+  "title": "Phone profiling wakes the developer disk image first",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 107.98,
+  "why": "Your question, Oct 26: where should the Oct 25 lesson live (xctrace record on Shivinate XIII timed out 'waiting for device to boot' until devicectl ddiServices ran)? claude-settings, ios-ship, or the Degen repo only?",
+  "note": "Checked Oct 26 at claude-settings 149f4bc. ios-ship has two jobs (testflight, install); no profile job, and no xctrace or ddiServices anywhere in claude-settings. Facts from the owner's Oct 25 log: two failures with plain xctrace record, one success right after 'devicectl device info ddiServices'. Web, Oct 26: the same 'Waiting for device to boot' message is a known intermittent xctrace failure since Xcode 13 (developer.apple.com/forums/thread/694698, Nov 2021; Apple asked for a sysdiagnose, no fix given); a second person hit it on iOS 27, Oct 24 2026, setup not stated (github.com/seedds/nxnative/issues/142); devicectl has a --no-auto-mount-ddis flag, so ddiServices mounts the DDI by default (github.com/appium/appium-xcuitest-driver/issues/2985); iOS 27 moved to the cryptex DDI (github.com/doronz88/pymobiledevice3/pull/1992). Advisor reading: general, not Degen's (the failure comes before the app launches); the likely cause is that xctrace waits for a DDI it does not mount itself, and ddiServices mounts it. Unmeasured: that cause; whether network pairing matters (no source says wired or wireless); device name versus UDID; how long the DDI stays mounted (the 21:43 failure came 34 minutes after the success). Advisor pick, not ruled: run one live test on the Mac first (UDID only: xctrace fails, ddiServices --no-auto-mount-ddis shows the DDI state, ddiServices mounts, xctrace succeeds), then an ios-ship 'profile' job that runs ddiServices and then xctrace by UDID, after c47 part 1 lands (both edit bin/ios-ship). Not a hook, not a CLAUDE.md rule. Waiting on the owner's word.",
+  "ask": "",
+  "updatedAt": "2026-10-26T03:05:00Z"
+}
