@@ -27,18 +27,28 @@ guard rule, so the watcher does the waiting and the session is told once.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
   of the session. The guard denies a stop of a process outside the session, unless the owner's override
   pass covers it (`owner-override-pass`, the owner's typed pass).
-- A tool that is quiet by design must print a short progress line at least every 120 seconds. The watcher
-  does not change, because a false STALL teaches the reader to scroll past a real one
-  (guard-that-cries-wolf-is-spent). The merge tool prints `merge: waiting on ...` while it waits on checks,
-  and while GitHub still shows the head before the push. `verdict` prints a `still running` line every 120
-  seconds.
+- A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
+  tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
+  the push. `verdict` prints a `still running` line every 120 seconds.
+- A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
+  2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
+  `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
+  scroll past a real one (guard-that-cries-wolf-is-spent). The hook reads the logs from the command itself
+  (`named_logs`): the target of `> F`, `>> F`, `&> F`, `>& F`, each `tee` file, and `--log F`. shlex reads
+  the command, so a path in quotes or a comment is text. A change of size or mtime on any of them resets the
+  quiet time. A job with no named log, or whose logs stop changing, stalls as before. The redirection is the
+  signal because it is the act; a declared note can be wrong, and an unnamed file is not read. Limit: a
+  relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
+  Cost: no new process, timer or file; one stat per named log each second in the watcher's own loop, and
+  one at each Stop check.
 
 ## The Stop-time check
 
 When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
-lists each background shell that is not finished and whose output file has been quiet longer than the
-age. A shell whose output file is not found is listed as unknown. It prints one systemMessage that tells
-the model to stop the shell or tell the owner.
+lists each open background shell whose output file has been quiet longer than the age. Each log its
+command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
+output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
+the shell or tell the owner.
 
 The hook exits 0 and never blocks. A crash never refuses a call, as advisory hooks stay fail-open
 (`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
