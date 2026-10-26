@@ -1,0 +1,9 @@
+{
+  "title": "No session sits idle while ready work waits",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.97,
+  "why": "Your gripe, Oct 26: the project went idle with plenty of ready work; you expected many lanes in parallel, and asked whether a standing thread must keep coal going into the engine.",
+  "note": "Checked Oct 26 at claude-settings 3f71d6b. What exists: c37 made goal runs pace on measured load and report 'minutes with no lane running, and the reason' at each batch merge (rule reports-batch-pace-numbers); rule parallelism-no-guessed-lane-cap forbids a guessed lane cap; home-app has a 'keep going' rule (go on to the next step with no stop). Gap: idle time is only reported after the merge; no rule or check makes a session start the next ready item when a lane ends, so an orchestrator ends its turn and the queue waits for you. In-chat fix, Oct 26 (coordinator): the build advisor dispatches and keeps about 4 to 6 build threads running. Proposed claude-settings fix, not ruled: (1) promote home-app's 'keep going' to the global rules: when a lane ends and a queued item has every question answered, start it in the same turn; stop only for an owner decision, a test only the owner can run, or the load brake. (2) An orchestrator's final report names the queue's ready items it left unstarted and why; 'none' or a reason per item, never silence. (3) Later, only after a repeat: a Stop check that refuses an orchestrator's turn end while its own plan lists a ready, unstarted item and the brake has room. Cost of (3): one read of the plan at Stop, no new process. Placed ahead of c49 (triage, Oct 26): it sets how fast every later step moves; a candidate for the front of batch 2.",
+  "updatedAt": "2026-10-26T05:20:00Z"
+}
