@@ -53,8 +53,9 @@ class Job(unittest.TestCase):
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
+        env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"})
         done = subprocess.run([sys.executable, CI_JOB, "lane", "--workflow", path, *args], cwd=self.root,
-                              capture_output=True, text=True, env=dict(ENV, VERDICT_LOG=self.log), timeout=120)
+                              capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
@@ -76,6 +77,15 @@ class Steps(Job):
         rc, lines, out = self.run_job(step("block", "echo a > a.txt\necho b > b.txt"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertTrue(os.path.exists(os.path.join(self.root, "b.txt")), out)
+
+    def test_the_verdict_line_is_not_a_heartbeat(self):
+        os.environ["VERDICT_HEARTBEAT"] = "1"
+        try:
+            rc, lines, out = self.run_job(step("slow", "sleep 2.5"))
+        finally:
+            del os.environ["VERDICT_HEARTBEAT"]
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        self.assertNotIn("still running", lines[0])
 
     def test_one_line_per_step_in_order(self):
         rc, lines, out = self.run_job(step("one", "true"), step("two", "false"), step("three", "true"))

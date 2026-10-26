@@ -195,7 +195,8 @@ def main(argv):
             gone = missing_in_log(log, start, script)
         finally:
             os.remove(script)
-        first = (done.stdout.splitlines() or ["(verdict printed nothing)"])[0]
+        first = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "FAIL "))),
+                     "(verdict printed no verdict line)")  # skip its "still running" heartbeats
         if done.returncode == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
