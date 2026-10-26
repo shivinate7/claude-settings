@@ -1,9 +1,9 @@
 {
   "title": "The waiting page lets you clear an answer or say \"none of these\"",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "review",
   "order": 103.357,
   "why": "Your gripe, Oct 26 (waiting page, item 27): you could not unselect an answer, and none of the three options was right.",
-  "note": "Pilot fixed Oct 26 by the waiting-page thread (version 3, https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8; source plans/c71-waiting-page.html in project files): every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the answer line reads \"N none of these (note)\". claude-settings part, one cloud lane, needs no answer from you: the waiting-page skill (c71, PR #636, on main 54be9f1) gives its page template the same two controls, and its session protocol treats a \"none\" answer as a request for new options, never as a ruling, and a cleared answer as no answer. Port: yes, every repo's page comes from the skill. Placed after c80, ahead of c76 (triage, Oct 26): the page is how every deferred step reaches you, and a wrong forced pick becomes a false ruling.",
-  "updatedAt": "2026-10-26T20:55:00Z"
+  "note": "Pilot fixed Oct 26 by the waiting-page thread (version 3, https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8; source plans/c71-waiting-page.html in project files): every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the answer line reads \"N none of these (note)\". claude-settings part: PR #646 (waiting page: clear an answer or say \"none of these\"), two Sonnet review rounds, round 2 clear; head 8ecd5bb sent to the build advisor for the next integration batch. The template has both controls; the skill reads \"none\" as a request for new options (its own step in Route and close) and a cleared answer as no answer; 8 browser tests in skills/waiting-page/tests run in the gates-shoot job. Port: yes, every repo's page comes from the skill. Placed after c80, ahead of c76 (triage, Oct 26).",
+  "updatedAt": "2026-10-26T21:00:00Z"
 }
