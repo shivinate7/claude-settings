@@ -88,15 +88,43 @@ project-ops, because every repo with a plan needs a current record you can skim.
 
 Lanes 1 to 3 need no answer from you. Lane 4 joins o4's lane. Lane 5 is deferred.
 
-## 7. Parked for you: where each worker's live state comes from
+## 7. Where each worker's live state comes from
 
-- **(a) Project threads and GitHub, read at build.** The publisher reads thread states (working,
-  blocked, review ready) and open branches and PRs. Gain: works in the cloud today, no new writes.
-  Lose: local sessions do not show.
-- **(b) session-board's store.** Gain: richest state (agents, context, update-ready). Lose: it lives on
-  one machine, so only a local build shows it.
-- **(c) Each session writes one line to the page's database at turn end** (c71's pattern). Gain: every
-  session, local too. Lose: a new write per turn; whether a local session can write a page database is
-  unmeasured (c71).
+Ruling (shiv, Oct 26, waiting page): (a) now, (c) once a local write is measured. The three options
+never excluded each other. They are three feeds into one strip, so the only real question was order.
 
-Pick: **(a) now, (c) after c71 measures the local write.** Lane 5 is (a) until you say otherwise.
+- **(a) Project threads and GitHub, read at build. Built (lane 5).** The publisher reads
+  `list_threads` and the open pull requests just before the build and passes them in `--live FILE`
+  (`skills/roadmap/SKILL.md`, "Live work"). A thread that names a step tags it. Local sessions do not
+  show, and the strip is as old as the last build.
+- **(b) session-board's store. Do not add.** It lives on one machine, and the page is built and
+  published from the cloud, so it would show only after a build on that machine and go stale between.
+  What it holds that (a) lacks (agents, context left, update ready) a local session can put in its
+  own (c) line, so (c) covers it.
+- **(c) Each session writes its own line to the page's database. Planned below.**
+
+### (c) plan: one line per session in the page's database
+
+c71 measured that a Mac session can write a page's database (liaison, Oct 26). Windows is unknown.
+
+- **Home.** A `live` collection in the published roadmap page's database, one doc per session:
+  `live/<session id>` = {title, where ("cloud", "mac", "windows"), state (the same five states as (a)),
+  step?, pr?, at (ISO)}. The doc is the session's own; nobody else writes it.
+- **When it writes.** Only on a state change: start, waiting on the owner, ready for review, done.
+  Never on a timer, never each turn (cost rule: one ArtifactData call per change, no new process,
+  no file). A session that is done deletes its doc. A doc older than 6 hours shows as "quiet", not
+  as working.
+- **Who makes it happen.** A hook cannot call ArtifactData, so the session does it: one paragraph in
+  the roadmap skill and one line in the waiting-page skill's protocol (the same moments it already
+  writes). The page URL comes from the layout extras, beside the waiting-page key.
+- **The page.** The viewer reads `live` from the real database when the page is published, and from
+  the baked stub as an empty collection on disk. Rows from (c) merge with (a) by title; (c) wins
+  when it is newer.
+- **Lane checks.** A fixture database with one fresh doc, one stale doc and one malformed doc: the
+  strip shows one working, one quiet and one skipped. Measure first on Windows (local liaison): one
+  ArtifactData write from a Windows session. Until then a Windows session reads "unknown".
+- **Needs before the lane:** claude-settings' layout roll-out (o2) for the page key, and the Windows
+  measure. No answer from shiv is needed.
+
+Port of the live strip: yes, with the builder, because any repo with threads or PRs gains it at no
+new cost; (c) ports with the waiting-page skill.
