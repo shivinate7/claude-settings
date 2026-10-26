@@ -11884,8 +11884,8 @@ def merge_hang_timeout_case():
     parts. The read ends within MERGE_READ_TIMEOUT (read from the guard under test) plus
     HANG_MARGIN_S, so a read that outlives its own budget fails. And that budget plus its margin
     stays under HANG_CEILING_S, on every OS, so a bound that follows the constant cannot bless a
-    budget that nears the hook's 60s. The first part is asserted on POSIX only. MEASURED on
-    Windows: GHHANG is a `.cmd` fake, and subprocess.run's kill on timeout only reaches the
+    budget that nears the hook's 60s. The first part is asserted on POSIX only. On
+    Windows, GHHANG is a `.cmd` fake, and subprocess.run's kill on timeout only reaches the
     cmd.exe it directly spawned, never the
     ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
     captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until

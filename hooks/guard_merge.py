@@ -72,7 +72,7 @@ MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", 
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
 # hung `gh` to this one budget (pinned in test_guard.py), so a merge with a dead `gh` is denied fast instead of waiting out
-# each call. Measured 2026-10-26 from a Linux cloud session: REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
+# each call. From a Linux cloud session, REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
 # budget covers 5 calls at the 3.5 s a GraphQL call took there under load (17.5 s). The guard hook's own timeout is 60 s.
 MERGE_READ_TIMEOUT = 25
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
