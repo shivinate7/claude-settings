@@ -83,7 +83,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
                        Also an Agent or Task spawn that sets model opus, unless Plan, Explore or a
-                       builder `Round 3 of 3` covers it. An override pass lifts the spawn ask only.
+                       builder's third-round marker covers it. An override pass lifts the spawn ask only.
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -1694,8 +1694,8 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-# `Try N of 3` is the old builder marker. Both forms count until 2026-11-09, so a brief sent before
-# the rename still steps up; then `try` leaves this pattern and BUILDER_KINDS.
+# `Try` is the old builder word for a round. Both words count for 14 days (note try-marker-sunset), so a
+# brief sent before the rename still steps up; then `try` leaves this pattern and BUILDER_KINDS.
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 BUILDER_KINDS = ("round", "try")
 
@@ -1846,7 +1846,7 @@ OPUS_STANDING_ROLES = ("Plan", "Explore")
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
-    is the role Plan or Explore, or a builder whose brief holds a `Round 3 of 3` line (the same marker
+    is the role Plan or Explore, or a builder whose brief holds a third-round marker line (the same marker
     step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
     override pass, so never_passed does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
@@ -2547,7 +2547,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: reviewer round 2 on Sonnet, round 3 on Sonnet or Opus, builder round 3 on Opus.
+    # 9b. Step-up: a reviewer's second round on Sonnet, its third on Sonnet or Opus, a builder's third on Opus.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))

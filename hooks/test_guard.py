@@ -894,8 +894,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     this test process's own full PATH, and that absolute path is written into the fake's body. The
     fake itself runs under a narrow PATH the guard builds (its own folder, then only the Python
     interpreter's folder — see PY_PATH), and calling the tool by bare name there is a silent
-    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: MEASURED in CI run
-    (checks job, PR #124) setup-python's toolcache folder has no `sleep`, and MEASURED locally
+    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: measured in a CI run
+    of the checks job, setup-python's toolcache folder has no `sleep`, and MEASURED locally
     `C:\\Python314` has no `ping`. Both print a "not found" line to stderr and return instantly, so
     the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
     tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
@@ -11660,10 +11660,10 @@ for _tool in ("Agent",):
 add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
-# ---- Step-up (owner ruling 2026-10-12, rule roles-third-round-steps-up). The brief's fixed form
-# "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
-# same form steps a builder up: round 3 needs opus, rounds 1 and 2 stay on sonnet. The old builder
-# form "Try N of 3" counts the same until 2026-11-09, so a brief sent before the rename still works.
+# ---- Step-up (rule roles-third-round-steps-up). The brief's fixed marker line steps a reviewer
+# up: the second round needs sonnet, the third sonnet or opus. The same line steps a builder up:
+# the third round needs opus, the first two stay on sonnet. The old builder word "Try" counts the
+# same for 14 days (note try-marker-sunset), so a brief sent before the rename still works.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) may run opus: the step-up allows it
 # and the Opus ceiling below asks. The middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
@@ -11715,7 +11715,7 @@ add("floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, n
 
 # ---- Rule 9, the Opus ceiling (decision subagent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `subagent-model-cap`, unless a standing word
-# covers it: Plan, a builder's `Round 3 of 3` line (or the old `Try 3 of 3`), and Explore (the class-level word, pinned above).
+# covers it: Plan, a builder's third-round marker line (old word included), and Explore (the class-level word, pinned above).
 # A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
 # so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
@@ -13487,7 +13487,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13; decision guard-hooks-fail-closed): a guard
+# audit-high (decision guard-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
