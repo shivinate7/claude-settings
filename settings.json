@@ -280,16 +280,9 @@
         "matcher": "SendMessage",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Judge this SendMessage call: $ARGUMENTS\nAnswer {\"ok\": true} at once for a resume, a status message, or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear something that changes its work). Judge by wording only: a separate state check handles a receiver on the session board. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "timeout": 30,
-            "model": "claude-sonnet-5-5",
-            "continueOnBlock": true
-          },
-          {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sendmessage_state.py\"; [ -f \"$g\" ] || { echo \"sendmessage state judge failed open: no script\" >&2; exit 0; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"sendmessage state judge failed open: no python\" >&2; exit 0",
-            "timeout": 45
+            "timeout": 50
           }
         ]
       },
