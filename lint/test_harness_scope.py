@@ -8,7 +8,7 @@ HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
              gates_windows_rest, gates_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods (the suite flags the steps inside a job read)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags the steps inside a job read)
 
 Run with:  python3 lint/test_harness_scope.py -v
 """
@@ -21,7 +21,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
-STEP_FLAGS = ["code", "guard", "sweep", "mods"]
+STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
 
@@ -287,6 +287,14 @@ class Scope(unittest.TestCase):
         for p in ("bin/ios-ship", "lint/test_ios_ship.sh"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
+    # bin/shoot's suite installs a browser, so only its own paths turn `shoot` on. An edit sets `code` and `shoot`
+    # and no other flag; an unrelated code change leaves `shoot` off.
+    def test_shoot_edit_turns_on_only_the_shoot_suite(self):
+        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
+        self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
 if __name__ == "__main__":
     unittest.main()

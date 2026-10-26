@@ -2,13 +2,13 @@
 # Decides which gates jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
-#   map skill tests, steps of the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
+#   map skill tests, steps of the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness), shoot (the bin/shoot suite, which installs a browser). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
-ALL="$JOBS code mods guard sweep"
+ALL="$JOBS code mods guard sweep shoot"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -39,6 +39,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $X code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
+      # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # merge.py: guard.py loads it. check_record_slugs.py: guard.py reads it. check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/check_record_slugs.py) on="$on $W $X code guard " ;;
