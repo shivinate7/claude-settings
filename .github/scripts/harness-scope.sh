@@ -37,6 +37,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/claude-janitor) on="$on $W $S $R $X code guard sweep " ;;
       janitor/*) on="$on $R $X code sweep " ;;
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $X code " ;;
+      # The fixture copy helpers: suites in every job copy the repo's modules through them.
+      testing/tracked_tree.py|testing/tracked_tree.sh|testing/TrackedTree.ps1) on="$on $ALL " ;;
+      bin/ci-job) on="$on code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.

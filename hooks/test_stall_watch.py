@@ -797,6 +797,82 @@ def log_keeps_growing_after_watcher_exits():
     return problems
 
 
+def growing_log_job(log, steps=5):
+    """A merge.py-like job: nothing on stdout, one line a second into a log its command names."""
+    return "i=0; while [ $i -lt %d ]; do echo t$i; sleep 1; i=$((i+1)); done >> %s 2>&1" % (steps, log)
+
+
+@posix_case
+def named_log_that_grows_is_no_stall():
+    """23a. a quiet stdout and a log the command names by redirection that grows each second: no
+    STALL, exit 0, in each shell"""
+    problems = []
+    for shell in shells():
+        log = os.path.join(new_dir(), "merge.log")
+        rc, text, _secs, _cmd = run_rewritten(growing_log_job(shlex.quote(log)), shell=shell)
+        problems += expect(rc == 0, f"{shell}: exit {rc}, want 0")
+        problems += expect("STALL:" not in text, f"{shell}: a STALL report came for a job whose log grows")
+        reap()
+    return problems
+
+
+@posix_case
+def named_log_relative_tee_and_flag_forms_are_read():
+    """23b. a relative `> F`, a `| tee -a F` and a `--log F` name a log the watcher reads: no STALL"""
+    problems = []
+    py = shlex.quote(PY)
+    grow = "import sys, time\nfor i in range(5): open(sys.argv[2], 'a').write('t\\n'); time.sleep(1)"
+    forms = {
+        "relative": growing_log_job("rel.log"),
+        "tee": "i=0; while [ $i -lt 5 ]; do echo t$i; sleep 1; i=$((i+1)); done 2>&1 | tee -a tee.log >%s"
+               % os.devnull,
+        "flag": "%s -c %s --log flag.log" % (py, shlex.quote(grow)),
+    }
+    for name, orig in forms.items():
+        rc, text, _secs, _cmd = run_rewritten(orig)
+        problems += expect(rc == 0, f"{name}: exit {rc}, want 0")
+        problems += expect("STALL:" not in text, f"{name}: a STALL report came for a job whose log grows")
+        reap()
+    return problems
+
+
+@posix_case
+def named_log_that_stops_growing_stalls():
+    """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the job alive"""
+    log = shlex.quote(os.path.join(new_dir(), "merge.log"))
+    rc, text, secs, _cmd = run_rewritten("echo once >> %s; sleep 30 >> %s 2>&1" % (log, log))
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+@posix_case
+def log_named_only_in_a_string_or_comment_still_stalls():
+    """23d. a log path the command names only inside quotes or a comment is not a redirection: a
+    quiet job stalls though another process grows that file"""
+    log = os.path.join(new_dir(), "elsewhere.log")
+    q = shlex.quote(log)
+    writer = subprocess.Popen([PY, "-c", "import sys, time\nwhile True:\n    open(sys.argv[1], 'a').write('x\\n'); time.sleep(0.3)", log])
+    try:
+        orig = "echo '> %s' \"--log %s\" >%s; sleep 30 # >> %s" % (log, log, os.devnull, q)
+        rc, text, secs, _cmd = run_rewritten(orig)
+    finally:
+        writer.kill()
+        writer.wait()
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+@posix_case
+def quiet_job_with_no_named_log_stalls():
+    """23e. a quiet job whose only redirection is to the null device, with no other log: STALL"""
+    rc, text, secs, _cmd = run_rewritten("sleep 30 >%s 2>&1" % os.devnull)
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
 # Parity table. A row is one case body from above, and keeps its label. A failing row
 # prints that label before its problem. A row that raises names itself too.
 @posix_case

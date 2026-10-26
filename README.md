@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `ux/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
@@ -232,7 +232,7 @@ Each account value comes from the first of: an environment variable of the same 
 `DEVICE_UDID`, `ASC_KEY_PATH`, `ASC_KEY_ID`, `ASC_ISSUER_ID`), the repo config, the account file. A value that is unset
 in all three is refused, and the refusal names both files and the variable. The tool has no built-in IDs.
 
-**Run it** from inside the app repo: `ios-ship testflight` or `ios-ship install`. With no `CONFIG`, the tool uses
+**Run it** from inside the app repo: `ios-ship testflight`, `ios-ship install` or `ios-ship profile --app NAME`. With no `CONFIG`, the tool uses
 `tools/ios-ship.json` at the git toplevel of the current folder. Outside a git repo, or with no such file, it exits 2.
 The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
 `tools/ios-ship.json`.
@@ -245,7 +245,23 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.
   An install that is more than 300 days old raises an overdue notice.
-* `--app NAME` limits a run to the named apps. A name that is not in the config exits 2.
+* `ios-ship profile [CONFIG] --app NAME [--template T] [--time-limit S] [--output P] [--retry-wait S]` records one app
+  on the phone with Instruments (`xcrun xctrace record`), by the phone's UDID, and launches the app by its bundle id.
+  Defaults: `Time Profiler`, 20 s, a new folder under `$TMPDIR` (the path is printed), and a 60 s retry wait. On a
+  network-paired phone, `xctrace` can fail with "Waiting for device to boot" while the phone is fine, and no device
+  state predicts it. So that one failure is retried once, after the retry wait. Any other failure is not retried. A
+  failure exits with `xctrace`'s code (124 when the tool's timeout stops it) and prints the log path. A failed retry
+  also says that the phone may need unlocking or a cable.
+* `--app NAME` limits a run to the named apps. A name that is not in the config exits 2. `profile` needs exactly one.
+
+## Standing roles and a roadmap record for a repo
+
+The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds four
+standing roles (triage, build advisor, local liaison, merge hand), one roster, counted hand-offs and
+autopilot deferral. It also holds a record branch for the roadmap data, briefs and role hand-off notes. Its
+`scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
+the roster, a brief and a role hand-off note. A repo adopts it only on the owner's word. See
+`skills/project-ops/SKILL.md`.
 
 ## Details worth knowing but not part of setup
 

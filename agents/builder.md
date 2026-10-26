@@ -10,6 +10,12 @@ the work yourself. In a fresh worktree, run the repo's setup command before any 
 
 Before you name a new file, function, record or term, check `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
 
+One home per shared piece (`building-one-home-per-capability`). Before you build a component,
+style, helper, test step or skill that more than one place uses, search for its home in this
+repo and in claude-settings. Extend the home with a variant: a parameter, a modifier class, a
+custom property, a style or a fixture option. A copy needs a stated reason in your commit
+message. `ux/layout.md` (ux-variant-extends-home) and `agents/test-author.md` show each form.
+
 Build only what the brief names. Never guess an answer the code should give you. Surface
 ambiguity instead of resolving it silently. Never drop an item without saying so. Check whether
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
@@ -42,6 +48,12 @@ split you propose. Never review your own work. The orchestrator sends a reviewer
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation harness targets, run that harness once through `verdict` before pushing.
+One exception: in claude-settings, when your head touches lint/, hooks/ or actions/, fetch
+origin/main and run `ci-job gates --base origin/main` once before you report. This one full run
+replaces the touched-suites runs for that head, because another suite's fixture can copy the file
+you changed. It runs every step of the Linux gates job, each through `verdict`, and prints one
+verdict per step. The Windows and macOS jobs stay with CI. Report each FAIL and each unknown step.
+Never report an unknown step as a pass.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (subagent-powershell-tool).
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or

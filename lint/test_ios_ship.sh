@@ -18,7 +18,7 @@ end_case() { if [[ -z $why ]]; then case_pass "$1"; else case_fail "$1" "$why"; 
 need() { local msg=$1; shift; [[ -n $why ]] && return 0; "$@" || why=$msg; }
 not() { ! "$@"; }
 
-REAL_GIT=$(command -v git); REAL_DATE=$(command -v date); REAL_CP=$(command -v cp); export REAL_GIT REAL_DATE REAL_CP
+REAL_GIT=$(command -v git); REAL_DATE=$(command -v date); REAL_CP=$(command -v cp); REAL_SLEEP=$(command -v sleep); export REAL_GIT REAL_DATE REAL_CP REAL_SLEEP
 # The owner's shell may export these. Unset here, so only a case's own prefix assignment reaches the tool.
 unset TEAM_ID DEVICE_UDID ASC_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID PHONE_APPS_JSON
 
@@ -106,9 +106,29 @@ case "$*" in
   "devicectl device process launch"*)
     echo launch >> "$CALL_LOG"
     if [[ -n ${LAUNCH_FAIL:-} ]]; then echo "$LAUNCH_FAIL"; exit 1; fi ;;
+  "xctrace record"*)
+    # XCTRACE_PLAN: one word per call. ok exits 0; boot prints the boot wait and exits 13; hang hangs in the save until
+    # the tool's timeout; any other word fails with exit 7.
+    echo xctrace >> "$CALL_LOG"
+    echo "xcrun $*" >> "$CALL_LOG.args"
+    o=; prev=; for a in "$@"; do [[ $prev == --output ]] && o=$a; prev=$a; done
+    # Real xctrace will not write over a trace.
+    if [[ -n $o && -e $o ]]; then echo "Recording failed: output exists"; exit 9; fi
+    n=$(cat "$CALL_LOG.xctn" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CALL_LOG.xctn"
+    set -- ${XCTRACE_PLAN:-ok}; shift $((n - 1)); w=${1:-ok}
+    case $w in
+      ok) exit 0 ;;
+      # XCTRACE_MAKE_OUTPUT=1: a boot failure leaves a partial trace at --output, which the retry must remove.
+      boot) [[ -z ${XCTRACE_MAKE_OUTPUT:-} ]] || [[ -z $o ]] || mkdir -p "$o"
+        echo "Waiting for device to boot..."; echo "Timed out waiting for device to boot"; exit 13 ;;
+      hang) echo "Recording completed. Saving output file..."; exec "$REAL_SLEEP" 30 ;;
+      *) echo "Recording failed: $w"; exit 7 ;;
+    esac ;;
   *) echo "xcrun $*" >> "$CALL_LOG" ;;
 esac
 SH
+# sleep: SLEEP_FAKE=1 logs the call and returns at once. Unset, it is the real sleep, so the other stubs still wait.
+printf '#!/usr/bin/env bash\nif [[ -n ${SLEEP_FAKE:-} ]]; then echo "sleep $*" >> "$CALL_LOG"; exit 0; fi\nexec "$REAL_SLEEP" "$@"\n' > "$stubs/sleep"
 # OSASCRIPT_HANG makes every notification sleep past the notify timeout.
 printf '#!/usr/bin/env bash\necho "osascript $*" >> "$CALL_LOG"\nif [[ -n ${OSASCRIPT_HANG:-} ]]; then sleep 60; fi\n' > "$stubs/osascript"
 chmod +x "$stubs"/*
@@ -152,12 +172,12 @@ tool_exec() {
   homevar=(HOME="$home"); phone=()
   [[ -z ${no_home:-} ]] || homevar=()
   [[ -z ${PHONE_APPS_JSON+x} ]] || phone=(PHONE_APPS_JSON="$PHONE_APPS_JSON")
-  cd "${run_dir:-$work/elsewhere}" && exec env -i ${homevar[@]+"${homevar[@]}"} PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" \
+  cd "${run_dir:-$work/elsewhere}" && exec env -i ${homevar[@]+"${homevar[@]}"} PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" REAL_SLEEP="$REAL_SLEEP" \
     DATE_COUNTER="$work/datecount" COPY_PROBE="${COPY_PROBE:-}" XCODEGEN_TOUCH="${XCODEGEN_TOUCH:-}" CP_PARTIAL="${CP_PARTIAL:-}" \
     XCODEBUILD_RC="${XCODEBUILD_RC:-0}" XCODEBUILD_OUT="${XCODEBUILD_OUT:-}" XCODEBUILD_SLEEP="${XCODEBUILD_SLEEP:-}" \
     XCODEBUILD_FAIL_KIND="${XCODEBUILD_FAIL_KIND:-}" XCODEBUILD_FAIL_SCHEME="${XCODEBUILD_FAIL_SCHEME:-}" XCODEBUILD_HANG="${XCODEBUILD_HANG:-}" \
     XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" XCODEBUILD_PID_FILE="${XCODEBUILD_PID_FILE:-}" \
-    XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" \
+    XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" XCTRACE_PLAN="${XCTRACE_PLAN:-}" XCTRACE_MAKE_OUTPUT="${XCTRACE_MAKE_OUTPUT:-}" SLEEP_FAKE="${SLEEP_FAKE:-}" \
     STEP_TIMEOUT="${STEP_TIMEOUT:-}" REINSTALL_HOME="${REINSTALL_HOME:-}" TEAM_ID="${TEAM_ID:-}" DEVICE_UDID="${DEVICE_UDID:-}" \
     ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" ${phone[@]+"${phone[@]}"} \
     perl -e '$SIG{INT} = $SIG{TERM} = "DEFAULT"; alarm shift; exec @ARGV' "${LIMIT:-60}" "$tool" "$@"
@@ -166,7 +186,7 @@ tool_exec() {
 # LIMIT (seconds, default 60) kills a hung run: rc 142.
 run() {
   local job=$1 conf=$2 home=$3; shift 3
-  rm -rf "$work/tmp"; [[ -z $home ]] || mkdir -p "$home"; mkdir -p "$work/tmp"; : > "$calls"; : > "$calls.args"; : > "$calls.probe"; : > "$calls.plist"; rm -f "$work/datecount"
+  rm -rf "$work/tmp"; [[ -z $home ]] || mkdir -p "$home"; mkdir -p "$work/tmp"; : > "$calls"; : > "$calls.args"; : > "$calls.probe"; : > "$calls.plist"; rm -f "$work/datecount" "$calls.xctn"
   if [[ -n ${BG:-} ]]; then
     ( tool_exec "$home" "$job" "$conf" "$@" ) > "$out" 2>&1 &
     RUN_PID=$!; return 0
@@ -846,6 +866,81 @@ need "notice lacks the config path: $(tail -1 "$out")" grep -qF "$iconf" "$out"
 need "notice lacks the account file" grep -qF "$work/acct-i2/.config/ios-ship/account.json" "$out"
 need "notice lacks DEVICE_UDID" grep -qF DEVICE_UDID "$out"
 end_case "install: device_udid unset in env, config and account file is refused, and the notice names both files and DEVICE_UDID"
+
+# ===================== profile: one xctrace recording, retried once after the boot wait =====================
+# xctrace on a network-paired phone can fail with "Waiting for device to boot" while the phone is fine. One retry after a
+# fixed wait; any other failure is not retried. The sleep is stubbed, so no case waits.
+icfg "$(apps "$(app AdBlock)" "$(app Other)")"
+prof() { SLEEP_FAKE=1 run profile "$iconf" "$work/prof" "$@"; }   # ARGS...
+pcalls() { tr '\n' ' ' < "$calls" | sed 's/ $//'; }
+XCTRACE_PLAN=ok prof --app AdBlock
+need "exit $rc, want 0: $(tail -1 "$out")" test "$rc" -eq 0
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace"
+end_case "profile: a first recording that passes is one call, no sleep, exit 0"
+XCTRACE_PLAN="boot ok" prof --app AdBlock
+need "exit $rc, want 0: $(tail -1 "$out")" test "$rc" -eq 0
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "no line names the wait" grep -q 'Waiting for device to boot' "$out"
+end_case "profile: the boot wait, then a pass, is two calls with one 60 s sleep between, exit 0"
+XCTRACE_PLAN="boot boot" prof --app AdBlock
+need "exit $rc, want 13 (xctrace's code)" test "$rc" -eq 13
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "the last line names no log: $(tail -1 "$out")" grep -qE 'see .*ios-ship-profile' "$out"
+need "no line says the phone may need unlocking or a cable" grep -qE 'unlock.*cable' "$out"
+end_case "profile: two boot waits are two calls and exit with xctrace's code"
+XCTRACE_PLAN="disk-full" prof --app AdBlock
+need "exit $rc, want 7 (xctrace's code)" test "$rc" -eq 7
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace"
+end_case "profile: a failure without the boot wait is not retried and exits with xctrace's code"
+XCTRACE_PLAN="boot ok" prof --app AdBlock --retry-wait 5 --template Allocations --time-limit 7 --output "$work/p.trace"
+need "exit $rc, want 0: $(tail -1 "$out")" test "$rc" -eq 0
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 5 xctrace"
+need "xctrace not aimed at the phone's UDID" args_have '^xcrun xctrace record .*--device FAKE-DEVICE-0001 '
+need "xctrace not launching the app's bundle id" args_have "--launch -- dev.example.AdBlock\$"
+need "template, time limit or output not passed" args_have "--template Allocations --device FAKE-DEVICE-0001 --time-limit 7s --output $work/p.trace "
+need "xctrace given a device name" not grep -qE -- '--device [^ ]*[^-A-Z0-9 ]' "$calls.args"
+end_case "profile: records by UDID with the app's bundle id, and --retry-wait 5 sleeps 5"
+XCTRACE_PLAN="boot boot" XCTRACE_MAKE_OUTPUT=1 prof --app AdBlock --output "$work/p3.trace"
+need "exit $rc, want 13" test "$rc" -eq 13
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "the partial trace of the first try was not removed before the retry" not grep -q 'output exists' "$out"
+end_case "profile: a partial trace from a boot failure is removed before the retry"
+XCTRACE_PLAN="boot other" prof --app AdBlock
+need "exit $rc, want 7" test "$rc" -eq 7
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a retry that fails another way exits with its code and names no cable"
+XCTRACE_PLAN="boot hang" STEP_TIMEOUT=1 prof --app AdBlock
+need "exit $rc, want 124" test "$rc" -eq 124
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "no line names the step and its 1 s timeout" grep -q 'step xctrace record timed out after 1s' "$out"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a retry that hangs in its save names the timeout and the step, and no cable"
+XCTRACE_PLAN="hang" STEP_TIMEOUT=1 prof --app AdBlock
+need "exit $rc, want 124" test "$rc" -eq 124
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace"
+need "no line names the step and its 1 s timeout" grep -q 'step xctrace record timed out after 1s' "$out"
+need "a line says the phone may need unlocking or a cable" not grep -qE 'unlock.*cable' "$out"
+end_case "profile: a first try that hangs is not retried, and names the timeout and the step"
+XCTRACE_PLAN=ok DEVICE_UDID=FAKE-DEVICE-ENV1 prof --app Other
+need "exit $rc, want 0" test "$rc" -eq 0
+need "the env UDID or the named app was not used" args_have '--device FAKE-DEVICE-ENV1 .*--launch -- dev.example.Other$'
+end_case "profile: the UDID comes from the env first, and --app picks the app"
+for a in "" "--app AdBlock --app Other" "--app AdBlock --retry-wait x" "--app AdBlock --time-limit 0"; do
+  # shellcheck disable=SC2086
+  XCTRACE_PLAN=ok prof $a
+  need "[$a] exit $rc, want 2" test "$rc" -eq 2
+  need "[$a] xctrace ran" test ! -s "$calls"
+done
+end_case "profile: no --app, two --app, or a bad number exits 2 with no recording"
+mkdir -p "$work/p2.trace"; XCTRACE_PLAN=ok prof --app AdBlock --output "$work/p2.trace"
+need "exit $rc, want non-zero" test "$rc" -ne 0
+need "xctrace ran over an existing output" test ! -s "$calls"
+end_case "profile: an output path that exists is refused before any recording"
+icfg "$(apps "$(app AdBlock)")"
+install_run "$work/prof2" --retry-wait 5
+need "install: exit $rc, want 2" test "$rc" -eq 2
+end_case "install: --retry-wait is a profile option and exits 2"
 
 # No CONFIG: the default is tools/ios-ship.json at the git toplevel of the current folder. It runs the calls that passing that path runs.
 one_app; run testflight "$tfconf" "$work/home"

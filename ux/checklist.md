@@ -26,6 +26,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
 - [ ] ux-layout-primitives: Is each page region built from a named layout primitive (stack, cluster, sidebar, grid, center)?
 - [ ] ux-component-reads-its-box (box): Does each shared component that this change touches change shape from a container query, not the screen width?
+- [ ] ux-variant-extends-home: Does each variant extend its shared component with a modifier, a custom property, a parameter or a style, and not a copy?
 - [ ] ux-component-reads-its-box (breakpoints): Does each container breakpoint that this change adds change the component's shape?
 - [ ] ux-fluid-tokens: Is each clamp() that this change adds a token read, in the shape `tokens.md` gives? A raw clamp() that the repo's own record rules for passes.
 - [ ] ux-swift-same-intent: In Swift, does each stack set its own spacing, with no child padding to space it from a sibling? (Swift screens only.)

@@ -64,12 +64,20 @@ def anchor_files(folder: str):
     return guard_files(folder) + [path for path in shared if os.path.exists(path)]
 
 
+def module_files(folder: str):
+    """Every module in `folder` that a copied guard may import: each *.py but the suites (test_*) and
+    the harnesses (mutate_*, prove_*), sorted. A copy of this set cannot miss a new shared module.
+    It lists the folder, not git: a mutation scaffold is not a git tree, and testing/tracked_tree.py
+    does not land beside the hooks."""
+    return sorted(os.path.join(folder, name) for name in os.listdir(folder)
+                  if name.endswith(".py") and not name.startswith(("test_", "mutate_", "prove_")))
+
+
 def guard_tree(dest: str) -> None:
-    """Copy every guard module and git_reads.py in HOOKS_DIR into `dest`, so a copied guard.py
-    finds its siblings beside it, never the real ones. shared_names.py goes too: guard_core.py and
-    config_watch.py import it, and a copy without it dies on that import."""
+    """Copy every module in HOOKS_DIR (module_files) into `dest`, so a copied guard.py finds its
+    siblings beside it, never the real ones, and a module they import cannot be left out."""
     os.makedirs(dest, exist_ok=True)
-    for path in anchor_files(HOOKS_DIR) + [os.path.join(HOOKS_DIR, "shared_names.py")]:
+    for path in module_files(HOOKS_DIR):
         shutil.copy(path, dest)
 
 

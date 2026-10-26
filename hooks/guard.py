@@ -139,8 +139,9 @@ The matched text goes to the log, so a person can still see what fired.
 
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override pass
 (decision owner-override-pass): the owner types `override` as a whole prompt, and refuse() lets the
-next refused act through, or every refused act for a time. It never lifts `frozen-path`,
-`git-env-set`, a kill of pid 0, 1 or -1, the role and model guards (`subagent-model-cap`,
+next refused act through, or every refused act for a time. The narrower Opus pass (`opus 2h`) lifts
+only the Opus spawn ask. No pass lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
+role and model guards (the settings-write ask of `subagent-model-cap`,
 `subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No pass check reaches the missing-module deny, the `settings.json` deny list,
 the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
@@ -2588,10 +2589,12 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass lifts it.
+    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass or an Opus
+    # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
-        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model)
+        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model,
+               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
     # 9d. The machine-load brake: one read on a lane-start call, none on any other call.
     load_reason, load_matched = load_hit(tool, tool_input)

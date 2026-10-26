@@ -793,61 +793,124 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
 
     def test_dm_red_builder_unnamed_blocks(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", [self.BUILDER])
+        out = self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_red_one_of_two_roles_unnamed_blocks(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** none",
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
                            [self.BUILDER, self.REVIEWER_R2])
         self.assertIn("no model named for reviewer", out["reason"])
 
     def test_dm_red_builder_named_opus_ran_sonnet_blocks(self):
         # The builder file has no pin, so the spawn reads CLAUDE_CODE_SUBAGENT_MODEL, sonnet.
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
                            [self.BUILDER])
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
     def test_dm_red_reviewer_named_sonnet_ran_file_pin_blocks(self):
         # No model field: the reviewer runs its agents/reviewer.md pin, haiku.
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** none",
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
                            [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}])
         self.assertIn("ran haiku", out["reason"])
 
     def test_dm_green_names_match_spawns(self):
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** none",
+            "> **Done** BUILT the gate, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** Unstarted: none",
             [self.BUILDER, self.REVIEWER_R2]))
 
     def test_dm_green_try3_builder_opus(self):
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+            "> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
             [{"subagent_type": "builder", "model": "opus", "prompt": "Try 3 of 3"}]))
 
     def test_dm_red_denied_opus_builder_does_not_back_opus_name(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
                            [self.BUILDER], denied=[{"subagent_type": "builder", "model": "opus"}])
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
     def test_dm_false_alarm_denied_spawn_then_solo_passes(self):
-        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", [],
+        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", [],
                                        denied=[{"subagent_type": "builder", "model": "opus"}]))
 
     def test_dm_false_alarm_other_name_forms_pass(self):
         for done in ("(builder and reviewer sonnet)", "(builder: sonnet, reviewer (sonnet))",
                      "(builder, reviewer sonnet)"):
             self.assertIsNone(self.verdict(
-                "> **Done** BUILT the gate, PR #5 " + done + "\n> **Next** none",
+                "> **Done** BUILT the gate, PR #5 " + done + "\n> **Next** Unstarted: none",
                 [self.BUILDER, self.REVIEWER_R2]), done)
 
     def test_dm_false_alarm_no_subagent_passes(self):
-        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", []))
+        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", []))
 
     def test_dm_false_alarm_search_only_spawns_pass(self):
         # An Explore search or a Plan spawn builds and reviews nothing, so Done names no model.
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5\n> **Next** none",
+            "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+
+class UnstartedItemsTests(unittest.TestCase):
+    """reports-name-unstarted-items, in report_gate.py's Stop hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def verdict(self, reply, spawns):
+        records = [human("do the task")]
+        for spawn in spawns:
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                    assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        run = run_gate(REPORT_GATE, hook, env=env)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    BUILDER = {"subagent_type": "builder", "prompt": "build it"}
+    DONE = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n"
+
+    def test_un_red_builder_turn_without_line_blocks(self):
+        rows = [
+            # Catches: a builder turn whose Next names no unstarted items passes.
+            self.DONE + "> **Next** merge the batch",
+            # Catches: the word alone, with no colon, is read as the line.
+            self.DONE + "> **Next** Unstarted items wait on the batch",
+            # Catches: the line outside the report blockquote counts.
+            "Unstarted: none\n\n" + self.DONE + "> **Next** merge the batch",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                out = self.verdict(reply, [self.BUILDER])
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("Unstarted gate", out["reason"])
+
+    def test_un_green_line_forms_pass(self):
+        rows = [
+            self.DONE + "> **Next** Unstarted: none",
+            self.DONE + "> **Next**\n> - merge the batch\n> - Unstarted: c41, the lint lane, waits on the brake",
+            self.DONE + "> **Next** merge the batch\n> Unstarted: none",
+            self.DONE + "> **Next:** Unstarted: none",
+            self.DONE + "> **Next** merge the batch; Unstarted: none",
+            self.DONE + "> **Next** unstarted: none",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.verdict(reply, [self.BUILDER]))
+
+    def test_un_false_alarm_no_builder_passes(self):
+        rows = [
+            # Catches: a solo turn, or one that spawned only a reviewer, must name unstarted items.
+            ([], "> **Done** BUILT the gate, PR #5\n> **Next** none"),
+            ([{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}],
+             "> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** none"),
+        ]
+        for spawns, reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.verdict(reply, spawns))
 
 
 class ConfigReportTests(unittest.TestCase):
