@@ -343,7 +343,8 @@ def scan_jobs(transcript):
                         notes[b.get("id")] = until_note(b["input"].get("description"))
                         cmd = b["input"].get("command")
                         if isinstance(cmd, str):
-                            logs[b.get("id")] = (named_logs(cmd), rec.get("cwd"))
+                            cwd = rec.get("cwd")
+                            logs[b.get("id")] = (named_logs(cmd), cwd if isinstance(cwd, str) else None)
                 stops.update(b["id"] for b in content if isinstance(b, dict)
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
