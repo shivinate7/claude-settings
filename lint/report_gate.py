@@ -287,8 +287,13 @@ def bare_cite(text):
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+# A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
+# and "builder and reviewer sonnet" all count.
+_ROLE = r"(?:builder|reviewer|test-author|record-writer)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(builder|reviewer|test-author|record-writer)\s+(haiku|sonnet|opus|fable)\b", re.I)
+    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    re.I)
+ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
 
 
@@ -318,10 +323,16 @@ def spawn_models(records):
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
     """
+    failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    for rec in records:
+        content = (rec.get("message") or {}).get("content")
+        for b in content if isinstance(content, list) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                failed.add(b.get("tool_use_id"))
     found = {}
     for rec in records:
         for b in tool_uses(rec):
-            if b.get("name") not in SPAWN_TOOLS:
+            if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
                 continue
             inp = b.get("input") or {}
             role = str(inp.get("subagent_type") or "").lower()
@@ -338,7 +349,8 @@ def done_models_problem(text, spawned):
     if not spawned:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
-    named = {(r.lower(), m.lower()) for r, m in ROLE_MODEL_RE.findall(done)}
+    named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
+             for r in ROLE_RE.findall(roles)}
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)

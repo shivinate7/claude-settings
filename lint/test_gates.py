@@ -770,10 +770,16 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns):
+    def verdict(self, reply, spawns, denied=()):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for spawn in denied:
+            use = tool_use_msg("Agent", spawn)
+            use["message"]["content"][0]["id"] = "tu_denied"
+            result = tool_result_msg("tu_denied")
+            result["message"]["content"][0]["is_error"] = True
+            records += [use, result]
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
@@ -817,6 +823,22 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
             [{"subagent_type": "builder", "model": "opus", "prompt": "Try 3 of 3"}]))
+
+    def test_dm_red_denied_opus_builder_does_not_back_opus_name(self):
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+                           [self.BUILDER], denied=[{"subagent_type": "builder", "model": "opus"}])
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_false_alarm_denied_spawn_then_solo_passes(self):
+        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", [],
+                                       denied=[{"subagent_type": "builder", "model": "opus"}]))
+
+    def test_dm_false_alarm_other_name_forms_pass(self):
+        for done in ("(builder and reviewer sonnet)", "(builder: sonnet, reviewer (sonnet))",
+                     "(builder, reviewer sonnet)"):
+            self.assertIsNone(self.verdict(
+                "> **Done** BUILT the gate, PR #5 " + done + "\n> **Next** none",
+                [self.BUILDER, self.REVIEWER_R2]), done)
 
     def test_dm_false_alarm_no_subagent_passes(self):
         self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", []))

@@ -89,7 +89,7 @@ a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
 MEASURED in a cloud session, 2026-10-26, by each subagent transcript's `model` field. The variable
 was `sonnet`, and no `agents/` files were installed. A `general-purpose` spawn with no model ran
-Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. So a definition that
+Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. An `Explore` spawn that set model `haiku` ran Haiku, so the call's `model` beats both. So a definition that
 names a model, `inherit` included, beats the variable. In cloud, an Explore search runs Opus, not
 Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because cloud installs none.
 
