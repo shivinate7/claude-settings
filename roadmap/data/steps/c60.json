@@ -1,0 +1,10 @@
+{
+  "title": "The stall watch does not cry wolf on a command that writes to its own log",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 104.05,
+  "why": "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it (rule verification-cry-wolf-guard-is-spent).",
+  "note": "Finding, Oct 26 (build advisor, merging #586 on the Mac): the stall watch (hooks/stall_watch.py) flagged merge.py as stalled, a false alarm: merge.py sent its output to a log file, so the watched stdout stayed quiet past 300 s while the job worked. Unchecked: how often other long commands log to a file. Fix shape, one cloud lane: count growth of a log file the command names, or let a command declare its log, before calling it stalled; red proof first on a merge.py-like case. Placed after c54 (triage, Oct 26): a real incident in the batch merge path, cloud-buildable, needs no answer from you.",
+  "ask": "",
+  "updatedAt": "2026-10-26T08:10:00Z"
+}
