@@ -498,7 +498,7 @@ check("LINT_FILES holds the linter run.sh runs",
       "lint/ste_lint.py" in LINT_FILES and "../../lint/ste_lint.py" in open(os.path.join(HERE, "run.sh")).read(), "")
 
 
-def pin_case(pin, change=lambda work: None):
+def pin_case(pin, change=lambda work: None, dead=None):
     """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
     commit label of the scratch clone. Returns (rc, output, {label: sha})."""
     with tempfile.TemporaryDirectory() as d:
@@ -527,6 +527,8 @@ def pin_case(pin, change=lambda work: None):
         git(cs, "checkout", "-q", "main")
         sha = shas.get(pin, pin)
         wf = "on: pull_request\njobs:\n  l:\n    steps:\n      - uses: o/claude-settings/actions/ste-lint@%s # main\n" % sha
+        if dead:
+            wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
         work = make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
         env = {k: v for k, v in os.environ.items() if k not in STEP_ENV}
         p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ste-changed"), "main"], cwd=work, env=env,
@@ -542,6 +544,9 @@ check("pin drift: the remedy names claude-settings main and the rule",
 rc, out, shas = pin_case("C")
 check("no drift: a pin whose lint files equal this copy's exits 0, though README.md moved since",
       rc == 0 and "CI pins ste-lint at %s" % shas["C"][:7] in out and "the same lint as this copy" in out, out)
+rc, out, shas = pin_case("C", dead="A")
+check("a commented-out pin is not a pin: an old one in a comment changes nothing",
+      rc == 0 and shas["A"][:7] not in out, out)
 rc, out, shas = pin_case("E")
 check("pin ahead: a pin this copy's history lacks exits 3 and says to pull claude-settings",
       rc == 3 and "pull claude-settings" in out, out)

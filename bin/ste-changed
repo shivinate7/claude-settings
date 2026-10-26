@@ -38,7 +38,7 @@ def pins():
         if name.endswith((".yml", ".yaml")):
             with open(os.path.join(wf, name), encoding="utf-8", errors="replace") as f:
                 for n, line in enumerate(f, 1):
-                    for sha in PIN.findall(line):
+                    for sha in PIN.findall(line.split("#", 1)[0]):
                         found.setdefault(sha, ".github/workflows/%s:%d" % (name, n))
     return found
 
