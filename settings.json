@@ -432,7 +432,8 @@
       "source": {
         "source": "github",
         "repo": "shivinate7/claude-settings"
-      }
+      },
+      "autoUpdate": true
     }
   },
   "outputStyle": "shiv-stylisms",
