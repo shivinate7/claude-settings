@@ -1,0 +1,10 @@
+{
+  "title": "After every overnight run, everything waiting on you is on one page, with a pick for each",
+  "phase": "cleanup",
+  "status": "active",
+  "order": 103.39,
+  "why": "Sessions work overnight and park questions; you should answer them all in one sitting, not hunt across threads.",
+  "note": "Ruling, Oct 26 (shiv): make \"one place to answer everything waiting on me\" a standing process; it comes up often because sessions work overnight. Each deferred decision is gathered on one page with its context, the options and a pick. Design: thread \"Answer all waiting decisions in one place\" (cmsg_01DoF7thf3iq2Srr1UsfXgh2ADTZhQexksM43HTmuCPZMa). Today's deferred items carry a \"Deferred (shiv, Oct 26)\" line on their steps, so the roadmap is the source to read. Overlap: o10 (a page per session for questions waiting on you, plan on main 54f2dfd) is the per-session page; this is the project-wide gathering; the design thread decides whether they become one page. Placed ahead of c69 (triage, Oct 26): it unblocks every deferred step at once.",
+  "ask": "",
+  "updatedAt": "2026-10-26T15:55:00Z"
+}
