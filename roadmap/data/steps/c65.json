@@ -1,0 +1,10 @@
+{
+  "title": "Main's branch protection requires gates-shoot",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 109.33,
+  "why": "A check that only the merge tool requires can be skipped by any other merge path.",
+  "note": "Deferred (shiv, Oct 26): it needs your GitHub login; branch protection is an owner setting. From c64 (#604, main 0b39053): gates-shoot is a new required job and is in stamp.json requiredChecks, so merge.py already blocks on it; GitHub's branch protection on main does not yet list it. Your step: Settings, Branches, main's rule, add gates-shoot to the required checks. About one minute. Placed after c60 and ahead of c41 (triage, Oct 26): the smallest of the deferred owner acts.",
+  "ask": "",
+  "updatedAt": "2026-10-26T12:20:00Z"
+}
