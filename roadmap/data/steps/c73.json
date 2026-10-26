@@ -1,0 +1,10 @@
+{
+  "title": "The phone profile job names a save timeout instead of telling you to unlock the phone",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.41,
+  "why": "A wrong hint sends you to fix the phone when the tool hung.",
+  "note": "Finding, Oct 26 (local liaison, c48 part 2 on the Mac): when xctrace hangs while saving after a full recording (exit 124 at the step timeout, seen once with HomeApp), bin/ios-ship profile reports \"failed twice\" and says the phone may need unlocking, which is wrong there. Fix, one small cloud lane, needs no answer from you: print the unlock hint only when the second failure also shows the boot-wait text; otherwise name the timeout. Red first with a stubbed exit-124 run in shell-macos. Port: yes, ios-ship serves every app repo. Placed after c69 (triage, Oct 26): small, and it misleads only on a rare hang.",
+  "ask": "",
+  "updatedAt": "2026-10-26T18:35:00Z"
+}
