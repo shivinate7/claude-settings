@@ -24,7 +24,8 @@ never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the bui
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
 the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try
 (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
-model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
+model above Sonnet, only on my word, for the spawn I name, or for a time when I type `opus 2h`
+(`opus builders 2h` for one role).<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
 wait for my word.<!-- rule:roles-opus-shaped-say-so --> Owner raises Opus. The guard asks before an env write raises the subagent model.<!-- rule:roles-opus-override-guarded --> A brief carries the task, the files, governing rulings, failure classes from
 `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
