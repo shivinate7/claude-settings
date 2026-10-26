@@ -1,10 +1,10 @@
 {
   "ask": "Draft the sandbox settings and the test list for the Mac trial.",
-  "note": "Repo and roadmap disagree, Oct 26: decision adoptions-declined-2026-09-28 (claude-settings 149f4bc) declines sandbox mode, because every network host and tool needs an allow entry and the guard plus deny rules give most of the gain; it reopens only on a guard bypass those miss. This step (Oct 17) plans a Mac trial anyway. Facts from Oct 17: the sandbox runs on macOS, Linux and WSL2, not native Windows, so no guard code retires; worth about an hour for real protection on the Mac; add failIfUnavailable. Proposed to triage: close unless you want the trial despite the decision.",
+  "note": "Closed by your word, Oct 26 ('c8 close'): decision adoptions-declined-2026-09-28 already declined the sandbox; the guard and deny rules give most of the gain. Reopens only on a guard bypass those miss.",
   "order": 450,
   "phase": "later",
-  "status": "todo",
+  "status": "done",
   "title": "Try the sandbox on your Mac",
-  "updatedAt": "2026-10-26T05:30:00Z",
+  "updatedAt": "2026-10-26T05:05:00Z",
   "why": "The OS blocks writes outside the repo however a command is spelled. Since Windows stays native (Oct 17), this protects Mac sessions only, and the guard code it would have replaced stays for Windows."
 }
