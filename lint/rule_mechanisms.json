@@ -392,6 +392,13 @@
         "test": "lint/test_gates.py::DoneFormatAndCiteTests.test_cite_red_bare_d_id_blocks"
       }
     },
+    "speak-one-name-per-thing": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/check_glossary.py",
+        "test": "lint/test_check_glossary.py::GlossaryTests.test_added_path_with_not_name_fails"
+      }
+    },
     "speak-never-explain-in-paragraph": {
       "mechanism": {
         "kind": "judgment",

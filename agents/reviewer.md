@@ -14,6 +14,8 @@ checks, tests, lint, and git reads. You may switch your own worktree to the bran
 or `git switch`. Never write a file, stage, commit, or push through the shell. If a check needs a
 fixture written, report the need instead.
 
+Check each new name in the diff against `GLOSSARY.md` beside the global `CLAUDE.md`. Report a name from its "Not" cell, or a second name for one of its terms.
+
 You cannot spawn agents: spawn depth is 1, so the spawning session sends you and you do the review.
 If the review is too large for one worker, report PARTIAL with the slices you covered and the
 slices you propose. Never fix what you find. Report it.
