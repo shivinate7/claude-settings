@@ -22,7 +22,8 @@
 # profile: record one app on the phone with Instruments (xctrace), by the phone's UDID. Defaults: Time Profiler, 20 s,
 #   a printed path under $TMPDIR, a 60 s retry wait. xctrace on a network-paired phone can fail with "Waiting for device
 #   to boot" while the phone is fine, and no device state predicts it, so that failure is retried once after the wait.
-#   Any other failure is not retried. A failure exits with xctrace's code and the log path.
+#   Any other failure is not retried. A failure exits with xctrace's code (124 on the tool's timeout) and the log path.
+#   No --app, two --app, or a bad option value: exit 2.
 set -uo pipefail
 
 usage() { echo "usage: ios-ship testflight|install|profile [CONFIG] [--app NAME]... [--export-only | --no-install --debug --force | --template T --time-limit S --output P --retry-wait S]" >&2; exit 2; }
@@ -438,9 +439,9 @@ job_profile() {
     tmo "${STEP_TIMEOUT:-$(( time_limit + 120 ))}" xcrun xctrace record --template "$template" --device "$DEVICE_UDID" \
       --time-limit "${time_limit}s" --output "$output" --launch -- "$bundle" >"$STEP_OUT" 2>&1 </dev/null; rc=$?
     cat "$STEP_OUT" >> "$LOG" 2>/dev/null
-    if (( rc == 0 )); then rm -f "$STEP_OUT"; echo "PROFILE OK: $NAME recorded to $output"; exit 0; fi
-    grep -q 'Waiting for device to boot' "$STEP_OUT" || break
+    if (( rc == 0 )); then rm -f "$STEP_OUT"; echo "PROFILE OK: $NAME recorded to $output, log $LOG"; exit 0; fi
     (( try == 1 )) || { twice=1; break; }
+    grep -q 'Waiting for device to boot' "$STEP_OUT" || break
     echo "ios-ship: $NAME: xctrace stopped at \"Waiting for device to boot\"; retrying once in ${retry_wait}s"
     [[ ! -e $output ]] || rm -rf "$output"
     sleep "$retry_wait"

@@ -110,11 +110,16 @@ case "$*" in
     # XCTRACE_PLAN: one word per call. ok exits 0; boot prints the boot wait and exits 13; any other word fails with exit 7.
     echo xctrace >> "$CALL_LOG"
     echo "xcrun $*" >> "$CALL_LOG.args"
+    o=; prev=; for a in "$@"; do [[ $prev == --output ]] && o=$a; prev=$a; done
+    # Real xctrace will not write over a trace.
+    if [[ -n $o && -e $o ]]; then echo "Recording failed: output exists"; exit 9; fi
     n=$(cat "$CALL_LOG.xctn" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CALL_LOG.xctn"
     set -- ${XCTRACE_PLAN:-ok}; shift $((n - 1)); w=${1:-ok}
     case $w in
       ok) exit 0 ;;
-      boot) echo "Waiting for device to boot..."; echo "Timed out waiting for device to boot"; exit 13 ;;
+      # XCTRACE_MAKE_OUTPUT=1: a boot failure leaves a partial trace at --output, which the retry must remove.
+      boot) [[ -z ${XCTRACE_MAKE_OUTPUT:-} ]] || [[ -z $o ]] || mkdir -p "$o"
+        echo "Waiting for device to boot..."; echo "Timed out waiting for device to boot"; exit 13 ;;
       *) echo "Recording failed: $w"; exit 7 ;;
     esac ;;
   *) echo "xcrun $*" >> "$CALL_LOG" ;;
@@ -170,7 +175,7 @@ tool_exec() {
     XCODEBUILD_RC="${XCODEBUILD_RC:-0}" XCODEBUILD_OUT="${XCODEBUILD_OUT:-}" XCODEBUILD_SLEEP="${XCODEBUILD_SLEEP:-}" \
     XCODEBUILD_FAIL_KIND="${XCODEBUILD_FAIL_KIND:-}" XCODEBUILD_FAIL_SCHEME="${XCODEBUILD_FAIL_SCHEME:-}" XCODEBUILD_HANG="${XCODEBUILD_HANG:-}" \
     XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" XCODEBUILD_PID_FILE="${XCODEBUILD_PID_FILE:-}" \
-    XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" XCTRACE_PLAN="${XCTRACE_PLAN:-}" SLEEP_FAKE="${SLEEP_FAKE:-}" \
+    XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" XCTRACE_PLAN="${XCTRACE_PLAN:-}" XCTRACE_MAKE_OUTPUT="${XCTRACE_MAKE_OUTPUT:-}" SLEEP_FAKE="${SLEEP_FAKE:-}" \
     STEP_TIMEOUT="${STEP_TIMEOUT:-}" REINSTALL_HOME="${REINSTALL_HOME:-}" TEAM_ID="${TEAM_ID:-}" DEVICE_UDID="${DEVICE_UDID:-}" \
     ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" ${phone[@]+"${phone[@]}"} \
     perl -e '$SIG{INT} = $SIG{TERM} = "DEFAULT"; alarm shift; exec @ARGV' "${LIMIT:-60}" "$tool" "$@"
@@ -893,6 +898,16 @@ need "xctrace not launching the app's bundle id" args_have "--launch -- dev.exam
 need "template, time limit or output not passed" args_have "--template Allocations --device FAKE-DEVICE-0001 --time-limit 7s --output $work/p.trace "
 need "xctrace given a device name" not grep -qE -- '--device [^ ]*[^-A-Z0-9 ]' "$calls.args"
 end_case "profile: records by UDID with the app's bundle id, and --retry-wait 5 sleeps 5"
+XCTRACE_PLAN="boot boot" XCTRACE_MAKE_OUTPUT=1 prof --app AdBlock --output "$work/p3.trace"
+need "exit $rc, want 13" test "$rc" -eq 13
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "the partial trace of the first try was not removed before the retry" not grep -q 'output exists' "$out"
+end_case "profile: a partial trace from a boot failure is removed before the retry"
+XCTRACE_PLAN="boot other" prof --app AdBlock
+need "exit $rc, want 7" test "$rc" -eq 7
+need "calls: $(pcalls)" test "$(pcalls)" = "xctrace sleep 60 xctrace"
+need "no line says the phone may need unlocking or a cable" grep -qE 'unlock.*cable' "$out"
+end_case "profile: a retry that fails another way still exits with its code and names the cable"
 XCTRACE_PLAN=ok DEVICE_UDID=FAKE-DEVICE-ENV1 prof --app Other
 need "exit $rc, want 0" test "$rc" -eq 0
 need "the env UDID or the named app was not used" args_have '--device FAKE-DEVICE-ENV1 .*--launch -- dev.example.Other$'

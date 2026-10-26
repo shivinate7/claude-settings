@@ -250,7 +250,8 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
   Defaults: `Time Profiler`, 20 s, a new folder under `$TMPDIR` (the path is printed), and a 60 s retry wait. On a
   network-paired phone, `xctrace` can fail with "Waiting for device to boot" while the phone is fine, and no device
   state predicts it. So that one failure is retried once, after the retry wait. Any other failure is not retried. A
-  failure exits with `xctrace`'s code and prints the log path.
+  failure exits with `xctrace`'s code (124 when the tool's timeout stops it) and prints the log path. A failed retry
+  also says that the phone may need unlocking or a cable.
 * `--app NAME` limits a run to the named apps. A name that is not in the config exits 2. `profile` needs exactly one.
 
 ## Details worth knowing but not part of setup

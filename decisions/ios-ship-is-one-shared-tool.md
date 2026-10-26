@@ -19,7 +19,7 @@ Protected by `lint/test_ios_ship.sh` (the clean-main refusals, the `copy_in` cle
 
 ## Limits
 
-- Unmeasured: a real `xcodebuild`, a real upload, a real phone, and whether one retry clears the boot wait (c48's live check on the Mac). The suite stubs all three. A green run proves the tool's own logic and its calls, not Apple's side.
+- Unmeasured: a real `xcodebuild`, a real upload, a real phone, and whether one retry clears the boot wait (the live check on the Mac, roadmap step c48, "ios-ship gets a profile job"). The suite stubs all three. A green run proves the tool's own logic and its calls, not Apple's side.
 - The tool is macOS only. `install.ps1` still lands the file on Windows, where nothing runs it.
 
 Kind: process
