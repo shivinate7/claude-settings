@@ -4,7 +4,7 @@
   "status": "active",
   "order": 103.37,
   "why": "Main's push run stays red until the Windows merge tests compare paths the way git prints them.",
-  "note": "Status, Oct 26: #609 reviewed and green, waits for the next batch. Dispatched Oct 26 by build advisor (2), its 12th; a successor advisor follows it. Finding, Oct 26 (build advisor 2): main's push run 40325058256 on b1e5a6d is red. All 5 gates-windows-merge shards failed in \"Merge tool git-half fixture suite\". merge/test_merge.py compares a native path (C:\\Users\\...\\wt-feat) with git worktree list output, which uses forward slashes (C:/Users/.../wt-feat); the worktree exists. Failing: CutBranchTree.test_clean_merged_tree_is_removed_when_merged_is_the_pr_head, test_tree_whose_cwd_is_inside_it_is_kept, CutLanes.test_a_local_lane_*. These tests never finished on Windows before c61, as the jobs hit their caps. Fix, one cloud lane: normalize paths on both sides of each compare, and check whether merge.py's own worktree matching has the same flaw on Windows (if so, a real defect: fix it there, red then green); needs no answer from you. Placed ahead of c44 (triage, Oct 26): it is the last thing between main and a green push run, c61's goal.",
+  "note": "Status, Oct 26: #609 merged; ready to close. Result: test-only fix. A tree_listed helper in merge/test_merge.py compares realpath plus normcase on both sides; merge.py's remove_held_tree already compared realpath on both sides, so no product defect. Proof: red on main run 40325058256 (5 Windows merge shards), green on gates dispatch 40332792660 (all jobs). Placed ahead of c44 (triage, Oct 26): last thing between main and a green push run, c61's goal.",
   "ask": "",
-  "updatedAt": "2026-10-26T14:05:00Z"
+  "updatedAt": "2026-10-26T14:40:00Z"
 }
