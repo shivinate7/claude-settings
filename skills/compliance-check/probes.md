@@ -83,4 +83,4 @@ Then mark `ux/checklist.md` for each route in `shoot.json`, at each size and the
 
 ## Copies
 
-Held for the copy finder, which adds its own probe file here. No probe yet: report `unknown - no probe`.
+The copy probe and its verdicts are in `copies.md`, beside this file.

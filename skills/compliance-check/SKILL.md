@@ -40,7 +40,7 @@ Three groups read the tree, not a rule prefix. Each comes after the rule groups:
 
 - `Layout`: folder shape against `lint/layout.json` and the child's extras file.
 - `Design`: screen readiness against `ux/`.
-- `Copies`: held for the copy finder. Until its probe file lands, report it as `unknown - no probe`.
+- `Copies`: copies of shared things the child holds, from the probe in `copies.md`.
 
 ## 3. Run the probes
 
