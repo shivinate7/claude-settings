@@ -246,7 +246,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
 
     # mods/decision-watch/decision-watch.test.mjs imports lint/test_scanner_traps.mjs,
-    # and the Mod tests run that test. The lint/* rule sets `code` only, so a diff naming only the lint
+    # and the mod-tests.sh step runs that test. The lint/* rule sets `code` only, so a diff naming only the lint
     # file would skip its test.
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
         self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"] + self.MOD_JOBS)

@@ -49,7 +49,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Mod tests: the mod-tests.sh step in gates, gates-windows and gates-macos reads mods/.
       mods/*) on="$on $W $X mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
-      # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.
+      # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
