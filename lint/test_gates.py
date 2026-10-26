@@ -894,6 +894,8 @@ class UnstartedItemsTests(unittest.TestCase):
             self.DONE + "> **Next**\n> - merge the batch\n> - Unstarted: c41, the lint lane, waits on the brake",
             self.DONE + "> **Next** merge the batch\n> Unstarted: none",
             self.DONE + "> **Next:** Unstarted: none",
+            self.DONE + "> **Next** merge the batch; Unstarted: none",
+            self.DONE + "> **Next** unstarted: none",
         ]
         for reply in rows:
             with self.subTest(reply=reply):

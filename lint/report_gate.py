@@ -363,8 +363,10 @@ def done_models_problem(text, spawned):
 
 
 # reports-name-unstarted-items: a builder spawn marks an orchestrator's turn. Its report holds an
-# `Unstarted:` line, inline after Next or on its own line, that lists the ready items or says none.
-UNSTARTED_RE = re.compile(r"^(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?Unstarted:", re.M)
+# `Unstarted:` line, inline after Next, after a `;` or `.`, or on its own line, in any case. It lists
+# the ready items or says none. A bold `**Unstarted:**` is an unknown label, which the shape check refuses.
+UNSTARTED_RE = re.compile(
+    r"(?:^|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
 
 
 def unstarted_problem(text, spawned):
