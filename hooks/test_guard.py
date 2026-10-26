@@ -10846,6 +10846,25 @@ LOG_CHECKS_EXTRA.append(("designer-diff: a design-folder diff logs no designer-d
                          dz_diff_case("design-only", 0)))
 
 
+def dz_unread_layout_case():
+    """With no readable lint/layout.json the design folder is unknown, so a designer may write no repo
+    path: a false deny the designer reports, never a false allow. A readable layout still allows a mockup."""
+    guard = _load_guard_module()
+    empty = os.path.join(ROOT, "dz-no-layout")
+    os.makedirs(empty, exist_ok=True)
+    guard.settings_roots = lambda: [empty]
+    del guard._DESIGN_FOLDER[:]
+    if guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "an unread layout allowed a mockup path"
+    guard = _load_guard_module()
+    if not guard.designer_path_ok("/docs/design/robots.html"):
+        return False, "a readable layout refused a mockup path"
+    return True, "an unread layout allows no path; a readable one allows the mockup"
+
+
+LOG_CHECKS_EXTRA.append(("designer-scope: an unread layout allows no path", dz_unread_layout_case))
+
+
 # An .xctestplan diff: a builder's ADDED skippedTests line is logged once each at commit, push and
 # stop; a builder's added codeCoverage line logs nothing; a test-author's plan edit logs nothing.
 XCTESTPLAN_BASE = '{\n  "configurations" : [ ],\n  "testTargets" : [ ]\n}\n'

@@ -52,7 +52,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    one with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until
    the list is complete. Then a fix never hides a flaw or blurs the cause of one.
 4. **Compare.** Only now read the repo's design spec, tokens and design decisions. Spawn one
-   reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
+   design reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
    changed pages, the screenshots, the step's mockup in the design folder, and the full list. It
    judges each screen against the mockup and the repo's design rules, and sets each finding
    against them. Do not change the list. The design reviewer is not blind, so it never takes the
