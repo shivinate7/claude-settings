@@ -20,10 +20,10 @@ Why: an agent must not stop another agent's server or the owner's editor by pid.
 
 - `$!`, `$PID`, `%1` and `$(...)` cannot be read, so they pass. The remedy asks for `$!`.
 - A lister through a longer pipe (`pgrep x | sort | xargs kill`), process substitution, and pids stored first (`pids=$(pgrep x); kill $pids`) pass.
-- A process that reparented to init reads as foreign, unless its cwd is inside one of this session's agent worktrees or, in a main-session call, its environment holds this session's tag. A forked shell stub carries no tag (the tool's shell sets it after exec), so a left-behind stub reads foreign. Stop it through the harness.
+- A process that reparented to init reads as foreign, unless its cwd is inside one of this session's agent worktrees. In a main-session call, it is also owned when its environment holds this session's tag. A forked shell stub carries no tag (the tool's shell sets it after exec), so a left-behind stub reads foreign. Stop it through the harness.
 - When no `claude` ancestor or no `ps` exists (Windows, unmeasured), the guard allows. Unknown is not a verdict. `taskkill /PID` and `Stop-Process -Id` pass for the same reason.
 - Measured on macOS, 2026-10-26: an orphan a subagent's Bash call started holds the tag at exec, equal to the payload `session_id`; no agent-level tag exists. Unmeasured live: the Linux `/proc` read.
-- Measured on macOS, 2026-10-26 (claude 2.1.296, PreToolUse on Bash): the main-session payload has `agent_id` and `agent_type` null; foreground and background general-purpose subagent payloads carry both, with the same `session_id`; `transcript_path` is present on both and is the main session's `<session_id>.jsonl`.
+- Measured on macOS, 2026-10-26 (claude 2.1.296, PreToolUse on Bash): the main-session payload has `agent_id` and `agent_type` null. Foreground and background general-purpose subagent payloads carry both, with the same `session_id`. `transcript_path` is present on both and is the main session's `<session_id>.jsonl`.
 - Unmeasured: the payload of a fork subagent (the CLI does not offer the type). Also unmeasured: that every subagent which left a process has its file on disk, that a resumed agent keeps its id, and the folder layout on Windows and Linux.
 
 Kind: process
