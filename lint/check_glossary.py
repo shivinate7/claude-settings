@@ -5,9 +5,11 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
 
 - Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES.
 - Each file the change adds (against origin/main, renames counted as adds) has no path segment
-  that holds a name from a row's "not" cell. A name matches whole lowercase words, split on any
-  character that is not a letter or a digit, inside one segment: `handover` matches
-  `hooks/handover_note.py`, not `docs/handovers.md`.
+  that holds a name from a row's "not" cell. A name matches whole lowercase words inside one
+  segment. Words split on any character that is not a letter or a digit, and the segment is read
+  both with and without a split at each lower-to-upper case step. The last word may take a
+  plural `s` or `es`. `handover` matches `hooks/handover_note.py`, `docs/handovers.md` and
+  `HandoverNote.py`, not `docs/handoverly.md`.
 
 It reads paths only, never prose, so a sentence that names a "not" word passes. A path that
 already exists on the base is not checked or renamed.
@@ -29,6 +31,7 @@ GLOSSARY = "GLOSSARY.md"
 SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
 WORD_RE = re.compile(r"[^a-z0-9]+")
+CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch branch
 
 
 def read(rel):
@@ -39,8 +42,8 @@ def read(rel):
         return None
 
 
-def words(text):
-    return [w for w in WORD_RE.split(text.lower()) if w]
+def words(text, camel=False):
+    return [w for w in WORD_RE.split((CAMEL_RE.sub(" ", text) if camel else text).lower()) if w]
 
 
 def cells(line):
@@ -86,14 +89,20 @@ def home_problems(term, homes, ids):
     return out
 
 
+def same(got, name):
+    """Whole words equal, with a plural `s` or `es` allowed on the last word."""
+    return got[:-1] == name[:-1] and got[-1] in (name[-1], name[-1] + "s", name[-1] + "es")
+
+
 def path_problems(path, table):
     out = []
     for seg in path.replace("\\", "/").split("/"):
-        seg_words = words(seg)
+        # Read with and without case steps: HandOver may mean handover or hand over.
+        forms = [words(seg), words(seg, camel=True)]
         for term, _homes, names in table:
             for name in names:
                 n = words(name)
-                if n and any(seg_words[i:i + len(n)] == n for i in range(len(seg_words) - len(n) + 1)):
+                if n and any(same(w[i:i + len(n)], n) for w in forms for i in range(len(w) - len(n) + 1)):
                     out.append("%s uses '%s'; the glossary name is '%s'" % (path, name, term))
     return out
 

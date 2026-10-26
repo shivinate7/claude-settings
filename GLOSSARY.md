@@ -25,13 +25,13 @@ one name for each thing, and a list of names to avoid.
 | handoff | The notes file of one session, outside git, at `~/.claude/handoffs/<session_id>.md`. The session rewrites it whole at each checkpoint, so the work survives a compaction. | `decisions/precompact-handoff.md` | `handover` |
 | ruling | The owner's answer to a question. | `rule:output-answer-has-a-home` | — |
 | decision | A record in `decisions/` for one question. It holds the ruling, the reason, and the kind and home of the ruling. | `rule:git-one-entry-per-question`, `decisions/rulings-declare-kind.md` | `ADR` |
-| debt | A known gap or deferred work that Claude is likely to hit in normal work. Each debt is one file in `debts/`. | `debts/README.md` | `deferred item` |
+| debt | A known gap or deferred work that Claude is likely to hit in normal work. Each debt is one file in `debts/`. | `debts/README.md` | — |
 | note | A finding that Claude is not likely to hit in normal work. Each note is one line in `debts/notes.md`. | `rule:roles-holes-are-debts`, `debts/notes.md` | — |
 | guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `decisions/guard-guards-mistakes-only.md` | — |
 | check | A lint, test or CI job that passes or fails a change. A check never asks. | `decisions/guard-guards-mistakes-only.md` | — |
 | owner | The person who owns these repos. Only the owner's word makes a ruling, an override pass or a merge grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-word-covers-named-act` | — |
 | override pass | A prompt from the owner that starts with `override`. The guard then lets a refusal or an ask through, once or for a set time. | `decisions/owner-override-pass.md` | — |
-| orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | `oversight session` |
+| orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
 
