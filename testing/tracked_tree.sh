@@ -8,6 +8,12 @@
 # Each returns non-zero, with a line on stderr, when git cannot list a folder or lists nothing in it.
 # Paths are read one per line with core.quotePath off, so a path that holds a newline is refused.
 
+# bash 3.2 (macOS /bin/sh) misreads a case pattern's ")" inside $( ), so the suite test is its own function.
+_tt_is_suite() {
+  case $1 in test_*|*_test.py|*.test.*) return 0 ;; esac
+  return 1
+}
+
 tracked_list() { # <folder>: one path per line, relative to the folder; suites and missing files left out
   _tt_folder=${1%/}
   [ -n "${TRACKED_ROOT:-}" ] || { echo "tracked_tree.sh: TRACKED_ROOT is not set" >&2; return 1; }
@@ -16,8 +22,7 @@ tracked_list() { # <folder>: one path per line, relative to the folder; suites a
   case $_tt_out in *'"'*) echo "tracked_tree.sh: a path under $_tt_folder/ needs quoting; use tracked_tree.py" >&2; return 1 ;; esac
   _tt_list=$(printf '%s\n' "$_tt_out" | sort -u | while IFS= read -r _tt_p; do
     [ -n "$_tt_p" ] || continue
-    _tt_b=${_tt_p##*/}
-    case $_tt_b in test_*|*_test.py|*.test.*) continue ;; esac
+    _tt_is_suite "${_tt_p##*/}" && continue
     if [ -f "$TRACKED_ROOT/$_tt_p" ]; then printf '%s\n' "${_tt_p#"$_tt_folder"/}"; fi
   done)
   [ -n "$_tt_list" ] || { echo "tracked_tree.sh: git lists no file under $_tt_folder/ in $TRACKED_ROOT" >&2; return 1; }
