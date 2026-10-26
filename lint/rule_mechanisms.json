@@ -497,7 +497,7 @@
     "reports-batch-pace-numbers": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "The numbers come from live git and GitHub reads at report time; no check checks them."
+        "reason": "The numbers come from live git and GitHub reads at report time; nothing verifies them."
       }
     },
     "reports-blockquote-no-fence": {

@@ -1911,7 +1911,7 @@ class AfterPush(Env):
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
         # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
-        self.host.seq = [(True, ""), (False, "check checks is red")]
+        self.host.seq = [(True, ""), (False, "the checks job is red")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
