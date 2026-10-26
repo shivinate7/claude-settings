@@ -36,6 +36,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a linked install: the real folder holds ui_suffixes.py
 from ui_suffixes import UI_SUFFIXES  # noqa: E402
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
 __version__ = "1.0.0"
 
@@ -388,8 +389,9 @@ DEFAULT_CONFIG = {
     "fail_on": "error",
     "allow_words": [],
     "exclude": [],
-    # Off for a repository with no folder at this path: see `find_decisions_dir`.
-    "decisions_dir": "docs/decisions",
+    # None: the decisions folder of lint/layout.json. Off for a repository with
+    # no folder at this path: see `find_decisions_dir`.
+    "decisions_dir": None,
 }
 
 
@@ -527,8 +529,8 @@ def strip_placeholders(text: str) -> str:
 # directly.
 #
 # OFF BY DEFAULT for a repository with no decisions folder in the shape this
-# expects. `--decisions-dir` (default "docs/decisions", the same path
-# `decision-refs.mjs` uses) turns it on only when that folder exists.
+# expects. `--decisions-dir` (default: the decisions folder of lint/layout.json)
+# turns it on only when that folder exists.
 # --------------------------------------------------------------------------
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
@@ -670,7 +672,10 @@ def find_decisions_dir(config: dict) -> Optional[str]:
     directory (a repository's own root, the way this linter is always
     invoked), or None when it names no real directory.
     """
-    decisions_dir = config.get("decisions_dir") or ""
+    decisions_dir = config.get("decisions_dir")
+    if decisions_dir is None:
+        found = [d for d in layout.candidates(os.getcwd(), "decisions") if os.path.isdir(d)]
+        decisions_dir = found[0] if found else ""
     if decisions_dir and os.path.isdir(decisions_dir):
         return decisions_dir
     return None
@@ -2043,7 +2048,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
     parser.add_argument("--decisions-dir", default=None,
                         help="folder of D-nnn decision entries, for gloss collapse in STE001 "
-                             "(default: docs/decisions; pass '' to turn the collapse off)")
+                             "(default: the decisions folder of lint/layout.json; pass '' to turn "
+                             "the collapse off)")
     parser.add_argument("--config-from", default=None, metavar="PATH",
                         help="find .ste.json or .ste.toml from PATH upwards "
                              "(default: the first path to check)")
@@ -2104,7 +2110,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         [p.strip() for p in args.exclude.split(",") if p.strip()]
     if args.decisions_dir is not None:
         config["decisions_dir"] = args.decisions_dir
-    decisions_dir = find_decisions_dir(config)
+    try:
+        decisions_dir = find_decisions_dir(config)
+    except layout.LayoutError as err:  # a broken extras file is red, never a silent default
+        print("ste_lint: cannot read the layout: %s" % err, file=sys.stderr)
+        return 2
     set_gloss_pattern(build_gloss_pattern(decisions_dir) if decisions_dir else None)
 
     source_suffixes = (TEXT_SUFFIXES | SOURCE_SUFFIXES) if args.source_prose else None

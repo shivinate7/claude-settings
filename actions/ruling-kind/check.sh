@@ -13,7 +13,7 @@ if [ -z "${BASE_REF:-}" ]; then
   echo "ruling-kind: no pull request base, skipped"
   exit 0
 fi
-RECORDS_DIR="${RECORDS_DIR-decisions}"
+RECORDS_DIR="${RECORDS_DIR-}"  # empty: the lint reads the folder from lint/layout.json
 case "$RECORDS_DIR" in
   *..*|/*) echo "ruling-kind: records-dir must be a folder inside the checkout, not '$RECORDS_DIR'"; exit 1 ;;
 esac
@@ -26,4 +26,9 @@ rules=()
 for d in "$root" "$action_root"; do
   for f in CLAUDE.md output-styles/shiv-stylisms.md; do rules+=(--rules-file "$d/$f"); done
 done
+if [ -z "$RECORDS_DIR" ]; then
+  # The layout's folder, passed as --dir so the lint still refuses a folder that does not exist.
+  RECORDS_DIR="$(python3 "$here/../../lint/layout.py" path "$root" decisions)" ||
+    { echo "ruling-kind: UNKNOWN, cannot read the layout"; exit 1; }
+fi
 CI=true python3 "$here/../../lint/check_ruling_kind.py" --root "$root" --dir "$RECORDS_DIR" --base "origin/$BASE_REF" "${rules[@]}"

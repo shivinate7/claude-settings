@@ -17,7 +17,10 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RECORD = os.path.join(ROOT, "decisions", "subagent-model-cap.md")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+
+RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "subagent-model-cap.md")
 SKILLS = os.path.join(ROOT, "skills")
 ROW = re.compile(r"^\|\s*skill `([^`]+)`\s*\|")
 FENCE = re.compile(r"^(`{3,}|~{3,})")

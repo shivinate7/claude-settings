@@ -1038,29 +1038,41 @@ def cap_ask_reason(change: str, where: str) -> str:
 
 
 # ---- a message that cites a record by path
-RECORD_DIRS_FILE = os.path.join("lint", "check_record_slugs.py")   # its DIRS is the one list
+RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")   # lint/check_layout.py: equals lint/layout.py LAYOUT_FILE
 _RECORD_PATTERN = []
+
+
+def record_folders(text):
+    """The record folders a cite may not name, from the text of lint/layout.json: each kind marked
+    `"record": true`, at its legacy path while the layout keeps one. Raises when the text is not
+    a layout, and the caller reads that as unread."""
+    data = json.loads(text)
+    legacy = data.get("legacy") or {}
+    found = []
+    for kind in data["kinds"].values():
+        if isinstance(kind, dict) and kind.get("record") is True and isinstance(kind.get("path"), str):
+            folder = legacy.get(kind["path"], kind["path"]).strip("/")
+            if folder and re.fullmatch(r"[\w.-]+(?:/[\w.-]+)*", folder):
+                found.append(folder)
+    return found
 
 
 def record_path_pattern():
     """The pattern for a repo-root record path, or None when the record folders cannot be read.
 
-    The folders are the `DIRS` of lint/check_record_slugs.py, read from the file (it runs on
-    import, so it cannot be imported). A path counts only at the START of a word: after a space,
-    quote, bracket or `=`, with an optional `./`. A URL, `lint/decisions/x.md` and
-    `docs/decisions/0001.md` have a `/` or a word before the folder, so they are not repo-root
-    record paths and stay allowed.
+    The folders are the record kinds of lint/layout.json, read from the file. A path counts only at
+    the START of a word: after a space, quote, bracket or `=`, with an optional `./`. A URL,
+    `lint/decisions/x.md` and `docs/decisions/0001.md` have a `/` or a word before the folder, so
+    they are not repo-root record paths and stay allowed.
     """
     if _RECORD_PATTERN:
         return _RECORD_PATTERN[0]
     for root in settings_roots():
         try:
-            with open(os.path.join(root, RECORD_DIRS_FILE), encoding="utf-8") as handle:
-                text = handle.read(MESSAGE_FILE_MAX)
+            with open(os.path.join(root, RECORD_LAYOUT_FILE), encoding="utf-8") as handle:
+                names = record_folders(handle.read(MESSAGE_FILE_MAX))
         except Exception:
             continue
-        block = re.search(r"^DIRS\s*=\s*\(([^)]*)\)", text, re.MULTILINE)
-        names = re.findall(r'"([\w.-]+)/"', block.group(1)) if block else []
         if names:
             pattern = re.compile(
                 r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))

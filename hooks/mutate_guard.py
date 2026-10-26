@@ -1233,7 +1233,7 @@ MUTATIONS = [
      '"|".join(map(re.escape, names))', 're.escape(names[0])', "guard",
      'cite-by-id: a -am cluster denies'),
     ("cite-by-id: the record folders are read from nowhere",
-     "names = re.findall(r'\"([\\w.-]+)/\"', block.group(1)) if block else []", "names = []",
+     "                found.append(folder)\n", "                pass\n",
      "guard", 'cite-by-id: a commit -m denies'),
     ("cite-by-id: a path deep in a URL or a subfolder is a record path",
      'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@]))(?:\\./)?(?:"', 'r"(?:[\\w.:/-]*/)?(?:"', "guard",

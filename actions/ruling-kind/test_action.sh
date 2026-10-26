@@ -61,6 +61,7 @@ quiet git clone -q "$remote" "$act"
 mkdir -p "$act/actions/ruling-kind" "$act/lint"
 quiet cp "$here/check.sh" "$act/actions/ruling-kind/"
 quiet cp "$here/../../lint/check_ruling_kind.py" "$act/lint/"
+quiet cp "$here/../../lint/layout.py" "$here/../../lint/layout.json" "$act/lint/"  # check.sh reads the default folder from the layout
 quiet git -C "$act" switch -q -c action-only
 mkdir -p "$act/decisions"; printf 'No kind line here.\n' > "$act/decisions/action-only.md"
 quiet git -C "$act" add decisions/action-only.md
@@ -87,6 +88,7 @@ actroot="$tmp/actroot"
 mkdir -p "$actroot/actions/ruling-kind" "$actroot/lint"
 quiet cp "$here/check.sh" "$actroot/actions/ruling-kind/"
 quiet cp "$here/../../lint/check_ruling_kind.py" "$actroot/lint/"
+quiet cp "$here/../../lint/layout.py" "$here/../../lint/layout.json" "$actroot/lint/"  # check.sh reads the default folder from the layout
 printf '# Action rules\n\nRule text. <!-- rule:action-rule -->\n' > "$actroot/CLAUDE.md"
 # Case 1: the rule lives only in the action's CLAUDE.md. The caller has no CLAUDE.md.
 quiet git clone -q "$remote" "$tmp/rule-action"

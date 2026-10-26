@@ -18,7 +18,8 @@ every platform has a Plan line. It checks each line that is there.
         # files given: check those, skip git
         # --rules-file (repeatable): the files whose rule markers a Home may name, instead of the
         # RULE_FILES under --root. A missing file is skipped. None readable: a rule: Home is red.
-        # --dir: the records folder, relative to --root. Default decisions. Only .md files under it are checked.
+        # --dir: the records folder, relative to --root. Default: the decisions folder of
+        # lint/layout.json, found under --root. Only .md files under it are checked.
 """
 import os
 import re
@@ -29,9 +30,11 @@ try:
     import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # actions/ruling-kind runs this file in a tree without hooks/
     _nowindow = subprocess
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIR = "decisions/"  # the records folder; --dir replaces it
+DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
 RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
@@ -202,6 +205,12 @@ if "--dir" in args:  # the records folder, for a repo that keeps its records els
         if not ok or not os.path.isdir(here):
             print("check_ruling_kind: FAIL: records folder '%s' is not a folder under %s" % (given, ROOT))
             sys.exit(1)
+if DIR is None:
+    try:
+        DIR = layout.path(ROOT, "decisions") + "/"
+    except layout.LayoutError as err:  # a check that cannot read its folder is red, never green
+        print("check_ruling_kind: FAIL: " + str(err))
+        sys.exit(1)
 for a in args:  # an option left over is a typo: fail, never read it as a file name
     if a.startswith("-"):
         print("check_ruling_kind: FAIL: unknown option '%s'" % a)

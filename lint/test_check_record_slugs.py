@@ -51,6 +51,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.addCleanup(rm_tree, self.tree)
         os.makedirs(os.path.join(self.tree, "lint"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
+        for name in ("layout.py", "layout.json"):  # the check reads its records folder from the layout
+            shutil.copyfile(os.path.join(HERE, name), os.path.join(self.tree, "lint", name))
         os.makedirs(os.path.join(self.tree, "hooks"))
         shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
 
