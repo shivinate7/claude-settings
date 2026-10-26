@@ -92,6 +92,13 @@ class Layout(unittest.TestCase):
         code, out = Repo(self).write(legacy + "/a.md").run("layout")
         self.assertIn("legacy home of decisions, moves to " + kind_path("decisions"), out)
 
+    def test_untracked_core_kind_is_missing(self):
+        rules = kind_path("rules")
+        repo = Repo(self).write(EXTRAS, '{"kinds": {}}')
+        os.makedirs(os.path.join(repo.root, *rules.split("/")))
+        code, out = repo.run("layout")
+        self.assertIn("missing core kind rules: " + rules, out)
+
     def test_not_a_git_repo_is_unknown(self):
         root = tempfile.mkdtemp(prefix="probes-")
         self.addCleanup(shutil.rmtree, root, True)
@@ -129,6 +136,28 @@ class Design(unittest.TestCase):
         self.assertIn("ui copy: known gap", out)
         self.assertTrue(out.rstrip().endswith("design: out"), out)
 
+    def test_a_config_shoot_refuses_is_a_gap(self):
+        for bad in ('{"routes": ["/"]}', '{"baseUrl": "http://h", "routes": ["/"], "sizes": "x"}',
+                    '{"baseUrl": "http://h", "routes": ["/"], "themes": ["sepia"]}', '{"baseUrl": "http://h", "routes": []}'):
+            code, out = Repo(self).write("a.tsx").write(".claude/shoot.json", bad).write("tokens.css").run("design")
+            self.assertEqual(code, 1, bad)
+            self.assertIn("screens named: gap", out)
+            self.assertIn("screenshot command: gap", out)
+            self.assertNotIn(": pass - the shared shoot", out)
+
+    def test_token_paths_tests_and_generated(self):
+        repo = Repo(self).write("a.tsx").write(".claude/shoot.json", SHOOT)
+        repo.write("latest/tokens.css", "/* not generated: the source */\n").write("tests/tokens.json")
+        repo.write("app/tokens.test.ts").write("lint/test_shoot.mjs")
+        code, out = repo.run("design")
+        self.assertIn("token file: pass - latest/tokens.css\n", out)
+        self.assertEqual(code, 0, out)
+
+    def test_layout_token_path_counts(self):
+        home = layout.layout()["kinds"]["tokens"]["path"]
+        code, out = Repo(self).write("a.tsx").write(".claude/shoot.json", SHOOT).write(home, "{}").run("design")
+        self.assertIn("token file: pass - " + home, out)  # TOKEN_FILE must keep matching the layout's name
+
     def test_two_token_sources_are_partial(self):
         repo = Repo(self).write("App.swift").write(".claude/shoot.json", SHOOT)
         repo.write("web/tokens.css").write("ios/Tokens.swift")
@@ -153,8 +182,15 @@ class LaneCap(unittest.TestCase):
         self.assertIn("briefs/b.md:1", out)
         self.assertIn("p.md:1", out)
 
+    def test_more_cap_forms_are_red(self):
+        text = "Keep 3 lanes max.\nRun three lanes in parallel.\nLimit to 2 lanes.\nThe owner left it open; at most 3 lanes.\nWe said \"fine\" and run at most 3 lanes.\nHe wrote \"at most 3 lanes for now\" here.\n"
+        code, out = Repo(self).write("docs/brief-x.md", text).run("lanecap")
+        self.assertEqual(code, 1, out)
+        for line in range(1, 7):
+            self.assertIn("guessed cap? docs/brief-x.md:%d:" % line, out)
+
     def test_owner_named_cited_and_other_files_pass(self):
-        repo = Repo(self).write("briefs/b.md", 'The owner caps it at two lanes at a time.\nWe dropped "one or two at a time".\n')
+        repo = Repo(self).write("briefs/b.md", 'Two lanes at a time (owner, 2026-10-12).\nWe dropped "one or two at a time".\n')
         repo.write("specs/todo.md", "One global lane at a time.\n")
         code, out = repo.run("lanecap")
         self.assertEqual(code, 0, out)

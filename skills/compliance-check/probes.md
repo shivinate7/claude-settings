@@ -31,7 +31,7 @@ session transcripts, not a repo.
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
 | Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_subagentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
-| Parallelism | `python3 $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes, and the probe passes a line that names the owner or a ruling |
+| Parallelism | `python3 $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
@@ -61,8 +61,9 @@ session transcripts, not a repo.
 | `missing core kind <kind>: <path>` | a core kind of the layout that the child lacks |
 | `layout: not rolled out` | the child has no extras file. Not a fail. Each line carries `preview`, for the roll-out lane |
 
-Exit 0: in shape or not rolled out. Exit 1: out. Exit 2: unknown. A top-level dot folder and
-Claude Code's own folders in `.claude/` are tool folders, not repo choices, so they pass.
+Exit 0: in shape or not rolled out. Exit 1: out. Exit 2: unknown. Each top-level dot folder, and
+Claude Code's own folders in `.claude/`, count as tool folders, not repo choices, so they pass.
+The probe reads tracked files only, so an untracked folder is not there.
 
 ## Design
 
@@ -71,10 +72,10 @@ Claude Code's own folders in `.claude/` are tool folders, not repo choices, so t
 
 | Item | Pass when |
 | --- | --- |
-| screens named | `.claude/shoot.json` lists its routes |
-| sizes named, themes named | `shoot.json` names them, or takes shoot's default |
+| screens named | `.claude/shoot.json` lists its routes, and `bin/shoot` would accept the file |
+| sizes named, themes named | `shoot.json` names them, or takes shoot's default (1440, 820 and 390; light and dark), the house sizes |
 | screenshot command | `shoot.json` exists, so the shared `bin/shoot` runs (decision shoot-is-one-shared-command, one shared screenshot command). The repo's own command is `partial` |
-| token file | one token source (`tokens.*`, `design-tokens.*`). A file that says it is generated does not count |
+| token file | one token source (`tokens.*`, `design-tokens.*`). A test file, and a file that says it is generated, do not count |
 | ui copy | never graded: the known STE gap in the Output row |
 
 Then mark `ux/checklist.md` for each route in `shoot.json`, at each size and theme.

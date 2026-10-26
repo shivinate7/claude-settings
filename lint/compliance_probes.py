@@ -13,9 +13,12 @@ layout: lint/layout.json through lint/layout.py, plus the child's extras file. I
   folder that is neither a layout kind nor an extra, and each core kind the child lacks. A child
   with no extras file is "not rolled out": it exits 0, and lists the same findings as a preview.
 design: screen readiness against ux/. The shoot config names the screens, sizes and themes. The
-  shared `bin/shoot` is the screenshot command. One token file. Each item has its own grade.
+  shared `bin/shoot` is the screenshot command, and a config it would refuse is a gap. One token
+  file: a `tokens.*` file (the layout's tokens path is one), tests and generated files aside. Each item
+  has its own grade.
 lanecap: a guessed lane cap in a brief or a plan (rule parallelism-no-guessed-lane-cap). A line that
-  names the owner or a ruling is an owner-named cap, and passes. A cap in quotes is cited, and passes.
+  cites its owner or ruling source, "(owner, ...)" or "owner ... <date>", passes. A cap inside a pair
+  of quotes is cited, and passes.
 """
 import json
 import os
@@ -37,16 +40,19 @@ TOKEN_FILE = re.compile(r"^(design[-_]?)?tokens\.(json|css|scss|ts|js|swift)$", 
 # Screen files beyond the copy suffixes: SwiftUI, Astro and Svelte views.
 SCREEN_SUFFIXES = set(UI_SUFFIXES) | {".swift", ".astro", ".svelte"}
 SCREENSHOT_SCRIPT = re.compile(r"(^|/)[^/]*(screenshot|shoot)[^/]*\.(sh|mjs|js|ts|py)$", re.I)
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|fixtures?|spec)/|(^|/)test_[^/]*$|\.(test|spec)\.[^/]+$", re.I)
+GENERATED = re.compile(r"(?<!not )\bgenerated\b|\bdo not edit\b", re.I)
 MAKE_TARGET = re.compile(r"^(screenshot|shoot)[\w-]*\s*:", re.M)
 NUM = r"(\d+|one|two|three|four|five|six)"
-WHO = r"(lanes?|threads?|agents?|workers?|builders?|sessions?)"
+RANGE = NUM + r"( ?(-|to|or) ?" + NUM + r")?"
+WHO = r"((parallel|concurrent|build|open|running|workflow|cloud|at once) ){0,2}(lanes?|threads?|agents?|workers?|builders?)\b"
 LANE_CAP = re.compile(
-    r"\b(at most|no more than|up to|max(imum)?( of)?|cap(ped)? (at|of)) " + NUM
-    + r" (parallel |concurrent |build |open |running )?" + WHO + r"\b"
-    r"|\b" + NUM + r" or " + NUM + r" (" + WHO + r" )?at a time\b"
-    r"|\b" + NUM + r" " + WHO + r" at a time\b", re.I)
-OWNER_NAMED = re.compile(r"\b(owner|ruling|ruled)\b", re.I)
-QUOTES = "\"'`\u201c\u2018"  # a cap in quotes is cited, not set
+    r"\b(at most|no more than|up to|max(imum)?( of)?|cap(ped)? (at|of)|limit(ed)? (to|of|at)) " + RANGE + " " + WHO
+    + r"|\b" + RANGE + " " + WHO + r"( max(imum)?\b| at a time\b| at once\b| in parallel\b)"
+    + r"|\b" + NUM + r" or " + NUM + r" at a time\b", re.I)
+# An owner-named cap carries its source, as the repos write a ruling: "(owner, 2026-10-12)".
+OWNER_NAMED = re.compile(r"\((owner|ruling)\b|\b(owner|ruling)\b[^.]*\d{4}-\d{2}-\d{2}", re.I)
+QUOTES = {"\"": "\"", "'": "'", "`": "`", "\u201c": "\u201d", "\u2018": "\u2019"}  # a cap in quotes is cited, not set
 
 
 class CannotRun(Exception):
@@ -93,8 +99,9 @@ def probe_layout(root):
     def covered(folder):
         return folder in above or any(folder == h or folder.startswith(h + "/") for h in homes)
 
+    files = tracked(root)
     stray = set()
-    for rel in tracked(root):
+    for rel in files:
         parts = rel.split("/")[:-1]
         for depth in range(1, len(parts) + 1):
             folder = "/".join(parts[:depth])
@@ -114,7 +121,8 @@ def probe_layout(root):
         note = " (legacy home of %s, moves to %s)" % (legacy[folder], kinds[legacy[folder]]["path"]) if folder in legacy else ""
         lines.append("  folder %s/: neither a layout kind nor an extra%s" % (folder, note))
     for name, kind in kinds.items():
-        if kind.get("set") == "core" and not os.path.exists(os.path.join(root, *kind["path"].strip("/").split("/"))):
+        home = kind["path"].strip("/")
+        if kind.get("set") == "core" and not any(f == home or f.startswith(home + "/") for f in files):
             lines.append("  missing core kind %s: %s" % (name, kind["path"]))
     if not rolled:
         lines = ["  preview" + line[1:] for line in lines]
@@ -133,12 +141,25 @@ def shoot_config(root):
         data = json.loads(text)
     except ValueError as err:
         return None, "%s does not parse: %s" % (SHOOT_CONFIG, err)
-    return (data, "") if isinstance(data, dict) else (None, "%s is not an object" % SHOOT_CONFIG)
+    if not isinstance(data, dict):
+        return None, "%s is not an object" % SHOOT_CONFIG
+    # The refusals bin/shoot makes, so a config shoot would refuse is never a pass.
+    routes, sizes, themes = data.get("routes"), data.get("sizes", [1]), data.get("themes", ["light"])
+    if not isinstance(data.get("baseUrl"), str) or not data["baseUrl"]:
+        return None, "%s needs baseUrl" % SHOOT_CONFIG
+    if not isinstance(routes, list) or not routes or not all(isinstance(r, str) or (isinstance(r, dict) and isinstance(r.get("path"), str)) for r in routes):
+        return None, "%s needs a list of routes" % SHOOT_CONFIG
+    if not isinstance(sizes, list) or not sizes or not all(isinstance(w, int) and not isinstance(w, bool) and w > 0 for w in sizes):
+        return None, "%s: sizes is not a list of widths" % SHOOT_CONFIG
+    if not isinstance(themes, list) or not themes or not all(t in ("light", "dark") for t in themes):
+        return None, "%s: themes holds light and dark only" % SHOOT_CONFIG
+    return data, ""
 
 
 def own_screenshot_command(root, files):
     # A dot folder holds a tool's copy (a vendored skill), not the repo's own command.
-    found = [f for f in files if SCREENSHOT_SCRIPT.search(f) and not re.search(r"(^|/)(\.|node_modules/|vendor/)", f)]
+    found = [f for f in files if SCREENSHOT_SCRIPT.search(f) and not TEST_PATH.search(f)
+             and not re.search(r"(^|/)(\.|node_modules/|vendor/)", f)]
     for make in ("Makefile", "makefile", "GNUmakefile"):
         text = read(root, make) if make in files else None
         if text:
@@ -168,22 +189,18 @@ def probe_design(root):
         for name in ("screens named", "sizes named", "themes named"):
             item(name, "gap", why)
     else:
-        routes = config.get("routes")
-        if isinstance(routes, list) and routes:
-            item("screens named", "pass", "%d route(s) in %s" % (len(routes), SHOOT_CONFIG))
-        else:
-            item("screens named", "gap", "%s has no routes" % SHOOT_CONFIG)
+        item("screens named", "pass", "%d route(s) in %s" % (len(config["routes"]), SHOOT_CONFIG))
         for key in ("sizes", "themes"):
             item(key + " named", "pass", ("%s in %s" % (config[key], SHOOT_CONFIG)) if key in config else "shoot's default")
     own = own_screenshot_command(root, files)
     if config is not None:
         item("screenshot command", "pass", "the shared shoot reads %s" % SHOOT_CONFIG)
-    elif own:
+    elif own and why.startswith("no "):
         item("screenshot command", "partial", "own command, not the shared shoot: %s" % "; ".join(own))
     else:
-        item("screenshot command", "gap", "none found")
-    tokens = [f for f in files if TOKEN_FILE.match(f.rsplit("/", 1)[-1]) and "test" not in f.lower()]
-    sources = [f for f in tokens if "generated" not in (read(root, f) or "")[:400].lower()]
+        item("screenshot command", "gap", why if not why.startswith("no ") else "none found")
+    tokens = [f for f in files if TOKEN_FILE.match(f.rsplit("/", 1)[-1]) and not TEST_PATH.search(f)]
+    sources = [f for f in tokens if not GENERATED.search((read(root, f) or "")[:400])]
     if len(sources) == 1:
         item("token file", "pass", "%s%s" % (sources[0], "" if len(tokens) == 1 else ", plus %d generated" % (len(tokens) - 1)))
     elif not sources:
@@ -196,6 +213,13 @@ def probe_design(root):
     return finish("design", lines, worst, 0 if worst == "in shape" else 1)
 
 
+def cited(text, match):
+    """True when the cap sits inside a pair of quotes, so the line quotes it."""
+    start, end = match.start(), match.end()
+    before = text[start - 1] if start else ""
+    return before in QUOTES and text[end:end + 1] == QUOTES[before]
+
+
 def probe_lanecap(root):
     try:
         plans = layout.candidates(root, "plans")
@@ -205,7 +229,7 @@ def probe_lanecap(root):
     hits, owned = [], []
     for rel in where:
         for number, text in enumerate((read(root, rel) or "").splitlines(), 1):
-            if any(m.start() == 0 or text[m.start() - 1] not in QUOTES for m in LANE_CAP.finditer(text)):
+            if any(not cited(text, m) for m in LANE_CAP.finditer(text)):
                 (owned if OWNER_NAMED.search(text) else hits).append("%s:%d: %s" % (rel, number, text.strip()[:160]))
     lines = ["  guessed cap? %s" % h for h in hits] + ["  owner-named, passes: %s" % h for h in owned]
     if hits:
