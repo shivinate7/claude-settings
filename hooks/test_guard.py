@@ -895,7 +895,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     fake itself runs under a narrow PATH the guard builds (its own folder, then only the Python
     interpreter's folder — see PY_PATH), and calling the tool by bare name there is a silent
     no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: measured in a CI run
-    of the checks job, setup-python's toolcache folder has no `sleep`, and MEASURED locally
+    of the checks job, setup-python's toolcache folder has no `sleep`, and measured locally
     `C:\\Python314` has no `ping`. Both print a "not found" line to stderr and return instantly, so
     the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
     tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
