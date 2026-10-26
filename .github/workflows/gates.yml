@@ -759,7 +759,7 @@ jobs:
   # The guard fixture suite on Windows, split off gates-windows by cut F. On pull_request it runs only the cases
   # tagged windows (the slice step below), whole, in this job, the required check. Push, schedule and
   # workflow_dispatch run the full suite in shards: shard 1 here, the rest in gates-windows-guard-<i>, which never
-  # run on pull_request (GUARD_SHARD in hooks/test_guard.py; lint/test_windows_split.py proves each case runs once).
+  # run on pull_request (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case runs once).
   gates-windows-guard:
     runs-on: windows-latest
     needs: scope
@@ -811,7 +811,7 @@ jobs:
         run: python hooks/test_guard.py
 
   # The merge suites on Windows. The slice runs whole here on pull_request; off pull_request the full git-half
-  # suite runs in shards, shard 1 here and the rest in gates-windows-merge-<i> (MERGE_SHARD in merge/test_merge.py).
+  # suite runs in shards, shard 1 here and the rest in gates-windows-merge-<i> (the shard switch in merge/test_merge.py).
   gates-windows-merge:
     runs-on: windows-latest
     needs: scope

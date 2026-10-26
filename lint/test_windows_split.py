@@ -265,6 +265,12 @@ def hardening_problems(text):
     if n != 1:
         problems.append(f"MERGE_TESTS appears {n} times in gates.yml, want exactly 1 (the slice step's env)")
     slice_envs = {SLICE: SLICE_ENV, GUARD_SLICE: GUARD_SLICE_ENV}
+    # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would reach the slice on pull_request.
+    for var in SHARD_VAR.values():
+        homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
+                    if isinstance(st.get("env"), dict) and var in st["env"] and key(st) in REQUIRED)
+        if text.count(var) != homes:
+            problems.append(f"{var} appears {text.count(var)} times in gates.yml, want {homes} (once per shard step's env)")
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
         if not any(key(st) in REQUIRED for st in steps):
@@ -458,6 +464,11 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(job_gate_problems("gates-windows-guard-2", {"needs": "scope", "if": base_if}))
         self.assertTrue(guard_problems(doc(base, job("gates-windows-guard-2", "2/3", slice_=True),
                                            job("gates-windows-guard-3", "3/3"))))
+        # A shard value set for the whole job or workflow would cut the PR slice too.
+        self.assertFalse([p for p in hardening_problems(good) if "GUARD_SHARD appears" in p])
+        for leak in (good.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/3\n    steps:\n", 1),
+                     "env:\n  GUARD_SHARD: 1/3\n" + good):
+            self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p], leak)
 
     def test_the_guard_suite_has_its_own_windows_job(self):
         self.assertEqual(guard_problems(self.text), [])
