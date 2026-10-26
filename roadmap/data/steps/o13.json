@@ -1,0 +1,10 @@
+{
+  "title": "One name per thing: a glossary in every repo",
+  "phase": "organize",
+  "status": "todo",
+  "order": 116,
+  "why": "Your idea, Oct 26: AI sessions need settled terms. A photos folder beside a captures folder leads to confusion, a second copy being built, and misread asks.",
+  "note": "Checked Oct 26: no glossary in claude-settings (f463787), banchi (9683902) or home-app (65315da); q_max and home not checked. The only related rule is output-write-in-ste ('one term per meaning'), which governs prose, not names of folders, files, types or concepts. This is the naming side of o11 (one home per shared thing): two names for one thing is how a second home gets built. Advisor pick, not ruled: (1) each repo gets GLOSSARY.md with one row per term: the term, what it means, where it lives (path or symbol), and the names not to use for it ('not: photos, pictures'); only terms that caused or could cause confusion, not a dictionary. (2) One rule in claude-settings: before naming a new folder, file, type, setting or concept, check the glossary and reuse its term; a new term gets its row in the same change; renaming to the glossary term beats adding a second name. CLAUDE.md points at the file and does not inline it (token cost). (3) Later, a CI lint (CI only, per c21) that fails a new path or symbol matching a 'not:' name; build it only after a real repeat. (4) o2 (one layout) puts GLOSSARY.md in the shared layout; each repo seeds it from its known clashes. Unknown: which repo has the photos/captures clash.",
+  "ask": "",
+  "updatedAt": "2026-10-26T00:35:00Z"
+}
