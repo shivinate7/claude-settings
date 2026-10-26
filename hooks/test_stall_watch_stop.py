@@ -1096,7 +1096,7 @@ def named_log_with_odd_cwd_keeps_the_report():
     output_file(base, "bmflag600", 600)
     fresh = log_at(os.path.join(d, "flag.log"), 10)
     recs = (log_job("bmodd600", "python3 merge.py 586 &> rel.log", cwd=["x"])
-            + log_job("bmflag600", "python3 merge.py 586 --log=%s" % fresh, cwd=5))
+            + log_job("bmflag600", "python3 merge.py 586 --log='%s'" % fresh, cwd=5))
     rc, out, err = run_stop(transcript(recs), base)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
