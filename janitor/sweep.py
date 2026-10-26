@@ -455,6 +455,54 @@ def stale_agent_lock_verdict(reason: str):
     return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS
 
 
+MAX_CLIMB = 64  # fixed depth bound against a pid cycle, never a real tree this deep
+
+
+def _parent_pid(pid: int):
+    """The parent pid of PID, or None when it cannot be read."""
+    if sys.platform.startswith("win"):
+        return _parent_pid_windows(pid)
+    try:
+        answer = _nowindow.run(["ps", "-o", "ppid=", "-p", str(pid)],
+                               capture_output=True, text=True, timeout=5)
+        return int(answer.stdout.strip()) if answer.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def own_agent_lock_verdict(reason: str):
+    """True when REASON is an Agent-tool lock whose live holder is this process or one of its
+    ancestors (the calling session's own Claude process). False for any other reason, or a holder
+    outside the ancestry. None when a pid read could not tell. The caller still owns the clean,
+    merged, idle, session and process gates: this reads the holder only."""
+    found = AGENT_LOCK_RE.match(reason or "")
+    if not found:
+        return False
+    alive = stale_agent_lock_verdict(reason)
+    if alive is not False:
+        return None if alive is None else False
+    holder = int(found.group(1))
+    current = os.getpid()
+    for _ in range(MAX_CLIMB):
+        if current == holder:
+            return True
+        if current <= 1:
+            return False
+        current = _parent_pid(current)
+        if current is None:
+            return None
+    return None
+
+
+def _own_lock_ready(where: str, path: str, batch, idle):
+    """True when a tree held by the caller's own agent lock may go: merged into the default
+    branch, and idle AGENT_END_IDLE_SECONDS even under --attended. IDLE is the read taken before
+    any `git status`, which can rewrite the index. An unreadable fact is False."""
+    if idle is None or idle < AGENT_END_IDLE_SECONDS:
+        return False
+    return _merged_read(where, path, batch) is True
+
+
 _FETCH_FAILED = None  # a set of roots while `main` runs: those whose `fetch --prune` failed
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
@@ -710,7 +758,7 @@ def _idle_then_dirty(entry: dict, attended: bool):
 
 
 def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,
-                    batch=None, fast: bool = False):
+                    batch=None, fast: bool = False, own_lock_rule: bool = True):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
@@ -718,7 +766,12 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     keeps hold it. A repo's own `reap:worktrees` script turns it off. BATCH (`merged_batch`) is
     the one read that says which commits are in the default branch. FAST reads no remote and no
     push state: the tree goes only when its HEAD is in the default branch (and idle 1 hour,
-    unless attended), and with no BATCH nothing is proven, so it stays."""
+    unless attended), and with no BATCH nothing is proven, so it stays. OWN_LOCK_RULE (on by
+    default) frees the calling session's own agent lock once the tree is clean, merged, idle 30
+    minutes and unused; the agent-end reap turns it off."""
+    lock_idle = None  # an agent lock's idle is read even when attended, and before any status
+    if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
+        lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
         idle, path = (None if attended else entry["idle"]), entry["path"]
         dirty = git_reads.porcelain(path)
@@ -732,11 +785,16 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).
     # `remove_worktree` still has git refuse a locked tree.
     stale_agent_lock = False
+    own_lock = False
     if entry.get("locked_reason") is not None:
         holder = entry.get("locked_reason") or "locked"
         stale_agent_lock = stale_agent_lock_verdict(holder)
         if stale_agent_lock is not True:
-            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}
+            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True
+                        and (not fast or batch is not None)
+                        and _own_lock_ready(where, path, batch, lock_idle))
+            if not own_lock:
+                return {"path": path, "action": "keep", "reason": "locked: %s" % holder}
     live = git_reads.worktree_live_session(path)
     if live is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
@@ -784,8 +842,9 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     if inside:
         return {"path": path, "action": "keep",
                 "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
-    if stale_agent_lock:
-        return {"path": path, "action": "reap", "reason": "removable: stale agent lock",
+    if stale_agent_lock or own_lock:
+        return {"path": path, "action": "reap",
+                "reason": "removable: " + ("stale agent lock" if stale_agent_lock else "own agent lock"),
                 "unlock": True, "lock_reason": holder}
     return {"path": path, "action": "reap", "reason": "removable"}
 
@@ -813,7 +872,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
     _restore_cut_short(where, entry)
-    decision = decide_worktree(where, entry, attended=True)
+    decision = decide_worktree(where, entry, attended=True, own_lock_rule=False)
     if decision["action"] != "reap":
         return decision
     return _remote_tracking_keep(path) or decision
@@ -2294,7 +2353,8 @@ def _lock_unlockable(root: str, path: str, decision: dict):
         decision.pop("unlock", None)  # nobody holds a lock now: nothing to take off
         return True
     if (reason is not _LOCK_UNREADABLE and reason == decision.get("lock_reason")
-            and stale_agent_lock_verdict(reason) is True):
+            and (stale_agent_lock_verdict(reason) is True
+                 or own_agent_lock_verdict(reason) is True)):
         return True
     decision.pop("unlock", None)
     decision["action"] = "keep"

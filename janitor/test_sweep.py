@@ -7380,5 +7380,145 @@ class NoGuardAtImportTests(unittest.TestCase):
                          "importing sweep loaded these guard modules")
 
 
+class OwnAgentLockTests(unittest.TestCase):
+    """A lock whose pid N is the sweep process or one of its ancestors (the calling session's own
+    Claude process) may be freed, and only when every one of these holds: the tree is clean, HEAD
+    is in the default branch, the tree is idle 30 minutes (read even under --attended), no process
+    has a cwd inside it, and no live session holds it. Any other lock keeps. An unreadable
+    ancestor read keeps. Each case builds its own real repository, worktree and lock."""
+
+    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60):
+        """A clean, pushed, merged worktree locked by `claude agent agent-<name> (pid PID start ...)`
+        with PID's real start time. PREPARE runs before the lock, CHECK after it, and the admin
+        files are aged last, so a git read in CHECK cannot make the tree look active."""
+        root = os.path.join(ROOT, "own-lock-" + name)
+        make_repo(root, {"f.txt": "base\n"})
+        give_remote(root)
+        path = root + "-wt"
+        require(run_vcs(root, "worktree", "add", "-q", path, "-b", "lane-own-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        if prepare is not None:
+            prepare(path)
+        start = guard._process_start_ms(pid)
+        require(isinstance(start, int), "could not read the start time of pid %d" % pid)
+        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(start / 1000))
+        reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        require(run_vcs(root, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                "lock of %s failed" % name)
+        if check is not None:
+            check(root, path)
+        _age_admin_files(path, age)
+        return root, path
+
+    @staticmethod
+    def entry_for(root, path):
+        found = [e for e in sweep.parse_worktree_list(root) if _norm_path(e["path"]) == _norm_path(path)]
+        require(len(found) == 1, "worktree %s is not listed once" % path)
+        require(found[0].get("locked_reason") is not None, "worktree %s is not locked" % path)
+        return found[0]
+
+    def test_own_lock_on_a_live_ancestor_on_a_clean_merged_idle_tree_is_freed(self):
+        # The test process's parent is a live ancestor of the sweep (this process). Red today:
+        # every locked tree is kept as "locked: ...".
+        root, path = self.own_lock_tree("ancestor", os.getppid())
+        entry = self.entry_for(root, path)
+        with self.subTest(arm="decide_worktree"):
+            decision = sweep.decide_worktree(root, entry)
+            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+            self.assertTrue(decision.get("unlock"), "the own lock was not marked for unlock")
+        with self.subTest(arm="--confirm main run removes the tree"):
+            refused, results, calls = _run_main(root, ["--confirm"], hours=2)
+            self.assertIsNone(refused, REFUSED % refused)
+            self.assertTrue(results, "the sweep reported no repository")
+            decided = [d for r in results for d in r["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
+            self.assertTrue(decided, "the sweep made no decision for the tree")
+            self.assertEqual(decided[0]["action"], "reap", "kept: %s" % decided[0]["reason"])
+            self.assertNotEqual(_removals_of(calls, path), [], "the sweep never tried to remove the tree")
+            self.assertFalse(os.path.isdir(path), "the tree is still on disk")
+
+    def test_own_lock_on_a_live_ancestor_is_freed_under_attended_fast(self):
+        # Red today: the locked tree is kept as "locked: ...", so no removal is tried.
+        root, path = self.own_lock_tree("fast", os.getppid())
+        refused, results, calls = _run_main(root, ["--attended", "--fast", "--confirm"], hours=2)
+        self.assertIsNone(refused, REFUSED % refused)
+        self.assertTrue(results, "the sweep reported no repository")
+        decided = [d for r in results for d in r["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
+        self.assertTrue(decided, "the sweep made no decision for the tree")
+        self.assertEqual(decided[0]["action"], "reap", "kept: %s" % decided[0]["reason"])
+        self.assertNotEqual(_removals_of(calls, path), [], "the sweep never tried to remove the tree")
+        self.assertFalse(os.path.isdir(path), "the tree is still on disk")
+
+    def test_own_lock_on_an_unmerged_pushed_tree_keeps(self):
+        # Green today: the lock keeps. The rule must keep it too, because HEAD is not in main.
+        def commit_ahead(path):
+            write(os.path.join(path, "lane.txt"), "ahead of main\n")
+            run_vcs(path, "add", "-A")
+            require(run_vcs(path, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
+                    "commit in %s failed" % path)
+            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/lane-ahead")
+            require(pushed.returncode == 0, "push of the lane failed: %s" % pushed.stderr.strip())
+
+        def subject(root, path):
+            self.assertIs(sweep._merged_read(root, path), False, "HEAD is in main, not ahead of it")
+            self.assertIs(sweep.fully_pushed(path), True, "the ahead commit is not pushed")
+
+        root, path = self.own_lock_tree("ahead", os.getppid(), prepare=commit_ahead, check=subject)
+        decision = sweep.decide_worktree(root, self.entry_for(root, path))
+        self.assertEqual(decision["action"], "keep", "reaped an unmerged tree: %s" % decision["reason"])
+
+    def test_own_lock_on_a_merged_dirty_tree_keeps_as_dirty(self):
+        # Green today: the dirty read comes before the lock read.
+        def dirty(path):
+            write(os.path.join(path, "f.txt"), "changed in place\n")
+
+        def subject(root, path):
+            self.assertTrue(guard.porcelain(path), "no uncommitted edit took")
+
+        root, path = self.own_lock_tree("dirty", os.getppid(), prepare=dirty, check=subject)
+        decision = sweep.decide_worktree(root, self.entry_for(root, path))
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "dirty")
+
+    def test_own_lock_on_a_merged_clean_tree_idle_five_minutes_keeps_under_attended(self):
+        # Green today: the lock keeps. The rule must keep it too, because the tree is not idle 30 min.
+        root, path = self.own_lock_tree("young", os.getppid(), age=5 * 60)
+        self.assertGreaterEqual(sweep.worktree_idle_seconds(path), 4 * 60, "the tree is not 5 min idle")
+        decision = sweep.decide_worktree(root, self.entry_for(root, path), attended=True)
+        self.assertEqual(decision["action"], "keep", "reaped a tree idle 5 min: %s" % decision["reason"])
+        self.assertFalse(decision.get("unlock"))
+
+    def test_a_live_lock_holder_that_is_not_an_ancestor_keeps(self):
+        # Green today: a lock on a live child is kept. The child is not in this process's ancestry.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+        def reap_child():
+            child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(reap_child)
+        require(child.poll() is None, "the child exited before the lock")
+        require(child.pid not in (os.getpid(), os.getppid()), "the child is an ancestor")
+        root, path = self.own_lock_tree("child", child.pid)
+        decision = sweep.decide_worktree(root, self.entry_for(root, path))
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
+    def test_an_unreadable_ancestor_read_keeps_the_own_lock(self):
+        # Red on the positive arm today (kept as "locked: ..."). The negative arm keeps today, but the
+        # read itself does not exist yet: `sweep._parent_pid` is the name the new walk must use.
+        root, path = self.own_lock_tree("unreadable", os.getppid())
+        entry = self.entry_for(root, path)
+        with self.subTest(arm="the ancestor read works"):
+            decision = sweep.decide_worktree(root, entry)
+            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+        with self.subTest(arm="the ancestor read fails"):
+            with mock.patch.object(sweep, "_parent_pid", create=True, return_value=None) as read:
+                decision = sweep.decide_worktree(root, entry)
+            self.assertTrue(read.called, "the ancestor read was never made")
+            self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
