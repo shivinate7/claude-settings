@@ -113,7 +113,7 @@ def prompt_path():
 
 def build_digest(transcript_path, cap=DIGEST_CAP):
     """User and assistant text only, tool results and thinking dropped, last `cap`
-    characters kept (the tail: newest text matters most, see decisions/precompact-
+    characters kept (the tail: newest text matters most, see docs/decisions/precompact-
     handoff.md's "Known limits"). Raises OSError when the transcript cannot be read, so
     the caller can tell "nothing to digest" from "an empty session"."""
     parts = []
@@ -394,7 +394,9 @@ def inbox_note(session_id):
             with open(paths[0], encoding="utf-8") as f:
                 ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
             if ids:
-                note += " Open feedback items: %s. Keep each in the handoff." % ", ".join(ids)
+                note += (" Open feedback items: %s. Keep each standing item in the handoff, and give"
+                         " each ruling and task its tracked home: a decision record or rule, or the"
+                         " repo's todo or debt store." % ", ".join(ids))
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
     if local_time.is_open(paths[1]):  # never raises

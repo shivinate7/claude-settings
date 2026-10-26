@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+# ci-job <job> [--workflow <file>] [--base <ref>] [--plan]: run every step of one workflow job here,
+# each through bin/verdict, and print one verdict per step. A lane runs `ci-job gates --base origin/main`
+# before it sends a head that touches lint/, hooks/ or actions/ (agents/builder.md).
+# Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
+# Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
+# key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
+# Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
+# cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no --base).
+# A step's `if:` reads every needs.scope.outputs flag as true, !cancelled(), always() and success() as true,
+# and github.event_name == 'pull_request' as true only with --base. ${{ github.base_ref }} is --base without
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# A tool is missing when a line's command is not on PATH, or the step exits 127.
+# --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
+# temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
+# Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process.
+import os, re, shutil, sys, tempfile
+BIN = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+
+EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
+BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
+            "for", "do", "done", "while", "until", "case", "esac", "true", "false", ":", "read", "local", "return",
+            "shift", "eval", "source", ".", "trap", "unset", "wait", "{", "}", "(", ")", "!", "time", "exec", "command"}
+KEYWORDS = {"if", "elif", "while", "until", "do", "then", "else", "!", "time"}  # a word a command may follow
+RUNNERS = {"xargs", "env", "nice", "nohup"}  # a command whose first operand is the tool it runs
+SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"], "sh": ["sh", "-e"],
+          "python": ["python3"], "pwsh": ["pwsh", "-NoProfile", "-NonInteractive", "-File"]}
+
+
+def git(*args, cwd=None):
+    done = _nowindow.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def condition(text, pr):
+    """True, False, or None when the expression holds a term this runner cannot read."""
+    if not text:
+        return True
+    m = EXPR.fullmatch(text.strip())
+    expr = m.group(1) if m else text.strip()
+    expr = re.sub(r"needs\.scope\.outputs\.[\w-]+\s*==\s*'true'", " T ", expr)
+    expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
+    expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
+    expr = re.sub(r"\b(?:cancelled|always|success|failure)\(\)", lambda x: " F " if x.group(0) in ("cancelled()", "failure()") else " T ", expr)
+    expr = expr.replace("&&", " and ").replace("||", " or ").replace("!", " not ")
+    if not re.fullmatch(r"[\sTF()]*(?:(?:and|or|not)[\sTF()]*)*", expr):
+        return None
+    return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
+
+
+def expand(value, values):
+    """value with each known ${{ }} replaced, or None when one is unknown."""
+    missing = [m.group(1) for m in EXPR.finditer(value) if m.group(1) not in values]
+    return None if missing else EXPR.sub(lambda m: values[m.group(1)], value)
+
+
+def commands(script):
+    """The command word of each simple command in a shell script, for the tool-missing check."""
+    words, until = [], None
+    for line in script.splitlines():
+        if until is not None:  # a heredoc body is data, not commands
+            until = None if line.strip() == until else until
+            continue
+        line = line.split(" #")[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        bare = re.sub(r"\$\(\(.*?\)\)|\"[^\"]*\"", "", line)  # arithmetic and double-quoted text hold no heredoc
+        doc = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_]\w*)['\"]?", bare)
+        if doc:
+            until = doc.group(1)
+        for part in re.split(r"\|\||&&|[|;]", line):
+            tokens = [t for t in part.split() if not re.fullmatch(r"[A-Za-z_]\w*=\S*", t)]
+            while tokens and tokens[0] in KEYWORDS:  # if nosuchtool ...: the tool is nosuchtool
+                tokens.pop(0)
+            while len(tokens) > 1 and tokens[0] in RUNNERS:  # xargs -0 pipx ...: the tool is pipx
+                words.append(tokens.pop(0))
+                while len(tokens) > 1 and tokens[0].startswith("-"):
+                    tokens.pop(0)
+            if tokens and re.fullmatch(r"[\w./+-]+", tokens[0]) and tokens[0] not in BUILTINS and "/" not in tokens[0]:
+                words.append(tokens[0])
+    return words
+
+
+def missing_in_log(log, start, script):
+    """Each command the step's shell reported as not found, from this run's part of the log. A 127 that
+    an `if`, a `!` or `|| true` swallowed still lands there, so the step is unknown, not PASS."""
+    try:
+        with open(log, "rb") as f:
+            f.seek(start)
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    lead = re.escape(script)
+    found = re.findall(r"^%s: (?:line \d+: )?(\S+): command not found$" % lead, text, re.M)
+    found += re.findall(r"^%s: \d+: (\S+): not found$" % lead, text, re.M)
+    return sorted(set(found))
+
+
+def plan(step, pr, values):
+    """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
+    if step_key(step, "continue-on-error") not in (None, "false"):
+        return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
+    if step_key(step, "uses") is not None:
+        return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
+    cond = condition(step_key(step, "if"), pr)
+    if cond is None:
+        return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if"), None, None, None
+    if not cond:
+        why = "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
+        return "skipped", why, None, None, None
+    body = run_body(step)
+    if body is None:
+        return "unknown", "no run: and no uses:", None, None, None
+    env = {}
+    for name, raw in step_env(step).items():
+        val = expand(raw.strip("'\""), values)
+        if val is None:
+            return "unknown", "env %s needs an expression this runner cannot read: %s" % (name, raw), None, None, None
+        env[name] = val
+    if EXPR.search(body):
+        return "unknown", "run: holds an expression this runner cannot read", None, None, None
+    shell = step_key(step, "shell")
+    if shell not in SHELLS:
+        return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
+    argv = SHELLS[shell]
+    need = [argv[0]] + (commands(body) if shell in (None, "bash", "sh") else [])
+    gone = sorted({w for w in need if not shutil.which(w)})
+    if gone:
+        return "unknown", "tool missing: %s" % ", ".join(gone), None, None, None
+    return "run", body, argv, env, step_key(step, "working-directory")
+
+
+def main(argv):
+    args = list(argv)
+    opts = {"--workflow": None, "--base": None}
+    for key in opts:
+        if key in args:
+            i = args.index(key)
+            if i + 1 >= len(args):
+                print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan]")
+                return 2
+            opts[key] = args[i + 1]
+            del args[i:i + 2]
+    dry = "--plan" in args
+    args = [a for a in args if a != "--plan"]
+    if len(args) != 1:
+        print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan]")
+        return 2
+    job = args[0]
+    top = git("rev-parse", "--show-toplevel") or os.getcwd()
+    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "gates.yml")
+    try:
+        with open(workflow, encoding="utf-8") as f:
+            block = job_block(f.read(), job)
+    except OSError as e:
+        print("unknown  cannot read the workflow: %s" % e)
+        return 2
+    if block is None:
+        print("unknown  no job %r in %s" % (job, workflow))
+        return 2
+    if re.search(r"^    (?:env|defaults):", block, re.M):
+        print("unknown  job %r sets a job-level env: or defaults:, which this runner does not read" % job)
+        return 2
+    base = opts["--base"]
+    values = {"github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
+              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+    log = os.environ.get("VERDICT_LOG")
+    if not log and not dry:
+        fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
+        os.close(fd)
+    tally = {"FAIL": 0, "unknown": 0}
+    for n, step in enumerate(step_blocks(block), 1):
+        name = step_key(step, "name") or ("step %d" % n)
+        state, detail, shell, env, cwd = plan(step, bool(base), values)
+        if state != "run":
+            print("%-15s %s: %s" % (state, name, detail))
+            tally["unknown"] += state == "unknown"
+            continue
+        if dry:
+            print("%-15s %s" % ("would run", name))
+            continue
+        with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
+                                         encoding="utf-8", newline="\n") as f:
+            f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else detail)
+            script = f.name
+        try:
+            start = os.path.getsize(log) if os.path.exists(log) else 0
+            done = _nowindow.run([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
+                                 cwd=os.path.join(top, cwd) if cwd else top, capture_output=True, text=True,
+                                 env={**os.environ, **env, "VERDICT_LOG": log})
+            gone = missing_in_log(log, start, script)
+        finally:
+            os.remove(script)
+        first = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "FAIL "))),
+                     "(verdict printed no verdict line)")  # skip its "still running" heartbeats
+        if done.returncode == 127 or gone:
+            state = "unknown"
+            first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
+        else:
+            state = "PASS" if done.returncode == 0 else "FAIL"
+        tally["FAIL" if state == "FAIL" else "unknown"] += state != "PASS"
+        print("%-15s %s: %s" % (state, name, first))
+    if not dry:
+        print("log=%s" % log)
+    return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

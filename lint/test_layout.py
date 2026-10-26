@@ -24,6 +24,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
 REPO = os.path.dirname(LINT)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 LONG = "a" * 33 + ".md"  # a slug over 32 characters
 EXTRAS = ".claude/layout-extras.json"
 
@@ -121,16 +123,46 @@ class LayoutFile(Tree):
             self.layout.kinds(self.tree)
 
 
+class WaitingPage(Tree):
+    """The waiting page's URL is one key in a repo's extras file (skill waiting-page)."""
+    URL = "https://claude.ai/artifact/abc123"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_key_set_returns_the_url(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_no_extras_file_is_unknown_not_an_error(self):
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown")
+
+    def test_extras_file_without_the_key_is_unknown(self):
+        self.roll_out()
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown")
+
+    def test_a_key_that_is_not_a_claude_artifact_link_is_an_error(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://example.com/x"}))
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.waiting_page(self.tree)
+
+    def test_command_prints_the_url_or_unknown(self):
+        code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", self.tree], self.tree)
+        self.assertEqual((code, out.strip()), (0, "unknown"))
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
+        code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", self.tree], self.tree)
+        self.assertEqual((code, out.strip()), (0, self.URL))
+
+
 class Readers(Tree):
     """Each reader finds the records of a fixture repo under docs/, and of one at the legacy root."""
 
     def slug_tree(self):
         """A copy of the slug check with the layout, run from its own tree as in CI."""
-        os.makedirs(os.path.join(self.tree, "lint"))
-        for name in ("check_record_slugs.py", "layout.py", "layout.json"):
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, whatever they become
+        for name in ("check_record_slugs.py", "layout.py", "layout.json"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
-        os.makedirs(os.path.join(self.tree, "hooks"))
-        shutil.copyfile(os.path.join(REPO, "hooks", "_nowindow.py"), os.path.join(self.tree, "hooks", "_nowindow.py"))
         return [os.path.join(self.tree, "lint", "check_record_slugs.py")]
 
     def test_record_slugs_judges_docs_records_in_a_rolled_out_repo(self):
@@ -236,17 +268,13 @@ class Readers(Tree):
 class ConstantCheck(Tree):
     """lint/check_layout.py over a copy of the repo's readers, with one mutant at a time."""
 
-    COPY = ("lint/layout.py", "lint/layout.json", "lint/check_record_slugs.py", "lint/check_ruling_kind.py",
-            "lint/check_skill_model_rows.py", "lint/hook_catalog.py", "lint/ste_lint.py", "hooks/guard.py",
-            "actions/ruling-kind/action.yml", "actions/ste-lint/action.yml", "actions/ruling-kind/check.sh",
-            "actions/ste-lint/run.sh")
-
     def setUp(self):
         super().setUp()
-        for rel in self.COPY:
-            os.makedirs(os.path.dirname(os.path.join(self.tree, rel)), exist_ok=True)
-            shutil.copyfile(os.path.join(REPO, *rel.split("/")), os.path.join(self.tree, *rel.split("/")))
-        shutil.copytree(os.path.join(REPO, "actions", "stamp", "examples"), os.path.join(self.tree, "actions", "stamp", "examples"))
+        tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
+        os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
+        shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        for name in ("layout.py", "layout.json"):  # the files under test, from LINT
+            shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
     def check(self):
         return run([os.path.join(LINT, "check_layout.py"), "--root", self.tree], self.tree)

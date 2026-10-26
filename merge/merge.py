@@ -11,6 +11,8 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403.
 `gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
+A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
+git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
 import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
@@ -249,11 +251,27 @@ def say(*lines):
 
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
-# refs/merge-lock/<defaultBranch>. Two backends, one interface: acquire, release, unlock.
+# refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
+# Two backends, one interface: acquire, release, unlock. A Claude Code cloud session uses GitLock (default_lock).
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
 LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (a rate wait is the exception to the 600 s cap; standing-merge-grant)
+
+def lock_ref(b):
+    """The one name of the lock ref. Mac and cloud runs must share it, or each would hold a lock the other cannot see."""
+    return f"refs/heads/merge-lock/{b}"
+
+def old_lock_ref(b):
+    """The lock name before c53. A Mac run of older merge.py still takes it, so a GitLock (cloud) take refuses while it is live.
+    One way only: an old run never reads the new name, so it can take the old name while a cloud run holds the new one. Only the Mac's
+    reinstall from main at each merge closes that. GhLock skips this read for the same reason. Delete this and its read once no install
+    runs a merge.py older than c53."""
+    return f"refs/merge-lock/{b}"
+
+def refuse_old_lock(b, old, now):
+    if old and old[1] > now:
+        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
 
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
@@ -363,8 +381,8 @@ class GitLock(Lock):
     def __init__(self, root, now=time.time, pause=time.sleep):
         self.root, self.now, self.pause = root, now, pause
 
-    def read(self, b):
-        ref = f"refs/merge-lock/{b}"
+    def read(self, b, ref=None):
+        ref = ref or lock_ref(b)
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
@@ -376,10 +394,11 @@ class GitLock(Lock):
         return out.split()[0], expiry_of(msg), msg
 
     def acquire(self, b, ttl):
-        ref = f"refs/merge-lock/{b}"
+        ref = lock_ref(b)
         cur = self.read(b)
         if cur and cur[1] > self.now():
             raise Held(holder_text(b, cur, self.now()))
+        refuse_old_lock(b, self.read(b, old_lock_ref(b)), self.now())
         tree = git(self.root, "mktree", input="")[1]
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
@@ -397,7 +416,7 @@ class GitLock(Lock):
 
     def swap(self, b, msg):
         """A new lock commit with the text `msg`, swapped in only while the ref still holds this run's last commit. -> its sha, or Stop."""
-        ref = f"refs/merge-lock/{b}"
+        ref = lock_ref(b)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
         if c:
             raise Stop("cannot make the lock commit: " + sha)
@@ -407,15 +426,36 @@ class GitLock(Lock):
             raise Stop("the lock ref moved, or the push failed: " + out)
         return sha
 
+    def released(self, b, lease):
+        """Push a lock commit that expired at 0, so any run may take it. The cloud proxy refuses every ref delete (HTTP 403, c53),
+        so there a release or an unlock leaves this commit in place of no ref. `lease` is the push's lease flag. -> (code, output)."""
+        ref = lock_ref(b)
+        c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", git(self.root, "mktree", input="")[1],
+                     "-m", f"merge lock\nexpires: 0\nreleased: {int(self.now())}")
+        return (c, sha) if c else git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
+
     def delete(self, b, token):
-        ref = f"refs/merge-lock/{b}"
-        return git(self.root, "push", "-q", f"--force-with-lease={ref}:{token}", "origin", f":{ref}")
+        ref = lock_ref(b)
+        c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{token}", "origin", f":{ref}")
+        if not c:
+            return c, out
+        c2, out2 = self.released(b, f"--force-with-lease={ref}:{token}")  # the same lease: a lock another run took is never touched
+        return (0, out2) if not c2 else (c, out + "\n" + out2)
 
     def unlock(self, b):
-        c, out = git(self.root, "push", "-q", "origin", f":refs/merge-lock/{b}")
-        if c and "does not exist" not in out:
-            raise Stop("unlock failed: " + out)
-        return not c and "non-existent ref" not in out  # False: no lock was there (a remote refuses, or a local one only warns)
+        """-> True when it removed or expired a lock, False when no lock was there."""
+        ref = lock_ref(b)
+        cur = self.read(b)
+        if not cur or cur[1] <= 0:  # no ref, or a lock already released to expires 0
+            return False
+        c, out = git(self.root, "push", "-q", "origin", f":{ref}")
+        if c and "does not exist" in out:  # gone since the read
+            return False
+        if c:
+            c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
+            if c2:
+                raise Stop("unlock failed: " + out + "\n" + out2)
+        return True
 
 class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
@@ -434,7 +474,7 @@ class GhLock(Lock):
         return c, out
 
     def read(self, b):
-        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha")
+        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
                 raise NetStop("cannot read the merge lock: " + sha)
@@ -451,7 +491,7 @@ class GhLock(Lock):
         if cur and cur[1] > self.now():
             raise Held(holder_text(b, cur, self.now()))
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
-            c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
+            c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
                 raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
@@ -463,7 +503,7 @@ class GhLock(Lock):
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
             raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
-        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/merge-lock/{b}", "-f", f"sha={sha}")
+        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
         if c:
             if is_net(c, out):
                 raise NetStop("cannot take the merge lock: " + out)
@@ -476,8 +516,8 @@ class GhLock(Lock):
     def swap(self, b, msg):
         """A new lock commit with the text `msg`, then the ref moved to it. -> its sha, or Stop. No retry, no wait (api once).
         ponytail: the ref update is not compare-and-swap. Window: the read of the ref to the PATCH. The API has no lease; a backend with compare-and-swap closes it."""
-        ref = f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}"
-        c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha", once=True)
+        ref = f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}"
+        c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=True)
         if c or cur.strip() != self.sha:
             raise Stop("the lock is not this run's any more" if not c else "cannot read the lock: " + cur)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
@@ -496,12 +536,12 @@ class GhLock(Lock):
         return not is_net(1, out) and ("404" in out or "Not Found" in out or "does not exist" in out)
 
     def delete(self, b, token):
-        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         return (0, out) if c and self.gone(out) else (c, out)
 
     def unlock(self, b):
         """-> True when it removed the lock, False when no lock was there."""
-        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
             raise NetStop("unlock failed, still failing after the retries. Run again: " + out)
         if c and not self.gone(out):
@@ -1657,6 +1697,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
 
+def default_lock(root):
+    """A Claude Code cloud session (CLAUDE_CODE_REMOTE=true) gets GitLock: its proxy refuses the REST writes GhLock makes (HTTP 403 on
+    POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
+    return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
+
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", type=int)
@@ -1673,7 +1718,7 @@ def main(argv, host=None, lock=None):
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
-        lock = lock or GhLock()
+        lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
             if b is True:

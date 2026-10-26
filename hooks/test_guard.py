@@ -56,6 +56,8 @@ REPO = os.path.dirname(HERE)
 # one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
+sys.path.insert(0, HERE)
+import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -517,13 +519,13 @@ def slash(path):
 
 
 def copy_guard_family(dest):
-    """guard.py, its guard_* siblings, shared_names.py and git_reads.py (which guard_core.py imports)
-    from GUARD's folder into `dest`. A copy without either crashes on import. git_reads.py is copied
-    by name, so a folder that lacks it stops the fixture instead of building a guard that cannot load."""
+    """Every module in GUARD's folder (mutate_shared.module_files) into `dest`: guard.py, its guard_*
+    siblings, and each module they may import, so a new shared module cannot crash the copy on import.
+    git_reads.py is copied by name, so a folder that lacks it stops the fixture instead of building a
+    guard that cannot load."""
     source = os.path.dirname(GUARD)
-    for name in os.listdir(source):
-        if (name.startswith("guard") and name.endswith(".py")) or name == "shared_names.py":
-            shutil.copy(os.path.join(source, name), dest)
+    for path in mutate_shared.module_files(source):
+        shutil.copy(path, dest)
     shutil.copy(os.path.join(source, "git_reads.py"), dest)
 
 
@@ -13491,7 +13493,7 @@ FAMILY = "fail-closed"
 
 def _guard_siblings(folder):
     """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed.
-    Test files start with test_, so they are never listed. _guard_copy copies this same set."""
+    Test files start with test_, so they are never listed. _guard_copy copies these and every other module in the folder."""
     return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
 
 
@@ -13503,18 +13505,15 @@ FAILCLOSED_CHECKS = []
 
 
 def _guard_copy(name, drop):
-    """A scratch folder with a copy of guard.py, every guard_* sibling, shared_names.py and git_reads.py,
-    but for `drop`."""
+    """A scratch folder with a copy of guard.py and every other module in its folder
+    (mutate_shared.module_files), but for `drop`."""
     source = os.path.dirname(GUARD)
     folder = os.path.join(ROOT, "failclosed", name)
     os.makedirs(folder, exist_ok=True)
+    for path in mutate_shared.module_files(source):
+        if os.path.basename(path) not in ("guard.py", drop):
+            shutil.copy(path, folder)
     shutil.copy(GUARD, os.path.join(folder, "guard.py"))
-    for module in _guard_siblings(source):
-        if module + ".py" != drop:
-            shutil.copy(os.path.join(source, module + ".py"), folder)
-    shutil.copy(os.path.join(source, "shared_names.py"), folder)
-    if drop != "git_reads.py":  # guard_core.py imports it, so a copy needs it unless it is the one dropped
-        shutil.copy(os.path.join(source, "git_reads.py"), folder)
     return folder
 
 
@@ -13732,8 +13731,9 @@ def _reload_copy_stamped(name, first_line_for):
         with open(src, encoding="utf-8") as handle:
             good[entry] = (first_line_for(entry) or "") + handle.read()
         _put_whole(os.path.join(folder, entry), good[entry])
-    shutil.copy(os.path.join(source, "shared_names.py"), folder)
-    shutil.copy(os.path.join(source, "git_reads.py"), folder)  # unstamped, like shared_names.py
+    for path in mutate_shared.module_files(source):  # shared_names.py, git_reads.py and the rest, unstamped
+        if os.path.basename(path) not in good:
+            shutil.copy(path, folder)
     return folder, good
 
 
@@ -15048,7 +15048,7 @@ def ov_no_module_check():
     the refusal path would otherwise reach the guard's crash handler, which fails open."""
     config, session = ov_config("no-module"), "ov-no-module"
     note = ov_type(config, session, "override 15m")
-    folder = _guard_copy("ov-no-module", None)
+    folder = _guard_copy("ov-no-module", "override_pass.py")
     if os.path.exists(os.path.join(folder, "override_pass.py")):
         return False, "the scratch copy holds override_pass.py, so the case proves nothing"
     env = dict(os.environ)

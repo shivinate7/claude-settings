@@ -51,7 +51,6 @@
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
-- expired-lock-delete-race: the API cannot delete a ref only if it holds a value, so two runs can hold the merge lock for a few API calls (merge/merge.py)
 - fb-done-forms-unpinned: tests pin only a plain last line 'fb done'; colon, case, punctuation, CRLF, blank-line forms have no case, and fb and done on two last lines also close (hooks/local_time.py)
 - fb-done-unclosed-fence: a last line 'fb done' inside an unclosed code fence still closes capture (hooks/local_time.py CLOSE_LINE)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py, hooks/feedback_judge.py)
@@ -376,7 +375,7 @@
 - awk-v-glob-cleared: an awk -v value holding a glob is cleared as a search pattern; test_guard.py pins it as an allow (hooks/guard_env.py). Decision: none
 - env-wrapper-shape-reopen: reopen the hooks/guard_env.py rules on a wrapper shape that test_guard.py does not pin, with a counted number of denies in the weekly table (guard-log-read-weekly) (hooks/guard_env.py)
 - lane-number-unread-acts: old history is not checked, only new acts; reopen when a session number reaches main through an act the guard does not read, then widen the scan (hooks/guard.py LANE_NUMBER). Decision: lane-by-slug (a lane is named by its branch slug)
-- merge-lock-expired-delete-race: the expired-lock delete can remove a live lock, so two runs hold the lock; window is a few API calls, fix needs compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
+- merge-lock-expired-delete-race: GhLock (the Mac) deletes an expired lock with no compare-and-swap. So it can remove a live lock that another run just took, and then two runs hold the lock. The window is a few API calls. A cloud run releases the lock to an expired commit, never deletes it, so every Mac take after a cloud merge goes through this window. Fix: the Mac also uses GitLock, whose leased push is compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
 - merge-unborn-workflow-green: a workflow GitHub has not created yet reads as green; runs read and the settle read close most of the window, ceiling is a workflow that appears after SETTLE_SECONDS (merge/merge.py). Decision: none
 - purge-realpath-unverified: purge unverified for realpath on mapped or subst drives, git stderr text on other git versions, and realpath errors on older Python (janitor/sweep.py). Decision: none
 - records-header-copy-pinned: RECORDS_HEADER in hooks/guard_merge.py copies the first line of RECORDS_INTRO in lint/hook_catalog.py; a pin test compares them. Decision: records-index-at-merge (one records index page, rebuilt at merge time)

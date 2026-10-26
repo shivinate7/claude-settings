@@ -33,6 +33,7 @@ if ($env:OS -ne 'Windows_NT') { Write-Host 'SKIP: install set (Windows only)'; e
 
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Utf8    = New-Object Text.UTF8Encoding($false)
+. (Join-Path $Here 'testing\TrackedTree.ps1')  # copies what git lists, so no fixture lists files
 $PsHost  = (Get-Process -Id $PID).Path
 $Python  = (Get-Command python -ErrorAction Stop).Source
 $GitExe  = (Get-Command git -ErrorAction Stop).Source
@@ -115,7 +116,7 @@ function Add-BuildLine([string]$Dir, [string]$Build) {
     }
 }
 
-# A clone folder: install.ps1, the repo's guard files each with a build line appended,
+# A clone folder: install.ps1, the repo's hook modules (testing\TrackedTree.ps1) with a build line appended to each guard file,
 # and a settings.json and CLAUDE.md. With -Skills N it also lands N skill folders after the hooks, so
 # an install runs long enough to overlap another. With -Git it is a git repository on main.
 function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git) {
@@ -125,9 +126,7 @@ function New-Clone([string]$Dir, [string]$Build, [int]$Skills = 0, [switch]$Git)
     [IO.File]::WriteAllText((Join-Path $Dir 'settings.json'), "{}`n", $Utf8)
     $lands = if ($Skills -gt 0) { "hooks`nskills`n" } else { "hooks`n" }
     [IO.File]::WriteAllText((Join-Path $Dir 'landed-dirs.txt'), $lands, $Utf8)
-    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $Here 'hooks') -File | Where-Object { $_.Name -ceq 'guard.py' -or $_.Name -clike 'guard_*.py' -or $_.Name -ceq 'shared_names.py' -or $_.Name -ceq 'git_reads.py' })) {
-        Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Dir ('hooks\' + $f.Name))
-    }
+    Copy-TrackedFolder $Here 'hooks' (Join-Path $Dir 'hooks') | Out-Null  # every module the guard may import
     Add-BuildLine $Dir $Build
     for ($i = 0; $i -lt $Skills; $i++) {
         $d = Join-Path $Dir ('skills\skill-' + $i)

@@ -26,7 +26,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("MOD_VERSIONS_UNDER_TEST") or os.path.join(HERE, "check_mod_versions.py")
-HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 PLUGIN = ".claude-plugin/plugin.json"
 MARKET = ".claude-plugin/marketplace.json"
 PREFIX = "check_mod_versions: FAIL:"
@@ -69,10 +70,8 @@ class ModVersionTests(unittest.TestCase):
     def fresh_tree(self):
         self.tree = tempfile.mkdtemp(prefix="mvg_")
         self.addCleanup(rm_tree, self.tree)
-        os.makedirs(os.path.join(self.tree, "lint"))
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, whatever they become
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_mod_versions.py"))
-        os.makedirs(os.path.join(self.tree, "hooks"))
-        shutil.copyfile(HELPER, os.path.join(self.tree, "hooks", "_nowindow.py"))
 
     def put(self, rel, text="# file\n"):
         path = os.path.join(self.tree, *rel.split("/"))
