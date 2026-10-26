@@ -321,7 +321,7 @@
 - prune-symlink-probe-negative-only: the SYMLINK_CAPABLE probe and early-return are proven only on the no-privilege branch Decision: none
 - mutants-hidden-crashes: mutants other than the watch target are not audited for hidden crashes; the required-case-name field narrows it Decision: none
 - merge-notice-no-report: a turn that merges and writes no report still fires the merge notice; the safe side Decision: none
-- mod-step-unverified: zizmor on the Mod tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: none
+- mod-step-unverified: zizmor on the Mod and map-skill tests step not run, and whether cancelled() is true on a job timeout is unknown Decision: none
 - verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: none
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
