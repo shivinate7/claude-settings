@@ -12,6 +12,11 @@ try:
 except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
     _nowindow = subprocess
 import sys
+try:
+    from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
+except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
+    def holds_session_tag(pid, session_id):
+        return False
 
 from guard_core import (
     QUOTE_MARKS,
@@ -215,13 +220,16 @@ def kills_group_pid(tokens) -> bool:
     return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
 
 
-def foreign_pid_kill(tokens, transcript: str = "") -> str:
+def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
     Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
     the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
-    answer is "" (unknown, so allowed), never a guess. ponytail: a pid reused since launch, or
-    a child that reparented to init, reads as foreign; stop it through the harness.
+    answer is "" (unknown, so allowed), never a guess. A PPID-1 pid is also owned when its exec
+    environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`),
+    read only after the walk says foreign, so an allowed kill costs nothing new. ponytail: a pid
+    reused since launch reads as foreign; a forked shell stub carries no tag, so a left-behind
+    shell reads foreign too; stop either through the harness.
     """
     root = None
     for arg in _kill_pids(tokens):
@@ -235,6 +243,8 @@ def foreign_pid_kill(tokens, transcript: str = "") -> str:
         if in_own_agent_worktree(abs(number), transcript):
             continue
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
+            if _ps_ppid(abs(number)) == 1 and holds_session_tag(abs(number), session_id):
+                continue
             return arg
     return ""
 

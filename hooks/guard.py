@@ -2054,7 +2054,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        matched = foreign_pid_kill(tokens, transcript)
+        matched = foreign_pid_kill(tokens, transcript, session_id)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
