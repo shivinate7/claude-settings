@@ -1,0 +1,10 @@
+{
+  "title": "A roadmap write never lands with git conflict markers in it",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.395,
+  "why": "A conflict marker in a step file breaks the build and the page for every thread until someone notices.",
+  "note": "Incident, Oct 26 16:34 (build advisor 4): roadmap commit 45891d5 was pushed with conflict markers in steps/o13.json and roadmap.html; build.py crashed on the bad JSON mid-rebase, the shell chain did not stop on the error, and the commit went out. Fixed at 6927b4c. Fix, one small cloud lane, needs no answer from you: build.py scans every file under roadmap/data/, briefs/, plans/ and handoffs/ for a line starting with <<<<<<<, =======, or >>>>>>> and exits non-zero naming the file; it already runs before each commit. A git hook alone would not cover cloud sessions, which clone fresh and arm no hooks. Red first: plant a marker in a fixture step. Port: yes, with o16's roadmap package. Placed ahead of c69 (triage, Oct 26): it breaks the record every thread writes to.",
+  "ask": "",
+  "updatedAt": "2026-10-26T16:40:00Z"
+}
