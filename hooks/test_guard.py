@@ -12,6 +12,10 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_SHARD=<i>/<n> runs every n-th selected case, starting at the i-th (1-based), after the other
+filters. The n shards of one selection are disjoint and together hold every case, so CI can split
+the suite across jobs and drop none. A malformed value stops the run before a case runs.
+
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
 
@@ -105,6 +109,25 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+
+
+def parse_shard(value):
+    """(i, n) from GUARD_SHARD's "<i>/<n>", 1 <= i <= n; (1, 1) when unset. Anything else stops the run."""
+    if not value:
+        return 1, 1
+    m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not m or int(m.group(1)) > int(m.group(2)):
+        sys.exit("GUARD_SHARD=%r: want <i>/<n> with 1 <= i <= n. Nothing ran." % value)
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_of(items, shard):
+    """The items of one shard: every n-th item, starting at index i-1."""
+    i, n = shard
+    return items[i - 1::n]
+
+
+GUARD_SHARD = parse_shard(os.environ.get("GUARD_SHARD", ""))
 FAMILY = "misc"  # set at each section header below
 # TEMP_DIR is the temp folder the guard reads for the cases added while it is set, or None for the
 # system temp. add() records it, and decide() puts it in TMPDIR, TEMP and TMP for that guard run.
@@ -14457,6 +14480,72 @@ def ov_parallel_check(workers=6, rounds=5):
     return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
 
 
+OV_TAKE_CHILD = (
+    "import sys\n"
+    "from datetime import datetime\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import override_pass\n"
+    "print(override_pass.take(sys.argv[2], None, datetime.fromisoformat(sys.argv[3])))\n"
+)
+
+
+def ov_take_race_check(workers=6, rounds=30):
+    """Processes that call take() on one one-act pass at once: exactly one gets it. A Windows rename
+    acts on an open handle, so a rename claim let two racers win (2 of 40 rounds, run 40296652083)."""
+    config = ov_config("take-race")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
+    for n in range(rounds):
+        session = "ov-take-race-%d" % n
+        note = ov_type(config, session, "override")
+        got = [None] * workers
+        start = threading.Barrier(workers)
+
+        def worker(i):
+            start.wait()
+            run = subprocess.run([sys.executable, "-c", OV_TAKE_CHILD, os.path.dirname(GUARD), session,
+                                  ov_clock(60)], capture_output=True, text=True, env=env, timeout=60)
+            got[i] = run.stdout.strip() if run.returncode == 0 else "error: " + run.stderr.strip()[-80:]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if got.count("override") != 1 or got.count("None") != workers - 1:
+            return False, "round %d: %d processes raced take(), results %r, want one override; %s" % (
+                n, workers, got, note or "typed")
+    return True, "%d rounds of %d racing take() calls, one winner each" % (rounds, workers)
+
+
+def ov_late_reader_check():
+    """A call that read the pass before another call spent it is refused. Its bytes come back as the
+    pass file here, which is what it sees. A new `override` typed at the same instant still lifts one act."""
+    config, session = ov_config("late-reader"), "ov-late-reader"
+    rule = "machine-wide-kill"
+    note = ov_type(config, session, "override")
+    path = ov_pass_path(config, session)
+    try:
+        with open(path, "rb") as handle:
+            seen = handle.read()
+    except OSError as error:
+        return False, "no pass file after `override`: %s; %s" % (error, note or "typed")
+    ok, why = ov_story([("the first call", lambda: ov_kill(config, session, 60), "allow", rule)], note)
+    if not ok:
+        return False, why
+    with open(path, "wb") as handle:
+        handle.write(seen)
+    ok, why = ov_story([("a call that read the pass before it was spent",
+                         lambda: ov_kill(config, session, 90), "deny", rule)], note)
+    if not ok:
+        return False, why
+    os.remove(path)
+    note = ov_type(config, session, "override") or note
+    ok, why = ov_story([("a new pass typed at the same instant",
+                         lambda: ov_kill(config, session, 120), "allow", rule)], note)
+    if not ok:
+        return False, why
+    return True, "the spent pass stayed spent for a late reader, and a new pass lifted one act"
+
+
 def ov_agent_once_check():
     """A subagent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
     config, session = ov_config("agent-once"), "ov-agent-once"
@@ -14716,6 +14805,9 @@ for _label, _check in (
      ov_corrupt_check),
     ("override: a pass covers only the session that typed it", ov_scope_check),
     ("override: two calls racing for one one-act pass, exactly one gets it", ov_parallel_check),
+    ("override: processes racing take() for one one-act pass, exactly one gets it",
+     ov_take_race_check),
+    ("override: a call that read a one-act pass before it was spent is refused", ov_late_reader_check),
     ("override: a subagent never spends a one-act pass", ov_agent_once_check),
     ("override: a timed pass reaches a subagent until it ends", ov_agent_timed_check),
     ("override: frozen-path and git-env-set stay refused under a one-act pass",
@@ -15527,6 +15619,31 @@ for _short, _tool in LB_TOOLS:
 lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
+def shard_split_check():
+    """GUARD_SHARD: the n shards of a list are disjoint, hold every item, and differ in size by one at most;
+    a malformed value stops the run."""
+    for size in (0, 1, 7, 3900):
+        items = list(range(size))
+        for n in range(1, 6):
+            shards = [shard_of(items, (i, n)) for i in range(1, n + 1)]
+            if sorted(sum(shards, [])) != items or max(map(len, shards)) - min(map(len, shards)) > 1:
+                return False, "%d items in %d shards split as %s" % (size, n, [len(x) for x in shards])
+    for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2"):
+        try:
+            parse_shard(bad)
+        except SystemExit:
+            continue
+        return False, "GUARD_SHARD=%r was accepted" % bad
+    if parse_shard("") != (1, 1) or parse_shard("2/3") != (2, 3):
+        return False, "parse_shard misread an empty or a well-formed value"
+    return True, "shards of 0 to 3900 items in 1 to 5 shards are disjoint and whole; bad values stop"
+
+
+LOG_CHECKS_EXTRA.append(("GUARD_SHARD: the shards are disjoint and hold every case", shard_split_check))
+LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
+FIXTURELESS_CHECKS.add(shard_split_check)
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -15556,6 +15673,9 @@ WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
 # load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx
 # and a process snapshot) that no Linux run exercises.
 WINDOWS_CHECKERS.update(LB_CHECKS)
+# override: a one-act pass claimed by a rename let two Windows racers win (run 40296652083), and no
+# Linux run shows it, so the claim cases run in the Windows slice.
+WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
@@ -16010,9 +16130,14 @@ def run_cases():
     if mode and not total:
         print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
         return 2
+    # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
+    picked = shard_of(cases + logs, GUARD_SHARD)
+    cases = [c for c in picked if isinstance(c, dict)]
+    logs = [c for c in picked if not isinstance(c, dict)]
     print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
     print("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
           % (mode or "(unset)", fam or "(unset)", total))
+    print("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
     print("fixtures under " + ROOT)
     print()
     failed = 0
@@ -16072,10 +16197,11 @@ def run_cases():
             os.kill(orphan, signal.SIGTERM)
         except OSError:
             pass
-    if (mode or fam or only) and not ran:
-        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s "
-              "matched none, or matched only skips: %d skipped)" % (
-                  mode or "(unset)", fam or "(unset)", only or "(unset)", skipped))
+    if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
+        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
+              "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
+                  mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
+                  skipped))
         return 1
     if failed:
         print("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))

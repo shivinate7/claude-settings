@@ -97,6 +97,21 @@ GUARD_CMD = "python hooks/test_guard.py"
 GUARD_SLICE = "python hooks/test_guard.py [windows-slice]"
 GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
 GUARD_JOB = "gates-windows-guard"
+# A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
+# carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
+# once. A shard job past the first never runs on pull_request: the required check is the base job alone, so
+# the PR verdict stays in it (the slice there runs whole, with no shard value).
+SHARD_VAR = {"gates-windows-guard": "GUARD_SHARD", "gates-windows-merge": "MERGE_SHARD"}
+SHARD_CMD = {"gates-windows-guard": "python hooks/test_guard.py", "gates-windows-merge": "python merge/test_merge.py"}
+SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
+
+
+def shard_base(name):
+    """The base job a shard job belongs to (`gates-windows-guard-2` -> `gates-windows-guard`), or None."""
+    m = re.fullmatch(r"(.+)-([2-9]|[1-9][0-9]+)", name)
+    return m.group(1) if m and m.group(1) in SHARD_VAR else None
+
+
 # The guard mutation harness moves off `gates` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "gates-mutate-guard"
@@ -118,17 +133,43 @@ def key(st):
     return run
 
 
+def shard_problems(cmd, homes):
+    """A suite in several jobs is one shard family: its base job and `<base>-2`..`<base>-<n>`, each full step with
+    SHARD_VAR=<i>/<n>, the values 1/n to n/n once each. [] when the homes are such a family."""
+    names = [n for n, _ in homes]
+    bases = {shard_base(n) or n for n in names}
+    base = next(iter(bases))
+    if len(bases) != 1 or base not in SHARD_VAR or SHARD_CMD[base] != cmd:
+        return [f"{cmd!r} runs {len(homes)} times on windows-latest: {names}"]
+    n = len(homes)
+    want_names = {base} | {f"{base}-{i}" for i in range(2, n + 1)}
+    got = sorted((st.get("env") or {}).get(SHARD_VAR[base], "") if isinstance(st.get("env"), dict) else ""
+                 for _, st in homes)
+    want = sorted(f"{i}/{n}" for i in range(1, n + 1))
+    problems = []
+    if set(names) != want_names or len(names) != n:
+        problems.append(f"{cmd!r} shard jobs are {names}, want {sorted(want_names)}")
+    if got != want:
+        problems.append(f"{cmd!r} {SHARD_VAR[base]} values are {got}, want {want}: a case would run twice or never")
+    return problems
+
+
 def placement_problems(text):
     """Strings naming each suite not run exactly once, or too few carrying jobs."""
-    jobs = {n: [key(st) for st in j["steps"]] for n, j in windows_jobs(text).items()}
+    wj = windows_jobs(text)
+    jobs = {n: [key(st) for st in j["steps"]] for n, j in wj.items()}
     problems = []
     homes = [n for n, runs in jobs.items() for r in runs if r == SLICE]
     if len(homes) != 1:
         problems.append(f"{SLICE!r} runs {len(homes)} times on windows-latest: {homes}")
     for cmd in REQUIRED:
-        homes = [n for n, runs in jobs.items() for r in runs if r == cmd]
-        if len(homes) != 1:
-            problems.append(f"{cmd!r} runs {len(homes)} times on windows-latest: {homes}")
+        homes = [(n, st) for n, j in wj.items() for st in j["steps"] if key(st) == cmd]
+        if len(homes) > 1:
+            problems += shard_problems(cmd, homes)
+        elif len(homes) != 1 or any(isinstance(st.get("env"), dict) and SHARD_VAR.get(n) in st["env"]
+                                    for n, st in homes):
+            problems.append(f"{cmd!r} runs {len(homes)} times on windows-latest: {[n for n, _ in homes]}"
+                            + (" (a lone shard value)" if homes else ""))
     carrying = [n for n, runs in jobs.items() if any(r in REQUIRED for r in runs)]
     if len(carrying) < MIN_JOBS:
         problems.append(f"{len(carrying)} windows-latest jobs carry the suites, need {MIN_JOBS}: {carrying}")
@@ -175,6 +216,8 @@ def job_gate_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
+    if shard_base(name):  # a shard past the first: every event but pull_request, whatever the flags
+        return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if expr is None and name != "gates":
         return problems + [f"{name}: no job-level if"]
     own = flag or name.replace("-", "_")
@@ -225,6 +268,12 @@ def hardening_problems(text):
     if n != 1:
         problems.append(f"MERGE_TESTS appears {n} times in gates.yml, want exactly 1 (the slice step's env)")
     slice_envs = {SLICE: SLICE_ENV, GUARD_SLICE: GUARD_SLICE_ENV}
+    # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would reach the slice on pull_request.
+    for var in SHARD_VAR.values():
+        homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
+                    if isinstance(st.get("env"), dict) and var in st["env"] and key(st) in REQUIRED)
+        if text.count(var) != homes:
+            problems.append(f"{var} appears {text.count(var)} times in gates.yml, want {homes} (once per shard step's env)")
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
         if not any(key(st) in REQUIRED for st in steps):
@@ -255,8 +304,11 @@ def guard_problems(text):
         return [f"no windows-latest job named {GUARD_JOB}"]
     problems = []
     for name, job in jobs.items():
-        if name != GUARD_JOB and any(key(st) in (GUARD_CMD, GUARD_SLICE) for st in job["steps"]):
-            problems.append(f"{name} runs the guard suite; it belongs to {GUARD_JOB} alone")
+        if name not in (GUARD_JOB, ) and shard_base(name) != GUARD_JOB and any(
+                key(st) in (GUARD_CMD, GUARD_SLICE) for st in job["steps"]):
+            problems.append(f"{name} runs the guard suite; it belongs to {GUARD_JOB} and its shard jobs alone")
+        if shard_base(name) and any(key(st) in (SLICE, GUARD_SLICE) for st in job["steps"]):
+            problems.append(f"{name} runs a slice; the slice belongs to the base job, the required check")
     job = jobs[GUARD_JOB]
     problems += job_gate_problems(GUARD_JOB, job, FLAG_OF[GUARD_JOB])
     steps = {}
@@ -421,6 +473,50 @@ class WindowsSplit(unittest.TestCase):
             self.assertTrue(any("MERGE_TESTS appears 2 times" in p for p in hardening_problems(bad)), bad)
         self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
         self.assertTrue(hardening_problems(doc(full_if=full_if.replace(" && needs.scope.outputs.code == 'true'", ""))))
+
+    def test_checker_sees_the_shard_defects(self):
+        full_if = IF_PIN[GUARD_CMD]
+        base_if = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"
+
+        def job(name, shard, job_if=SHARD_JOB_IF, slice_=False):
+            return (f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n    if: {job_if}\n    steps:\n"
+                    "      - uses: actions/setup-python@abc # v6\n"
+                    f"      - name: Full\n        if: {full_if}\n"
+                    + (f"        env:\n          GUARD_SHARD: {shard}\n" if shard else "")
+                    + "        run: python hooks/test_guard.py\n"
+                    + (f"      - name: Slice\n        if: {IF_PIN[GUARD_SLICE]}\n        env:\n"
+                       "          GUARD_TESTS: windows-slice\n        run: python hooks/test_guard.py\n" if slice_ else ""))
+
+        def doc(*jobs):
+            return "jobs:\n" + "".join(jobs)
+
+        def place(text):
+            return [p for p in placement_problems(text) if "test_guard" in p]
+
+        base = job("gates-windows-guard", "1/3", base_if, slice_=True)
+        good = doc(base, job("gates-windows-guard-2", "2/3"), job("gates-windows-guard-3", "3/3"))
+        self.assertEqual(place(good), [])
+        self.assertEqual(guard_problems(good), [])
+        self.assertEqual(job_gate_problems("gates-windows-guard-2", {"needs": "scope", "if": SHARD_JOB_IF}), [])
+        bad = {
+            "a shard dropped": doc(base, job("gates-windows-guard-2", "2/3")),
+            "a shard doubled": doc(base, job("gates-windows-guard-2", "2/3"), job("gates-windows-guard-3", "2/3")),
+            "a shard unset": doc(base, job("gates-windows-guard-2", "2/3"), job("gates-windows-guard-3", "")),
+            "n disagrees": doc(base, job("gates-windows-guard-2", "2/2"), job("gates-windows-guard-3", "3/3")),
+            "a lone shard": doc(job("gates-windows-guard", "1/2", base_if, slice_=True)),
+            "a stray job name": doc(base, job("gates-windows-guard-2", "2/3"), job("gates-windows-rest", "3/3")),
+        }
+        for label, text in bad.items():
+            self.assertTrue(place(text) or guard_problems(text), label)
+        # A shard job that runs on pull_request, or runs the slice, takes the PR verdict out of the required check.
+        self.assertTrue(job_gate_problems("gates-windows-guard-2", {"needs": "scope", "if": base_if}))
+        self.assertTrue(guard_problems(doc(base, job("gates-windows-guard-2", "2/3", slice_=True),
+                                           job("gates-windows-guard-3", "3/3"))))
+        # A shard value set for the whole job or workflow would cut the PR slice too.
+        self.assertFalse([p for p in hardening_problems(good) if "GUARD_SHARD appears" in p])
+        for leak in (good.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/3\n    steps:\n", 1),
+                     "env:\n  GUARD_SHARD: 1/3\n" + good):
+            self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p], leak)
 
     def test_the_guard_suite_has_its_own_windows_job(self):
         self.assertEqual(guard_problems(self.text), [])
