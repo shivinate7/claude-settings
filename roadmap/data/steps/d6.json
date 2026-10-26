@@ -1,9 +1,9 @@
 {
-  "note": "Checked Oct 26 at 149f4bc: no screenshot script in claude-settings (bin/ has none); home-app has none either (f8a59b2). banchi still has scripts/screenshot.sh with a 1280x900 viewport (19abdfb); q_max has Playwright installed but no screenshot command (b47bd00). Ruling Oct 17: build the shared script here; adding it to each child repo and fixing banchi's 1280 viewport is Roll out. Your ruling Oct 20 (o11): one scripts/shoot in claude-settings, installed like the hooks; each repo keeps only a config (URL, sizes, themes, simulator). The script is the check; a browser is for exploring. Found Oct 26: cloud sessions ship Chromium and Playwright, and the desktop app's browser pane is allowed in settings.json, so the script needs no MCP (d8 folds in here). Commands: topic 'Reusable prompts and snippets'.",
-  "order": 260,
+  "note": "Checked Oct 26 at 149f4bc: no screenshot script in claude-settings (bin/ has none); home-app has none either (f8a59b2). banchi still has scripts/screenshot.sh with a 1280x900 viewport (19abdfb); q_max has Playwright installed but no screenshot command (b47bd00). Ruling Oct 17: build the shared script here; adding it to each child repo and fixing banchi's 1280 viewport is Roll out. Your ruling Oct 20 (o11): one scripts/shoot in claude-settings, installed like the hooks; each repo keeps only a config (URL, sizes, themes, simulator). The script is the check; a browser is for exploring. Found Oct 26: cloud sessions ship Chromium and Playwright, and the desktop app's browser pane is allowed in settings.json, so the script needs no MCP (d8 folds in here). Commands: topic 'Reusable prompts and snippets'. Placed second in Design (triage, Oct 26): ruled and needs no answer from you.",
+  "order": 202,
   "phase": "design",
   "status": "todo",
   "title": "A screenshot command in every repo",
-  "updatedAt": "2026-10-26T05:45:00Z",
+  "updatedAt": "2026-10-26T06:00:00Z",
   "why": "scripts/shoot with the Playwright CLI and simctl, so agents can look at what they built. Fix banchi's 1280 viewport."
 }
