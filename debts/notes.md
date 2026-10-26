@@ -1,5 +1,4 @@
 # Notes: findings too unlikely to hit to be debts
-- SendMessage prompt hook may never fire: check that a logged SendMessage call gets a verdict. Decision: haiku-prompt-hooks (blocking prompt hooks trial).
 - AskUserQuestion gain/loss rule may block terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a deny case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
@@ -255,7 +254,7 @@
 - sb-safe-stop-origin: /safe-stop origin check is a block-list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
 - schtasks-test-not-in-ci: janitor/test_install_schtasks.py is in no CI job; its skip never ran on Windows CI (janitor, CI)
 - sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
-- sendmessage-wording-judge-always: the SendMessage prompt hook makes a model call on every send; the state judge removes none (settings.json)
+- sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override pass too; the busy judge removes none (hooks/sendmessage_state.py)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)
 - shell-write-miss-git-config-file: git config --file P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
@@ -388,7 +387,7 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- prompt-hooks-fail-open: Prompt hooks (Agent, decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, decisions/ Edit and Write) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position
