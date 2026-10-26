@@ -820,14 +820,22 @@ class CutBranchTree(Env):
         self.assertIn(self.wt, self.listed())
         self.assertTrue(self.exists(), f"the branch was deleted; out: {out!r}")
 
-    def test_clean_merged_tree_is_removed_with_its_branch(self):
-        merged = self.merged_feat()
+    def assert_clean_tree_removed(self, merged):
         self.worktree()
         out = self.cut(merged)
         self.assertFalse(os.path.exists(self.wt), f"the worktree folder is still there; out: {out!r}")
         self.assertNotIn(self.wt, self.listed())
         self.assertFalse(self.exists(), f"the local branch feat was not deleted; out: {out!r}")
         self.assertIn("feat here: deleted", out)
+
+    def test_clean_merged_tree_is_removed_with_its_branch(self):
+        self.assert_clean_tree_removed(self.merged_feat())
+
+    def test_clean_merged_tree_is_removed_when_merged_is_the_pr_head(self):
+        # Production passes the PR head sha (merge.py `cut_branch(root, branch, sha)`), not origin/main.
+        head = sh(self.co, "git", "rev-parse", "origin/feat")
+        self.merged_feat()
+        self.assert_clean_tree_removed(head)
 
     def test_dirty_tree_is_kept(self):
         merged = self.merged_feat()
@@ -850,6 +858,7 @@ class CutBranchTree(Env):
 
     def test_tree_locked_by_a_live_agent_is_kept(self):
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))  # the process-start read the lock's verdict uses
+        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
         import git_reads
         merged = self.merged_feat()
         self.worktree()
@@ -859,7 +868,11 @@ class CutBranchTree(Env):
         self.assertIsNotNone(started, "could not read the child's start time")
         start = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(started / 1000))
         sh(self.co, "git", "worktree", "lock", "--reason", f"claude agent agent-x (pid {child.pid} start {start})", self.wt)
-        self.assertKept(self.cut(merged), r"feat kept here: .*lock")
+        import sweep  # janitor/sweep.py, the module merge.remove_held_tree imports
+        with unittest.mock.patch.object(sweep, "remove_worktree", wraps=sweep.remove_worktree) as remove:
+            out = self.cut(merged)
+        self.assertFalse(remove.called, f"the sweep removed a tree its own lock rule keeps; out: {out!r}")
+        self.assertKept(out, r"feat kept here: .*locked: claude agent agent-x")
 
 # ------------------------------------------------------------------ the lanes of a batch
 # One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
