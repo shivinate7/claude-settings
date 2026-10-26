@@ -247,6 +247,15 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
   An install that is more than 300 days old raises an overdue notice.
 * `--app NAME` limits a run to the named apps. A name that is not in the config exits 2.
 
+## Standing roles and a roadmap record for a repo
+
+The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds four
+standing roles (triage, build advisor, local liaison, merge hand), one roster, counted hand-offs and
+autopilot deferral. It also holds a record branch for the roadmap data, briefs and role hand-off notes. Its
+`scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
+the roster, a brief and a role hand-off note. A repo adopts it only on the owner's word. See
+`skills/project-ops/SKILL.md`.
+
 ## Details worth knowing but not part of setup
 
 * **How local sessions catch up with main.** `settings.json` carries a `SessionStart` hook. It exits at once
