@@ -547,7 +547,7 @@
     "questions-go-to-owner": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a question names what the session does meanwhile, and whether the session kept working on what does not depend on the answer, is a content judgment."
+        "reason": "Whether a question names what the session does meanwhile, whether the session kept working on what does not depend on the answer, and whether it also reached the waiting page, is a content judgment."
       }
     },
     "style-cut-narration": {
