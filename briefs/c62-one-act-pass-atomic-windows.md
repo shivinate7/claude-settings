@@ -2,7 +2,7 @@
 
 Cloud build thread brief. Build advisor (2), Oct 26, against claude-settings main e5525a6.
 Base: main e5525a6; never rebase onto main after review. Push roadmap edits to the branch only;
-only "Triage the roadmap (2)" republishes the roadmap page.
+only the triage thread republishes the roadmap page.
 
 ## Incident
 
