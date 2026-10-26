@@ -63,3 +63,4 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
   is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
   note. Each points to its decision (`roles-review-cap-three`, `roles-holes-are-debts`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.
+- Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/ux/layout.md` (gap on the parent, layout primitives, container queries, fluid tokens).

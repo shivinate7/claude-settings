@@ -10,6 +10,25 @@ value. Ruling: record ux-house-rules (house UX rules). Owner ruling, 2026-10-11.
 
 Seen in: banchi, q_max, degen spec, sillage, feed-build, home-app.
 
+## Fluid tokens
+
+A size that grows with its box is a clamp() token. Rules: `layout.md` ux-fluid-tokens.
+
+```css
+:root {
+  --space-2: 8px;
+  --space-4: 16px;
+  --space-fluid-2-4: clamp(var(--space-2), 1.5cqi + 4px, var(--space-4));
+}
+```
+
+- The name gives the two ends, as steps: `--space-fluid-<low>-<high>`.
+- Both ends are fixed space tokens, so they sit on the 4 px step. Between the ends the value is
+  fluid and can fall off the step. A repo whose check needs every gap on the step, such as
+  mailaudit's claim 14, keeps fixed tokens.
+- The middle term uses `cqi` (the query container's inline size), so the size follows the box.
+  With no query container, `cqi` reads the small viewport. Use `vi` only for page-frame tokens.
+
 ## Color by role
 
 - Each color has a role name, such as surface, text or accent. Never name a color by its hue.

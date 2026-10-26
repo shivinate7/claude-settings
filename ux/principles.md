@@ -2,7 +2,8 @@
 
 Read this file before you write UI in a repo with screens. Each rule states only what Vercel
 web-interface-guidelines, impeccable and frontend-design do not state. Ruling: record
-ux-house-rules (house UX rules). A repo's own design records can add to a rule, never cancel it.
+ux-house-rules (house UX rules). A repo's own design records can add to a rule, never cancel it. Before you lay out a screen,
+also read [`layout.md`](layout.md).
 
 ## ux-press-moves-nothing
 
