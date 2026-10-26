@@ -16,6 +16,8 @@ Task, two parts, one lane:
    - Judge every Stop whose reply carries an "Input Needed" label, besides the 1-in-5 sample. Detect the label in code (a string match on the label), not by the model. This changes the owner ruling of 2026-10-13 in decision reply-judge-samples-never-blocks; rewrite that entry in place with the new ruling and its cost: one extra model call per report that carries Input Needed, no new file, no new process, no timer.
    - Still never blocks, still fails open.
 
+3. Each finding the judge passes on also writes one line to guard.log, the existing log (rule id, session, Stop number). No new file. Named reader: the advisor at each cull, who counts flags against owner-confirmed misses and false alarms, to rule whether the judge stays, widens or goes. Today it keeps no record, so its value is unmeasured.
+
 Record: the incident above is the named incident (building-guard-needs-incident). Update lint/rule_mechanisms.json reason for output-never-hand-off-doable-step to say the judge now also checks reason and check, on every Input Needed report.
 
 Proof (test-author first, red on main):
