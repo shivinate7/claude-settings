@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # ios-ship: one shared tool to ship the owner's iOS apps from this Mac. macOS only. Runs on /bin/bash 3.2.
-#   ios-ship testflight CONFIG [--app NAME]... [--export-only]
-#   ios-ship install    CONFIG [--app NAME]... [--no-install] [--debug] [--force]
+#   ios-ship testflight [CONFIG] [--app NAME]... [--export-only]
+#   ios-ship install    [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]
 # CONFIG is the tools/ios-ship.json of a private app repo (README, "Shipping iOS apps"). No ID is built in.
-# Env overrides win over CONFIG: TEAM_ID, DEVICE_UDID, ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID.
+# No CONFIG: tools/ios-ship.json at the git toplevel of the current folder. None there: exit 2.
+# Each ID comes from the env first (TEAM_ID, DEVICE_UDID, ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID),
+#   then CONFIG, then the account file $HOME/.config/ios-ship/account.json (the same keys, lower case).
 # --app limits a run to the named apps (unknown name: exit 2). No --app: every app in CONFIG.
 # The repo root is the git toplevel of CONFIG's folder. It is never derived from this script's own path.
 #
@@ -15,13 +17,20 @@
 #   LOG_DIR, OVERDUE_DAYS, STEP_TIMEOUT (seconds; overrides every step timeout). One app's failure does not stop the others.
 #   --force has no effect (every run installs). --debug builds Debug. --no-install stops after a generic-iOS build, no phone needed.
 #   Exit 75: the phone is not reachable. Works only in its own clones. Never touches a shared checkout.
+#   PHONE_APPS_JSON is retired: install refuses it (exit 2). Use --app and tools/ios-ship.json.
 set -uo pipefail
 
-usage() { echo "usage: ios-ship testflight|install CONFIG [--app NAME]... [--export-only | --no-install --debug --force]" >&2; exit 2; }
-JOB=${1:-}; CONFIG=${2:-}
-case $JOB in testflight|install) ;; *) usage ;; esac
-[[ -n $CONFIG ]] || usage
-shift 2
+usage() { echo "usage: ios-ship testflight|install [CONFIG] [--app NAME]... [--export-only | --no-install --debug --force]" >&2; exit 2; }
+JOB=${1:-}
+case $JOB in testflight|install) shift ;; *) usage ;; esac
+if [[ $JOB == install && -n ${PHONE_APPS_JSON:-} ]]; then
+  echo "ios-ship: PHONE_APPS_JSON is no longer read; name the apps with --app and list them in tools/ios-ship.json" >&2; exit 2
+fi
+CONFIG=
+if (( $# )) && [[ $1 != --* ]]; then
+  CONFIG=$1; shift
+  [[ -n $CONFIG ]] || usage
+fi
 want_apps=(); export_only=0; noinstall=0; debug=0
 while (( $# )); do
   case $1 in
@@ -34,6 +43,10 @@ while (( $# )); do
   esac
   shift
 done
+if [[ -z $CONFIG ]]; then
+  CONFIG=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)/tools/ios-ship.json
+  [[ -f $CONFIG ]] || { echo "ios-ship: no CONFIG given and no tools/ios-ship.json at the git toplevel of $PWD" >&2; exit 2; }
+fi
 [[ $CONFIG == /* ]] || CONFIG=$PWD/$CONFIG
 ROOT=$(git -C "$(dirname "$CONFIG")" rev-parse --show-toplevel 2>/dev/null) || ROOT=
 
@@ -43,11 +56,16 @@ expand() { case $1 in \~/*) printf '%s' "$HOME/${1#\~/}" ;; *) printf '%s' "$1" 
 cfg_get() { jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/dev/null; }
 app_get() { printf '%s' "$ENTRY" | jq -r --arg k "$1" '.[$k] // empty' 2>/dev/null; }
 
-# resolve VAR KEY: VAR from the env, else from CONFIG's KEY. Unset in both: refuse.
+# The account file holds the owner's IDs once for every repo. A missing or invalid file gives no values.
+ACCOUNT=${HOME:-}/.config/ios-ship/account.json
+account_get() { jq -r --arg k "$1" '.[$k] // empty' "$ACCOUNT" 2>/dev/null; }
+
+# resolve VAR KEY: VAR from the env, else from CONFIG's KEY, else from the account file's KEY. Unset in all three: refuse.
 resolve() {
   local v=${!1:-}
   [[ -n $v ]] || v=$(cfg_get "$2")
-  [[ -n $v ]] || refuse "config: $2 is unset; set it in $CONFIG or export $1"
+  [[ -n $v ]] || v=$(account_get "$2")
+  [[ -n $v ]] || refuse "config: $2 is unset; set it in $CONFIG or $ACCOUNT, or export $1"
   printf -v "$1" '%s' "$v"
 }
 
