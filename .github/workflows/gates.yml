@@ -762,8 +762,8 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
-    # 2x the slowest green step (382 s) is 764 s; 15 min with setup.
-    timeout-minutes: 15
+    # The full suite took 13 min on main's push run 40273599923, so 2x is 26 min; 30 min with setup.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:

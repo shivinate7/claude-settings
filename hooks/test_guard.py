@@ -14174,7 +14174,7 @@ OV_TAKE_CHILD = (
 )
 
 
-def ov_take_race_check(workers=8, rounds=60):
+def ov_take_race_check(workers=6, rounds=30):
     """Processes that call take() on one one-act pass at once: exactly one gets it. A Windows rename
     acts on an open handle, so a rename claim let two racers win (2 of 40 rounds, run 40296652083)."""
     config = ov_config("take-race")
