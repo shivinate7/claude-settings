@@ -46,7 +46,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
-      # Mod tests: no other CI job reads mods/.
+      # Mod tests: the mod-tests.sh step in gates, gates-windows and gates-macos reads mods/.
       mods/*) on="$on $W $X mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mods job runs it too.

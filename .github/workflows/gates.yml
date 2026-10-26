@@ -373,6 +373,8 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
+  # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
+  # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
     runs-on: windows-latest
     needs: scope
