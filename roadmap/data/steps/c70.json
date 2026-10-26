@@ -1,0 +1,10 @@
+{
+  "title": "A refusal with one lossless fix hands the session that fix, so it never asks you",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.38,
+  "why": "A session that stops to ask about the only safe move spends your attention on nothing.",
+  "note": "Gripe, Oct 26 (shiv): when the branch guard refuses a delete because the branch holds the only copy of its commits, sessions stop and ask \"push as an archive, then delete?\". That is always the right move, so the question is noise. Checked at main 54f2dfd: hooks/guard_branch_worktree.py BRANCH_DELETE_DENY_REASON ends \"Remedy: push the branch, or merge it, before it is deleted\", which leaves the session a choice and no command. Fix, one cloud lane, needs no answer from you: (1) the refusal names the exact next step: push the branch to an archive ref on origin, then delete it locally (it never names the refused target, rule git-remedy-never-names-target); (2) one CLAUDE.md line: an archive push of an unmerged branch, then a local delete, is pre-approved and needs no question, since nothing is lost; (3) sweep every guard refusal: where one safe, lossless fix exists, the message hands it over; list the others in the PR. Red first: a fixture session sees today's message and asks. Placed ahead of c69 (triage, Oct 26): it costs your attention every time it fires.",
+  "ask": "",
+  "updatedAt": "2026-10-26T15:50:00Z"
+}
