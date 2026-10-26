@@ -821,7 +821,7 @@ def named_log_relative_tee_and_flag_forms_are_read():
     """23b. a relative `> F`, a `| tee -a F` and a `--log F` name a log the watcher reads: no STALL"""
     problems = []
     py = shlex.quote(PY)
-    grow = "import sys, time\nfor i in range(5): open(sys.argv[1], 'a').write('t\\n'); time.sleep(1)"
+    grow = "import sys, time\nfor i in range(5): open(sys.argv[2], 'a').write('t\\n'); time.sleep(1)"
     forms = {
         "relative": growing_log_job("rel.log"),
         "tee": "i=0; while [ $i -lt 5 ]; do echo t$i; sleep 1; i=$((i+1)); done 2>&1 | tee -a tee.log >%s"
