@@ -264,7 +264,9 @@ def lock_ref(b):
 
 def old_lock_ref(b):
     """The lock name before c53. A Mac run of older merge.py still takes it, so a GitLock (cloud) take refuses while it is live.
-    GhLock skips this read: the Mac reinstalls from main at each merge. Delete this and its read once no install runs a merge.py older than c53."""
+    One way only: an old run never reads the new name, so it can take the old name while a cloud run holds the new one. Only the Mac's
+    reinstall from main at each merge closes that. GhLock skips this read for the same reason. Delete this and its read once no install
+    runs a merge.py older than c53."""
     return f"refs/merge-lock/{b}"
 
 def refuse_old_lock(b, old, now):
