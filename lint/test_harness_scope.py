@@ -37,6 +37,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None):
         git(d, "config", "user.email", "t@t")
         git(d, "config", "user.name", "t")
         git(d, "config", "commit.gpgsign", "false")
+        # No background gc or maintenance after a commit: it can write into .git while the temp dir is removed.
+        git(d, "config", "gc.auto", "0")
+        git(d, "config", "maintenance.auto", "false")
         open(os.path.join(d, "seed.txt"), "w").write("seed\n")
         # The base holds landed-dirs.txt: the repo's own, or `landed` (a list of dir names) in its place.
         with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
