@@ -191,6 +191,7 @@ function host(opts = {}) {
         h.procs.push({ argv, opts: o })
         if (/^(where(\.exe)?|which)$/.test(argv[0])) {
           if (h.finderThrow) throw new Error('finder failed')
+          if (typeof h.finder === 'function') return h.finder(argv)
           return h.finder ?? { exitCode: 0, stdout: PY + '\r\n', stderr: '' }
         }
         const phase = argv.includes('--emit-prompt') ? h.py1 : h.py2
@@ -760,6 +761,24 @@ await test('python: the first python on PATH that is not under WindowsApps', asy
   const first = pyCalls(h)[0].argv[0]
   assert.ok(!/WindowsApps/i.test(first), `spawned the store stub: ${first}`)
   same(first, PY, 'python spawned')
+})
+
+// Stock macOS has python3 and no python. which -a, like where.exe, exits 1 when any name it was given is missing,
+// even after it printed a path for the others. Each name is looked up on its own, so one missing name hides no python.
+const MAC_PATHS = { python3: ['/usr/bin/python3'] }
+const macFinder = argv => {
+  if (argv[0] !== 'which') throw new Error(`spawn ${argv[0]} ENOENT`)
+  const names = argv.slice(1).filter(a => !a.startsWith('-'))
+  const hits = names.flatMap(n => MAC_PATHS[n] || [])
+  return { exitCode: names.every(n => MAC_PATHS[n]) ? 0 : 1, stdout: hits.map(x => x + '\n').join(''), stderr: '' }
+}
+
+await test('python: on a Mac with python3 and no python, the judge runs python3', async () => {
+  const h = await load(host({ finder: macFinder }))
+  await fire(h, 'turn.complete', turnEvent(), {})
+  const endData = await judged(h)
+  assert.doesNotMatch(endData, /no python on PATH/, 'a Mac with python3 read as no python')
+  same(pyCalls(h)[0] && pyCalls(h)[0].argv[0], '/usr/bin/python3', 'python spawned')
 })
 
 await test('script path: CLAUDE_CONFIG_DIR/hooks/decision_watch.py', async () => {
