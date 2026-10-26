@@ -60,6 +60,18 @@ class ClaudeMdSizeTests(unittest.TestCase):
         r = self.run_check("CLAUDE.md")
         self.assertIn("201 lines", r.stdout)
 
+    def test_form_feed_does_not_add_a_line(self):
+        self.write("CLAUDE.md", lines(199) + "a\fb\u2028c\n")
+        r = self.run_check("CLAUDE.md")
+        self.assertIn("200 lines", r.stdout)
+        self.assertNotIn("WARN", r.stdout)
+
+    def test_directory_at_the_path_is_a_skip(self):
+        os.makedirs(os.path.join(self.tree, "CLAUDE.md"))
+        r = self.run_check("CLAUDE.md")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("skip", r.stdout)
+
     def test_missing_file_is_a_skip(self):
         r = self.run_check("CLAUDE.md")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

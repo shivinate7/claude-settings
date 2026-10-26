@@ -28,8 +28,14 @@ for path in args or DEFAULT:
     if not os.path.isfile(path):
         print("check_claude_md_size: skip, no file: %s" % path)
         continue
-    with open(path, encoding="utf-8", errors="replace") as f:
-        n = len(f.read().splitlines())
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:  # an unreadable file is a skip: a warning check never fails
+        print("check_claude_md_size: skip, unreadable: %s: %s" % (path, e.strerror))
+        continue
+    # Count newlines as wc -l does, plus a last line with none; splitlines() also splits on \f and U+2028.
+    n = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
     if n > MAX:
         print("check_claude_md_size: WARN: %s: %d lines, over %d. Move a section that matters only"
               " under one folder to a path-scoped rule, and give bulk data a Read deny rule. See %s"
