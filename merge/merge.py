@@ -262,6 +262,15 @@ def lock_ref(b):
     """The one name of the lock ref. Mac and cloud runs must share it, or each would hold a lock the other cannot see."""
     return f"refs/heads/merge-lock/{b}"
 
+def old_lock_ref(b):
+    """The lock name before c53. A Mac run of older merge.py still takes it, so a GitLock (cloud) take refuses while it is live.
+    GhLock skips this read: the Mac reinstalls from main at each merge. Delete this and its read once no install runs a merge.py older than c53."""
+    return f"refs/merge-lock/{b}"
+
+def refuse_old_lock(b, old, now):
+    if old and old[1] > now:
+        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
+
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
     lines = [f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"]
@@ -370,8 +379,8 @@ class GitLock(Lock):
     def __init__(self, root, now=time.time, pause=time.sleep):
         self.root, self.now, self.pause = root, now, pause
 
-    def read(self, b):
-        ref = lock_ref(b)
+    def read(self, b, ref=None):
+        ref = ref or lock_ref(b)
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
@@ -387,6 +396,7 @@ class GitLock(Lock):
         cur = self.read(b)
         if cur and cur[1] > self.now():
             raise Held(holder_text(b, cur, self.now()))
+        refuse_old_lock(b, self.read(b, old_lock_ref(b)), self.now())
         tree = git(self.root, "mktree", input="")[1]
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
@@ -433,14 +443,14 @@ class GitLock(Lock):
     def unlock(self, b):
         """-> True when it removed or expired a lock, False when no lock was there."""
         ref = lock_ref(b)
-        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
-        if c:
-            raise Stop("unlock failed: cannot read the lock: " + out)
-        if not out:
+        cur = self.read(b)
+        if not cur or cur[1] <= 0:  # no ref, or a lock already released to expires 0
             return False
         c, out = git(self.root, "push", "-q", "origin", f":{ref}")
+        if c and "does not exist" in out:  # gone since the read
+            return False
         if c:
-            c2, out2 = self.released(b, "--force")
+            c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
             if c2:
                 raise Stop("unlock failed: " + out + "\n" + out2)
         return True

@@ -690,7 +690,7 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b: None
+        lock2.read = lambda b, ref=None: None
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -728,7 +728,7 @@ class CloudProxy(Env):
     def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertNotIn("refs/merge-lock/", self.refs())  # the ref the proxy refuses
+        self.assertNotRegex(self.refs(), r"\trefs/merge-lock/")  # the ref the proxy refuses
         self.assertLessEqual(merge.expiry_of(self.lock_text()), self.now, out)  # released by a swap to an expired commit, never deleted
         self.assertNotIn("lock release failed", out)
 
@@ -743,6 +743,32 @@ class CloudProxy(Env):
     def test_unlock_through_the_proxy_leaves_a_lock_anyone_may_take(self):
         merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         self.assertTrue(self.lock.unlock("main"))
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        self.assertFalse(self.lock.unlock("main"))  # a released lock is no lock: nothing is pushed again
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_unlock_with_no_lock_reports_none_and_writes_nothing(self):
+        before = self.refs()
+        self.assertFalse(self.lock.unlock("main"))
+        self.assertEqual(self.refs(), before)
+
+    def test_a_release_never_touches_a_lock_another_run_took(self):
+        token = self.lock.acquire("main", 600)
+        self.now += 601  # expired: another run takes it by a leased push
+        rival = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.lock.release("main", token)
+        self.assertEqual(self.refs().split("\trefs/heads/merge-lock/main")[0].split("\n")[-1], rival)
+
+    def test_a_live_lock_under_the_old_name_holds_a_new_run_off(self):
+        old = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", merge.lock_message(600, self.now))
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        os.rename(hook, hook + ".off")  # the old name was pushed by a Mac run, past no proxy
+        sh(self.co, "git", "push", "-q", "origin", f"{old}:refs/merge-lock/main")
+        os.rename(hook + ".off", hook)
+        with self.assertRaisesRegex(merge.Held, "old name"):
+            self.lock.acquire("main", 600)
+        self.now += 601
         self.assertTrue(self.lock.acquire("main", 600))
 
     def test_a_cloud_session_picks_the_git_lock_and_a_mac_the_api_lock(self):
