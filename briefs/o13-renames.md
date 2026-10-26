@@ -32,6 +32,10 @@ branch only; only Triage the roadmap (3) republishes.
   Renames anchors outcomes-word-covers-named-act, git-one-entry-per-question,
   verification-never-dry-run-blocklist, records owner-override-pass,
   cite-by-id-blocks-unread-file, reply-judge-samples-never-blocks; guard.py ask texts.
+- **Lane D, after A to C merge: the widened glossary check.** lint/check_glossary.py reads
+  identifiers, rule anchors, record slugs and hook messages too, not only file paths, so a retired
+  word cannot come back in code. Prose stays a reviewer's job. Red first on a planted retired word;
+  a correct sense in prose ("the test will pass") is not flagged. It changes a check: reviewer.
 
 Each lane: every reader of a renamed name changes in the same PR (grep the old name to zero
 outside the stub and git history). Edit only the retired sense; a correct sense stays. Add a
