@@ -153,6 +153,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`decisions/mods-deferred-table.md`](../decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`decisions/mods-install-via-marketplace.md`](../decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`decisions/mods-no-cli-key-headless.md`](../decisions/mods-no-cli-key-headless.md) |
+| `one-layout-every-repo` | Every repo keeps each kind of file in the same place. | [`decisions/one-layout-every-repo.md`](../decisions/one-layout-every-repo.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`decisions/one-shared-record-stamp.md`](../decisions/one-shared-record-stamp.md) |
 | `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no workflow step. | [`decisions/opt-in-ci-templates-composite.md`](../decisions/opt-in-ci-templates-composite.md) |
 | `opus-grant-expires` | An Opus worker is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). | [`decisions/opus-grant-expires.md`](../decisions/opus-grant-expires.md) |
