@@ -1789,6 +1789,12 @@ def read_load() -> dict:
     return out
 
 
+def _load_value(reading: dict, key: str):
+    """A reading as a float, or None when it is unread or not a number."""
+    v = reading.get(key)
+    return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
+
+
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal."""
@@ -1800,13 +1806,8 @@ def load_hit(tool: str, tool_input) -> tuple:
         return "", ""
     if not isinstance(reading, dict):
         return "", ""
-
-    def value(key):
-        v = reading.get(key)
-        return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
-
-    memory = value("memory_pct")
-    disk, disk_total = value("disk_free_gb"), value("disk_total_gb")
+    memory = _load_value(reading, "memory_pct")
+    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
     disk_text = None if disk is None or disk_total is None else "disk %.1f GB free of %.0f GB" % (disk, disk_total)
 
     def disk_under(share, gb):
@@ -1860,13 +1861,8 @@ def load_full(reading) -> list:
     """The readings over the full line, as text, or []. An unread or malformed reading counts as normal."""
     if not isinstance(reading, dict):
         return []
-
-    def value(key):
-        v = reading.get(key)
-        return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
-
-    memory = value("memory_pct")
-    disk, disk_total = value("disk_free_gb"), value("disk_total_gb")
+    memory = _load_value(reading, "memory_pct")
+    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
     disk_full = (disk is not None and disk_total is not None
                  and disk < min(disk_total * LOAD_FULL_DISK_SHARE / 100.0, LOAD_FULL_DISK_GB))
     return [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
