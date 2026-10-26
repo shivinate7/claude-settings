@@ -221,6 +221,9 @@ jobs:
       - name: Hook platform exit fixture suite
         run: python3 lint/test_hook_platform_exit.py
 
+      - name: Hook stub fixture suite
+        run: python3 lint/test_check_hook_stubs.py
+
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
@@ -232,6 +235,9 @@ jobs:
 
       - name: Hook catalog check
         run: python3 lint/hook_catalog.py --check
+
+      - name: Hook stub check
+        run: python3 lint/check_hook_stubs.py
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
