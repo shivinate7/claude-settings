@@ -19,12 +19,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 FILES = ("landed-dirs.txt", "install.sh", "install.ps1")
-# Every hooks/guard*.py: the frozen-dir literals may move to a sibling module (guard_core.py and
-# the family modules), so the copy takes all of them, not only guard.py.
-GUARD_FILES = tuple(
-    os.path.relpath(p, ROOT) for p in sorted(glob.glob(os.path.join(ROOT, "hooks", "guard*.py")))
-)
 
 
 def move_frozen_dirs_to_sibling(tree):
@@ -53,13 +50,10 @@ def run_in_copy(edit=None):
     """Copy the inputs to a temp tree, apply `edit(tree)`, run the script there."""
     tree = tempfile.mkdtemp(prefix="landed_dirs_case_")
     try:
-        for rel in FILES + GUARD_FILES:
-            dest = os.path.join(tree, rel)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.copy(os.path.join(ROOT, rel), dest)
+        for rel in FILES:
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(tree, rel))
         shutil.copytree(os.path.join(ROOT, "skills"), os.path.join(tree, "skills"))
-        os.makedirs(os.path.join(tree, "lint"))
-        shutil.copy(os.path.join(HERE, "check_landed_dirs.py"), os.path.join(tree, "lint"))
+        tracked_tree.copy_tracked(tree, "lint", "hooks")  # the check, its imports, and every hooks/guard*.py
         if edit:
             edit(tree)
         return subprocess.run(

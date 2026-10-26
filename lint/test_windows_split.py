@@ -20,10 +20,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from workflow_steps import job_block, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
 GATES = os.environ.get("GATES_YML") or os.path.join(HERE, "..", ".github", "workflows", "gates.yml")
 MIN_JOBS = 3
 
@@ -575,41 +578,6 @@ STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
 CHECKOUT = re.compile(r"^(?:      - |        )uses:[ \t]*actions/checkout@", re.M)
 # A copy of either suite in a run command: the mod glob, a bare `node --test`, or the skill folder.
 INLINE_COPY = re.compile(r"\*\.test\.m?js|\bnode\s+--test\s*$|plain-english-map")
-
-
-def job_block(text, name):
-    """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
-    m = re.search(rf"^  {re.escape(name)}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
-    return m.group(1) if m else None
-
-
-def step_blocks(block):
-    """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
-    return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]
-
-
-def step_key(step, key):
-    """A step's own `key:` value (`        key:` or inline `      - key:`), or None. Body lines sit deeper."""
-    m = re.search(rf"^(?:      - |        ){re.escape(key)}:[ \t]*(.*?)[ \t]*$", step, re.M)
-    return m.group(1) if m else None
-
-
-def run_body(step):
-    """A step's `run:` text: the one line, or a `run: |` block with its 10-space indent removed. None if absent."""
-    lines = step.split("\n")
-    for i, line in enumerate(lines):
-        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
-        if not m:
-            continue
-        if m.group(1) != "|":
-            return m.group(1)
-        body = []
-        for ln in lines[i + 1:]:
-            if ln.strip() and not ln.startswith("          "):
-                break
-            body.append(ln[10:] if ln.strip() else "")
-        return "\n".join(body).strip("\n") + "\n"
-    return None
 
 
 def mod_steps(text, job):

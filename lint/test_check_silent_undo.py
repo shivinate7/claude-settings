@@ -11,6 +11,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -1650,7 +1652,6 @@ class RecordsPage(unittest.TestCase):
         self.assertTrue(any("docs/records.md" in p for p in got), got)
         self.assertEqual(C.generated_page(r.dir, "HEAD", {"docs/records.md"}), ("docs/records.md", False))
 
-    SHIPPED = ("check_silent_undo.py", "hook_catalog.py", "check_skill_model_rows.py", "layout.py", "layout.json")  # the generator imports the rest
 
     @staticmethod
     def without_debt_rows(text):
@@ -1687,13 +1688,7 @@ class RecordsPage(unittest.TestCase):
         outside the reversal window. The debt block lands as its own insertion into a page that already exists,
         the shape the reversal check reads as an undo: a page made whole in one commit is not."""
         r = base_repo()
-        shipped = {}
-        for name in self.SHIPPED:
-            with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
-                shipped["lint/" + name] = f.read()
-        with open(os.path.join(HERE, "..", "hooks", "_nowindow.py"), encoding="utf-8", newline="") as f:
-            shipped["hooks/_nowindow.py"] = f.read()  # the checker imports it from hooks/
-        self.put_lf(r, shipped)
+        self.put_lf(r, tracked_tree.read_tracked("lint", "hooks"))  # the checker, its generator and their imports
         self.put_lf(r, {"plans/keep.md": self.KEEP})
         self.regenerate(r)
         self.commit_all(r, "the checker, its generator, a plan and the records page")
@@ -1765,10 +1760,7 @@ class RecordsPage(unittest.TestCase):
         r.push()
         self.assertNotIn("lint/hook_catalog.py", r.sh("ls-tree", "-r", "--name-only", "origin/main"))  # the base has no generator
         r.sh("checkout", "-q", "-b", "oops")
-        head = {}
-        for name in ("hook_catalog.py", "check_skill_model_rows.py", "layout.py", "layout.json"):
-            with open(os.path.join(HERE, name), encoding="utf-8", newline="") as f:
-                head["lint/" + name] = f.read()  # the generator imports the rest; without them it crashes and fails closed
+        head = tracked_tree.read_tracked("lint", "hooks")  # the generator and its imports; without them it crashes and fails closed
         head["lint/layout.json"] = self.without_debt_rows(head["lint/layout.json"])
         self.put_lf(r, head)
         self.run_generator(r, os.path.join(r.dir, "lint", "hook_catalog.py"))
