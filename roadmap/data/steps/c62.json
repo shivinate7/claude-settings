@@ -1,0 +1,10 @@
+{
+  "title": "A one-act override pass lifts exactly one act on Windows too",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.36,
+  "why": "Your typed pass for one act must never lift a second act.",
+  "note": "Finding, Oct 26 (the c61 thread): on main's push run 40273599923 (bf084df), the Windows guard suite went red on 'override: two calls racing for one one-act pass, exactly one gets it'. Six calls raced for one pass and two got allow (deny, allow, deny, deny, deny, allow). So the claim on a one-act pass looks non-atomic on Windows, and parallel tool calls in one turn could spend one pass twice. It is the only real failure in the last 80 push runs of that job; every other red was the 15-minute cap (c61). Unchecked: the cause in hooks/override_pass.py. Fix, one cloud lane: a red repeat-run of that case on windows-latest first, then an atomic claim. Placed after c61 (triage, Oct 26): a guard hole Claude could hit with parallel calls, cloud-buildable, needs no answer from you; c61 splits the suites first, so this case runs inside its cap.",
+  "ask": "",
+  "updatedAt": "2026-10-26T09:02:00Z"
+}
