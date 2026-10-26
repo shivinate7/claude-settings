@@ -6,12 +6,14 @@
 Each file under templates/record-branch/ lands at the same path under <dest>, with its `.tmpl`
 suffix dropped and `{{repo}}` and `{{branch}}` filled. Each folder in FOLDERS gets an empty
 `.gitkeep`, so git keeps it. It prints each path it writes. When any target path exists, it prints
-each one, writes nothing, and exits 1. A bad argument exits 2.
+each one, writes nothing, and exits 1. A write that fails midway removes the files this run wrote,
+and exits 1. A bad argument exits 2.
 
 The templates carry the `.tmpl` suffix so that Claude Code does not load the template CLAUDE.md as
 an instruction file in sessions on claude-settings.
 """
 import argparse
+import contextlib
 import os
 import re
 import sys
@@ -56,11 +58,22 @@ def main(argv):
         for rel in taken:
             print(f"scaffold: exists, nothing written: {rel}", file=sys.stderr)
         return 1
-    for rel, text in files:
-        path = os.path.join(a.dest, *rel.split("/"))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+    written = []
+    try:
+        for rel, text in files:
+            path = os.path.join(a.dest, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "x", encoding="utf-8", newline="\n") as f:
+                written.append(path)
+                f.write(text)
+    except OSError as e:
+        # Remove this run's files, so a fixed rerun does not refuse over a half skeleton.
+        for path in written:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+        print(f"scaffold: write failed, files removed: {e}", file=sys.stderr)
+        return 1
+    for rel, _ in files:
         print(rel)
     return 0
 

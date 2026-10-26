@@ -6,6 +6,9 @@ description: Use when the owner asks to give a repo standing roles, counted hand
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
 adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's word.
 
+The model assumes a claude.ai project: a coordinator session in the project chat starts one thread
+per role. Without a project, each role is one Claude Code session, and the owner acts as the coordinator.
+
 ## What it packages
 
 - **Standing roles.** Triage, build advisor, local liaison and merge hand. `templates/operating-model.md`
@@ -27,9 +30,9 @@ branch's `handoffs/` folder that a standing role writes for its successor.
 
 1. **Get the owner's word.** Name the repo and the record branch. When the owner has not named the repo, stop.
 2. **Make the record branch.** In a new worktree of the repo, make an orphan branch:
-   `git worktree add --orphan -b roadmap ../<repo>-roadmap` (git 2.42 or later).
+   `git worktree add --orphan -b <branch> ../<repo>-<branch>` (git 2.42 or later).
 3. **Write the skeleton.** From the repo root of that worktree:
-   `python3 ~/.claude/skills/project-ops/scripts/scaffold.py --dest . --repo <owner>/<name>`.
+   `python3 ~/.claude/skills/project-ops/scripts/scaffold.py --dest . --repo <owner>/<name> --branch <branch>`.
    It writes `CLAUDE.md`, `roadmap/README.md` and the empty folders `roadmap/data/steps`,
    `roadmap/data/topics`, `roadmap/data/meta`, `briefs` and `handoffs`. It prints each path it
    writes. It refuses, and writes nothing, when one of those files exists.

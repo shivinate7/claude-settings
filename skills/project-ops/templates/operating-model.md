@@ -15,8 +15,8 @@ hand-off rule below.
   order, the merge queue and the integration branch. Dispatches no deferred step.
 - **Local liaison.** Writes briefs for work that needs a local machine, and reads back the
   reports. May drive a Remote Control session on the owner's machine.
-- **Merge hand.** Runs the merge command on an integration PR that the build advisor sends, on a
-  machine that can run it. Prints the merge output on the terminal and never to a log only.
+- **Merge hand.** Runs the merge command on an integration PR that the build advisor sends through
+  the coordinator, on a machine that can run it. Prints the merge output on the terminal and never to a log only.
 
 ## Hand-off rule
 

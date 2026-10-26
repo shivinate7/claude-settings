@@ -90,6 +90,16 @@ class Scaffold(unittest.TestCase):
         self.assertIn("CLAUDE.md", err)
         self.assertEqual(tree(self.dest), {"CLAUDE.md": "mine\n"})
 
+    def test_failed_write_leaves_no_files(self):
+        # A file named like a folder the scaffold makes fails the write after earlier files land.
+        with open(os.path.join(self.dest, "briefs"), "w", encoding="utf-8") as f:
+            f.write("x")
+        code, out, err = run("--dest", self.dest, "--repo", "acme/widgets")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("write failed", err)
+        self.assertEqual(tree(self.dest), {"briefs": "x"})
+
     def test_second_run_changes_nothing(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         before = tree(self.dest)
