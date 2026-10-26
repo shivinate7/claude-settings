@@ -5,5 +5,5 @@ data/meta/{advisor,cull,phases}.json. Each file is the document's fields (title,
 order, why, note, ask, updatedAt). It moved here from the claude.ai page's database on Oct 22.
 
 page/index.html is the viewer. build.py bakes data/ into roadmap.html, which opens from disk and
-is published as the roadmap page: https://claude.ai/artifact/R3iCpK91QRjC5he8bwfY7m. Republish
+is published as the roadmap page (this is the roadmap branch of claude-settings): https://claude.ai/artifact/R3iCpK91QRjC5he8bwfY7m. Republish
 it to that URL after each build.
