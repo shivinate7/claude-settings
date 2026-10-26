@@ -763,6 +763,71 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
 
 
+class DoneNamesModelsTests(unittest.TestCase):
+    """reports-done-names-models, in report_gate.py's Stop hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def verdict(self, reply, spawns):
+        records = [human("do the task")]
+        for spawn in spawns:
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                    assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        run = run_gate(REPORT_GATE, hook, env=env)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    BUILDER = {"subagent_type": "builder", "prompt": "build it"}
+    REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+
+    def test_dm_red_builder_unnamed_blocks(self):
+        out = self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", [self.BUILDER])
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_one_of_two_roles_unnamed_blocks(self):
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** none",
+                           [self.BUILDER, self.REVIEWER_R2])
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_builder_named_opus_ran_sonnet_blocks(self):
+        # The builder file has no pin, so the spawn reads CLAUDE_CODE_SUBAGENT_MODEL, sonnet.
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+                           [self.BUILDER])
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_red_reviewer_named_sonnet_ran_file_pin_blocks(self):
+        # No model field: the reviewer runs its agents/reviewer.md pin, haiku.
+        out = self.verdict("> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** none",
+                           [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}])
+        self.assertIn("ran haiku", out["reason"])
+
+    def test_dm_green_names_match_spawns(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the gate, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** none",
+            [self.BUILDER, self.REVIEWER_R2]))
+
+    def test_dm_green_try3_builder_opus(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** none",
+            [{"subagent_type": "builder", "model": "opus", "prompt": "Try 3 of 3"}]))
+
+    def test_dm_false_alarm_no_subagent_passes(self):
+        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** none", []))
+
+    def test_dm_false_alarm_search_only_spawns_pass(self):
+        # An Explore search or a Plan spawn builds and reviews nothing, so Done names no model.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the gate, PR #5\n> **Next** none",
+            [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
 

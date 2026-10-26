@@ -448,6 +448,13 @@
         "test": "lint/test_gates.py::DoneFormatAndCiteTests.test_df_red_done_without_ref_blocks"
       }
     },
+    "reports-done-names-models": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "test": "lint/test_gates.py::DoneNamesModelsTests.test_dm_red_builder_unnamed_blocks"
+      }
+    },
     "reports-drop-unused-label": {
       "mechanism": {
         "kind": "unmechanized",

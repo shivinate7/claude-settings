@@ -49,6 +49,11 @@ Check for:
 - Shell hook or CI script hardening: flag an unquoted variable expansion. Flag input passed to
   `eval` or to a command with no check on it. Flag a secret or token written as plain text.
 - Scanner tests: when the diff adds or changes code that scans source text, flag it if its tests lack the cases in building-scanner-respects-strings (scanners respect strings).
+- Subagent models (`reports-done-names-models`): check each role and model a Done item names
+  against the spawn calls you can see. A spawn's model is its call's `model` field, else its agent
+  file's `model:` pin, else `CLAUDE_CODE_SUBAGENT_MODEL`. Flag a named model that no spawn ran. Flag
+  a model above the role's row in `subagent-model-cap` (the model-per-role table) that no owner word
+  or standing word covers.
 - Do not flag an issue the diff did not add, except design-review findings on the changed pages.
   Do not flag a style issue a linter catches. Do not flag a nitpick a senior engineer would skip.
 

@@ -12,7 +12,9 @@ stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
-a record id with no short gloss (`speak-cite-id-plus-gloss`).
+a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
+test-author or record-writer spawned since the last human message goes unnamed in Done, or a
+named "role model" pair matches no spawn of that role (`reports-done-names-models`).
 """
 import json
 import os
@@ -279,6 +281,74 @@ def bare_cite(text):
     return ""
 
 
+# reports-done-names-models: a Done item that subagents built or reviewed names each one's role
+# and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
+# search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
+NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
+SPAWN_TOOLS = {"Agent", "Task"}
+MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+ROLE_MODEL_RE = re.compile(
+    r"\b(builder|reviewer|test-author|record-writer)\s+(haiku|sonnet|opus|fable)\b", re.I)
+AGENTS_DIR = os.path.join(HERE, "..", "agents")
+
+
+def model_family(text):
+    text = (text or "").lower()
+    return next((f for f in MODEL_FAMILIES if f in text), "")
+
+
+def agent_pin(role):
+    """The `model:` key of agents/<role>.md, or '' when the file or key is missing."""
+    try:
+        with open(os.path.join(AGENTS_DIR, role + ".md"), encoding="utf-8") as f:
+            lines = f.read().split("---")[1].splitlines()
+    except (OSError, IndexError):
+        return ""
+    for line in lines:
+        key, _, value = line.partition(":")
+        if key.strip() == "model":
+            return value.strip()
+    return ""
+
+
+def spawn_models(records):
+    """Map each named role spawned in `records` to the set of model families it ran on.
+
+    A spawn's model is its call's `model` field, else its agent file's pin, else
+    CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
+    resolve adds '' (unknown), which never counts as a mismatch.
+    """
+    found = {}
+    for rec in records:
+        for b in tool_uses(rec):
+            if b.get("name") not in SPAWN_TOOLS:
+                continue
+            inp = b.get("input") or {}
+            role = str(inp.get("subagent_type") or "").lower()
+            if role not in NAMED_ROLES:
+                continue
+            model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
+                model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
+            found.setdefault(role, set()).add(model)
+    return found
+
+
+def done_models_problem(text, spawned):
+    """Name what Done gets wrong about the spawned roles' models, else ''."""
+    if not spawned:
+        return ""
+    done = " ".join(done_items(block_text(text, keep_indent=True)))
+    named = {(r.lower(), m.lower()) for r, m in ROLE_MODEL_RE.findall(done)}
+    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    if missing:
+        return "no model named for " + ", ".join(missing)
+    for role, model in sorted(named):
+        ran = spawned.get(role)
+        if ran is not None and "" not in ran and model not in ran:
+            return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
+    return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -330,6 +400,11 @@ def main():
         reasons.append(
             "Report-shape gate: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
+    models = done_models_problem(text, spawn_models(after)) if shape_ok else ""
+    if models:
+        reasons.append(
+            "Model-name gate: a Done item that subagents built or reviewed names each one's role "
+            "and model, like \"(builder sonnet, reviewer sonnet)\". Here: " + models + ".")
     cite = bare_cite(text)
     if cite:
         reasons.append(

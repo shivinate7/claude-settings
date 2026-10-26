@@ -87,6 +87,12 @@ model and whose definition names no model. `agents/builder.md` carries no `model
 spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
+MEASURED in a cloud session, 2026-10-26, by each subagent transcript's `model` field. The variable
+was `sonnet`, and no `agents/` files were installed. A `general-purpose` spawn with no model ran
+Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. So a definition that
+names a model, `inherit` included, beats the variable. In cloud, an Explore search runs Opus, not
+Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because cloud installs none.
+
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `subagent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
