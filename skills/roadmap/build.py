@@ -29,6 +29,7 @@ import datetime
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -42,6 +43,9 @@ OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
 HOMES = (("decisions", "Decisions"), ("debts", "Debts"), ("debt-notes", "Debt notes"),
          ("plans", "Plans"), ("specs", "Specs"))
+
+# A merge subject that names its pull request: GitHub's merge commit, or a squash title ending "(#N)".
+PR_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b|\(#(\d+)\)\s*$")
 
 HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
@@ -171,6 +175,69 @@ def short(repo, ref):
     return out.strip() if out else None
 
 
+def main_ref(repo, branch):
+    for ref in ("origin/" + branch, branch):
+        if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None:
+            return ref
+    return None
+
+
+def step_trailers(repo, ref):
+    """[(step id, commit, pull request or None)] for each `Step:` trailer on `ref`, from one git log.
+
+    A commit's pull request is the one whose merge put it on the first-parent line of `ref`. Walking
+    that line oldest first, each merge owns the commits its other parents bring that no earlier
+    commit on the line already holds. None when git cannot read `ref`.
+    """
+    out = git(repo, "log", ref, "--format=%H%x1f%P%x1f%s%x1f%(trailers:key=Step,valueonly,separator=%x2C)%x1e")
+    if out is None:
+        return None
+    parents, subject, steps = {}, {}, {}
+    for rec in out.split("\x1e"):
+        fields = rec.strip("\n").split("\x1f")
+        if len(fields) != 4:
+            continue
+        sha, ps, subj, trail = fields
+        parents[sha], subject[sha] = ps.split(), subj
+        ids = [t for t in re.split(r"[,\s]+", trail) if t]
+        if ids:
+            steps[sha] = ids
+    line, at = [], out.split("\x1f", 1)[0].strip("\n")
+    while at in parents:
+        line.append(at)
+        at = parents[at][0] if parents[at] else None
+    owner, seen = {}, set()
+    for sha in reversed(line):
+        hit = PR_SUBJECT.search(subject[sha])
+        pr = "#" + (hit.group(1) or hit.group(2)) if hit else None
+        stack = list(parents[sha][1:])
+        while stack:
+            x = stack.pop()
+            if x in seen or x not in parents:
+                continue
+            seen.add(x)
+            owner[x] = pr
+            stack.extend(parents[x])
+        seen.add(sha)
+        owner[sha] = pr
+    return [(sid, sha, owner.get(sha)) for sha, ids in steps.items() for sid in ids]
+
+
+def landed_marks(repo, ref, branch, steps):
+    """({open step: [pull request or commit]}, [trailer that names no step], why or None)."""
+    found = step_trailers(repo, ref) if ref else None
+    if found is None:
+        return {}, [], "no %s branch in this checkout" % branch if ref is None else "git log failed on " + ref
+    marks, strays = {}, []
+    for sid, sha, pr in reversed(found):
+        where = pr or sha[:7]
+        if sid not in steps:
+            strays.append("%s in %s%s" % (sid, sha[:7], " (%s)" % pr if pr else ""))
+        elif steps[sid].get("status") != "done" and where not in marks.setdefault(sid, []):
+            marks[sid].append(where)
+    return {k: v for k, v in marks.items() if v}, strays, None
+
+
 def homes(repo):
     """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown."""
     try:
@@ -255,6 +322,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Bake a repo's roadmap into one read-only page.")
     ap.add_argument("--repo", default=".", help="the checkout to read (default: the current folder)")
     ap.add_argument("--record-branch", default="roadmap", help="the branch that holds roadmap/data/")
+    ap.add_argument("--main-branch", default="main", help="the branch whose merges carry Step: trailers")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
@@ -275,12 +343,17 @@ def main(argv=None):
             raise SystemExit(1)
         data = load(source)
     info = build_info(repo, source, why)
+    ref = main_ref(repo, args.main_branch)
+    marks, strays, unread = landed_marks(repo, ref, args.main_branch, data["steps"] if data else {})
+    info["landed"] = marks
+    info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
+                              "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
     out.write_text(render(data, info), encoding="utf-8")
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
-    upkeep(data["steps"], added_at(source))
+    upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread])
 
 
 def added_at(source):
@@ -297,7 +370,7 @@ def added_at(source):
     return seen
 
 
-def upkeep(steps, added):
+def upkeep(steps, added, marks, strays):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
@@ -324,7 +397,9 @@ def upkeep(steps, added):
     if not added:
         jumped = ["unknown (git log could not run)"]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
-            ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped)]
+            ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
+            ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
+            ("Step trailers naming no step", strays)]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

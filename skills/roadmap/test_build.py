@@ -213,5 +213,48 @@ class ConflictMarkers(Fixture):
         self.assertIn("upkeep:", out)
 
 
+class StepTrailers(Fixture):
+    """A merged lane commit with a `Step:` trailer marks its step "landed in #N" (lane 2)."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_step("c2", dict(STEP, order=2))
+        self.write_step("c3", dict(STEP, order=3, status="done"))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "more steps")
+        self.on_main()
+        git(self.repo, "checkout", "-q", "-b", "lane")
+        for n, trailer in enumerate(("Step: c1", "Step: zz9", "Step: c3", "No-step: here")):
+            (self.repo / ("f%d.txt" % n)).write_text("x", encoding="utf-8")
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-q", "-m", "lane %d\n\nBody.\n\n%s" % (n, trailer))
+        git(self.repo, "checkout", "-q", "main")
+        (self.repo / "other.txt").write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "main moves on")
+        git(self.repo, "merge", "-q", "--no-ff", "lane", "-m", "Merge pull request #7 from o/lane")
+
+    def test_trailer_marks_only_its_open_step(self):
+        page, _ = self.build_from_main()
+        self.assertEqual(build_info(page)["landed"], {"c1": ["#7"]})
+
+    def test_trailer_naming_no_step_is_listed(self):
+        _, out = self.build_from_main()
+        self.assertRegex(out, r"Step trailers naming no step: zz9 in [0-9a-f]{7} \(#7\)")
+        self.assertRegex(out, r"landed, waiting for triage to close: c1 \(#7\)")
+
+    def test_trailer_on_main_itself_names_its_commit(self):
+        (self.repo / "direct.txt").write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "direct (#9)\n\nStep: c2")
+        page, _ = self.build_from_main()
+        self.assertEqual(build_info(page)["landed"], {"c1": ["#7"], "c2": ["#9"]})
+
+    def test_unmerged_lane_marks_nothing(self):
+        git(self.repo, "reset", "-q", "--hard", "HEAD^1")
+        page, _ = self.build_from_main()
+        self.assertEqual(build_info(page)["landed"], {})
+
+
 if __name__ == "__main__":
     unittest.main()

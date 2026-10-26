@@ -20,6 +20,14 @@ Run from any folder:
 The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths
 `lint/layout.py` gives. A home that is not there reads "unknown", never "none".
 
+## A merge marks a step
+
+A lane commit names its step in a `Step: <id>` trailer, in the last paragraph of the message, beside
+the other trailers. Several ids may share one line, split by commas. At build, the builder reads
+the log of `origin/main` (`--main-branch` names another) and marks each named open step "Landed in
+#N", where #N is the pull request whose merge put the commit on main. It never closes a step: triage
+closes it, from the upkeep list. A trailer that names no step is listed there too.
+
 ## Refusals
 
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
@@ -29,7 +37,8 @@ The record homes (decisions, debts, debt notes, plans, specs) come from the chec
 ## Upkeep list
 
 After each build the builder prints the upkeep list for the triage thread: long notes, untouched
-steps and empty notes in a live phase, and new top steps with no "Placed ahead of" line.
+steps and empty notes in a live phase, new top steps with no "Placed ahead of" line, landed steps
+waiting to close, and `Step:` trailers that name no step.
 
 ## Cost
 

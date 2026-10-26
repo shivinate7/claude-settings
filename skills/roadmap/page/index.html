@@ -292,10 +292,11 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 </style>
 <!-- build:style -->
 <style>
-/* Panels the roadmap builder adds: read-at stamps. */
+/* Panels the roadmap builder adds: read-at stamps and landed marks. */
 .stamps{display:flex;flex-wrap:wrap;gap:4px 14px;margin:-4px 2px 12px;font-size:11px;color:var(--muted)}
 .stamps .sk{text-transform:uppercase;letter-spacing:.06em}
 .stamps .unk{color:var(--warn)}
+.tag.landed{color:var(--good);background:var(--good-soft)}
 </style>
 <!-- /build:style -->
 
@@ -831,6 +832,17 @@ function unavailable(){
     const unk = String(p.read).startsWith('unknown');
     return `<span${unk?' class="unk"':''}><span class="sk">${esc(p.name)}</span> ${p.home?`<span class="id">${esc(p.home)}</span> `:''}read at <span class="num">${esc(p.read)}</span></span>`;
   }).join('');
+})();
+/* "Landed in #N" on each open step a merged Step: trailer names, until triage closes it. */
+(() => {
+  const marks = (window.ROADMAP_BUILD && window.ROADMAP_BUILD.landed) || {}, box = document.getElementById('phases');
+  if(!box || !Object.keys(marks).length) return;
+  const tag = () => Object.entries(marks).forEach(([id, where]) => {
+    const meta = document.querySelector(`#s-${CSS.escape(id)} .meta`);
+    if(meta && !meta.querySelector('.landed')) meta.insertAdjacentHTML('beforeend', `<span class="tag landed" title="Merged; waiting for triage to close the step">Landed in ${esc(where.join(', '))}</span>`);
+  });
+  tag();
+  new MutationObserver(tag).observe(box, {childList:true, subtree:true});
 })();
 </script>
 <!-- /build:script -->
