@@ -267,6 +267,10 @@ jobs:
       - name: Glossary homes and avoided names
         run: python3 lint/check_glossary.py
 
+      # No scope gate: the suite reads the skill's .md templates, and a .md-only change must run it too.
+      - name: project-ops skill scaffold suite
+        run: python3 skills/project-ops/tests/test_scaffold.py
+
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
 
