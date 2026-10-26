@@ -1,9 +1,10 @@
 """Bake roadmap/data/ into roadmap/roadmap.html, a read-only page that opens straight from disk.
 
 The viewer in page/index.html reads its data through the artifact database (window.claude.use('db')).
-This script puts a small stand-in for that database, holding every JSON file, in front of the
-page's own script, so the same viewer runs with no server and no login. Run it after each edit to
-roadmap/data/:  python roadmap/build.py
+This script puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every
+JSON file, in front of the page's own script, so the same viewer runs from disk and as the published
+artifact. Run it after each edit to roadmap/data/:  python roadmap/build.py
+Then republish roadmap/roadmap.html to the roadmap artifact (see roadmap/README.md).
 """
 import json
 import pathlib
@@ -32,7 +33,7 @@ STUB = """<script>
       update: () => Promise.reject(new Error('read only')),
     };
   };
-  window.claude = {use: async () => ({collection, doc})};
+  window.ROADMAP_DB = {use: async () => ({collection, doc, readOnly: true})};
 })();
 </script>
 """

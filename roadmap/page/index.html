@@ -331,7 +331,7 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
   <div class="view" id="v-ref" hidden>
     <div class="cols">
       <div id="ref"></div>
-      <aside class="side"><div class="card"><header><h3>About this area</h3></header><p class="lead">Reference is not a phase. It holds the hand-off guide for a new advisor chat and the reasoning behind the plan. Steps point here; nothing here is a to-do.</p></div></aside>
+      <aside class="side"><div class="card"><header><h3>About this area</h3></header><p class="lead">Reference is not a phase. It holds the hand-off guide for a new advisor thread and the reasoning behind the plan. Steps point here; nothing here is a to-do.</p></div></aside>
     </div>
   </div>
 </main>
@@ -545,7 +545,7 @@ function stepRow(s, nextIds){
   const lbl = LABEL[s.status]||LABEL.todo;
   return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
     <div class="rw">
-      <button class="sp" data-cycle="${esc(s.id)}" ${db?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(s.status)}</button>
+      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(s.status)}</button>
       <button class="tg" data-row="${esc(s.id)}" aria-expanded="${open}"><span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title||'Untitled step')}</span>
         <span class="meta">${tags}</span><span class="chev" aria-hidden="true">▶</span></button>
     </div>
@@ -594,7 +594,7 @@ function renderPhase(){
     ${k==='cleanup'&&ui.how&&cull&&cull.note?`<div class="howbody">${esc(cull.note)}</div>`:''}
     <div class="tiles">${tiles}</div>
     ${foot?`<div class="foot">${foot}</div>`:''}
-    <div class="hint"><span>${open.length} open step${open.length===1?'':'s'}, in work order</span><span>${db?'Tap a status mark to change it':'Read only'}</span></div>
+    <div class="hint"><span>${open.length} open step${open.length===1?'':'s'}, in work order</span><span>${db&&!db.readOnly?'Tap a status mark to change it':'Read only'}</span></div>
     <ul class="steps">${open.slice(pg*size,(pg+1)*size).map(s=>stepRow(s,nextIds)).join('') || `<li class="emptyrow">${ss.length?'Every step in this phase is done.':'No steps in this phase yet.'}</li>`}</ul>
     ${pager('open',pg,pages,open.length,'open steps')}
     ${d?`<div class="donefold${ui.folds.has(k)?' open':''}"><button data-fold="${k}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
@@ -792,7 +792,7 @@ function unavailable(){
 }
 
 (async () => {
-  const c=window.claude;
+  const c=window.ROADMAP_DB||window.claude;
   try { db = c && typeof c.use==='function' ? await c.use('db') : null; } catch(e) { db=null; }
   if(!db){ unavailable(); return; }
   db.collection('steps').orderBy('order').onSnapshot(snap=>{
