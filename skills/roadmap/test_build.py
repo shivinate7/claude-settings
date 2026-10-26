@@ -371,7 +371,79 @@ class RecordsAndHealth(Fixture):
         page, _ = self.build_from_main()
         health = self.health(page)
         self.assertIn("unknown", health["Compliance scores"]["read"])
-        self.assertIn("Deferred", health["Session board"]["read"])
+        self.assertIn("one machine", health["Session board"]["read"])
+
+
+class LiveWork(Fixture):
+    """Live work from the publisher's file: project threads and GitHub (lane 5, option a)."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_step("c2", dict(STEP, order=2, status="done"))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "done step")
+        self.live = pathlib.Path(self.tmp.name) / "live.json"
+
+    def write_live(self, value):
+        self.live.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
+
+    def panel(self, page):
+        return {p["name"]: p for p in build_info(page)["panels"]}["Live work"]
+
+    def test_no_live_file_reads_unknown(self):
+        page, _ = self.build_from_main()
+        self.assertTrue(self.panel(page)["read"].startswith("unknown (no --live file"))
+        self.assertNotIn("threads", build_info(page)["live"])
+
+    def test_threads_and_pulls_are_baked_in_waiting_first(self):
+        self.write_live({"readAt": "2026-10-26T21:00:00Z",
+                         "threads": [{"title": "Build a", "state": "working", "step": "c1"},
+                                     {"title": "Ask b", "state": "blocked"},
+                                     {"title": "Old c", "state": "done"}],
+                         "pulls": [{"number": 9, "title": "nine"}, {"number": 3, "title": "three", "draft": True}],
+                         "branches": [{"name": "lane-x"}]})
+        page, out = self.build_from_main("--live", str(self.live))
+        live = build_info(page)["live"]
+        self.assertEqual(self.panel(page)["read"], "2026-10-26T21:00:00Z")
+        self.assertEqual([t["title"] for t in live["threads"]], ["Ask b", "Build a", "Old c"])
+        self.assertEqual([p["number"] for p in live["pulls"]], [3, 9])
+        self.assertEqual(live["branches"], [{"name": "lane-x"}])
+        self.assertEqual((live["skipped"], live["strays"]), ([], []))
+        self.assertIn("live threads naming no open step: 0", out)
+
+    def test_wrong_shape_entries_are_counted_not_dropped(self):
+        self.write_live({"readAt": "2026-10-26T21:00:00Z",
+                         "threads": [{"title": "ok", "state": "working"}, {"title": "bad", "state": "asleep"},
+                                     {"title": "bad step", "state": "working", "step": ["c1"]}, "x"],
+                         "pulls": [{"number": "7", "title": "s"}], "branches": "lane"})
+        page, out = self.build_from_main("--live", str(self.live))
+        live = build_info(page)["live"]
+        self.assertEqual([t["title"] for t in live["threads"]], ["ok"])
+        self.assertEqual(live["skipped"], ["thread 2", "thread 3", "thread 4", "pull 1", "branch (not a list)"])
+        self.assertIn("live file entries skipped: thread 2, thread 3, thread 4, pull 1, branch (not a list)", out)
+
+    def test_thread_naming_a_missing_or_done_step_is_listed(self):
+        self.write_live({"readAt": "2026-10-26T21:00:00Z",
+                         "threads": [{"title": "A", "state": "working", "step": "zz9"},
+                                     {"title": "B", "state": "working", "step": "c2"},
+                                     {"title": "C", "state": "working", "step": "c1"}]})
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assertIn("live threads naming no open step: zz9 (A), c2 (B)", out)
+
+    def test_unreadable_live_file_reads_unknown(self):
+        self.write_live("{not json")
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertTrue(self.panel(page)["read"].startswith("unknown (the live file could not be read"))
+
+    def test_missing_read_at_reads_unknown(self):
+        self.write_live({"threads": []})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no readAt)")
+
+    def test_markup_in_a_thread_title_cannot_reach_the_page_script(self):
+        self.write_live({"readAt": "x", "threads": [{"title": "</script><!-- y", "state": "working"}]})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertNotIn("</script><!--", page)
 
 
 if __name__ == "__main__":
