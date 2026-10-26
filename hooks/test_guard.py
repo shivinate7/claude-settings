@@ -42,6 +42,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 
@@ -303,7 +304,33 @@ def chained_ask(name, command, **kw):
 # Every path a case names lives under one temporary root, so no case can reach the real
 # configuration, the real log or a real repository.
 
-ROOT = tempfile.mkdtemp(prefix="guard_cases_")
+# test-temp-standard (decisions/test-temp-standard.md): this run's folder is `<pid>-<UUID>` under one
+# temp root for this repo. The first request of a run sweeps the sibling run folders older than one
+# day; newer ones belong to parallel runs and stay. run_cases removes this run folder at teardown.
+TEMP_ROOT = os.path.join(tempfile.gettempdir(), "claude-settings-test-temp")
+RUN_FOLDER_RE = re.compile(r"[0-9]+-[0-9a-f]{32}")
+RUN_FOLDER_MAX_AGE = 24 * 60 * 60
+
+
+def sweep_run_folders(temp_root, own, now=None):
+    """Remove each sibling run folder under `temp_root` whose mtime is over a day old. `own` stays."""
+    now = time.time() if now is None else now
+    try:
+        names = os.listdir(temp_root)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(temp_root, name)
+        if path == own or not RUN_FOLDER_RE.fullmatch(name) or not os.path.isdir(path):
+            continue
+        if now - os.path.getmtime(path) > RUN_FOLDER_MAX_AGE:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+os.makedirs(TEMP_ROOT, exist_ok=True)
+ROOT = os.path.join(TEMP_ROOT, "%d-%s" % (os.getpid(), uuid.uuid4().hex))
+os.makedirs(ROOT)
+sweep_run_folders(TEMP_ROOT, ROOT)
 CFG = os.path.join(ROOT, "cfg")            # stands in for the config directory
 LOGDIR = os.path.join(ROOT, "logcfg")      # a second config directory, for the log case
 PROJ = os.path.join(ROOT, "proj")          # an ordinary project with its own .claude folder
@@ -3136,6 +3163,90 @@ else:
     skip_case("kill: a PPID-1 pid in a worktree not named agent-<id>", NO_ORPHAN)
     skip_case("kill: a pid in this session's agent worktree whose parent is alive, not init", NO_ORPHAN)
 
+# THE SESSION TAG (decision a-kill-by-pid-needs-an-owned-pid). A PPID-1 pid is owned when its
+# ENVIRONMENT holds `CLAUDE_CODE_SESSION_ID=<this session's id>` exactly, the id the payload's
+# `session_id` carries. argv, a suffix or prefix of the entry, another variable's value and an empty
+# entry do not own it. Each holder is a python process that calls setsid, so it leads its own process
+# group, which the group case names. Pids 0, 1 and -1 stay denied by the `kill: init`, `kill: every
+# process` and `kill: the shell's own process group` cases above, and by their root-unknown twins.
+TAG = "CLAUDE_CODE_SESSION_ID"
+TAG_CWD = os.path.join(ROOT, "tagged")   # a scratch folder, not an agent worktree
+TAG_HOLDER = "import os, time; os.setsid(); time.sleep(300)"
+
+
+def tag_orphan(env_entries=(), argv_extra=()):
+    """A holder whose shell exits first, so init adopts it (PPID 1). `env_entries` are NAME=value
+    strings for its environment, with the inherited tag removed first. `argv_extra` is appended to
+    its argv. Returns its pid, or None when it is not an orphan leading its own process group."""
+    env = {key: value for key, value in os.environ.items() if key != TAG}
+    env.update(entry.split("=", 1) for entry in env_entries)
+    os.makedirs(TAG_CWD, exist_ok=True)
+    script = '"$@" </dev/null >/dev/null 2>&1 & echo $!'
+    try:
+        answer = subprocess.run(["sh", "-c", script, "sh", sys.executable, "-c", TAG_HOLDER]
+                                + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
+                                text=True, timeout=20)
+        pid = int(answer.stdout.strip())
+        ORPHAN_PIDS.append(pid)
+        for _ in range(100):   # setsid runs a moment after the shell exits
+            ppid, pgid = subprocess.run(["ps", "-o", "ppid=,pgid=", "-p", str(pid)],
+                                        capture_output=True, text=True, timeout=5).stdout.split()
+            if ppid != "1":
+                return None
+            if pgid == str(pid):
+                return pid
+            time.sleep(0.05)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return None
+
+
+def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
+             **who):
+    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
+    is agent_id and agent_type, the payload fields that mark a subagent call."""
+    pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
+    if pid is None:
+        skip_case(name, NO_ORPHAN)
+    else:
+        sh(name, "kill %d" % pid, expected, "machine-wide-kill" if expected == "deny" else None,
+           cwd=NOGIT, session=session, config=SUBCFG, transcript=SUB_TRANSCRIPT, carries=carries,
+           **who)
+    return pid
+
+
+TAG_LEADER = tag_case("kill: a PPID-1 pid whose environment holds this session's id", "allow",
+                      env_entries=[TAG + "=" + SUB_SESSION])
+# Every subagent shares the main session's id, so the tag owns a pid for the main session only
+# (decision a-kill-by-pid-needs-an-owned-pid, owner 2026-10-26). A truthy agent_id or agent_type
+# marks a subagent call, which keeps the agent-worktree rule alone.
+for _who, _kw in (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
+                  ("agent_id only", dict(agent_id="tag-sub1")),
+                  ("agent_type only", dict(agent_type="general-purpose"))):
+    tag_case("kill: a PPID-1 pid with this session's id, called by a subagent (%s)" % _who, "deny",
+             env_entries=[TAG + "=" + SUB_SESSION], carries="did not start", **_kw)
+tag_case("kill: a PPID-1 pid whose environment holds another session's id", "deny",
+         env_entries=[TAG + "=" + OTHER_SESSION], carries="did not start")
+tag_case("kill: a PPID-1 pid with no session id in its environment", "deny",
+         carries="did not start")
+tag_case("kill: a PPID-1 pid with this session's id only in its argv", "deny",
+         argv_extra=[TAG + "=" + SUB_SESSION], carries="did not start")
+tag_case("kill: a PPID-1 pid whose session id entry has a suffix", "deny",
+         env_entries=[TAG + "=" + SUB_SESSION + "x"], carries="did not start")
+tag_case("kill: a PPID-1 pid whose session id entry has a prefix", "deny",
+         env_entries=["X_" + TAG + "=" + SUB_SESSION], carries="did not start")
+tag_case("kill: a PPID-1 pid with this session's id as another variable's value", "deny",
+         env_entries=["SESSION_HINT=" + SUB_SESSION], carries="did not start")
+tag_case("kill: a PPID-1 pid with an empty session id entry and no id in the payload", "deny",
+         env_entries=[TAG + "="], session=None, carries="did not start")
+if TAG_LEADER is None:
+    skip_case("kill: the group led by a PPID-1 pid whose environment holds this session's id",
+              NO_ORPHAN)
+else:
+    sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
+       "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
+       transcript=SUB_TRANSCRIPT)
+
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: a pid list made by pidof", "kill -9 $(pidof node)", "deny", "machine-wide-kill",
@@ -3825,8 +3936,8 @@ sh("playwright-install: grep for the install text in a README is allowed",
 sh("playwright-install: echo of the install text is allowed", "echo npx playwright install",
    "allow", cwd=NOGIT)
 # Rule 1: a subagent call that runs an install is denied whatever the form, including the Node 22
-# cli.js form, and whatever the role the subagent carries. The switch reads agent_id alone (guard.py
-# passes bool(payload["agent_id"])), so one row per outcome pins it: a plain install and the Node 22
+# cli.js form, and whatever the role the subagent carries. The switch reads agent_id or agent_type
+# (guard.py passes bool of either), so one row per outcome pins it: a plain install and the Node 22
 # cli.js form denied, and a test run allowed.
 sh("playwright-install: a subagent install is denied",
    "npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT,
@@ -10939,6 +11050,28 @@ def impeccable_settings_case():
 
 LOG_CHECKS_EXTRA.append(("impeccable: settings.json names no impeccable plugin",
                          impeccable_settings_case))
+
+
+def run_folder_sweep_case():
+    """test-temp-standard: the sweep removes a sibling run folder over a day old and keeps a new one."""
+    fake = os.path.join(ROOT, "sweep-root")   # a temp root of its own, inside this run's folder
+    old = os.path.join(fake, "4242-" + "a" * 32)
+    new = os.path.join(fake, "4243-" + "b" * 32)
+    for path in (old, new):
+        os.makedirs(path)
+    stale = time.time() - RUN_FOLDER_MAX_AGE - 3600
+    os.utime(old, (stale, stale))
+    sweep_run_folders(fake, own=ROOT)
+    if os.path.exists(old):
+        return False, "the old sibling run folder stays"
+    if not os.path.isdir(new):
+        return False, "the new sibling run folder was removed"
+    return True, "the old sibling run folder goes, the new one stays"
+
+
+FIXTURELESS_CHECKS.add(run_folder_sweep_case)
+LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and keeps a new one",
+                         run_folder_sweep_case))
 
 
 # --------------------------------------------------------------------------- the runner

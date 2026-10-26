@@ -38,6 +38,10 @@ REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import git_reads  # noqa: E402
 try:
+    import proc_env  # the one home of the exec-environment tag read (hooks/proc_env.py)
+except ImportError:  # a hook never dies for a missing helper; with no read, the reap stops nothing
+    proc_env = None
+try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
@@ -87,7 +91,11 @@ HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECOND
 #   With the defaults above (10 * 2 + 25), that is 45 seconds. settings.json's SessionEnd entry
 # for this hook must set a timeout STRICTLY GREATER than HOOK_WORST_CASE_SECONDS, with margin for
 # process-start and interpreter-import overhead neither number above counts; it sets 55, a
-# 10-second margin over the 45-second worst case. Changing SWEEP_TIMEOUT_SECONDS (or a future
+# 10-second margin over the 45-second worst case. The scratchpad reap (up to REAP_PS_TIMEOUT_SECONDS
+# + REAP_CWD_TIMEOUT_SECONDS = 15 s) runs first and is NOT in that 45: its time counts as elapsed,
+# so remaining_sweep_timeout_seconds shortens the sweep to fit. The true worst case is
+# 15 + 20 + (55 - 3 - 35 = 17) = 52 s, which is
+# SESSION_END_CEILING_SECONDS - EXIT_MARGIN_SECONDS. Changing SWEEP_TIMEOUT_SECONDS (or a future
 # change to git_reads._git's own timeout) without also widening that settings.json entry is exactly
 # the drift HookBudgetFitsUnderItsHostCeiling exists to catch.
 
@@ -139,6 +147,60 @@ def remaining_sweep_timeout_seconds(elapsed_seconds):
     return sweep_timeout
 
 
+# THE SCRATCHPAD REAP (decision agent-end-reap-stops-what-a-finished-agent-left). A server a lane
+# agent left behind sits in the session's scratchpad, parent init, holding the session's tag in its
+# exec environment. It is stopped here, at session end, and not at agent end: the session and its
+# agents share one scratchpad and no agent tag exists, so an agent-end reap would stop a live server
+# of the session or of a sibling lane. Its own two reads (one `ps`, one cwd table) are bounded so
+# the sweep below still gets the time that remains; any failed read keeps.
+REAP_PS_TIMEOUT_SECONDS = 5
+REAP_CWD_TIMEOUT_SECONDS = 10
+
+
+def _orphan_pids():
+    """Pids whose parent is init, from ONE `ps`, or [] when it could not answer."""
+    try:
+        answer = _nowindow.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                               timeout=REAP_PS_TIMEOUT_SECONDS)
+    except Exception:
+        return []
+    pids = []
+    for line in answer.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1] == "1" and int(parts[0]) != 1:
+            pids.append(int(parts[0]))
+    return pids if answer.returncode == 0 else []
+
+
+def reap_scratchpad(hook) -> None:
+    """Stop each PPID-1 process that holds the payload's session tag and has its cwd inside the
+    payload's `scratchpad_dir`. No `scratchpad_dir`, no `session_id`, or any failed read: stop
+    nothing. Never raises."""
+    session, scratch = hook.get("session_id"), hook.get("scratchpad_dir")
+    if proc_env is None or not isinstance(session, str) or not session \
+            or not isinstance(scratch, str) or not scratch or sys.platform.startswith("win"):
+        return
+    try:
+        import sweep  # lazy: only a session with a scratchpad pays the import
+        root = os.path.realpath(scratch)
+        if os.path.dirname(root) == root:
+            return
+        tagged = [pid for pid in _orphan_pids() if proc_env.holds_session_tag(pid, session)]
+        if not tagged:
+            return
+        if sys.platform == "darwin":
+            table = sweep._read_all_cwds_macos(timeout=REAP_CWD_TIMEOUT_SECONDS)
+            cwds = {} if table is None else sweep._first_cwd_by_pid(table)
+        else:
+            cwds = {pid: sweep.process_cwd(pid) for pid in tagged}
+        for pid in tagged:
+            cwd = os.path.realpath(cwds[pid]) if cwds.get(pid) else None
+            if cwd and (cwd == root or cwd.startswith(root + os.sep)):
+                sweep.send_signal(pid)
+    except Exception:
+        return
+
+
 def handle(hook, start=None, elapsed_seconds=None) -> None:
     """Run the sweep for the repository `hook` names, or do nothing. Never raises.
 
@@ -158,6 +220,7 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
         return
     if hook.get("hook_event_name") != "SessionEnd":
         return
+    reap_scratchpad(hook)  # before the repo checks: it needs no repository
     cwd = hook.get("cwd")
     if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
         return
