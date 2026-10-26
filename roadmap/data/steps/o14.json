@@ -1,0 +1,10 @@
+{
+  "title": "Each repo's rules load by the folder they govern, not all at once",
+  "phase": "organize",
+  "status": "todo",
+  "order": 109.95,
+  "why": "Your question, Oct 26: you work at repo level only, and wondered whether bigger teams work a better way.",
+  "note": "Checked Oct 26 at claude-settings bf084df, banchi e910e8a, mailaudit 37d4e7d, q_max b47bd003 (the 'Weigh repo-level vs folder-level working' thread): every session loads the whole repo CLAUDE.md plus the 19 KB global one. banchi's is 399 lines (35 KB), mailaudit's 478 (31 KB). Claude Code's docs aim under 200 lines and recommend path-scoped rules, .claude/rules/*.md with a paths: glob, that load only when Claude touches matching files (code.claude.com/docs/en/memory). Example: banchi's 'The front end' is 82 lines that matter only under app/. banchi also has 5,286 files under demo-assets/ with no Read deny rule. Ask, in claude-settings, one lane: (1) a size check that warns when a repo CLAUDE.md passes about 200 lines; (2) a short rule on when a section moves to a path-scoped rule and when it stays (a rule needed before the first file read, such as a design pass, stays); (3) Read deny guidance for bulk checked-in data. The repo pilots are o3's, deferred. Not recommended: a CLAUDE.md per folder, per-folder subagents, worktree sparse paths; they serve many-team monorepos, and your repos have one owner and lanes split by task. Placed first in Organize (triage, Oct 26): small, needs no answer from you, and its rule (2) is what o2's .claude/rules/ folder will follow.",
+  "ask": "",
+  "updatedAt": "2026-10-26T07:00:00Z"
+}
