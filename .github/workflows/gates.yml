@@ -383,7 +383,6 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
 
-
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
       # plain-english-map skill tests. The same step ends gates-windows and gates-macos. The `mods` flag
