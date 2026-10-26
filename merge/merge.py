@@ -10,6 +10,7 @@
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403.
+`gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
 """
 import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
@@ -827,8 +828,13 @@ class Host:
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
         MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
         or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
-        lost = False
         say(f"merge: merging #{n} ...")  # the merge call can block
+        # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
+        # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
+        state_now = self.pr(n)["merge_state"]
+        if state_now in ("BLOCKED", "BEHIND"):
+            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base. gh's merge refuses it the same way, so no merge call was sent."
+        lost = False
         try:
             c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
         except NetStop as e:
