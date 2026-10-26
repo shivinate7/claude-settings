@@ -47,9 +47,13 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 
 ## Upkeep list
 
-After each build the builder prints the upkeep list for the triage thread: long notes, untouched
-steps and empty notes in a live phase, new top steps with no "Placed ahead of" line, landed steps
-waiting to close, and `Step:` trailers that name no step.
+After each build the builder prints the upkeep list for the triage thread. It names:
+
+- open-step notes that are too long;
+- untouched steps and empty notes in a live phase;
+- new top steps with no "Placed ahead of" line;
+- landed steps that wait for triage to close them;
+- `Step:` trailers that name no step.
 
 ## Cost
 
