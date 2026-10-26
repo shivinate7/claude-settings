@@ -2,6 +2,7 @@
 # ios-ship: one shared tool to ship the owner's iOS apps from this Mac. macOS only. Runs on /bin/bash 3.2.
 #   ios-ship testflight [CONFIG] [--app NAME]... [--export-only]
 #   ios-ship install    [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]
+#   ios-ship profile    [CONFIG] --app NAME [--template T] [--time-limit S] [--output P] [--retry-wait S]
 # CONFIG is the tools/ios-ship.json of a private app repo (README, "Shipping iOS apps"). No ID is built in.
 # No CONFIG: tools/ios-ship.json at the git toplevel of the current folder. None there: exit 2.
 # Each ID comes from the env first (TEAM_ID, DEVICE_UDID, ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID),
@@ -18,11 +19,16 @@
 #   --force has no effect (every run installs). --debug builds Debug. --no-install stops after a generic-iOS build, no phone needed.
 #   Exit 75: the phone is not reachable. Works only in its own clones. Never touches a shared checkout.
 #   PHONE_APPS_JSON is retired: install refuses it (exit 2). Use --app and tools/ios-ship.json.
+# profile: record one app on the phone with Instruments (xctrace), by the phone's UDID. Defaults: Time Profiler, 20 s,
+#   a printed path under $TMPDIR, a 60 s retry wait. xctrace on a network-paired phone can fail with "Waiting for device
+#   to boot" while the phone is fine, and no device state predicts it, so that failure is retried once after the wait.
+#   Any other failure is not retried. A failure exits with xctrace's code (124 on the tool's timeout) and the log path.
+#   No --app, two --app, or a bad option value: exit 2.
 set -uo pipefail
 
-usage() { echo "usage: ios-ship testflight|install [CONFIG] [--app NAME]... [--export-only | --no-install --debug --force]" >&2; exit 2; }
+usage() { echo "usage: ios-ship testflight|install|profile [CONFIG] [--app NAME]... [--export-only | --no-install --debug --force | --template T --time-limit S --output P --retry-wait S]" >&2; exit 2; }
 JOB=${1:-}
-case $JOB in testflight|install) shift ;; *) usage ;; esac
+case $JOB in testflight|install|profile) shift ;; *) usage ;; esac
 if [[ $JOB == install && -n ${PHONE_APPS_JSON+x} ]]; then
   echo "ios-ship: PHONE_APPS_JSON is no longer read; name the apps with --app and list them in tools/ios-ship.json" >&2; exit 2
 fi
@@ -32,9 +38,14 @@ if (( $# )) && [[ $1 != --* ]]; then
   [[ -n $CONFIG ]] || usage
 fi
 want_apps=(); export_only=0; noinstall=0; debug=0
+template="Time Profiler"; time_limit=20; output=; retry_wait=60
 while (( $# )); do
   case $1 in
     --app) (( $# >= 2 )) || usage; want_apps+=("$2"); shift ;;
+    --template) [[ $JOB == profile && $# -ge 2 && -n ${2:-} ]] || usage; template=$2; shift ;;
+    --time-limit) [[ $JOB == profile && ${2:-} =~ ^[1-9][0-9]*$ ]] || usage; time_limit=$2; shift ;;
+    --output) [[ $JOB == profile && -n ${2:-} ]] || usage; output=$2; shift ;;
+    --retry-wait) [[ $JOB == profile && ${2:-} =~ ^[0-9]+$ ]] || usage; retry_wait=$2; shift ;;
     --export-only) [[ $JOB == testflight ]] || usage; export_only=1 ;;
     --no-install) [[ $JOB == install ]] || usage; noinstall=1 ;;
     --debug) [[ $JOB == install ]] || usage; debug=1 ;;
@@ -400,6 +411,45 @@ job_install() {
   APP=phone-apps
   (( exit_rc == 0 )) || log "done: at least one app failed (exit $exit_rc)"
   exit "$exit_rc"
+}
+
+# ---- profile ----
+
+job_profile() {
+  refuse() { echo "PROFILE FAIL: $*"; exit 1; }
+  (( ${#want_apps[@]} == 1 )) || { echo "ios-ship: profile records one app; name it with one --app" >&2; exit 2; }
+  command -v jq >/dev/null || refuse "config: jq not found"
+  select_apps
+  ENTRY=${ENTRIES[0]}; check_entry
+  local bundle dir twice=0 rc try
+  bundle=$(app_get bundle_id); [[ -n $bundle ]] || refuse "config: $NAME: bundle_id is unset"
+  resolve DEVICE_UDID device_udid
+  if [[ -z $output ]]; then
+    dir=$(mktemp -d "${TMPDIR:-/tmp}/ios-ship-profile.XXXXXX") || refuse "cannot make an output dir"
+    output=$dir/$NAME.trace
+  fi
+  [[ $output == /* ]] || output=$PWD/$output
+  # xctrace will not write over a trace, and a retry may remove only what this run made.
+  [[ ! -e $output && ! -L $output ]] || refuse "$output already exists; pass another --output"
+  LOG=$(mktemp "${TMPDIR:-/tmp}/ios-ship-profile-log.XXXXXX") || refuse "cannot make a log file"
+  STEP_OUT=$LOG.step
+  echo "ios-ship: $NAME: recording $template for ${time_limit}s to $output, log $LOG"
+  for try in 1 2; do
+    # The timeout covers the recording plus the launch and the save.
+    tmo "${STEP_TIMEOUT:-$(( time_limit + 120 ))}" xcrun xctrace record --template "$template" --device "$DEVICE_UDID" \
+      --time-limit "${time_limit}s" --output "$output" --launch -- "$bundle" >"$STEP_OUT" 2>&1 </dev/null; rc=$?
+    cat "$STEP_OUT" >> "$LOG" 2>/dev/null
+    if (( rc == 0 )); then rm -f "$STEP_OUT"; echo "PROFILE OK: $NAME recorded to $output, log $LOG"; exit 0; fi
+    (( try == 1 )) || { twice=1; break; }
+    grep -q 'Waiting for device to boot' "$STEP_OUT" || break
+    echo "ios-ship: $NAME: xctrace stopped at \"Waiting for device to boot\"; retrying once in ${retry_wait}s"
+    [[ ! -e $output ]] || rm -rf "$output"
+    sleep "$retry_wait"
+  done
+  rm -f "$STEP_OUT"
+  (( twice )) && echo "ios-ship: the phone may need unlocking or a cable"
+  echo "PROFILE FAIL: $NAME: xctrace exit $rc, see $LOG"
+  exit "$rc"
 }
 
 job_"$JOB"

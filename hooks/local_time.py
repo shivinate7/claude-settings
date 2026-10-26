@@ -92,9 +92,14 @@ def central_hhmm(at):
 
 def override_line(result):
     """The context line for a grant() result: names the pass and when it ends, Central time."""
-    kind, until = result
+    kind, until = result[:2]
     if kind == "off":
         return "Override pass: ended."
+    if kind == "opus-off":
+        return "Opus pass: ended."
+    if kind == "opus":
+        who = "%s spawns" % result[2] if result[2] else "spawns"
+        return "Opus pass: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override pass: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
     return "Override pass: every refused act goes through until %s." % central_hhmm(until)
@@ -184,8 +189,9 @@ def capture(raw, stamp, at=None):
 
 
 def grant_override(raw, at):
-    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]` or `override off` (decision owner-override-pass):
-    grants or ends the session's pass and prints one line. Any failure is one stderr line, no pass."""
+    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
+    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override-pass): grants or ends
+    the session's pass and prints one line. Any failure is one stderr line, no pass."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override_pass

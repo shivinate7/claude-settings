@@ -99,6 +99,40 @@ from its content. Use `inline-size`.
 Source: banchi `app/src/Inventory.css` (the `copies` query container); q_max
 `src/components/screens/level.css` (`.level-grid`).
 
+## ux-variant-extends-home
+
+A screen that needs a shared component to look or act a little different extends the component.
+It never copies it. The component keeps one home. The variant is a modifier class or a custom
+property in CSS, and a parameter or a style in Swift.
+Outcome: a fix to the shared component reaches every variant, so two screens never drift (o11,
+one home per shared thing; rule building-one-home-per-capability).
+Check: pass when no component file holds a copy of another component with small edits. A copy
+passes only when its commit message states why the home cannot take the variant.
+
+```css
+/* The home: one card, with a custom property for the one value a variant changes. */
+.card { padding: var(--card-pad, var(--space-3)); border-radius: var(--radius-2); }
+
+/* A variant: a modifier class on the same component. */
+.card--dense { --card-pad: var(--space-2); }
+```
+
+```swift
+// The home: one view, with a parameter for the one thing a variant changes.
+struct StatusRow: View {
+    var title: String
+    var dense = false
+    var body: some View {
+        HStack(spacing: dense ? Space.s1 : Space.s2) { Text(title) }
+    }
+}
+
+// A variant: the same view with an argument, or a ButtonStyle for a look that many views share.
+StatusRow(title: "Kitchen", dense: true)
+```
+
+`lint/find_copies.py` lists the copies a repo holds of claude-settings files and skills.
+
 ## ux-fluid-tokens
 
 Space and type that grow with the box use clamp() tokens. A component reads the token. It
