@@ -155,6 +155,11 @@ class Unknowns(Job):
         rc, lines, out = self.run_job(step("doc", "cat > note.txt <<EOF\nno-such-word-c69 here\nEOF\ntest -s note.txt"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
+    def test_a_here_string_shift_or_quoted_marker_is_no_heredoc(self):
+        for first in ("grep a <<< foo", "x=$(( 1 << 2 ))", 'echo "a <<EOF"'):
+            rc, lines, out = self.run_job(step("doc", first + "\nno-such-tool-c69 2>/dev/null"))
+            self.assertEqual(self.verdicts(lines), ["unknown"], first + ": " + out)
+
     def test_continue_on_error_is_unknown(self):
         rc, lines, out = self.run_job(step("soft", "true", continue_on_error="true"))
         self.assertEqual(self.verdicts(lines), ["unknown"], out)

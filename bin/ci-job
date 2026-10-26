@@ -68,7 +68,8 @@ def commands(script):
         line = line.split(" #")[0].strip()
         if not line or line.startswith("#"):
             continue
-        doc = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", line)
+        bare = re.sub(r"\$\(\(.*?\)\)|\"[^\"]*\"", "", line)  # arithmetic and double-quoted text hold no heredoc
+        doc = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_]\w*)['\"]?", bare)
         if doc:
             until = doc.group(1)
         for part in re.split(r"\|\||&&|[|;]", line):
