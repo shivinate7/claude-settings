@@ -243,6 +243,12 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      - name: CLAUDE.md size fixture suite
+        run: python3 lint/test_check_claude_md_size.py
+
+      - name: CLAUDE.md size (warns, never fails)
+        run: python3 lint/check_claude_md_size.py
+
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
 
