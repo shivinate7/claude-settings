@@ -1,0 +1,10 @@
+{
+  "title": "Deleting a hook script never breaks a session that is still running",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 107.96,
+  "why": "Goal-3 session report, Oct 25: deleting the two STE stub scripts (#575) broke Edit and Write in the goal session itself and in every agent it started, because that session began before #566 and still called ste_gate.py on every edit. The goal had to move to a fresh session mid-batch.",
+  "note": "Filed by the advisor, Oct 26, from the report the owner pasted. The session checked installs on both machines before deleting, but not sessions still running; it said it would note this on the debt record (not checked whether it did). Likely risk: any hook delete hits it again. Brief not written yet; the text in Ask is the plan.",
+  "ask": "Two parts. (1) Find the cause: a deleted script that a live session's hook list still calls breaks that session and every agent it starts (Edit and Write fail), until the session restarts. (2) Fix the cause in its one home, the installer or the hook wiring: either a hook entry fails open when its script is missing, or a deleted hook script leaves a stub for one more release, recorded with its delete date. Red case first: a settings.json that calls a missing script, and an Edit that must still pass. Advisor pick: fail open on a missing script, since it also covers a half-finished install.",
+  "updatedAt": "2026-10-26T03:10:00Z"
+}
