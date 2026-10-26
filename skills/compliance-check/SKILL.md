@@ -38,7 +38,7 @@ session practice, with no trace in the tree, is `n/a (session)`.
 
 ## 3. Run the probes
 
-Run each probe in `probes.md` from the child's root. One bounded command per probe, and keep
+Run each probe in `probes.md` from the child's root. Run the copy probe in `copies.md` too. One bounded command per probe, and keep
 its verdict, not its stream. Some probes cannot run, for example with no `gh` login or no
 network. Mark each of them `unknown`, never pass or fail. Defer CI shape to the `ci-hygiene`
 skill and docs staleness to the `fresh-prose` skill. Name the skill and its top finding, and do
