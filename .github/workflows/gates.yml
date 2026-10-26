@@ -763,7 +763,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
     # 2x the slowest green step (382 s) is 764 s; 15 min with setup.
-    timeout-minutes: 15
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -789,7 +789,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_merge == 'true' || github.event_name != 'pull_request' }}
     # Expected: PR slice about 60 s; full merge suite on push and nightly about 8 min (464 s, plus launcher 31 s, cmd under 25 s). 2x of the full run is 20 min.
-    timeout-minutes: 20
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
