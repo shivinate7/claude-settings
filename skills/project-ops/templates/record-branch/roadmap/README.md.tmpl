@@ -1,0 +1,8 @@
+# Roadmap
+
+`data/` holds one JSON file per document: `data/steps/<id>.json`, `data/topics/<id>.json` and
+`data/meta/<name>.json`. A step file holds the fields `title`, `status` (`todo`, `active`, `done`),
+`phase`, `order`, `why`, `note`, `ask` and `updatedAt`.
+
+The page builder has one home: `roadmap/build.py` on the `roadmap` branch of claude-settings. It
+does not read this repo's data yet. Until it does, this folder is the record, and it has no page.

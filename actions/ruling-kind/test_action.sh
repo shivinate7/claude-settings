@@ -16,6 +16,9 @@
 #    against the action's CLAUDE.md or the caller's, and fails in neither.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
+TRACKED_ROOT="$(cd "$here/../.." && pwd)"
+# shellcheck source=../../testing/tracked_tree.sh
+. "$TRACKED_ROOT/testing/tracked_tree.sh"  # copies what git lists, so no fixture lists files
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -58,10 +61,9 @@ expect 0 declared-record-passes "$tmp/topic" main ""
 # The action's own repo: a clone with a copy of check.sh and the lint. Its record is never the caller's.
 act="$tmp/action"
 quiet git clone -q "$remote" "$act"
-mkdir -p "$act/actions/ruling-kind" "$act/lint"
+mkdir -p "$act/actions/ruling-kind"
 quiet cp "$here/check.sh" "$act/actions/ruling-kind/"
-quiet cp "$here/../../lint/check_ruling_kind.py" "$act/lint/"
-quiet cp "$here/../../lint/layout.py" "$here/../../lint/layout.json" "$act/lint/"  # check.sh reads the default folder from the layout
+quiet copy_tracked "$act" lint hooks  # the lint, the layout check.sh reads, and their imports
 quiet git -C "$act" switch -q -c action-only
 mkdir -p "$act/decisions"; printf 'No kind line here.\n' > "$act/decisions/action-only.md"
 quiet git -C "$act" add decisions/action-only.md
@@ -85,10 +87,9 @@ expect 1 shallow-no-merge-base-red "$tmp/shallow" main "git diff failed"
 # is a copy of check.sh and the lint, with its own CLAUDE.md (one rule). Each caller clone adds one
 # declared record, and maybe a CLAUDE.md with one rule of its own.
 actroot="$tmp/actroot"
-mkdir -p "$actroot/actions/ruling-kind" "$actroot/lint"
+mkdir -p "$actroot/actions/ruling-kind"
 quiet cp "$here/check.sh" "$actroot/actions/ruling-kind/"
-quiet cp "$here/../../lint/check_ruling_kind.py" "$actroot/lint/"
-quiet cp "$here/../../lint/layout.py" "$here/../../lint/layout.json" "$actroot/lint/"  # check.sh reads the default folder from the layout
+quiet copy_tracked "$actroot" lint hooks  # the lint, the layout check.sh reads, and their imports
 printf '# Action rules\n\nRule text. <!-- rule:action-rule -->\n' > "$actroot/CLAUDE.md"
 # Case 1: the rule lives only in the action's CLAUDE.md. The caller has no CLAUDE.md.
 quiet git clone -q "$remote" "$tmp/rule-action"

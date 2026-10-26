@@ -67,11 +67,15 @@ def _fake_run(argv, **kwargs):
     if not (isinstance(argv, (list, tuple)) and argv
             and os.path.basename(str(argv[0])).lower() in ("claude", "claude.exe", "claude.cmd")):
         return _real_run(argv, **kwargs)
+    prompt = kwargs.get("input") or b""
+    prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
+    kind = "wording" if prompt.startswith("Judge this SendMessage call") else "busy"
     with open(os.environ["SM_RECORD"], "a", encoding="utf-8") as f:
-        f.write(json.dumps({"argv": list(argv)}) + "\n")
+        f.write(json.dumps({"argv": list(argv), "kind": kind}) + "\n")
     if os.environ.get("SM_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
-    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["SM_ANSWER"]}), stderr="")
+    answer = os.environ["SM_WORDING_ANSWER" if kind == "wording" else "SM_ANSWER"]
+    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
 subprocess.run = _fake_run
@@ -181,11 +185,12 @@ def write_launchers():
         f.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
 
 
-def argv_lines(path):
+def argv_lines(path, kind=None):
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as f:
-        return [json.loads(line)["argv"] for line in f if line.strip()]
+        rows = [json.loads(line) for line in f if line.strip()]
+    return [r["argv"] for r in rows if kind is None or r.get("kind") == kind]
 
 
 def read_text(path):
@@ -197,6 +202,7 @@ def read_text(path):
 
 class Run:
     def __init__(self, proc, base, elapsed):
+        self.base = base
         self.code = proc.returncode
         self.out = proc.stdout or ""
         self.err = proc.stderr or ""
@@ -207,7 +213,9 @@ class Run:
         self.word = read_text(os.path.join(base, "word.txt"))  # the state the stub printed, if it got that far
         self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
         self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
-        self.model_calls = [a for a in self.calls if "-p" in a]
+        self.model_calls = [a for a in argv_lines(os.path.join(base, "calls.jsonl"), "busy") if "-p" in a]  # the busy judge
+        self.wording_calls = [a for a in argv_lines(os.path.join(base, "calls.jsonl"), "wording") if "-p" in a]
+        self.log = read_text(os.path.join(base, "config", "guard.log")) or ""
         self.agents_calls = [a for a in self.calls if a[:2] == ["agents", "--json"]]
 
     def deny(self):
@@ -222,8 +230,8 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r model=%d agents=%d reader=%d word=%r loaded=%s wall=%.1fs" % (
-        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls),
+    return "code=%s out=%r err=%r busy=%d wording=%d agents=%d reader=%d word=%r loaded=%s wall=%.1fs" % (
+        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.wording_calls), len(r.agents_calls),
         len(r.reader_calls), r.word, r.loaded, r.elapsed)
 
 
@@ -240,11 +248,14 @@ def point_reader_at_stub(cfg, base):
 
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
-             reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120):
+             reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120, wording=ALLOW,
+             override=None, base=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
     os.makedirs(cfg)
+    if override is not None:  # (session id, pass file body): the pass the owner's prompt would write
+        write_pass(cfg, *override)
     agents = os.path.join(base, "agents.json")
     with open(agents, "w", encoding="utf-8") as f:
         f.write(json.dumps(rows if rows is not None else []))
@@ -257,6 +268,7 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
         "SM_RECORD": os.path.join(base, "calls.jsonl"),
         "SM_AGENTS_FILE": agents,
         "SM_ANSWER": answer,
+        "SM_WORDING_ANSWER": wording,
     })
     if model_fail:
         env["SM_MODEL_FAIL"] = "1"
@@ -276,8 +288,19 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     return Run(proc, base, time.monotonic() - started)
 
 
-def hook_input(to=PEER, message="Status: the step is done, no change for you."):
-    return json.dumps({"tool_name": "SendMessage", "tool_input": {"to": to, "message": message}})
+def hook_input(to=PEER, message="Status: the step is done, no change for you.", session=SID_A, agent=None):
+    payload = {"session_id": session, "tool_name": "SendMessage", "tool_input": {"to": to, "message": message}}
+    if agent:
+        payload["agent_id"] = agent
+    return json.dumps(payload)
+
+
+def write_pass(cfg, session, body):
+    """Write <config>/state/override/<session>.json, the owner override pass (hooks/override_pass.py)."""
+    folder = os.path.join(cfg, "state", "override")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, session + ".json"), "w", encoding="utf-8") as f:
+        f.write(body if isinstance(body, str) else json.dumps(body))
 
 
 def row(sid, name, status, cwd="/x/app"):
@@ -357,13 +380,13 @@ def case_find_reader():
 
 def case_idle_and_waiting_allow_with_no_model_call():
     # The stub reader answers the word, so no claude board read runs. Its record shows it was asked
-    # about PEER. Allow and unseen look the same here; the no-model check is what a mutant that sends
-    # idle to the model turns red.
+    # about PEER. Allow and unseen look the same here; the no-busy-call check is what a mutant that
+    # sends idle to the busy judge turns red. The wording judge reads every send, once.
     for status in ("idle", "waiting"):
         r = run_hook(hook_input(), reader_mode=status)
-        check("%s receiver: allow, no model call, no output" % status,
+        check("%s receiver: allow, no busy call, one wording call, no output" % status,
               r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and not r.agents_calls
-              and r.loaded and r.reader_calls == [[PEER]], detail(r))
+              and len(r.wording_calls) == 1 and r.loaded and r.reader_calls == [[PEER]], detail(r))
 
 
 # Busy receiver and a model FLAG. Each row: (row id, model answer, reason prefix the deny carries).
@@ -401,12 +424,13 @@ def case_unseen_receivers_allow_with_no_model_call():
     # The word check catches a stub that crashed: the hook would then read unseen for the wrong reason.
     for label, rows in cases:
         r = run_hook(hook_input(), rows=rows)
-        check("unseen (%s): allow, no model call" % label,
+        check("unseen (%s): allow, no busy call, one wording call" % label,
               r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
+              and len(r.wording_calls) == 1
               and r.word == "unseen", detail(r))
     # SM_AGENTS_FAIL: the stub stands in for a failed claude read, and prints unseen as the real reader does.
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], agents_fail=True)
-    check("unseen (agents list fails): allow, no model call",
+    check("unseen (agents list fails): allow, no busy call",
           r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
           and r.word == "unseen", detail(r))
 
@@ -421,18 +445,26 @@ def case_advisor_named_receiver_is_a_peer():
 
 
 def case_malformed_input_fails_open_with_no_deny():    # direct=True runs the script as shipped, so its __main__ line is under test. The first two raise
-    # inside main() and print the failed-open line; the last two return 0 with no line.
-    for label, text, opened in (
-        ("stdin is not JSON", "not json", True),
-        ("tool_input is not an object", '{"tool_input": "oops"}', True),
-        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False),
-        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False),
+    # inside main() and print the failed-open line, with no judge call. The rest are not a plain message
+    # to a named receiver: no board read and no busy call, but the wording judge still reads them.
+    for label, text, opened, wording in (
+        ("stdin is not JSON", "not json", True, 0),
+        ("tool_input is not an object", '{"tool_input": "oops"}', True, 0),
+        ("to is not a string", '{"tool_input": {"to": 5, "message": "x"}}', False, 1),
+        ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}', False, 1),
+        ("message is an object", '{"tool_input": {"to": "peer", "summary": "s", "message": {"type": "x"}}}', False, 1),
     ):
         r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG, direct=True)
-        check("malformed input (%s): exit 0, no deny, no model call, no reader call, failed-open line %s"
-              % (label, "printed" if opened else "absent"),
-              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == []
-              and ("failed open" in r.err) == opened, detail(r))
+        check("malformed input (%s): exit 0, no deny, no busy call, %d wording call, no reader call, failed-open line %s"
+              % (label, wording, "printed" if opened else "absent"),
+              r.code == 0 and r.out == "" and not r.model_calls and len(r.wording_calls) == wording
+              and r.reader_calls == [] and ("failed open" in r.err) == opened, detail(r))
+    r = run_hook('{"session_id": "%s", "tool_input": {"to": "peer", "summary": "chat about X", "message": {"type": "x"}}}'
+                 % SID_A, wording=FLAG, direct=True)
+    d = r.deny()
+    check("a structured message the wording judge flags: one deny, no board read",
+          d is not None and d.get("permissionDecision") == "deny" and len(r.wording_calls) == 1
+          and r.reader_calls == [], detail(r))
 
 
 def case_reader_timeout_allows_with_one_plain_line():
@@ -441,7 +473,7 @@ def case_reader_timeout_allows_with_one_plain_line():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG,
                  reader_mode="hang", reader_seconds=READER_SECONDS)
     lines = r.err.strip().splitlines()
-    check("reader times out: exit 0, no deny, no model call, one plain board-timeout line",
+    check("reader times out: exit 0, no deny, no busy call, one plain board-timeout line",
           r.code == 0 and r.out == "" and not r.model_calls and r.loaded and len(lines) == 1
           and "board read timed out" in lines[0] and "TimeoutExpired" not in r.err and "Command" not in r.err,
           detail(r))
@@ -466,7 +498,7 @@ def case_reader_that_holds_the_pipe_returns_before_the_child_ends():
         return
     check("reader holds the pipe: hook returned before the held child wrote done",
           r.code == 0 and not r.done, detail(r))
-    check("reader holds the pipe: exit 0, no deny, no model call, board-timeout line",
+    check("reader holds the pipe: exit 0, no deny, no busy call, board-timeout line",
           r.code == 0 and r.out == "" and not r.model_calls and "board read timed out" in r.err, detail(r))
 
 
@@ -483,31 +515,112 @@ def case_model_failures_fail_open_with_no_deny():
 
 
 def case_model_row_names_the_call():
-    # The model-per-role table has one row for this hook's model call; the row's model and effort
-    # must equal what the call uses (decision_watch.MODEL and its --effort argument).
+    # The model-per-role table has one row per model call of this hook; each row's model and effort
+    # must equal what the call uses. Busy judge: decision_watch.MODEL at invoke_model's default effort.
+    # Wording judge: the hook's WORDING_MODEL, and no --effort (the model's default).
     record = os.path.join(os.path.dirname(HERE), "docs", "decisions", "agent-model-cap.md")
     try:
         with open(record, encoding="utf-8") as f:
-            rows = [line for line in f if line.startswith("|") and "hooks/sendmessage_state.py" in line]
+            lines = [line for line in f if line.startswith("|")]
     except OSError as exc:
-        rows = []
+        lines = []
         check("model table: record readable", False, str(exc))
-    check("model table: exactly one row for the SendMessage state judge", len(rows) == 1, repr(rows)[:200])
+    rows = [line for line in lines if "hooks/sendmessage_state.py" in line]
+    wording_rows = [line for line in lines if line.startswith("| SendMessage wording judge")]
+    check("model table: exactly one row for the SendMessage busy judge", len(rows) == 1, repr(rows)[:200])
+    check("model table: exactly one row for the SendMessage wording judge", len(wording_rows) == 1,
+          repr(wording_rows)[:200])
+    spec = importlib.util.spec_from_file_location("decision_watch", os.path.join(HERE, "decision_watch.py"))
+    dw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dw)
+    with open(os.path.join(HERE, "decision_watch.py"), encoding="utf-8") as f:
+        effort_arg = 'effort="xhigh"):' in f.read()
     if len(rows) == 1:
         cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
-        spec = importlib.util.spec_from_file_location("decision_watch", os.path.join(HERE, "decision_watch.py"))
-        dw = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(dw)
-        with open(os.path.join(HERE, "decision_watch.py"), encoding="utf-8") as f:
-            effort_arg = '"--effort", "xhigh"' in f.read()
-        check("model table: row model is the call's model (haiku)",
+        check("model table: busy row model is the call's model (haiku)",
               "haiku" in cells[1] and dw.MODEL == "haiku", repr(cells[1:2]))
-        check("model table: row effort is the call's effort (xhigh)",
+        check("model table: busy row effort is the call's effort (xhigh)",
               cells[2] == "xhigh" and effort_arg, repr(cells[2:3]))
+    if len(wording_rows) == 1:
+        cells = [c.strip() for c in wording_rows[0].strip().strip("|").split("|")]
+        model = getattr(load_hook(), "WORDING_MODEL", None)  # None on a hook with no wording judge: a FAIL
+        check("model table: wording row model is the call's model (%s)" % model,
+              bool(model) and model in cells[1], repr(cells[1:2]))
+        check("model table: wording row effort is the model default", cells[2].startswith("model default"),
+              repr(cells[2:3]))
+
+
+def case_wording_call_carries_its_model_and_no_effort():
+    model = getattr(load_hook(), "WORDING_MODEL", None)
+    r = run_hook(hook_input(), reader_mode="idle")
+    argv = r.wording_calls[0] if len(r.wording_calls) == 1 else []
+    pairs = list(zip(argv, argv[1:]))
+    check("wording call: --model %s, no --effort" % model,
+          bool(model) and ("--model", model) in pairs and "--effort" not in argv, detail(r) + " argv=%r" % argv)
+
+
+def case_wording_judge_denies_any_receiver():
+    # The wording judge reads every send, so an idle, busy or unseen receiver is denied on its FLAG.
+    for label, kwargs in (("idle", {"reader_mode": "idle"}),
+                          ("unseen", {"rows": [row(SID_B, OTHER, "busy")]}),
+                          ("busy, busy judge ok", {"rows": [row(SID_A, PEER, "busy")], "answer": ALLOW})):
+        r = run_hook(hook_input(message="Chat."), wording=FLAG, **kwargs)
+        d = r.deny()
+        check("wording FLAG (%s): one deny carrying the rule once" % label,
+              r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
+              and d.get("permissionDecisionReason", "").startswith("parallelism-no-mid-task-talk: ")
+              and d.get("permissionDecisionReason", "").count("parallelism-no-mid-task-talk") == 1
+              and len(r.wording_calls) == 1, detail(r))
+    r = run_hook(hook_input(message="Chat."), reader_mode="idle", wording=FLAG)
+    check("wording FLAG: the deny writes one guard.log line", "\tdeny\tparallelism-no-mid-task-talk\t" in r.log,
+          detail(r) + " log=%r" % r.log)
+
+
+FUTURE, PAST = "2099-01-01T00:00:00+00:00", "2000-01-01T00:00:00+00:00"
+TIMED = {"kind": "timed", "until": FUTURE}
+ONCE = {"kind": "once", "until": FUTURE, "id": "0" * 32}
+
+
+def claims(r):
+    folder = os.path.join(r.base, "config", "state", "override")
+    return [n for n in os.listdir(folder) if n.endswith(".claim")] if os.path.isdir(folder) else []
+
+
+def case_override_pass_lifts_a_deny():
+    # decision owner-override-pass: an active pass lifts either judge.
+    both = {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG, "wording": FLAG}
+    for label, override, inp, kwargs, lifted in (
+        ("timed pass, both judges FLAG", (SID_A, TIMED), hook_input(), both, True),
+        ("timed pass, an agent's call", (SID_A, TIMED), hook_input(agent="a1"), both, True),
+        ("one-act pass, wording FLAG", (SID_A, ONCE), hook_input(), {"reader_mode": "idle", "wording": FLAG}, True),
+        ("one-act pass, busy FLAG", (SID_A, ONCE), hook_input(), {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG}, True),
+        ("one-act pass, an agent's call", (SID_A, ONCE), hook_input(agent="a1"), both, False),
+        ("an ended pass", (SID_A, dict(TIMED, until=PAST)), hook_input(), both, False),
+        ("another session's pass", (SID_B, TIMED), hook_input(), both, False),
+        ("a corrupt pass file", (SID_A, "{not json"), hook_input(), both, False),
+        ("no pass", None, hook_input(), both, False),
+    ):
+        r = run_hook(inp, override=override, **kwargs)
+        if lifted:
+            check("%s: lifted, no output, one override log line" % label,
+                  r.code == 0 and r.out == "" and r.log.count("\toverride\tparallelism-no-mid-task-talk\t") == 1
+                  and "\tdeny\t" not in r.log, detail(r) + " log=%r" % r.log)
+        else:
+            d = r.deny()
+            check("%s: the deny stands" % label,
+                  r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
+                  and "\toverride\t" not in r.log, detail(r) + " log=%r" % r.log)
+    r = run_hook(hook_input(), override=(SID_A, ONCE), reader_mode="idle", wording=FLAG)
+    check("one-act pass: the lift spends it (one claim marker)", len(claims(r)) == 1, detail(r))
+    r = run_hook(hook_input(), override=(SID_A, ONCE), reader_mode="idle", wording=ALLOW)
+    check("one-act pass: an allowed send leaves it unspent", r.out == "" and claims(r) == [], detail(r))
 
 
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
+                 case_wording_call_carries_its_model_and_no_effort,
+                 case_wording_judge_denies_any_receiver,
+                 case_override_pass_lifts_a_deny,
                  case_idle_and_waiting_allow_with_no_model_call,
                  case_busy_flag_rows,
                  case_busy_allows_when_the_model_does_not_flag,

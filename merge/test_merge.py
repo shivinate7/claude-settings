@@ -247,7 +247,7 @@ class Env(unittest.TestCase):
         return sh(self.co, "git", "log", f"origin/{ref}", "--format=%s").splitlines().count("Claim record numbers")
 
     def lock_ref(self):
-        return "refs/merge-lock/main" in self.refs()
+        return "refs/heads/merge-lock/main" in self.refs()
 
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
@@ -690,7 +690,7 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b: None
+        lock2.read = lambda b, ref=None: None
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -704,10 +704,78 @@ class Race(Env):
 
     def test_a_lock_that_is_not_ours_never_expires(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "not ours")
-        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/main")
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
         self.now += 10 ** 9
         with self.assertRaises(merge.Held):
             self.lock.acquire("main", 600)
+
+class CloudProxy(Env):
+    """The cloud proxy, measured on throwaway branches (c53): a push to refs/heads/* passes, any other ref and any ref delete get
+    HTTP 403, and every REST write under git/ is refused. A pre-receive hook on the origin refuses the same pushes."""
+    def setUp(self):
+        super().setUp()
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, "#!/bin/sh\nwhile read old new ref; do\n"
+                  "  case $new in 0000000000000000000000000000000000000000) echo 'proxy: 403 delete' >&2; exit 1;; esac\n"
+                  "  case $ref in refs/heads/*) ;; *) echo 'proxy: 403 ref' >&2; exit 1;; esac\n"
+                  "done\n")
+        os.chmod(hook, 0o755)
+
+    def lock_text(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
+    def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertNotRegex(self.refs(), r"\trefs/merge-lock/")  # the ref the proxy refuses
+        self.assertLessEqual(merge.expiry_of(self.lock_text()), self.now, out)  # released by a swap to an expired commit, never deleted
+        self.assertNotIn("lock release failed", out)
+
+    def test_a_second_run_is_held_while_the_first_holds_then_takes_the_released_lock(self):
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        token = self.lock.acquire("main", 600)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.lock.release("main", token)
+        self.assertTrue(lock2.acquire("main", 600))
+
+    def test_unlock_through_the_proxy_leaves_a_lock_anyone_may_take(self):
+        merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertTrue(self.lock.unlock("main"))
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        self.assertFalse(self.lock.unlock("main"))  # a released lock is no lock: nothing is pushed again
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_unlock_with_no_lock_reports_none_and_writes_nothing(self):
+        before = self.refs()
+        self.assertFalse(self.lock.unlock("main"))
+        self.assertEqual(self.refs(), before)
+
+    def test_a_release_never_touches_a_lock_another_run_took(self):
+        token = self.lock.acquire("main", 600)
+        self.now += 601  # expired: another run takes it by a leased push
+        rival = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.lock.release("main", token)
+        self.assertEqual(self.refs().split("\trefs/heads/merge-lock/main")[0].split("\n")[-1], rival)
+
+    def test_a_live_lock_under_the_old_name_holds_a_new_run_off(self):
+        old = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", merge.lock_message(600, self.now))
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        os.rename(hook, hook + ".off")  # the old name was pushed by a Mac run, past no proxy
+        sh(self.co, "git", "push", "-q", "origin", f"{old}:refs/merge-lock/main")
+        os.rename(hook + ".off", hook)
+        with self.assertRaisesRegex(merge.Held, "old name"):
+            self.lock.acquire("main", 600)
+        self.now += 601
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_a_cloud_session_picks_the_git_lock_and_a_mac_the_api_lock(self):
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
+            self.assertIsInstance(merge.default_lock(self.co), merge.GitLock)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):
+            self.assertIsInstance(merge.default_lock(self.co), merge.GhLock)
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
@@ -1940,7 +2008,7 @@ class Stopped(Env):
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
         self.assertEqual(self.head(), claim_head)
-        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/merge-lock/main"))  # the expiry the child wrote
+        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/heads/merge-lock/main"))  # the expiry the child wrote
         self.now = expires + 1  # past that lock, whatever its ttl
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
@@ -1989,7 +2057,7 @@ class BaseAware(Env):
     def put_locks(self, *branches):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "lock")
         for b in branches:
-            sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/{b}")
+            sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/{b}")
 
     def test_1_confirm_into_another_base_claims_and_pushes_nothing_but_merges(self):
         feat_before = self.head()
@@ -2028,16 +2096,16 @@ class BaseAware(Env):
             rc, out = e.code, "SystemExit"
         self.assertEqual(rc, 0, out)
         refs = self.refs()
-        self.assertNotIn(f"refs/merge-lock/{self.BASE}", refs)
-        self.assertIn("refs/merge-lock/main", refs)
+        self.assertNotIn(f"refs/heads/merge-lock/{self.BASE}", refs)
+        self.assertIn("refs/heads/merge-lock/main", refs)
 
     def test_3_bare_unlock_still_unlocks_the_default_branch(self):  # guard
         self.put_locks("main", self.BASE)
         rc, out = self.run_merge("--unlock")
         self.assertEqual(rc, 0, out)
         refs = self.refs()
-        self.assertNotIn("refs/merge-lock/main", refs)
-        self.assertIn(f"refs/merge-lock/{self.BASE}", refs)
+        self.assertNotIn("refs/heads/merge-lock/main", refs)
+        self.assertIn(f"refs/heads/merge-lock/{self.BASE}", refs)
 
     def test_4_a_base_that_changes_between_the_reads_stops_before_any_claim_or_push(self):
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/other-base")
@@ -2048,7 +2116,7 @@ class BaseAware(Env):
         self.assertEqual(self.head(), feat_before)
         self.assertNotIn("claim", [m for m, _ in self.modes])
         self.assertFalse(getattr(self.host, "merged", False))
-        self.assertNotIn("refs/merge-lock/", self.refs())
+        self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
     def test_6_undo_check_the_base_fetch_after_the_wait_and_stamp_check_use_the_base(self):
         rc, out = self.run_merge("7", "--confirm")
@@ -2094,7 +2162,7 @@ class BaseAware(Env):
         self.assertEqual(self.host.waits, [])  # stopped before the wait
         self.assertFalse(getattr(self.host, "merged", False))
         self.assertEqual(self.head(), claim)  # nothing pushed
-        self.assertNotIn("refs/merge-lock/", self.refs())
+        self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
     def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
         fake = self.host
@@ -2124,12 +2192,12 @@ class BaseAware(Env):
         rc, out = self.run_merge("7", "--confirm", host=WaitHost())
         self.assertEqual(rc, 1, out)
         self.assertFalse(getattr(fake, "merged", False), out)
-        self.assertNotIn("refs/merge-lock/", self.refs())
+        self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
 class Unlock(Env):
     def test_unlock_removes_a_live_lock_and_reads_nothing_first(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "unreadable, not ours")
-        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/main")
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
         rc, out = self.run_merge("--unlock")
         self.assertEqual(rc, 0, out)
         self.assertFalse(self.lock_ref())
@@ -2167,10 +2235,10 @@ if p.startswith("commits/"):
 if p == "refs" and method == "POST":
     if os.path.exists(ref): fail("HTTP 422: Reference already exists")
     open(ref, "w").write(fields["sha"]); out("{}")
-if p == "ref/merge-lock/main" and method == "GET":
+if p == "ref/heads/merge-lock/main" and method == "GET":
     if not os.path.exists(ref): fail("HTTP 404: Not Found")
     out(open(ref).read())
-if p == "refs/merge-lock/main" and method == "DELETE":
+if p == "refs/heads/merge-lock/main" and method == "DELETE":
     if not os.path.exists(ref): fail("HTTP 404: Not Found")
     os.remove(ref); out("")
 fail("unhandled " + p)
@@ -2465,7 +2533,7 @@ try:
                 val = seq.pop(0) if len(seq) > 1 else seq[0]; save()
             else:
                 val = not (S.get("dirty_after_checks") is not None and S.get("checks_calls", 0) >= S["dirty_after_checks"])
-            locked = bool(ref("refs/merge-lock/main"))
+            locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
@@ -3268,7 +3336,7 @@ class GhHalf(Env):
         real_git = merge.git
         hits = []
         def flaky(cwd, *a, input=None):
-            if a[:1] == ("ls-remote",) and a[-1] == "refs/merge-lock/main" and not hits:
+            if a[:1] == ("ls-remote",) and a[-1] == "refs/heads/merge-lock/main" and not hits:
                 hits.append(1)
                 return 1, "unexpected end of JSON input"
             return real_git(cwd, *a, input=input)
@@ -4822,10 +4890,10 @@ class LockHolder(Env):
     """The lock names its holder; the Held text says alive, dead, or cannot tell."""
     def push_lock(self, message):
         sha = sh(self.co, "git", "commit-tree", EMPTY_TREE, "-m", message)
-        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/main")
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
 
     def lock_msg(self):
-        sh(self.co, "git", "fetch", "-q", "origin", "refs/merge-lock/main")
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
         return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def peek(self, *args):
@@ -5009,7 +5077,7 @@ class ReleaseReports(Env):
                 if p.endswith("git/commits"): return 0, "c1"
                 if "ref" in S: return 1, "HTTP 422"
                 S["ref"] = "c1"; return 0, "{}"
-            if "/git/ref/merge-lock/" in p:
+            if "/git/ref/heads/merge-lock/" in p:
                 return (0, S["ref"]) if "ref" in S else (1, "HTTP 404: Not Found")
             if "/git/ref/heads/" in p: return 0, "head1"
             if "/git/commits/head1" in p: return 0, "tree1"
@@ -5044,7 +5112,7 @@ class GhReleaseReports(unittest.TestCase):
             calls.append(a)
             if a[:2] == ("-X", "DELETE"):
                 return delete
-            if "/git/ref/merge-lock/" in a[0]:
+            if "/git/ref/heads/merge-lock/" in a[0]:
                 return read_fail or (0, sha_on_read)
             if "/git/commits/" in a[0]:
                 return 0, "merge lock\nexpires: 2000\nowner: x"
@@ -5416,7 +5484,7 @@ class GhLockReadRetry(unittest.TestCase):
         seq, self.reads, self.pauses = list(replies), 0, []
         def fake_sh(args, cwd=None, input=None, env=None):
             args = without_include(args)
-            if args[:2] == ["gh", "api"] and "/git/ref/merge-lock/" in args[2]:
+            if args[:2] == ["gh", "api"] and "/git/ref/heads/merge-lock/" in args[2]:
                 self.reads += 1
                 return seq.pop(0) if len(seq) > 1 else seq[0]
             if args[:2] == ["gh", "api"] and "/git/commits/" in args[2]:
@@ -6653,15 +6721,15 @@ class GhLockRateRetry(unittest.TestCase):
             method, rest = rest[1], rest[2:]
         path = rest[0]
         jq = rest[rest.index("--jq") + 1] if "--jq" in rest else ""
-        if method == "DELETE" and path.endswith("/git/refs/merge-lock/main"):
+        if method == "DELETE" and path.endswith("/git/refs/heads/merge-lock/main"):
             return "delete"
         if method == "POST" and path.endswith("/git/commits"):
             return "lock-commit-post"
         if method == "POST" and path.endswith("/git/refs"):
             return "refs-post"
-        if method == "PATCH" and path.endswith("/git/refs/merge-lock/main"):
+        if method == "PATCH" and path.endswith("/git/refs/heads/merge-lock/main"):
             return "ref-patch"
-        if "/git/ref/merge-lock/" in path:
+        if "/git/ref/heads/merge-lock/" in path:
             return "lock-read"
         if "/git/ref/heads/" in path:
             return "base-ref"
@@ -7314,7 +7382,7 @@ class GitLockExtendsForRateWaits(Env):
     def published(self):
         if not self.lock_ref():
             return None
-        return expires_in(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/merge-lock/main"))
+        return expires_in(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/heads/merge-lock/main"))
 
     def held(self, ttl, clock=None):
         """-> the Host. self.glock is a GitLock this run holds, expiring ttl seconds after NOW. `gh` answers self.gh in order (the last repeats); git runs for real."""
@@ -7360,7 +7428,7 @@ class GitLockExtendsForRateWaits(Env):
         self.gh = [(1, RATE_403), (0, "[]")]
         host.gh(["run", "list"])
         self.assertEqual(self.seen, [(60, 1900, 1900)])
-        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token)  # the ref still holds the take
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token)  # the ref still holds the take
 
     def test_an_extension_over_a_ref_that_moved_stops_the_run_with_no_wait_and_no_second_try(self):
         host = self.held(30)
@@ -7370,7 +7438,7 @@ class GitLockExtendsForRateWaits(Env):
             host.gh(["run", "list"])
         self.assertRegex(str(cm.exception), r"(?i)merge lock")
         self.assertEqual((self.seen, self.gh_calls), ([], 1))
-        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], rival)  # the other run's lock is untouched
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], rival)  # the other run's lock is untouched
 
     def test_the_published_expiry_is_the_one_the_lock_holds_after_the_take_and_after_each_extension(self):  # (c): on a clock that moves between reads
         host = self.held(10, clock=TickClock(self.NOW))
@@ -7396,7 +7464,7 @@ class GitLockExtendsForRateWaits(Env):
         self.assertRegex(str(cm.exception), r"Run again")
         self.assertEqual((self.seen, self.gh_calls), ([], 1))
         self.assertEqual([c for c in self.cmds if "push" in c or "commit-tree" in c], [], "the run wrote a lock commit or pushed on an expired lock")
-        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token)  # the lock on origin is not touched
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token)  # the lock on origin is not touched
         self.assertEqual(self.glock.until, 1030)
 
     def test_a_rate_wait_on_an_expired_lock_stops_the_run_before_any_write(self):
@@ -7419,7 +7487,7 @@ class GitLockExtendsForRateWaits(Env):
         self.gh = [(1, RATE_403), (0, "[]")]
         with self.assertRaises(merge.NetStop):
             host.gh(["run", "list"])
-        self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token, "the push did not land: this case tests nothing")
+        self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token, "the push did not land: this case tests nothing")
         self.assertEqual(release_out(self, self.glock, self.token), "")
         self.assertFalse(self.lock_ref())
 
@@ -7427,7 +7495,7 @@ class GitLockExtendsForRateWaits(Env):
         host = self.held(30)
         self.gh = [(1, RATE_403), (0, "[]")]
         host.gh(["run", "list"])
-        self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], self.token, "the lock was not extended")
+        self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token, "the lock was not extended")
 
     def test_a_release_after_an_extension_deletes_the_lock(self):  # (e)
         self.extended()
@@ -7442,9 +7510,9 @@ class GitLockExtendsForRateWaits(Env):
 
     def test_a_release_with_a_stale_token_leaves_this_runs_extended_lock(self):  # (e), guard
         self.extended()
-        kept = sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0]
+        kept = sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0]
         self.assertIn("not this run's", release_out(self, self.glock, "0" * 40))
-        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/merge-lock/main").split()[0], kept)
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], kept)
 
 class HostDefaultBranchRateRetry(unittest.TestCase):
     """host_default_branch (`gh api repos/{owner}/{repo}`, run in the checkout's root) on a rate-limit error. It retries like Host.gh:

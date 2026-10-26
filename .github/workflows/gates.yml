@@ -159,6 +159,9 @@ jobs:
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
+      - name: Auto-mode allow entry suite
+        run: python3 hooks/test_auto_mode_allow.py
+
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
@@ -196,6 +199,12 @@ jobs:
 
       - name: Verdict runner fixture suite
         run: python3 lint/test_verdict.py
+
+      - name: Fixture copy helper suite
+        run: python3 lint/test_tracked_tree.py
+
+      - name: Job runner fixture suite (bin/ci-job)
+        run: python3 lint/test_ci_job.py
 
       - name: Rule mechanization audit
         run: python3 lint/rule_audit.py
@@ -249,6 +258,9 @@ jobs:
       - name: Layout fixture suite
         run: python3 lint/test_layout.py
 
+      - name: Roadmap builder fixture suite
+        run: python3 skills/roadmap/test_build.py
+
       - name: Layout readers hold no record path
         run: python3 lint/check_layout.py
 
@@ -266,6 +278,10 @@ jobs:
 
       - name: Glossary homes and avoided names
         run: python3 lint/check_glossary.py
+
+      # No scope gate: the suite reads the skill's .md templates, and a .md-only change must run it too.
+      - name: project-ops skill scaffold suite
+        run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
@@ -431,6 +447,13 @@ jobs:
       - name: shoot fixture suite
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
+
+      # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
+      # all-on arm of ci-scope.sh, so a change there runs this job. A red shoot suite above
+      # skips this step; it runs again once that suite is green.
+      - name: waiting page suite
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.

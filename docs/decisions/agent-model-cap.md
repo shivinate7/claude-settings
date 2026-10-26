@@ -3,12 +3,12 @@
 ## The ruling
 
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), and the builder's third try by standing word,
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing word,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
 An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level word and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
-or Task spawn that sets model opus asks, unless Plan, Explore or a builder's `Try 3 of 3` covers it.
+or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Try 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
@@ -30,6 +30,8 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | builder | sonnet | high |
 | builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
 | Plan (`agents/plan.md`) | opus | high |
+| designer (`agents/designer.md`) | opus, the owner's standing word of 2026-10-26 | high |
+| design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing word of 2026-10-26 | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
 | `fallbackModel` | sonnet | n/a |
@@ -43,17 +45,21 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `fresh-prose` | no model pin; runs on the caller's model | none |
 | skill `impeccable` | no model pin; runs on the caller's model | none |
 | skill `plain-english-map` | no model pin; runs on the caller's model | none |
+| skill `project-ops` | no model pin; runs on the caller's model | none |
+| skill `roadmap` | no model pin; runs on the caller's model | none |
+| skill `waiting-page` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
 | safety-classifier fallback | on, the default | n/a |
-| prompt-hook judges: Agent, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| prompt-hook judges: Agent (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | feedback judge (`hooks/feedback_judge.py`, a detached child of `hooks/local_time.py`; runs only while `fb` capture is open and the prompt does not open with `fb`) | claude-sonnet-5-5, through `decision_watch.invoke_model` | xhigh |
 | prompt-hook judges: AskUserQuestion, the question reviewer (an agent hook, `settings.json`) | claude-opus-5-5, by the owner's standing word of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default; an agent hook has no effort field |
-| SendMessage state judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
+| SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
+| SendMessage wording judge (the same script, one call on every send, so an override pass can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
@@ -96,7 +102,7 @@ Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because c
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `agent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
-class-level word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
+class-level word above), the role designer or design-reviewer (the 2026-10-26 word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override pass
 lifts the spawn ask like any other ask (`owner-override-pass`); the ask on a settings write under the same
 id stays outside every pass. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was

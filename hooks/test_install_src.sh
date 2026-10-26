@@ -20,6 +20,9 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
+TRACKED_ROOT=$REPO_ROOT
+# shellcheck source=../testing/tracked_tree.sh
+. "$TRACKED_ROOT/testing/tracked_tree.sh"  # copies what git lists, so no fixture lists files
 INSTALL_SH="${INSTALL_SH_UNDER_TEST:-$REPO_ROOT/install.sh}"
 SESSION_START_SH_DEFAULT="${SESSION_START_SH_UNDER_TEST:-$REPO_ROOT/hooks/session_start.sh}"
 
@@ -2181,23 +2184,18 @@ EOF
 }
 
 # A guard fixture at build $2 in clone folder $1: install.sh, the landed-dirs list, the install files, and
-# guard.py and each guard_*.py from this repo with a "# build $2" line appended. Mirrors New-Clone in
-# install-set.test.ps1.
+# every hook module from this repo (testing/tracked_tree.sh), with a "# build $2" line appended to guard.py
+# and each guard_*.py. The rest stay unstamped. Mirrors New-Clone in install-set.test.ps1.
 make_guard_clone() {
   mkdir -p "$1/hooks"
   cp "$INSTALL_SH" "$1/install.sh"
   cp "$REPO_ROOT/landed-dirs.txt" "$1/landed-dirs.txt"
   printf '# fixture CLAUDE.md %s\n' "$2" > "$1/CLAUDE.md"
   printf '{}\n' > "$1/settings.json"
-  for f in "$REPO_ROOT/hooks/guard.py" "$REPO_ROOT"/hooks/guard_*.py; do
-    b=$(basename "$f")
-    { cat "$f"; printf '\n# build %s\n' "$2"; } > "$1/hooks/$b"
+  copy_folder hooks "$1/hooks" || return 1
+  for f in "$1/hooks/guard.py" "$1"/hooks/guard_*.py; do
+    printf '\n# build %s\n' "$2" >> "$f"
   done
-  # shared_names.py is the one home of the names the guard and the config watch share (not stamped).
-  cp "$REPO_ROOT/hooks/shared_names.py" "$1/hooks/shared_names.py"
-  # git_reads.py is the one home of the git and session reads the guard and the janitor share (not
-  # stamped). guard_core.py imports it, so a guard fixture without it cannot load.
-  cp "$REPO_ROOT/hooks/git_reads.py" "$1/hooks/git_reads.py"
 }
 
 # The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the

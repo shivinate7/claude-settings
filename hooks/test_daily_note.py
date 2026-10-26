@@ -40,6 +40,8 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 NOTE = os.path.join(ROOT, "hooks", "daily_note.py")
+sys.path.insert(0, os.path.join(ROOT, "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 SETTINGS = os.path.join(ROOT, "settings.json")
 CLOCK = "CLAUDE_DAILY_NOTE_NOW"
 MAX_LINE = 240
@@ -253,12 +255,7 @@ class ReaderPathTests(NoteCase):
                        os.path.join(ROOT, "lint", "guard_log_report.py")):
             self.require_file(source)
         layout = self.scratch("layout")
-        for part in (("hooks", "daily_note.py"), ("hooks", "local_time.py"),
-                     ("hooks", "guard_core.py"), ("hooks", "shared_names.py"), ("hooks", "git_reads.py"),
-                     ("lint", "guard_log_report.py")):
-            os.makedirs(os.path.join(layout, part[0]), exist_ok=True)
-            source = os.path.join(ROOT, *part)
-            shutil.copyfile(source, os.path.join(layout, *part))
+        tracked_tree.copy_tracked(layout, "hooks", "lint")  # the note and every module it reaches
         self.write_log(healthy_log() + [guard_crash(CRASH_AT)])
         lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
         self.assertEqual(len(lines), 1)

@@ -21,7 +21,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("CHECK_HOOK_STUBS_UNDER_TEST") or os.path.join(HERE, "check_hook_stubs.py")
-HELPER = os.path.join(HERE, "..", "hooks", "_nowindow.py")  # the check imports it from hooks/
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 CONFIG = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 HEAD = "2026-10-25T12:00:00+00:00"  # the window starts 14 days earlier
@@ -54,10 +55,8 @@ class HookStubsTests(unittest.TestCase):
         root = tempfile.mkdtemp(prefix="hks_")
         self.addCleanup(rm_tree, root)
         self.tool = os.path.join(root, "tool")  # the script lives outside the repo it checks
-        os.makedirs(os.path.join(self.tool, "lint"))
-        os.makedirs(os.path.join(self.tool, "hooks"))
+        tracked_tree.copy_tracked(self.tool, "lint", "hooks")  # the check's imports, whatever they become
         shutil.copyfile(MODULE, os.path.join(self.tool, "lint", "check_hook_stubs.py"))
-        shutil.copyfile(HELPER, os.path.join(self.tool, "hooks", "_nowindow.py"))
         self.repo = os.path.join(root, "repo")
         os.makedirs(self.repo)
         self.root = root

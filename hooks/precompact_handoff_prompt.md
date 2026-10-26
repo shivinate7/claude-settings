@@ -34,8 +34,9 @@ Git and the transcript keep the history. Never make a dated copy.
 
 The handoff holds these sections, in this order:
 
-- Rulings with NO HOME YET, first. Each one names the work it governs. Give each a home
-  before that work merges.
+- Rulings with NO HOME YET, first: only a ruling whose record is being written now. Name
+  the branch that writes it. File every other ruling and task at once, in a decision record,
+  a rule, or the repo's todo or debt store. The handoff is never their home.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
@@ -44,8 +45,6 @@ The handoff holds these sections, in this order:
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
   `assumed`.
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
-- The owner's rulings from this session that have a home: one line each, the ruling and
-  its file and section.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
 - Next steps.
