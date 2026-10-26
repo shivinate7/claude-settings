@@ -1,6 +1,6 @@
 {
   "ask": "Design the session questions page: what the session publishes, how I answer, and how answers get back.",
-  "note": "Build the 'Copy answers' path first; it works on Max and Enterprise. Add comments sent to Claude for sessions on your Enterprise account (needs in-organization sharing). A session on the API key cannot publish artifacts. Since Oct 26, c31 (a question waiting on you reaches you) and c28 (a step left to you comes as a one-click command) cover how a question reaches you; this step is the page it lands on. Overlaps o7 and o8; the triage thread holds that overlap.",
+  "note": "Build the 'Copy answers' path first; it works on Max and Enterprise. Add comments sent to Claude for sessions on your Enterprise account (needs in-organization sharing). A session on the API key cannot publish artifacts. Since Oct 26, c31 (a question waiting on you reaches you) and c28 (a step left to you comes as a one-click command) cover how a question reaches you; this step is the page it lands on. Overlaps o7 and o8; the triage thread holds that overlap. Triage, Oct 26: kept apart from o8. o8 is the lasting repo page; this is the live session page that c31's alert and c28's one-click command point to.",
   "order": 170,
   "phase": "organize",
   "status": "todo",

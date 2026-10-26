@@ -1,6 +1,6 @@
 {
   "ask": "Draft the compliance-check rework with layout and design groups.",
-  "note": "The layout group reads o2's layout file plus each repo's extras file, and reports any folder that is neither (Oct 22). o12 leaves compliance-check's update to this step. r1 (run it on each child repo) waits for this. Waits for o2.",
+  "note": "The layout group reads o2's layout file plus each repo's extras file, and reports any folder that is neither (Oct 22). o12 leaves compliance-check's update to this step. r1 (run it on each child repo) waits for this. Waits for o2. Leftovers homed here by triage, Oct 26 (move them if wrong): a lint for a guessed lane cap in briefs (rule parallelism-no-guessed-lane-cap, from c37), and the STE lint's gap on UI files (from c15).",
   "order": 130,
   "phase": "organize",
   "status": "todo",

@@ -1,8 +1,8 @@
 {
-  "note": "Checked Oct 26 at 149f4bc: half done. agents/builder.md already loads frontend-design and reads ux/principles.md and ux/tokens.md before styling a screen. Left: the builder builds to d1's mockup when one exists, as one clause in builder.md (no separate ux-builder role, Oct 17). Waits for d1.",
+  "note": "Merged into d1 (triage, Oct 26): builder.md already loads frontend-design and the ux files; the one clause left (build to the designer's mockup when one exists) is part of d1.",
   "order": 230,
   "phase": "design",
-  "status": "todo",
+  "status": "done",
   "title": "Builders build to the mockup",
   "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Load frontend-design for every screen change, and unblock impeccable's polish and layout."

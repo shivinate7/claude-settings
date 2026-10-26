@@ -1,9 +1,9 @@
 {
   "ask": "Sketch how the map, /board and compliance-check could become one repo health view.",
-  "note": "Includes /board progress: done, now and next per session (was its own step). /board is now the session-board mod (Oct 26 at 149f4bc). Overlaps o8 (a roadmap page per repo) and o10 (a page per session); the triage thread holds that overlap.",
+  "note": "Merged into o8 (triage, Oct 26): one repo view: the map, the session-board mod and compliance-check scores become panels of the repo's roadmap page.",
   "order": 160,
   "phase": "organize",
-  "status": "todo",
+  "status": "done",
   "title": "Combine map, board and compliance-check into one repo health view",
   "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Your idea: the map shows structure, the board shows who is working on what, compliance-check scores the rules. One page could show a repo's whole health."

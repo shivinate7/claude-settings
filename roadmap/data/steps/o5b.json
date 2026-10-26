@@ -1,10 +1,10 @@
 {
   "ask": "Which of my hooks exist only to make sessions remember things, and which could filing-at-once replace?",
-  "note": "Builds on rules output-answer-has-a-home and building-never-drop-item-silently. Since Oct 26 this project files every item the turn it is said (project instructions, step c55), so the habit now lives in the advisor threads; what is left is the Ask: which hooks exist only to make sessions remember, and which filing at once could retire. Proposed to triage: rescope the title to that hook audit.",
+  "note": "Builds on rules output-answer-has-a-home and building-never-drop-item-silently. Since Oct 26 this project files every item the turn it is said (project instructions, step c55), so the habit now lives in the advisor threads; what is left is the Ask: which hooks exist only to make sessions remember, and which filing at once could retire. Rescoped to that hook audit (triage, Oct 26).",
   "order": 140,
   "phase": "organize",
   "status": "todo",
-  "title": "File it the moment it's said",
+  "title": "Which hooks exist only to make sessions remember, and can filing at once retire them",
   "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Guards that make a session remember are a backstop. What actually works: anything that matters goes to a lasting home (a repo file, a roadmap page) in the same turn it's said. A session's job is filing, not remembering, so a compaction or a lost session costs nothing. This includes fb: items: tasks and ideas land in the repo's todo, not only the handoff, and each closed item is checked against its home."
 }
