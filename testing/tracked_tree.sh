@@ -4,7 +4,7 @@
 # same helper for POSIX sh and bash suites. Source it after setting TRACKED_ROOT to the repo:
 #   TRACKED_ROOT=$REPO_ROOT; . "$REPO_ROOT/testing/tracked_tree.sh"
 #   copy_tracked <dest-root> <folder>...      lands <dest-root>/<folder>/<path>
-#   copy_folder <folder> <dest> [<skip>...]   lands <dest>/<path>; each <skip> is a path below the folder
+#   copy_folder <folder> <dest> [<skip>...]   lands <dest>/<path>; each <skip> is a path below the folder, with no space
 # Each returns non-zero, with a line on stderr, when git cannot list a folder or lists nothing in it.
 # Paths are read one per line with core.quotePath off, so a path that holds a newline is refused.
 
@@ -18,7 +18,7 @@ tracked_list() { # <folder>: one path per line, relative to the folder; suites a
     [ -n "$_tt_p" ] || continue
     _tt_b=${_tt_p##*/}
     case $_tt_b in test_*|*_test.py|*.test.*) continue ;; esac
-    [ -f "$TRACKED_ROOT/$_tt_p" ] && printf '%s\n' "${_tt_p#"$_tt_folder"/}"
+    if [ -f "$TRACKED_ROOT/$_tt_p" ]; then printf '%s\n' "${_tt_p#"$_tt_folder"/}"; fi
   done)
   [ -n "$_tt_list" ] || { echo "tracked_tree.sh: git lists no file under $_tt_folder/ in $TRACKED_ROOT" >&2; return 1; }
   printf '%s\n' "$_tt_list"

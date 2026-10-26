@@ -25,20 +25,26 @@ def step_key(step, key):
 
 
 def run_body(step):
-    """A step's `run:` text: the one line, or a `run: |` block with its 10-space indent removed. None if absent."""
+    """A step's `run:` text: the one line, or a block scalar with its 10-space indent removed. None if absent.
+    A literal block (`|`, `|-`, `|+`) keeps its lines. A folded block (`>`, `>-`, `>+`) joins each paragraph's
+    lines with a space, as YAML folds them."""
     lines = step.split("\n")
     for i, line in enumerate(lines):
         m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
         if not m:
             continue
-        if m.group(1) != "|":
+        style = re.fullmatch(r"([|>])[+-]?", m.group(1))
+        if not style:
             return m.group(1)
         body = []
         for ln in lines[i + 1:]:
             if ln.strip() and not ln.startswith("          "):
                 break
             body.append(ln[10:] if ln.strip() else "")
-        return "\n".join(body).strip("\n") + "\n"
+        text = "\n".join(body).strip("\n")
+        if style.group(1) == ">":
+            text = "\n".join(" ".join(p.split("\n")) for p in re.split(r"\n\s*\n", text))
+        return text + "\n"
     return None
 
 

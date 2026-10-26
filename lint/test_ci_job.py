@@ -136,6 +136,29 @@ class Unknowns(Job):
         rc, lines, out = self.run_job(step("cmd", "echo", shell="cmd"))
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
 
+    def test_a_folded_run_runs_its_text_not_the_marker(self):
+        rc, lines, out = self.run_job("      - name: folded\n        run: >-\n          test -f nothing-here\n\n")
+        self.assertEqual(self.verdicts(lines), ["FAIL"], out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "-")), out)
+
+    def test_a_missing_tool_inside_an_if_is_unknown(self):
+        rc, lines, out = self.run_job(step("cond", "if no-such-tool-c69 --x; then echo hi; else echo no; fi"),
+                                      step("neg", "while ! no-such-tool-c69; do exit 0; done"))
+        self.assertEqual(self.verdicts(lines), ["unknown", "unknown"], out)
+
+    def test_a_missing_tool_swallowed_at_run_time_is_unknown(self):
+        rc, lines, out = self.run_job(step("swallowed", "t=no-such-tool-c69; $t --x || true"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("no-such-tool-c69", lines[0])
+
+    def test_a_heredoc_body_is_not_read_as_commands(self):
+        rc, lines, out = self.run_job(step("doc", "cat > note.txt <<EOF\nno-such-word-c69 here\nEOF\ntest -s note.txt"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_continue_on_error_is_unknown(self):
+        rc, lines, out = self.run_job(step("soft", "true", continue_on_error="true"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+
     def test_a_fail_outranks_an_unknown_in_the_exit_code(self):
         rc, lines, out = self.run_job(step("tool", "no-such-tool-c69"), step("bad", "false"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["unknown", "FAIL"]), out)
@@ -176,9 +199,19 @@ class Conditions(Job):
         rc, lines, out = self.run_job(step("push", "false", **{"if": "${{ github.event_name != 'pull_request' }}"}),
                                       args=("--base", "origin/main"))
         self.assertEqual(self.verdicts(lines), ["skipped"], out)
+        self.assertNotIn("pass --base", lines[0])
 
 
 class Usage(Job):
+    def test_a_job_level_env_is_unknown(self):
+        path = os.path.join(self.root, "wf.yml")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(workflow(step("ok", "true")).replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    env:\n      A: b\n", 1))
+        done = subprocess.run([sys.executable, CI_JOB, "lane", "--workflow", path], cwd=self.root,
+                              capture_output=True, text=True, env=ENV)
+        self.assertEqual(done.returncode, 2, done.stdout)
+        self.assertIn("job-level", done.stdout)
+
     def test_an_absent_job_is_unknown(self):
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8") as f:
