@@ -20,7 +20,5 @@ docs do not say. Never guess an answer the docs should give you.
 You cannot spawn agents. If the question is too large for one worker, report PARTIAL with the
 parts you covered and the parts you propose.
 
-Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
-
 Report once. Start with the point. Write in Simplified Technical English. Report in under 25
 lines unless the brief names another cap.
