@@ -1569,6 +1569,67 @@ class CutLanes(Env):
         self.assertNotEqual(self.head("lane1"), "", "control: origin/lane1 is kept as a dropped lane")
         self.assert_deleted(out, "lane2")
 
+    def kept_local_lane(self, branch, tip):
+        """A local lane branch at `tip`, with a clean worktree on it. -> the worktree path. Both must exist before the merge."""
+        tree = self.local_branch(branch, tip, os.path.join(self.t, "wt-" + branch))
+        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
+        self.assertTrue(self.has_local(branch), "subject: the local lane branch must exist first")
+        return tree
+
+    def test_a_local_lane_in_keepBranches_keeps_its_branch_and_clean_tree(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["lane1"]))))
+        tips = lane_batch(self, "lane1", "lane2")
+        tree = self.kept_local_lane("lane1", tips["lane1"])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_kept(out, "lane1", "keep")  # the remote lane is kept by its name
+        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane1"), f"the local branch of a keepBranches lane was deleted; out: {out!r}")
+        self.assert_deleted(out, "lane2")  # control: the other lane still goes
+
+    def test_a_local_branch_of_a_lane_kept_for_an_open_pr_keeps_its_clean_tree(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.prs = [("stack-top", self.head("main"), "lane1")]  # a partial stack: its base is lane1
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_kept_line(out, "lane1")  # the remote lane is kept for its open PR
+        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"the local branch of an open-PR base was deleted; out: {out!r}")
+        self.assert_deleted(out, "lane2")  # control: the other lane still goes
+
+    def test_a_local_lane_branch_is_untouched_when_the_open_pr_read_fails(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        self.host.unreadable = "error"  # the open-PR read raises
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to keep")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the open-PR read failed; out: {out!r}")
+
+    def test_a_local_lane_branch_is_untouched_when_the_origin_heads_read_fails(self):
+        tips = lane_batch(self, "lane1", "lane2")
+        tree = self.kept_local_lane("lane-a", tips["lane1"])
+        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to read")
+        real, merged = merge.sh, []
+        def failing(args, *a, **k):
+            if merged and "ls-remote" in args and "--heads" in args:
+                return 128, "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com"
+            return real(args, *a, **k)
+        self.host.on_merged = lambda: merged.append(True)
+        with unittest.mock.patch.object(merge, "sh", failing):
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
+        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
+        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the origin heads read failed; out: {out!r}")
+
     def test_a_local_branch_at_no_lane_tip_is_untouched(self):
         lane_batch(self, "lane1", "lane2")
         base = sh(self.co, "git", "rev-parse", "origin/main")  # the base is no lane tip; it is an ancestor of the merge
