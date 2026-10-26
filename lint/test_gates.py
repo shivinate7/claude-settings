@@ -59,11 +59,11 @@ def peer_msg(body, stamp=None):
     isMeta true. It lands mid-turn, so it is never the owner's last message."""
     rec = {"type": "user", "isSidechain": False, "isMeta": True,
            "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                      "name": "advisor-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                      "name": "peer-cf", "fromSession": "local_fixture", "fromMode": "bypass",
                       "body": body},
            "message": {"role": "user", "content": "Another Claude session sent a message:\n"
                        '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                       'from-name="advisor-cf" from-mode="bypass">%s</cross-session-message>' % body}}
+                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % body}}
     if stamp:
         rec["timestamp"] = stamp
     return rec
@@ -163,8 +163,6 @@ class ReportGateTests(unittest.TestCase):
             GOOD_REPORT,
             # Catches: a colon inside a bold label is read as a bad label.
             "> **Done:** BUILT abc123\n> **Next:** ship it",
-            # Catches: the advisor-answers label (questions-ask-advisor-first) is read as unknown.
-            "> **Done** BUILT abc123\n> **Deviations** none\n> **Decided by the advisor** test names\n> **Next** ship",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
@@ -197,8 +195,8 @@ class ReportGateTests(unittest.TestCase):
             "> **Done** BUILT\n> **Next** ship\n> **Deviations** none",
             # Catches: the same order check misses colon labels.
             "> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none",
-            # Catches: the advisor-answers label passes after Input Needed.
-            "> **Done** BUILT\n> **Input Needed** merge?\n> **Decided by the advisor** names",
+            # Catches: the retired label "Decided by the advisor" (questions-go-to-owner) still passes.
+            "> **Done** BUILT abc123\n> **Deviations** none\n> **Decided by the advisor** test names\n> **Next** ship",
         ]
         for text in rows:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:

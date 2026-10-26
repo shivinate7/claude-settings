@@ -885,6 +885,124 @@ def table_write_and_remove():
               case_frozen_counter_judges_every_later_stop))
 
 
+# --------------------------------------------------------------------------- c45
+# Input Needed reports are judged on every Stop, not only the 1-in-5 sample (the label is found by
+# a string match in code). A finding also writes one guard.log line. Still never blocks.
+
+FINDING = {"ok": False, "reason": "output-never-hand-off-doable-step: name the reason and the check."}
+IN_BOLD = "**Input Needed**\n- Delete the two test App IDs on developer.apple.com."
+IN_PLAIN = "Done: shipped the change.\nInput Needed: delete the two test App IDs on developer.apple.com"
+NO_IN = "Done: shipped the change.\nNext: open the follow-up lane."
+
+
+def second_stop(text, answer=OK_ANSWER, label="c45", session="c45-session", fail_log=False):
+    """Stop 1 is a sample Stop with a plain reply; the returned run is Stop 2, which is not."""
+    config = sample_config(label)
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=session)
+    if fail_log:  # a directory where guard.log would go: every append fails
+        os.makedirs(os.path.join(config, "guard.log"), exist_ok=True)
+    return run_hook(text, answer=answer, config=config, session=session), config
+
+
+def case_input_needed_label_is_judged_off_sample():
+    for label, text in (("bold", IN_BOLD), ("plain", IN_PLAIN)):
+        run, _ = second_stop(text, label="c45-in-" + label)
+        check("input needed (%s): Stop 2 calls the model once" % label, len(run.calls) == 1, run.calls)
+        check("input needed (%s): exit 0" % label, run.code == 0, run.code)
+
+
+def case_no_input_needed_off_sample_is_not_judged():
+    run, _ = second_stop(NO_IN, answer=json.dumps(FINDING), label="c45-none")
+    check("no Input Needed label: Stop 2 never calls the model", not run.calls, run.calls)
+    check("no Input Needed label: Stop 2 is silent", run.out == "" and run.code == 0, (run.code, run.out))
+
+
+def case_label_forms_judged_and_non_labels_not():
+    judged = {
+        "quoted lower-case": "Done: x.\n> **Input needed:**\n> - Delete the test App IDs.",
+        "colon inside bold": "Done: x.\n**Input Needed:** delete the test App IDs.",
+    }
+    for name, text in judged.items():
+        run, _ = second_stop(text, label="c45-form-" + name.split()[0])
+        check("label form (%s): judged off-sample" % name, len(run.calls) == 1, run.calls)
+    not_judged = {
+        "prose mention": "Done: x.\nThe Input Needed section is below the fold in the old layout.",
+        "none inline": "Done: x.\n**Input Needed:** none",
+        "none on next line": "Done: x.\n> **Input Needed**\n> None.\n> **Next**\n> Go on.",
+        "empty": "Done: x.\n**Input Needed**\n\n**Next**\nGo on.",
+    }
+    for name, text in not_judged.items():
+        run, _ = second_stop(text, label="c45-non-" + name.split()[0] + name[-2:])
+        check("not a label hand-off (%s): not judged off-sample" % name, not run.calls, run.calls)
+
+
+def case_prompt_asks_for_reason_and_check():
+    run = run_hook(IN_BOLD, answer=OK_ANSWER)
+    sentences = re.split(r"[.\n]", run.prompt().split("\n\nReply:\n")[0])
+    check("prompt: one sentence ties Input Needed to a reason and a check",
+          any(all(w in s for w in ("Input Needed", "reason", "check")) for s in sentences), run.prompt()[:400])
+
+
+def guard_lines(config):
+    path = os.path.join(config, "guard.log")
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [l for l in f.read().split("\n") if l]
+
+
+def case_finding_writes_one_guard_log_line():
+    # Line shape: <iso time> TAB Stop TAB noted TAB <rule id> TAB stop=<n> <reason> TAB <session>.
+    # Decision "noted" is one the reader counts; the rule is the first known rule id the reason
+    # names, else "reply-judge".
+    run, config = second_stop(IN_BOLD, answer=json.dumps(FINDING), label="c45-log")
+    lines = guard_lines(config)
+    check("guard.log: one line for the finding", len(lines) == 1, lines)
+    line = lines[0] if lines else ""
+    parts = line.split("\t")
+    check("guard.log: six tab fields", len(parts) == 6, parts)
+    if len(parts) == 6:
+        check("guard.log: tool Stop, decision noted", parts[1:3] == ["Stop", "noted"], parts)
+        check("guard.log: rule is the id the reason names", parts[3] == "output-never-hand-off-doable-step", parts)
+        check("guard.log: matched carries the Stop number", "stop=2" in parts[4].split(), parts)
+        check("guard.log: session is the last field", parts[5] == "c45-session", parts)
+    sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+    import guard_log_report
+    row = guard_log_report.parse_line(line) if line else None
+    check("guard.log: lint/guard_log_report.parse_line reads it",
+          row is not None and row.decision == "noted" and row.session == "c45-session"
+          and row.rule == "output-never-hand-off-doable-step", row)
+    check("guard.log: finding still goes out as additionalContext, exit 0",
+          run.code == 0 and parse_stdout(run) is not None, (run.code, run.out))
+
+
+def case_finding_without_known_rule_logs_the_judge_id():
+    run, config = second_stop(IN_BOLD, answer=json.dumps({"ok": False, "reason": "fix it"}), label="c45-log2")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    check("guard.log: no rule named, rule is reply-judge", len(parts) == 6 and parts[3] == "reply-judge", parts)
+
+
+def case_ok_verdict_writes_no_guard_log_line():
+    _, config = second_stop(IN_BOLD, answer=OK_ANSWER, label="c45-ok")
+    check("guard.log: ok true writes nothing", guard_lines(config) == [], guard_lines(config))
+
+
+def case_guard_log_failure_fails_open():
+    good, _ = second_stop(IN_BOLD, answer=json.dumps(FINDING), label="c45-fo-a", session="c45-fo")
+    bad, _ = second_stop(IN_BOLD, answer=json.dumps(FINDING), label="c45-fo-b", session="c45-fo", fail_log=True)
+    check("guard.log failure: exit code unchanged", bad.code == good.code == 0, (good.code, bad.code))
+    check("guard.log failure: stdout unchanged and a note", bad.out == good.out and parse_stdout(bad) is not None,
+          (good.out, bad.out))
+
+
+def case_input_needed_finding_never_blocks():
+    run, _ = second_stop(IN_PLAIN, answer=json.dumps(FINDING), label="c45-nb")
+    out = parse_stdout(run)
+    check("never blocks: exit 0, no decision block, note is additionalContext",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == FINDING["reason"], (run.code, run.out))
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -909,6 +1027,15 @@ CASES = (
     case_empty_stop_writes_nothing_and_counts_nothing,
     case_empty_stops_between_replies_do_not_shift_samples,
     table_write_and_remove,
+    case_input_needed_label_is_judged_off_sample,
+    case_no_input_needed_off_sample_is_not_judged,
+    case_label_forms_judged_and_non_labels_not,
+    case_prompt_asks_for_reason_and_check,
+    case_finding_writes_one_guard_log_line,
+    case_finding_without_known_rule_logs_the_judge_id,
+    case_ok_verdict_writes_no_guard_log_line,
+    case_guard_log_failure_fails_open,
+    case_input_needed_finding_never_blocks,
 )
 
 

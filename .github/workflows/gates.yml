@@ -364,34 +364,14 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
 
-      # This step and the skill test step below come last, so a red test in them skips none of the steps above, and a red step above does not hide
-      # a mod test (!cancelled() runs it anyway). One find reaches every *.test.mjs and *.test.js file under
-      # mods/ except node_modules, at any depth. A new mods/<name>/ joins with no edit here. Each file's exit code lands in `fail`, so a failing first or last file
-      # fails the step. The find runs first and fails the step if it errors or lists nothing. No pipe.
-      - name: Mod tests
+      # Last step, so a red test here skips none of the steps above, and a red step above does not hide
+      # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
+      # plain-english-map skill tests. The same step ends gates-windows and gates-macos. The `mods` flag
+      # comes from harness-scope.sh.
+      - name: Mod and map-skill tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
-        run: |
-          list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print) || { echo "find failed"; exit 1; }
-          [ -n "$list" ] || { echo "no mod test file found"; exit 1; }
-          fail=0
-          while IFS= read -r f; do
-            node "$f" || fail=1
-          done <<< "$list"
-          exit "$fail"
-
-      # The plain-english-map skill: its tests load typescript from this checkout's node_modules, as an
-      # install does. They run from the skill's own tests/ folder, with no q_max path. Same `mods` flag
-      # as the step above. A .md path under skills/plain-english-map/ turns `mods` on through its own
-      # arm in harness-scope.sh. Any other path under the skill, or package*.json, turns it on, because
-      # harness-scope.sh runs every job for a path it does not name.
-      - name: Plain-english-map skill tests
-        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
-        shell: bash
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          cd skills/plain-english-map/tests
-          node --test
+        run: bash .github/scripts/mod-tests.sh
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
@@ -637,6 +617,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
+      - name: Mod and map-skill tests
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        shell: bash
+        run: bash .github/scripts/mod-tests.sh
+
   # The Windows suites run in four jobs (gates-windows, gates-windows-guard, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
@@ -745,6 +730,11 @@ jobs:
         shell: bash
         timeout-minutes: 3
         run: sh hooks/test_install_src.sh caseF1 caseG1
+
+      - name: Mod and map-skill tests
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        shell: bash
+        run: bash .github/scripts/mod-tests.sh
 
   # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:

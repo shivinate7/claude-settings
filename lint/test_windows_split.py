@@ -415,16 +415,22 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
 
 
-# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step finds every
-# *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/ joins with no
-# edit here. It carries the exit code of every file: a failing first or last file fails the step. The
-# checker's own self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each
-# defect is seen. MOD_GLOB is the name pattern that marks the step, in a glob or in a find -name.
-MOD_GLOB = "*.test.mjs"
+# Mod and map-skill tests: one step in each of the jobs gates (Linux), gates-windows and gates-macos, on
+# the `mods` scope flag. The step runs .github/scripts/mod-tests.sh with no argument, and that script is the
+# one home of both suites. A copy of either suite in a run step would drift, so no step may hold one. The
+# script finds every *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/
+# joins with no edit here. It carries the exit code of every file: a failing first or last file fails it.
+# The checker self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is
+# seen. MOD_SCRIPT_NAME marks the step that runs the script.
 MOD_FLAG = "mods"
-GATES_JOB = "gates"
+MOD_JOBS = ["gates", "gates-windows", "gates-macos"]
+MOD_SCRIPT_NAME = "mod-tests.sh"
+MOD_CMD = "bash .github/scripts/mod-tests.sh"
+MOD_SCRIPT = os.environ.get("MOD_TESTS_SH") or os.path.join(HERE, "..", ".github", "scripts", MOD_SCRIPT_NAME)
 STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
 CHECKOUT = re.compile(r"^(?:      - |        )uses:[ \t]*actions/checkout@", re.M)
+# A copy of either suite in a run command: the mod glob, a bare `node --test`, or the skill folder.
+INLINE_COPY = re.compile(r"\*\.test\.m?js|\bnode\s+--test\s*$|plain-english-map")
 
 
 def job_block(text, name):
@@ -462,9 +468,9 @@ def run_body(step):
     return None
 
 
-def mod_steps(text):
-    """The steps of the gates job whose run names the mod glob."""
-    return [st for st in step_blocks(job_block(text, GATES_JOB)) if MOD_GLOB in (run_body(st) or "")]
+def mod_steps(text, job):
+    """The steps of one job whose run names the mod-test script."""
+    return [st for st in step_blocks(job_block(text, job)) if MOD_SCRIPT_NAME in (run_body(st) or "")]
 
 
 def mods_scope_problems(text):
@@ -475,34 +481,44 @@ def mods_scope_problems(text):
     return []
 
 
-def mods_step_problems(text):
-    """Pins on the one mod-test step of the gates job. [] when the step is right."""
-    homes = mod_steps(text)
+def job_mod_step_problems(text, job):
+    """Pins on the one mod-test step of one job. [] when the step is right."""
+    homes = mod_steps(text, job)
     if len(homes) != 1:
-        return [f"{len(homes)} steps in {GATES_JOB} run {MOD_GLOB}, want 1"]
+        return [f"{job}: {len(homes)} steps run {MOD_SCRIPT_NAME}, want 1"]
     st = homes[0]
-    steps = step_blocks(job_block(text, GATES_JOB))
+    steps = step_blocks(job_block(text, job))
     i = steps.index(st)
     problems = []
     cond = step_key(st, "if") or ""
     if "!cancelled()" not in cond:
-        problems.append(f"mod step if lacks !cancelled(): {cond}")
+        problems.append(f"{job}: mod step if lacks !cancelled(): {cond}")
     if f"needs.scope.outputs.{MOD_FLAG} == 'true'" not in cond:
-        problems.append(f"mod step if does not read needs.scope.outputs.{MOD_FLAG}: {cond}")
+        problems.append(f"{job}: mod step if does not read needs.scope.outputs.{MOD_FLAG}: {cond}")
     if "github.event_name" in cond:
-        problems.append(f"mod step if reads the event; the {MOD_FLAG} flag alone decides: {cond}")
+        problems.append(f"{job}: mod step if reads the event; the {MOD_FLAG} flag alone decides: {cond}")
     if step_key(st, "shell") != "bash":
-        problems.append(f"mod step shell is {step_key(st, 'shell')}, want bash")
+        problems.append(f"{job}: mod step shell is {step_key(st, 'shell')}, want bash")
     if step_key(st, "continue-on-error") is not None:
-        problems.append("mod step sets continue-on-error, which swallows the exit code")
-    body = run_body(st)
-    if re.search(r"(?<!\|)\|(?!\|)", body):
-        problems.append("mod step pipes a command: the pipe takes the last command's exit code")
-    if re.search(r"\|\|\s*(true|:)\b", body):
-        problems.append("mod step ends a command with || true or || :")
+        problems.append(f"{job}: mod step sets continue-on-error, which swallows the exit code")
+    body = (run_body(st) or "").strip()
+    if body != MOD_CMD:
+        problems.append(f"{job}: mod step runs {body!r}, want {MOD_CMD!r} with no argument")
     checkout = [j for j, s in enumerate(steps) if CHECKOUT.search(s)]
     if not checkout or checkout[0] > i:
-        problems.append("no actions/checkout before the mod step")
+        problems.append(f"{job}: no actions/checkout before the mod step")
+    if i != len(steps) - 1:
+        problems.append(f"{job}: mod step is not the last step")
+    return problems
+
+
+def mods_step_problems(text):
+    """Pins on the mod-test step of each job in MOD_JOBS, and no inline copy of either suite anywhere."""
+    problems = []
+    for job in MOD_JOBS:
+        problems += job_mod_step_problems(text, job)
+    problems += [f"a run step holds a copy of a mod or map-skill suite: {c!r}"
+                 for c in run_commands(text) if INLINE_COPY.search(c)]
     return problems
 
 
@@ -510,34 +526,62 @@ def mods_problems(text):
     return mods_scope_problems(text) + mods_step_problems(text)
 
 
-def run_mod_body(body, files, dirs=(), find_exit=None):
-    """Run a step body as `shell: bash` does, in a scratch repo. files maps a path to True (passes) or False (fails).
-    dirs are empty folders to make. find_exit, when set, puts a `find` first on PATH that runs the real find and
-    then exits with that code, as a find does that meets an error after it listed files. Returns the exit code."""
+def script_problems(script):
+    """Pins on the script's text. A pipe or `|| true` hides a failing file's exit code. Comment lines and
+    `case` patterns (`mods|skill)`) are not pipes."""
+    code = [re.sub(r"^\s*[\w|\"'*-]+\)", "", ln) for ln in script.splitlines() if not ln.lstrip().startswith("#")]
+    body = "\n".join(code)
+    problems = []
+    if re.search(r"(?<!\|)\|(?!\|)", body):
+        problems.append("mod script pipes a command: the pipe takes the last command's exit code")
+    if re.search(r"\|\|\s*(?:true|:)(?!\w)", body):
+        problems.append("mod script ends a command with || true or || :")
+    return problems
+
+
+class ScriptRun:
+    """What one run of the mod script left: exit code, merged output, and the npm calls its shim saw."""
+    def __init__(self, rc, out, npm):
+        self.rc, self.out, self.npm = rc, out, npm
+
+
+def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
+    """Run the script file in a scratch repo, with `arg` (None for no argument). files maps a path to True
+    (passes) or False (fails). dirs are empty folders to make. find_exit, when set, puts a `find` first on
+    PATH that runs the real find and then exits with that code, as a find does that meets an error after it
+    listed files. An `npm` shim records its arguments, so no run reaches the network. cwd is a repo-relative
+    folder to start in."""
     with tempfile.TemporaryDirectory() as root:
         work = os.path.join(root, "repo")
-        os.makedirs(work, exist_ok=True)
-        for d in dirs:
+        shim = os.path.join(root, "shim")
+        os.makedirs(shim)
+        for d in (*dirs, cwd, ".github/scripts"):
             os.makedirs(os.path.join(work, d), exist_ok=True)
-        env = None
+        calls = os.path.join(root, "npm.log")
+        shims = {"npm": f'#!/bin/sh\necho "$@" >> "{calls}"\nexit 0\n'}
         if find_exit is not None:
-            shim = os.path.join(root, "shim")
-            os.makedirs(shim)
-            with open(os.path.join(shim, "find"), "w", encoding="utf-8", newline="\n") as f:
-                f.write(f'#!/bin/sh\n"{shutil.which("find")}" "$@"\nexit {find_exit}\n')
-            os.chmod(os.path.join(shim, "find"), 0o755)
-            env = dict(os.environ, PATH=shim + os.pathsep + os.environ["PATH"])
+            shims["find"] = f'#!/bin/sh\n"{shutil.which("find")}" "$@"\nexit {find_exit}\n'
+        for name, body in shims.items():
+            with open(os.path.join(shim, name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+            os.chmod(os.path.join(shim, name), 0o755)
+        env = dict(os.environ, PATH=shim + os.pathsep + os.environ["PATH"])
         for rel, ok in files.items():
             full = os.path.join(work, rel)
             os.makedirs(os.path.dirname(full), exist_ok=True)
             with open(full, "w", encoding="utf-8") as f:
                 f.write("// fixture\n" if ok else 'throw new Error("planted failure");\n')
-        script = os.path.join(root, "step.sh")
-        with open(script, "w", encoding="utf-8", newline="\n") as f:
-            f.write(body)
-        r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", script.replace("\\", "/")],
-                           cwd=work, capture_output=True, text=True, timeout=300, env=env)
-        return r.returncode
+        target = os.path.join(work, ".github", "scripts", MOD_SCRIPT_NAME)
+        shutil.copyfile(script or MOD_SCRIPT, target)
+        r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", target.replace("\\", "/")] + ([arg] if arg is not None else []),
+                           cwd=os.path.join(work, cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=300, env=env)
+        npm = open(calls, encoding="utf-8").read().splitlines() if os.path.exists(calls) else []
+        return ScriptRun(r.returncode, r.stdout, npm)
+
+
+SKILL_OK = {"skills/plain-english-map/tests/ok.test.mjs": True}
+NPM_CI = "ci --ignore-scripts --no-audit --no-fund"
 
 
 class ModTestStep(unittest.TestCase):
@@ -548,35 +592,50 @@ class ModTestStep(unittest.TestCase):
     def test_the_scope_job_exports_the_mods_flag(self):
         self.assertEqual(mods_scope_problems(self.text), [])
 
-    def test_gates_runs_the_mod_glob_in_one_pinned_step(self):
-        self.assertEqual(mods_step_problems(self.text), [])
+    def test_each_of_the_three_jobs_runs_the_script_in_one_pinned_step(self):
+        for job in MOD_JOBS:
+            with self.subTest(job=job):
+                self.assertEqual(job_mod_step_problems(self.text, job), [])
 
-    @unittest.skipUnless(shutil.which("bash") and shutil.which("node"), "needs bash and node on PATH")
-    def test_the_step_fails_when_any_mod_test_fails(self):
-        steps = mod_steps(self.text)
-        self.assertEqual(len(steps), 1, "no step runs the mod glob, so no mod test runs in CI")
-        body = run_body(steps[0])
+    def test_no_run_step_holds_a_copy_of_either_suite(self):
+        copies = [c for c in run_commands(self.text) if INLINE_COPY.search(c)]
+        self.assertEqual(copies, [])
+
+    def test_gates_stays_a_required_check_and_mods_adds_no_name(self):
+        """Control, green now: the step rides jobs that are already required, so the list gains no name."""
+        with open(STAMP, encoding="utf-8") as f:
+            required = json.load(f)["merge"]["requiredChecks"]
+        for job in MOD_JOBS:
+            self.assertIn(job, required)
+        self.assertEqual([n for n in required if "mod" in n.lower()], [])
+
+
+@unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
+class ModTestScript(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(os.path.exists(MOD_SCRIPT), f"{MOD_SCRIPT} is missing, so no job runs a mod test")
+
+    def test_the_script_text_has_no_pipe_and_no_or_true(self):
+        with open(MOD_SCRIPT, encoding="utf-8") as f:
+            self.assertEqual(script_problems(f.read()), [])
+
+    def test_the_script_fails_when_any_mod_test_fails(self):
         cases = [
             ("all pass", {"mods/a/a.test.mjs": True, "mods/b/b.test.mjs": True}, True),
             ("first file fails", {"mods/a/first.test.mjs": False, "mods/b/b.test.mjs": True}, False),
             ("last file fails, in a new mod", {"mods/a/a.test.mjs": True, "mods/zz-new/last.test.mjs": False}, False),
-            # These two shapes never ran.
             ("nested tests/ file fails", {"mods/a/a.test.mjs": True, "mods/a/tests/b.test.mjs": False}, False),
             ("*.test.js file fails", {"mods/a/a.test.mjs": True, "mods/a/c.test.js": False}, False),
-            # Control, green now: a dependency's own test under node_modules is not ours to run.
+            # Control: a dependency's own test under node_modules is not ours to run.
             ("node_modules test fails", {"mods/a/a.test.mjs": True, "mods/a/node_modules/dep/d.test.js": False}, True),
         ]
         for label, files, ok in cases:
             with self.subTest(case=label):
-                rc = run_mod_body(body, files)
-                self.assertEqual(rc == 0, ok, f"{label}: exit {rc}")
+                r = run_mod_script("mods", files)
+                self.assertEqual(r.rc == 0, ok, f"{label}: exit {r.rc}\n{r.out}")
 
-    @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
-    def test_the_step_fails_when_it_finds_no_test_or_find_errors(self):
+    def test_the_script_fails_when_it_finds_no_test_or_find_errors(self):
         """`done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
-        steps = mod_steps(self.text)
-        self.assertEqual(len(steps), 1, "no step runs the mod glob, so no mod test runs in CI")
-        body = run_body(steps[0])
         ok = {"mods/a/a.test.mjs": True}
         cases = [
             ("mods/ is missing", {}, (), None),
@@ -587,39 +646,97 @@ class ModTestStep(unittest.TestCase):
         ]
         for label, files, dirs, find_exit in cases:
             with self.subTest(case=label):
-                rc = run_mod_body(body, files, dirs, find_exit)
-                self.assertNotEqual(rc, 0, f"{label}: the step exited 0")
-        # Control, green now: one passing file and a clean find still pass.
-        self.assertEqual(run_mod_body(body, ok), 0)
+                r = run_mod_script("mods", files, dirs, find_exit)
+                self.assertNotEqual(r.rc, 0, f"{label}: the script exited 0\n{r.out}")
+        self.assertEqual(run_mod_script("mods", ok).rc, 0)  # control: one passing file and a clean find pass
 
-    def test_gates_stays_a_required_check_and_mods_adds_no_name(self):
-        """Control, green now: the mod step rides the required `gates` job, so the list gains no name."""
-        with open(STAMP, encoding="utf-8") as f:
-            required = json.load(f)["merge"]["requiredChecks"]
-        self.assertIn(GATES_JOB, required)
-        self.assertEqual([n for n in required if "mod" in n.lower()], [])
+    def test_the_script_prints_the_file_count_before_it_runs_them(self):
+        files = {"mods/a/a.test.mjs": True, "mods/a/tests/b.test.mjs": True, "mods/c/c.test.js": False,
+                 "mods/a/node_modules/dep/d.test.js": True, "mods/a/readme.md": True}
+        r = run_mod_script("mods", files)
+        lines = r.out.splitlines()
+        self.assertIn("mod tests: 3 files", lines, r.out)
+        self.assertLess(r.out.index("mod tests: 3 files"), r.out.index("planted failure"), "the count came after a run")
+
+    def test_the_script_runs_from_the_repo_root_whatever_the_cwd(self):
+        r = run_mod_script("mods", {"mods/a/a.test.mjs": True}, cwd="mods/a")
+        self.assertEqual(r.rc, 0, r.out)
+        self.assertIn("mod tests: 1 files", r.out.splitlines())
+
+    def test_an_unknown_argument_exits_2_and_runs_nothing(self):
+        for arg in ("bogus", "all", "--help", "MODS"):
+            with self.subTest(arg=arg):
+                r = run_mod_script(arg, dict(SKILL_OK, **{"mods/a/a.test.mjs": True}))
+                self.assertEqual(r.rc, 2, r.out)
+                self.assertEqual(r.npm, [])
+                self.assertNotIn("mod tests:", r.out)
+
+    def test_the_mods_argument_runs_phase_one_only(self):
+        r = run_mod_script("mods", dict(SKILL_OK, **{"mods/a/a.test.mjs": True}))
+        self.assertEqual((r.rc, r.npm), (0, []), r.out)
+
+    def test_the_skill_argument_runs_phase_two_only(self):
+        # A failing mod file must not matter: phase one does not run.
+        r = run_mod_script("skill", dict(SKILL_OK, **{"mods/a/a.test.mjs": False}))
+        self.assertEqual(r.rc, 0, r.out)
+        self.assertEqual(r.npm, [NPM_CI])
+        self.assertNotIn("mod tests:", r.out)
+
+    def test_the_skill_phase_fails_when_a_skill_test_fails(self):
+        r = run_mod_script("skill", {"skills/plain-english-map/tests/bad.test.mjs": False})
+        self.assertNotEqual(r.rc, 0, r.out)
+
+    def test_no_argument_runs_both_phases_and_phase_two_runs_after_a_phase_one_failure(self):
+        mods_ok, mods_bad = {"mods/a/a.test.mjs": True}, {"mods/a/a.test.mjs": False}
+        skill_bad = {"skills/plain-english-map/tests/bad.test.mjs": False}
+        cases = [
+            ("both pass", dict(SKILL_OK, **mods_ok), True),
+            ("phase one fails", dict(SKILL_OK, **mods_bad), False),
+            ("phase two fails", dict(skill_bad, **mods_ok), False),
+            ("both fail", dict(skill_bad, **mods_bad), False),
+        ]
+        for label, files, ok in cases:
+            with self.subTest(case=label):
+                r = run_mod_script(None, files)
+                self.assertEqual(r.rc == 0, ok, f"{label}: exit {r.rc}\n{r.out}")
+                self.assertEqual(r.npm, [NPM_CI], f"{label}: phase two did not run, or ran twice")
+                self.assertIn("mod tests: 1 files", r.out.splitlines())
 
 
 MOD_CHECKOUT = ("      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0\n"
                 "        with:\n          fetch-depth: 0\n\n")
-MOD_STEP = ("      - name: Mod tests\n"
+MOD_STEP = ("      - name: Mod and map-skill tests\n"
             "        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}\n"
             "        shell: bash\n"
-            "        run: |\n"
-            "          fail=0\n"
-            "          for f in mods/*/*.test.mjs; do\n"
-            "            node --test \"$f\" || fail=1\n"
-            "          done\n"
-            "          exit $fail\n")
+            f"        run: {MOD_CMD}\n")
+MOD_SCRIPT_TEXT = ("#!/usr/bin/env bash\n"
+                   "# Phase one.\n"
+                   "case \"${1:-}\" in\n"
+                   "  mods|skill|\"\") ;;\n"
+                   "  *) exit 2 ;;\n"
+                   "esac\n"
+                   "list=$(find mods -name node_modules -prune -o -name '*.test.mjs' -print) || exit 1\n"
+                   "fail=0\n"
+                   "while IFS= read -r f; do\n"
+                   "  node \"$f\" || fail=1\n"
+                   "done <<< \"$list\"\n"
+                   "exit \"$fail\"\n")
 
 
-def mod_doc(body=MOD_STEP, extra="", checkout=True, scope_out=True):
-    """A synthetic gates fragment: checkout, the mod step, then any extra step. Each argument changes one pin."""
-    gates = (MOD_CHECKOUT if checkout else "") + body + extra
+def mod_doc(steps=None, extra=None, checkout=True, scope_out=True):
+    """A synthetic gates fragment: the three jobs, each with a checkout, then its steps. `steps` maps a job to
+    its step text (default MOD_STEP). `extra` maps a job to a step added after the mod step."""
+    steps, extra = steps or {}, extra or {}
     scope = "      mods: ${{ steps.scope.outputs.mods }}\n" if scope_out else "      code: ${{ steps.scope.outputs.code }}\n"
-    return ("jobs:\n  scope:\n    outputs:\n" + scope +
-            "  gates:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n" + gates +
-            "  pointer-windows:\n    runs-on: windows-latest\n    steps:\n      - run: echo\n")
+    jobs = "".join(f"  {j}:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n"
+                   + (MOD_CHECKOUT if checkout else "") + steps.get(j, MOD_STEP) + extra.get(j, "")
+                   for j in MOD_JOBS)
+    return "jobs:\n  scope:\n    outputs:\n" + scope + jobs + "  pointer-windows:\n    runs-on: windows-latest\n    steps:\n      - run: echo\n"
+
+
+def only(job, body):
+    """The steps argument of mod_doc that changes one job's mod step."""
+    return {job: body}
 
 
 class ModTestStepChecker(unittest.TestCase):
@@ -627,31 +744,74 @@ class ModTestStepChecker(unittest.TestCase):
         self.assertEqual(mods_problems(mod_doc()), [])
 
     def test_the_checker_sees_each_defect(self):
+        inline_glob = ("      - name: Mod tests\n        run: |\n"
+                       "          find mods -name '*.test.mjs' -print\n")
+        inline_skill = "      - name: Skill\n        run: |\n          cd skills/plain-english-map/tests\n          node --test\n"
         defects = {
-            "pipe": mod_doc(body=MOD_STEP.replace("|| fail=1", "| tail -1")),
-            "or true": mod_doc(body=MOD_STEP.replace("|| fail=1", "|| true")),
-            "continue-on-error": mod_doc(body=MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n")),
-            "one hardcoded file": mod_doc(body=MOD_STEP.replace("mods/*/*.test.mjs", "mods/plain-diff/plain-diff.test.mjs")),
-            "no step": mod_doc(body=""),
-            "wrong flag": mod_doc(body=MOD_STEP.replace("needs.scope.outputs.mods", "needs.scope.outputs.code")),
-            "no !cancelled()": mod_doc(body=MOD_STEP.replace("!cancelled() && ", "")),
-            "reads the event": mod_doc(body=MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}")),
-            "no shell": mod_doc(body=MOD_STEP.replace("        shell: bash\n", "")),
-            "shell sh": mod_doc(body=MOD_STEP.replace("shell: bash", "shell: sh")),
+            "no step in gates": mod_doc(steps=only("gates", "")),
+            "step missing from gates-windows": mod_doc(steps=only("gates-windows", "")),
+            "step missing from gates-macos": mod_doc(steps=only("gates-macos", "")),
+            "step passes an argument": mod_doc(steps=only("gates-macos", MOD_STEP.replace(".sh\n", ".sh mods\n"))),
+            "step passes skill": mod_doc(steps=only("gates", MOD_STEP.replace(".sh\n", ".sh skill\n"))),
+            "step calls another script": mod_doc(steps=only("gates", MOD_STEP.replace("mod-tests.sh", "mod-tests.sh; echo"))),
+            "two steps in one job": mod_doc(steps=only("gates-windows", MOD_STEP + MOD_STEP)),
+            "inline copy of the mod glob in gates": mod_doc(extra={"gates": inline_glob}),
+            "inline copy of the mod glob in gates-windows": mod_doc(extra={"gates-windows": inline_glob}),
+            "inline copy of the skill run": mod_doc(extra={"gates": inline_skill}),
+            "old mod step kept beside the new one": mod_doc(steps=only("gates", inline_glob + MOD_STEP)),
+            "wrong flag": mod_doc(steps=only("gates-windows", MOD_STEP.replace("outputs.mods", "outputs.code"))),
+            "no !cancelled()": mod_doc(steps=only("gates-macos", MOD_STEP.replace("!cancelled() && ", ""))),
+            "reads the event": mod_doc(steps=only("gates", MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}"))),
+            "no shell": mod_doc(steps=only("gates-windows", MOD_STEP.replace("        shell: bash\n", ""))),
+            "shell sh": mod_doc(steps=only("gates-macos", MOD_STEP.replace("shell: bash", "shell: sh"))),
+            "shell pwsh": mod_doc(steps=only("gates-windows", MOD_STEP.replace("shell: bash", "shell: pwsh"))),
+            "continue-on-error": mod_doc(steps=only("gates", MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n"))),
             "no checkout": mod_doc(checkout=False),
+            "a step after the mod step": mod_doc(extra={"gates-macos": "      - run: echo\n"}),
             "scope lacks the mods output": mod_doc(scope_out=False),
         }
         for label, doc in defects.items():
             with self.subTest(defect=label):
                 self.assertTrue(mods_problems(doc), label)
 
+    def test_each_defect_names_its_job(self):
+        for job in MOD_JOBS:
+            with self.subTest(job=job):
+                problems = mods_step_problems(mod_doc(steps=only(job, "")))
+                self.assertEqual([p.split(":")[0] for p in problems], [job], problems)
+
+    def test_the_checker_misreads_no_comment_or_block_scalar(self):
+        # Rows: a comment that names the script is no step, and a `run: |` block that holds only the script line is
+        # the step. Named failure: a commented-out step reads as present, or a block step as absent.
+        commented = "      # run: bash .github/scripts/mod-tests.sh\n"
+        self.assertTrue(mods_step_problems(mod_doc(steps=only("gates", commented))))
+        block = MOD_STEP.replace(f"run: {MOD_CMD}\n", f"run: |\n          {MOD_CMD}\n")
+        self.assertEqual(mods_step_problems(mod_doc(steps=only("gates", block))), [])
+        trailing = mod_doc(extra={"gates": "      # find mods -name '*.test.mjs'\n"})
+        self.assertEqual(mods_step_problems(trailing), [])  # a comment line is not a run
+
+    def test_the_script_checker_sees_each_defect(self):
+        self.assertEqual(script_problems(MOD_SCRIPT_TEXT), [])  # control: case patterns and || are no pipe
+        defects = {
+            "pipe": MOD_SCRIPT_TEXT.replace('node "$f" || fail=1', 'node "$f" | tail -1'),
+            "or true": MOD_SCRIPT_TEXT.replace("|| fail=1", "|| true"),
+            "or colon": MOD_SCRIPT_TEXT.replace("|| fail=1", "|| :"),
+            "pipe after a case pattern line": MOD_SCRIPT_TEXT.replace("exit 2 ;;", "echo x | cat ;;"),
+        }
+        for label, text in defects.items():
+            with self.subTest(defect=label):
+                self.assertTrue(script_problems(text), label)
+        commented = MOD_SCRIPT_TEXT + "# node a | tail -1 || true\n"
+        self.assertEqual(script_problems(commented), [])  # a comment line is not code
+
+
 # ---- every test file runs in a CI step. A test file that no run step names never fails a pull
 # request, so its red stays invisible: lint/test_check_agent_models.py ran in no step. Failure
 # classes: (a) product, a test file has no run line in gates.yml; (b) test, this parser misreads a
 # run line (a comment, a quote, a block scalar); (c) stale, a test file was renamed or removed and
 # its run line was not. Scope: test_*.py, test_*.sh and *.test.ps1 outside hidden folders.
-# mutate_*.py is not a suite (mutate_shared.py is plumbing), and mods/*/*.test.mjs runs in the
-# gates "Mod tests" glob step, so neither is listed here.
+# mutate_*.py is not a suite (mutate_shared.py is plumbing), and mods/*/*.test.mjs runs through
+# .github/scripts/mod-tests.sh (the "Mod and map-skill tests" step of three jobs), so neither is listed here.
 REPO = os.path.normpath(os.path.join(HERE, ".."))
 TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh)|.*\.test\.ps1)$")
 

@@ -30,7 +30,10 @@ Verify a claim before you rely on it. Never guess an answer the code should give
 A test is a claim, not law. When a CHANGES verdict turns on a broken test, state its class.
 (a) The subject still holds, and only its route changed: the check was re-pointed and shown
 red, then green. (b) The failure found a real defect, now fixed. (c) The rule may be stale:
-flag it to the owner instead of waving the test through or forcing a bypass.
+flag it to the owner instead of waving the test through or forcing a bypass. (d) The owner
+already ruled this behaviour out: the change cites the ruling and its time, and re-points every
+test that expects the old behaviour. Check that each re-pointed test expects exactly the
+ruled-out behaviour. A test that pins a behaviour next to it goes back to class (c).
 
 Check for:
 

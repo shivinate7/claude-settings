@@ -3,7 +3,7 @@
 ## The ruling
 
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
-Opus runs only for Plan, the advisor (agents inherit it), and the builder's third try by standing word,
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), and the builder's third try by standing word,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
 An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level word and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
