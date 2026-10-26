@@ -39,7 +39,7 @@ The page hides an item with status `closed`. It shows an item as answered when `
 1. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
-   or fewer.
+   or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
 3. Ask in the terminal question box too, and put the page URL in the box (ruling 3a).
 4. Keep working on what does not depend on the answer.
 
@@ -49,16 +49,20 @@ A save on the page wakes no session. Read the answers at the start of each turn 
 item open: `ArtifactData list answers`.
 
 - An answer saved on the page counts as the owner's word for the item it names, and only for that
-  item (ruling 2a). The same answer in the terminal box counts the same. The first one you read wins.
+  item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
+  the later one wins: compare the answer's `at` with the time of the terminal answer.
+- An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
 - Never write `answers/`. Only the owner's Save writes it. A session that writes it forges the
-  owner's word.
+  owner's word. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
+  tell a session's write from the owner's Save.
 
 ## Route and close
 
 1. Move the answer to the item's home: the decision entry, the roadmap step or the PR, as rule
    `output-answer-has-a-home` (an answer has a home) says.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
-   you read (`if_version`).
+   you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
 3. If the answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to its
    version), and leave the item open. Say in the terminal what was not clear.
 
