@@ -39,6 +39,6 @@ lane runs before it sends a head that touches lint/, hooks/ or actions/.
 
 ## Report
 
-Cap 20 lines: Done, Deviations, Next. Send the green, reviewed head and branch to
+Add one line, "Port to other repos: yes or no, and why" (shiv's ruling on c52, Oct 26). Cap 20 lines: Done, Deviations, Next. Send the green, reviewed head and branch to
 "Advise the claude-settings build (3)". Do not merge, and do not rebase onto main. No question for
 shiv: park any in the PR body.

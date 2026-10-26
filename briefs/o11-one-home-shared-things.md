@@ -41,6 +41,6 @@ Make it reachable and checkable:
 
 ## Report
 
-Cap 20 lines: Done, Deviations, Next, and what the finder found per child repo, one line each.
+Add one line, "Port to other repos: yes or no, and why" (shiv's ruling on c52, Oct 26). Cap 20 lines: Done, Deviations, Next, and what the finder found per child repo, one line each.
 Send the green, reviewed head and branch to "Advise the claude-settings build (3)". Do not
 merge, and do not rebase onto main. No question for shiv: park any in the PR body.
