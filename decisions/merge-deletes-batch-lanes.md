@@ -6,6 +6,8 @@ Owner, 2026-10-19 12:14 CDT: each merge deletes the lane branches its batch took
 
 An open PR at its lane tip is done when its base is the batch base or another lane in the same batch. So a whole stack merged in one batch is deleted.
 
+The local side goes too (owner, 2026-10-25, step c44). Each local branch at a lane tip, by any name, gets the PR branch's own local cleanup. Its worktree goes when the sweep's `--fast` judgment says reap. The branch goes when its tip is in the merge commit. A lane whose remote head stays keeps its local side. So does a name in `merge.keepBranches`. A failed remote or open-PR read touches nothing local. GitHub's `delete_branch_on_merge` often deletes the remote lane heads first, and the local pass still runs then.
+
 A lane is kept, with a line, when:
 
 - an open PR outside the batch has it as its base (a partial stack);

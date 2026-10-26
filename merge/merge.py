@@ -1095,6 +1095,13 @@ def cut_branch(root, branch, merged):
     # A gone remote ref is a deleted branch: the repo may set delete_branch_on_merge.
     gone = c and "remote ref does not exist" in out
     say(f"merge: origin/{branch}: " + ("deleted." if not c else "already deleted." if gone else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+    cut_local(root, branch, merged)
+
+def cut_local(root, branch, merged):
+    """The local half of a branch's cleanup, for the PR's branch and each lane branch: a worktree that holds it goes
+    first when the janitor sweep's fast path judges it removable (`remove_held_tree`), else the branch stays (that
+    function prints why). The branch is deleted only when its tip is an ancestor of `merged`; a tip outside it holds
+    local-only commits. No --force. A branch that is not here is a no-op."""
     if git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0]:
         return
     held = holder(root, branch)
@@ -1147,7 +1154,27 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
     this batch at its tip (a partial stack), and the base of a lane that is itself kept, to a fixpoint. A PR is done when
     its head sits at a lane tip of this batch; a base is a lane of this batch whether kept or not. A name in `skip` is
     no lane. Dependents are deleted before their base, each delete leased to the tip. A base whose dependent was not
-    deleted is kept, with a line. Each lane has its own try. Never fails the merge."""
+    deleted is kept, with a line. Each lane has its own try. Never fails the merge.
+    Then, whatever the origin read or the remote pass found (GitHub may have deleted the heads already), the local
+    side: every local branch, of any name, whose tip equals a lane tip not in `dropped`, except a name in `skip`,
+    gets `cut_local`'s cleanup. A branch at no lane tip is never touched. The local pass follows the remote pass: a
+    name in `keep` stays, and so does every local branch at the tip of a head the remote pass kept or failed to
+    delete, for any reason. It does not run when the heads or the open PRs could not be read."""
+    def local_pass(held):  # held: the tips whose remote head stays
+        try:
+            c, out = git(root, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads/")
+            if c:
+                return
+            live = {t for t in lanes if t not in dropped and t not in held}
+            for line in out.splitlines():
+                sha, _, name = line.partition(" ")
+                if sha in live and name not in skip and name not in keep:
+                    try:  # one lane's failure never stops the next lane
+                        cut_local(root, name, commit)
+                    except Exception as e:
+                        say(f"merge: {name} here: not deleted: {type(e).__name__}: {e}")
+        except Exception as e:
+            say(f"merge: the local lane cleanup stopped: {type(e).__name__}: {e}")
     try:
         import guard_core  # hooks/guard_core.py: the one home of the cherry test
         c, out = git(root, "ls-remote", "--heads", "origin")
@@ -1166,6 +1193,7 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
         for b in kept:
             say(f"merge: lane origin/{b}: {kept[b]}")
         if len(kept) == len(heads):
+            local_pass({heads[b] for b in kept})
             return
         try:
             # {head name: (head sha, PR base)}; a head with two PRs has a None base, and one name:index row per PR
@@ -1221,6 +1249,7 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
             order += ready
             rest = [b for b in rest if b not in ready]
         blocked = {}  # base -> the lane whose delete did not happen
+        stays = {heads[b] for b in kept}  # tips whose remote head stays
         for b in order:
             tip = heads[b]
             if b in blocked:
@@ -1235,9 +1264,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
                     say(f"merge: lane origin/{b}: not deleted: {type(e).__name__}: {e}")
                     undone = True
             if undone:
+                stays.add(tip)
                 for n, _, pb in prs:
                     if n == b:
                         blocked.setdefault(pb, b)
+        if opened is not None:  # an unread PR list means nothing is known to be done
+            local_pass(stays)
     except Exception as e:  # a lane cleanup never fails a merge that landed
         say(f"merge: the lane cleanup stopped: {type(e).__name__}: {e}")
 
