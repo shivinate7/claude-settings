@@ -51,7 +51,6 @@ def select_shard(suite, value):
     keep = list(iter_tests(suite))[i - 1::n]
     if not keep:
         raise SystemExit(f"MERGE_SHARD={value!r}: this shard holds no test. Nothing ran.")
-    print(f"MERGE_SHARD={value}: {len(keep)} tests run in this shard", file=sys.stderr)
     return unittest.TestSuite(keep)
 
 def sh(cwd, *cmd):
@@ -7650,6 +7649,9 @@ if __name__ == "__main__":
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
-            return select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
-                                os.environ.get("MERGE_SHARD", ""))
+            suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
+                                 os.environ.get("MERGE_SHARD", ""))
+            if os.environ.get("MERGE_SHARD"):  # the count a reader sums across shards to see none dropped
+                print(f"MERGE_SHARD={os.environ['MERGE_SHARD']}: {suite.countTestCases()} tests run in this shard", file=sys.stderr)
+            return suite
     unittest.main(testLoader=Slicer())

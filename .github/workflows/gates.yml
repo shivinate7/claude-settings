@@ -764,7 +764,8 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
-    # Full guard suite on push, schedule and dispatch: 1296 s in one job (c53 dispatch run 40293472341), so it runs in 2 shards of about 650 s. 20 min is about 1.5x a shard with setup.
+    # Full guard suite off pull_request: 1296 s in one job (run 40293472341). In 2 shards the jobs took 582 s and
+    # 679 s (run 40296937814); 20 min is about 1.8x the slower.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -816,8 +817,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_merge == 'true' || github.event_name != 'pull_request' }}
-    # Full merge suite on Windows: about 6.5 s a test (178 of 547 done in 1161 s, run 40293472341), so about 59 min in one job and 12 min in each of 5 shards. 20 min is about 1.5x a shard with setup.
-    timeout-minutes: 20
+    # Full git-half suite off pull_request: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
+    # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -854,7 +856,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of gates-windows-merge: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -876,7 +878,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of gates-windows-merge: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -898,7 +900,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of gates-windows-merge: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -920,7 +922,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of gates-windows-merge: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
