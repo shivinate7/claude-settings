@@ -1,9 +1,9 @@
 {
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (other repos; you settle the plan first).\nNot started. Waits for o4 (rework compliance-check). Cull first in each repo. Checked Oct 26 at q_max b47bd00 (last commit Oct 20): 819 debts and 570 decisions under docs/, up from 759 and 560 on Oct 17.",
+  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Not started. Waits for o4 (rework compliance-check). Cull first in each repo. Checked Oct 26 at q_max b47bd00 (last commit Oct 20): 819 debts and 570 decisions under docs/, up from 759 and 560 on Oct 17.",
   "order": 310,
   "phase": "rollout",
   "status": "todo",
   "title": "Run compliance-check on each child repo",
-  "updatedAt": "2026-10-26T06:00:00Z",
+  "updatedAt": "2026-10-26T16:25:00Z",
   "why": "Cull first in each one. q_max has 759 debts and 560 decisions."
 }

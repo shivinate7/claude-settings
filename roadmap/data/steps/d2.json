@@ -1,9 +1,9 @@
 {
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (same Opus exception as d1).\nChecked Oct 26 at 149f4bc: no design-reviewer agent; skill design-review exists and names no model; agents/reviewer.md runs Haiku. Advisor pick Oct 17, not ruled: Opus for the design reviewer, since visual judgment is where the strongest model earns its cost; Haiku stays for round-1 code review. Proof first: rerun a few past design-review screenshots through Haiku, Sonnet and Opus. Needs the same Sonnet-ceiling exception as d1 (the designer); one ruling covers both. Merged in from l2 (triage, Oct 26): a second-model design critic is an option for this reviewer; Stitch and Figma Make are dropped unless you want them back.",
+  "note": "Ruling, Oct 26 (shiv, page item 15, b): Opus is allowed now for the designer and the design reviewer, a standing exception to roles-sonnet-is-the-ceiling for design and UX agents only (it replaces you telling UI sessions to use Opus by hand); no proof run first. Checked Oct 26 at 149f4bc: no design-reviewer agent; skill design-review exists and names no model; agents/reviewer.md runs Haiku. Advisor pick Oct 17, not ruled: Opus for the design reviewer, since visual judgment is where the strongest model earns its cost; Haiku stays for round-1 code review. Proof first: rerun a few past design-review screenshots through Haiku, Sonnet and Opus. Needs the same Sonnet-ceiling exception as d1 (the designer); one ruling covers both. Merged in from l2 (triage, Oct 26): a second-model design critic is an option for this reviewer; Stitch and Figma Make are dropped unless you want them back.",
   "order": 220,
   "phase": "design",
   "status": "todo",
   "title": "Add a design-reviewer agent",
-  "updatedAt": "2026-10-26T06:00:00Z",
+  "updatedAt": "2026-10-26T16:25:00Z",
   "why": "Opus judges screenshots instead of Haiku. Design-review gates every screen change, solo mode too."
 }

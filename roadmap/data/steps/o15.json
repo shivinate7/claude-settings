@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 140.5,
   "why": "A handoff file dies with the session's machine; a tracked file survives it.",
-  "note": "Deferred (shiv, Oct 26): it changes where feedback_gate sends things, which is your call. From o5b's audit (plans/o5b-memory-hooks-audit.md): re-point feedback_gate's task and ruling homes from the handoff to tracked files (the repo's todo and decision records), then trim the handoff template's two rulings sections. No build until you say yes. Placed after o5b (triage, Oct 26): its direct follow-up.",
+  "note": "Ruling, Oct 26 (shiv, page item 9, a): re-point it. Your note: this was already your rule in spirit: memory and handoffs hold only short-term, in-flight notes; decisions, debts and anything decided in a session go to tracked homes. From o5b's audit (plans/o5b-memory-hooks-audit.md): re-point feedback_gate's task and ruling homes from the handoff to tracked files (the repo's todo and decision records), then trim the handoff template's two rulings sections. No build until you say yes. Placed after o5b (triage, Oct 26): its direct follow-up.",
   "ask": "",
-  "updatedAt": "2026-10-26T12:55:00Z"
+  "updatedAt": "2026-10-26T16:25:00Z"
 }

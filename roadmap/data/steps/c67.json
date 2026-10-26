@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 109.34,
   "why": "A routine that stops the same way every run does no work and hides that it is broken.",
-  "note": "Deferred (shiv, Oct 26): rewriting a routine's prompt is your call. Finding, Oct 26 (coordinator): the scheduled roadmap-refresh routine (thread \"roadmap refresh\", cmsg_01DoF7thf3iq2Srr1UsfXgh2B4z7bjZH8zcikw5sHVdSp6) stopped with no change. It still reads and writes phase numbers in the page's built-in database, which is off now; they live in roadmap/data/meta/phases.json on the roadmap branch, and the routine may not push. Two fixes: (a) it edits phases.json, runs build.py and pushes, and triage republishes; (b) it sends its counts to the triage thread, which files and republishes. Pick: (b), since triage is already the one page publisher and the routine then needs no push grant. Until you pick, every run stops the same way. Placed after c65 (triage, Oct 26): a deferred owner act, small.",
+  "note": "Open (shiv, page item 12): you are fine giving the routine a push grant, which was option (a)'s main loss; the waiting-page thread is re-asking whether that changes the pick. Finding, Oct 26 (coordinator): the scheduled roadmap-refresh routine (thread \"roadmap refresh\", cmsg_01DoF7thf3iq2Srr1UsfXgh2B4z7bjZH8zcikw5sHVdSp6) stopped with no change. It still reads and writes phase numbers in the page's built-in database, which is off now; they live in roadmap/data/meta/phases.json on the roadmap branch, and the routine may not push. Two fixes: (a) it edits phases.json, runs build.py and pushes, and triage republishes; (b) it sends its counts to the triage thread, which files and republishes. Pick: (b), since triage is already the one page publisher and the routine then needs no push grant. Until you pick, every run stops the same way. Placed after c65 (triage, Oct 26): a deferred owner act, small.",
   "ask": "",
-  "updatedAt": "2026-10-26T13:45:00Z"
+  "updatedAt": "2026-10-26T16:25:00Z"
 }
