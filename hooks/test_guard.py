@@ -71,6 +71,7 @@ FAMILIES = {
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "pointer": "the pointer HEAD checkout",
+    "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -2717,6 +2718,152 @@ sh("pointer: a pointer naming a directory that is gone fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRGONECFG)
 sh("pointer: no global rules file at all fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRNOCFG)
+
+
+# =========================================================================== 1c. hand-made worktree
+FAMILY = "hand-made-worktree"
+#
+# A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
+# (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real
+# `git worktree add` whose NEW TREE path resolves outside `<primary>/.claude/worktrees/`. The
+# primary is the one of the repo the call acts on. A repo that sits under the guard's temp folder is
+# a throwaway and passes: the rule judges the REPO, never the target, so a non-temp repo adding a
+# tree INTO temp is the incident and denies.
+#
+# These cases run with the guard's temp folder set to ROOT/tmp. The default temp (TEMP_DIR None)
+# is the system temp that holds ROOT, which would put every fixture repo "under temp".
+TEMP_DIR = os.path.join(ROOT, "tmp")
+HMMAIN = os.path.join(ROOT, "hmmain")                          # a primary checkout, not under temp
+HMLANE = os.path.join(HMMAIN, ".claude", "worktrees", "lane1")  # a real linked tree of it, in home
+HMTMPREPO = os.path.join(TEMP_DIR, "hmtmprepo")                # a repo UNDER the guard's temp folder
+HMSCRATCH = slash(os.path.join(TEMP_DIR, "scratch", "lane-a"))  # a scratch target under temp
+
+
+def _build_hand_made():
+    make_repo(HMMAIN, {"f.txt": "base\n"})
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMLANE, "-b", "hmlane1")
+    make_repo(HMTMPREPO, {"f.txt": "base\n"})
+    for where in (HMMAIN, HMTMPREPO):
+        if run_vcs(where, "rev-parse", "--git-dir").returncode != 0:
+            sys.exit("fixture setup failed in _build_hand_made: %r is no repository" % where)
+    if not os.path.isdir(HMLANE):
+        sys.exit("fixture setup failed in _build_hand_made: no linked tree at %r" % HMLANE)
+
+
+lazy_fixture([HMMAIN, HMLANE, HMTMPREPO], _build_hand_made)
+HM = "hand-made-worktree"
+HMADD = VCS + " worktree add "
+HMIN = slash(HMMAIN)
+
+
+def hm_deny(name, command, **kw):
+    kw.setdefault("cwd", HMMAIN)
+    sh("hand-made worktree: " + name, command, "deny", HM, **kw)
+
+
+def hm_allow(name, command, **kw):
+    kw.setdefault("cwd", HMMAIN)
+    sh("hand-made worktree: " + name, command, "allow", **kw)
+
+
+# DENY. The new tree lands outside <primary>/.claude/worktrees/.
+hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+        VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
+hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+        "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
+hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_deny("--lock --reason r before the path does not hide it",
+        HMADD + "--lock --reason r ../lane-x")
+hm_deny("a double dash ends the options, and the path after it is judged",
+        HMADD + "-- ../lane-x")
+hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+        HMADD + ".claude/worktrees-x/foo")
+hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_deny("a dot-dot that climbs out of the home folder is outside",
+        HMADD + ".claude/worktrees/../../lane-x")
+hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+        HMADD + "../../../lane-x", cwd=HMLANE)
+hm_deny("a PowerShell call is judged the same",
+        "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
+        cwd=NOGIT)
+hm_deny("a PowerShell call with -C and a scratch path is refused",
+        VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
+hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+
+# ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
+hm_allow("an absolute path under the primary's home folder passes",
+         HMADD + HMIN + "/.claude/worktrees/lane2")
+hm_allow("a relative path under the home folder passes", HMADD + ".claude/worktrees/lane2")
+hm_allow("-b and a path under the home folder passes",
+         HMADD + "-b hmlane3 .claude/worktrees/lane3")
+hm_allow("from inside a linked tree of the same clone, an absolute home path passes",
+         HMADD + HMIN + "/.claude/worktrees/lane4", cwd=HMLANE)
+hm_allow("from inside a linked tree of the same clone, a relative home path passes",
+         HMADD + "../lane5", cwd=HMLANE)
+hm_allow("a repo under the guard's temp folder is a throwaway, so any target passes",
+         HMADD + "../hmtmp-sibling", cwd=HMTMPREPO)
+hm_allow("worktree list only reads", VCS + " worktree list")
+hm_allow("worktree lock names no new tree", VCS + " worktree lock " + slash(HMLANE))
+hm_allow("worktree add --help only reads", HMADD + "--help")
+hm_allow("worktree add -h only reads", HMADD + "-h")
+hm_allow("an echo that only mentions it passes", 'echo "git worktree add ../x"')
+hm_allow("a commit message that holds the words passes",
+         VCS + ' commit -m "docs: never run git worktree add ../x by hand"')
+hm_allow("a gh pr create body that holds the words passes",
+         'gh pr create --draft --title t --body "the old remedy was git worktree add ../x"')
+hm_allow("a heredoc body that holds the words passes",
+         "cat <<'EOF'\ngit worktree add ../x\nEOF")
+hm_allow("a folder that is no git tree passes, since unknown is no hit",
+         HMADD + "../lane-x", cwd=NOGIT)
+add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
+    "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
+    prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
+add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
+    cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
+
+TEMP_DIR = None   # back to the system temp for the sections below
+
+# THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
+HM_REFUSED_PATH = "hm-text-lane"
+
+
+def hand_made_refusal_text_case():
+    """The refusal tells the next step and names neither the refused path nor the refused act."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": HMMAIN, "session": None, "env_path": None,
+        "temp": os.path.join(ROOT, "tmp"),
+        "tool_input": {"command": HMADD + "../" + HM_REFUSED_PATH}})
+    if got != "deny":
+        return False, "expected deny, got %s: %s" % (got, reason[:90])
+    if not reason.lstrip().startswith("Rule (hand-made worktree)"):
+        return False, "the reason does not start 'Rule (hand-made worktree)': %s" % reason[:90]
+    for want in ("isolation", "EnterWorktree"):
+        if want not in reason:
+            return False, "the reason does not name %r: %s" % (want, reason[:90])
+    if not re.search(r"which layer", reason):
+        return False, "the reason does not say to report which layer refused: %s" % reason[:90]
+    for bad in (HM_REFUSED_PATH, "worktree add"):
+        if bad in reason:
+            return False, "the reason holds %r, which it must not" % bad
+    return True, "starts 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
+
+
+def pointer_remedy_names_enter_worktree_case():
+    """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": PTRMAIN, "session": None, "env_path": None,
+        "config": PTRCFG, "tool_input": {"command": VCS + " checkout somebranch"}})
+    if got != "deny" or "Rule (pointer checkout)" not in reason:
+        return False, "expected the pointer deny, got %s: %s" % (got, reason[:90])
+    if "worktree add" in reason:
+        return False, "the pointer remedy still names 'worktree add'"
+    if "EnterWorktree" not in reason:
+        return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
+    return True, "the pointer remedy names EnterWorktree and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -7325,7 +7472,7 @@ for _name, _command in (
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
     ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
-    ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
+    ("a PR body", 'gh pr create --draft --title t --body "cites ' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
 ):
     sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
@@ -12550,6 +12697,10 @@ LOG_CHECKS = (
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
     ("playwright: the refusal names the stale __dirlock and pgrep, and no other path",
      playwright_remedy_case),
+    ("hand-made worktree: the refusal text points to isolation and EnterWorktree, names no target",
+     hand_made_refusal_text_case),
+    ("hand-made worktree: the pointer remedy names EnterWorktree, not worktree add",
+     pointer_remedy_names_enter_worktree_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
