@@ -2110,7 +2110,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         [p.strip() for p in args.exclude.split(",") if p.strip()]
     if args.decisions_dir is not None:
         config["decisions_dir"] = args.decisions_dir
-    decisions_dir = find_decisions_dir(config)
+    try:
+        decisions_dir = find_decisions_dir(config)
+    except layout.LayoutError as err:  # a broken extras file is red, never a silent default
+        print("ste_lint: cannot read the layout: %s" % err, file=sys.stderr)
+        return 2
     set_gloss_pattern(build_gloss_pattern(decisions_dir) if decisions_dir else None)
 
     source_suffixes = (TEXT_SUFFIXES | SOURCE_SUFFIXES) if args.source_prose else None

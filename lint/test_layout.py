@@ -108,6 +108,13 @@ class LayoutFile(Tree):
         with self.assertRaises(self.layout.LayoutError):
             self.layout.kinds(self.tree)
 
+    def test_extras_path_outside_the_repo_is_an_error(self):
+        for bad in ("../x", "/etc", "a/../../b", "C:/x"):
+            with self.subTest(path=bad):
+                self.roll_out({"x": {"path": bad}})
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.kinds(self.tree)
+
     def test_broken_extras_file_is_an_error_never_a_silent_default(self):
         self.put(EXTRAS, "{not json")
         with self.assertRaises(self.layout.LayoutError):
@@ -204,6 +211,17 @@ class Readers(Tree):
         self.put("decisions/x.md")
         self.assertEqual(self.ste_dir(), "decisions")
 
+    def test_ste_lint_and_records_page_are_red_on_a_broken_extras_file(self):
+        self.put(EXTRAS, "{not json")
+        self.put("a.md", "# A\n")
+        rc, out = run([os.path.join(LINT, "ste_lint.py"), "a.md"], self.tree)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("cannot read the layout", out)
+        self.assertNotIn("Traceback", out)
+        rc, out = run([os.path.join(LINT, "hook_catalog.py"), "--root", self.tree, "--records-only"], self.tree)
+        self.assertEqual(rc, 2, out)
+        self.assertNotIn("Traceback", out)
+
     def test_guard_reads_record_folders_from_the_layout_text(self):
         guard = load("guard_under_test", os.path.join(REPO, "hooks", "guard.py"))
         with open(os.path.join(LINT, "layout.json"), encoding="utf-8") as f:
@@ -258,11 +276,29 @@ class ConstantCheck(Tree):
         for rel in ("lint/check_record_slugs.py", "lint/check_ruling_kind.py", "lint/check_skill_model_rows.py",
                     "lint/hook_catalog.py", "lint/ste_lint.py", "hooks/guard.py"):
             for literal in ('"decisions/"', '"docs/decisions"', '"./debts/x.md"', '"debts/notes.md"', '"plans/"',
-                            'os.path.join(ROOT, "decisions", "x.md")'):
+                            'os.path.join(ROOT, "decisions", "x.md")', 'ROOT + "/decisions/x.md"',
+                            '"x/decisions/a.md"', 'pathlib.Path(ROOT) / "decisions"'):
                 with self.subTest(reader=rel, literal=literal):
                     self.setUp()
                     self.append(rel, "MUTANT = %s" % literal)
                     self.assert_red("%s:" % rel)
+
+    def test_a_new_reader_in_any_scanned_folder_is_red(self):
+        for folder in ("lint", "hooks", "merge", "janitor"):
+            with self.subTest(folder=folder):
+                self.setUp()
+                self.put(folder + "/new_reader.py", 'FOLDER = "decisions/"\n')
+                self.assert_red(folder + "/new_reader.py:")
+
+    def test_a_test_file_is_not_a_reader(self):
+        self.put("lint/test_new.py", 'FIXTURE = "decisions/x.md"\n')
+        rc, out = self.check()
+        self.assertEqual((rc, out), (0, ""))
+
+    def test_a_word_in_a_shell_message_stays_green(self):
+        self.append("actions/ruling-kind/check.sh", 'echo "ruling-kind: no decisions here"')
+        rc, out = self.check()
+        self.assertEqual((rc, out), (0, ""))
 
     def test_a_kind_name_a_docstring_and_a_comment_stay_green(self):
         self.append("lint/hook_catalog.py", 'KIND_NAME = "decisions"  # decisions/ in a comment')

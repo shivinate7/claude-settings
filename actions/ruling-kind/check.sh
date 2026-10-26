@@ -26,6 +26,9 @@ rules=()
 for d in "$root" "$action_root"; do
   for f in CLAUDE.md output-styles/shiv-stylisms.md; do rules+=(--rules-file "$d/$f"); done
 done
-dir=()
-[ -n "$RECORDS_DIR" ] && dir=(--dir "$RECORDS_DIR")
-CI=true python3 "$here/../../lint/check_ruling_kind.py" --root "$root" ${dir[@]+"${dir[@]}"} --base "origin/$BASE_REF" "${rules[@]}"
+if [ -z "$RECORDS_DIR" ]; then
+  # The layout's folder, passed as --dir so the lint still refuses a folder that does not exist.
+  RECORDS_DIR="$(python3 "$here/../../lint/layout.py" path "$root" decisions)" ||
+    { echo "ruling-kind: UNKNOWN, cannot read the layout"; exit 1; }
+fi
+CI=true python3 "$here/../../lint/check_ruling_kind.py" --root "$root" --dir "$RECORDS_DIR" --base "origin/$BASE_REF" "${rules[@]}"

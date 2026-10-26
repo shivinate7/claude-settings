@@ -65,12 +65,12 @@ class RecordsDirInput(unittest.TestCase):
         lint_lines = [line for line in read(CHECK_SH).split("\n")
                       if "check_ruling_kind.py" in line and not line.lstrip().startswith("#")]
         self.assertTrue(lint_lines, "check.sh does not run check_ruling_kind.py")
-        # A set value goes to the lint as --dir; an empty one leaves --dir off, so the lint reads the layout.
-        flag = re.compile(r"\[ -n \"\$%s\" \] && (\w+)=\(--dir \"\$%s\"\)" % (re.escape(name), re.escape(name)))
-        found = flag.search(read(CHECK_SH))
-        self.assertIsNotNone(found, "check.sh does not build --dir \"$%s\" from a set value" % name)
-        self.assertTrue(any("${%s[@]" % found.group(1) in line for line in lint_lines),
-                        "the lint call in check.sh does not pass the --dir it built")
+        # Always --dir, so the lint refuses a folder that does not exist; an empty value is first
+        # resolved through lint/layout.py.
+        flag = re.compile(r"--dir\s+\"?\$\{?%s\}?\"?(?=\s|$)" % re.escape(name))
+        self.assertTrue(any(flag.search(line) for line in lint_lines),
+                        "the lint call in check.sh does not pass --dir \"$%s\"" % name)
+        self.assertRegex(read(CHECK_SH), r"%s=\"\$\(python3 \S*lint/layout\.py\" path " % re.escape(name))
 
 
 GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
@@ -136,6 +136,14 @@ class CheckShRecordsDir(unittest.TestCase):
         rc, out = self.check("")
         self.assertEqual(rc, 1, out)
         self.assertIn("decisions/bad-ruling.md", out)
+
+    def test_default_folder_that_does_not_exist_is_red(self):
+        # A repo with no decisions folder where the layout reads it: red, as an explicit bad folder is.
+        self.git("mv", "decisions", "notes")
+        self.git("commit", "-q", "-m", "move")
+        rc, out = self.check()
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("'decisions'", out)
 
     def test_explicit_decisions_passes(self):
         rc, out = self.check("decisions")

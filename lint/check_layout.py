@@ -6,9 +6,11 @@ Three things can drift from it, and this check reads each:
 
   1. The guard's literal. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
      its own literal. That literal must equal LAYOUT_FILE in lint/layout.py.
-  2. A path literal in a reader. A string constant in a reader's Python code may not name a record
-     path: a layout or legacy path of a record or listed kind, followed by `/` or holding one
-     (`decisions/`, `docs/decisions`, `debts/notes.md`), or a bare folder name passed to a `join`.
+  2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
+     mutation harnesses aside. A string constant there may not name a record
+     path: a layout or legacy path of a record or listed kind, followed by `/` or holding one, at
+     either end or inside (`decisions/`, `docs/decisions`, `x/decisions/a.md`), or a bare folder
+     name passed to a `join` or a `/` (`Path(root) / "decisions"`).
      Any other bare kind name (`"decisions"`) is a key into the layout, not a path, and passes. Docstrings pass. The Python parser reads the code,
      so a path in a comment never counts.
   3. The actions and the stamp examples. Each action input that names the records folder defaults
@@ -31,14 +33,8 @@ ROOT = os.path.dirname(HERE)
 
 GUARD = "hooks/guard.py"
 GUARD_NAME = "RECORD_LAYOUT_FILE"
-READERS = (
-    "lint/check_record_slugs.py",
-    "lint/check_ruling_kind.py",
-    "lint/check_skill_model_rows.py",
-    "lint/hook_catalog.py",
-    "lint/ste_lint.py",
-    GUARD,
-)
+READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and harnesses aside
+NOT_READERS = ("test_", "mutate_", "prove_")
 ACTION_INPUTS = (("actions/ruling-kind/action.yml", "records-dir"), ("actions/ste-lint/action.yml", "decisions-dir"))
 ACTION_SCRIPTS = ("actions/ruling-kind/check.sh", "actions/ste-lint/run.sh")
 STAMP_EXAMPLES = "actions/stamp/examples"
@@ -69,7 +65,7 @@ def path_literal(value, paths):
     for path in paths:
         if value == path and "/" in path:
             return True
-        if value.startswith(path + "/"):
+        if value.startswith(path + "/") or ("/" + path + "/") in value or value.endswith("/" + path):
             return True
     return False
 
@@ -119,13 +115,19 @@ def problems():
     if literal != layout.LAYOUT_FILE:
         found.append("%s: %s is %r, not lint/layout.py LAYOUT_FILE %r" % (GUARD, GUARD_NAME, literal, layout.LAYOUT_FILE))
 
-    for rel in READERS:
+    readers = sorted("%s/%s" % (folder, name) for folder in READER_DIRS
+                     if os.path.isdir(os.path.join(ROOT, folder))
+                     for name in os.listdir(os.path.join(ROOT, folder))
+                     if name.endswith(".py") and not name.startswith(NOT_READERS))
+    for rel in readers:
         tree = guard_tree if rel == GUARD else ast.parse(read(rel))
         skip = docstrings(tree)
         joined = set()  # a bare folder name as a path part: os.path.join(ROOT, "decisions", ...)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) == "join":
                 joined.update(id(a) for a in node.args if isinstance(a, ast.Constant) and a.value in paths)
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):  # Path(root) / "decisions"
+                joined.update(id(a) for a in (node.left, node.right) if isinstance(a, ast.Constant) and a.value in paths)
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip \
                     and (path_literal(node.value, paths) or id(node) in joined):
@@ -135,13 +137,16 @@ def problems():
         default = input_default(read(rel), name)
         if default != "":
             found.append("%s: input %s defaults to %r, not \"\" (the layout's folder)" % (rel, name, default))
-    shell_path = re.compile(r"(?<![\w/.])(?:\./)?(%s)(?![\w-])" % "|".join(
-        map(re.escape, sorted(paths, key=len, reverse=True))))
+    # A shell line names a record path when it holds one with a `/`, or gives a bare folder name as a
+    # default or a value: `${X-decisions}`, `${X:-decisions}`, `X=decisions`. A word in a message does not.
+    names = "|".join(map(re.escape, sorted(paths, key=len, reverse=True)))
+    shell_path = re.compile(r"(?<![\w.-])(?:\./)?((?:%s)/[\w./-]*|(?:[\w.-]+/)+(?:%s)(?:/[\w./-]*)?)" % (names, names)
+                            + r"|(?:\$\{\w+:?-|\b\w+=)[\"']?(%s)[\"']?(?=[\s}]|$)" % names)
     for rel in ACTION_SCRIPTS:
         for n, line in enumerate(read(rel).split("\n"), 1):
             hit = shell_path.search(line.split("#", 1)[0])
             if hit:
-                found.append("%s:%d: names the record path %r; leave it to the layout" % (rel, n, hit.group(1)))
+                found.append("%s:%d: names the record path %r; leave it to the layout" % (rel, n, hit.group(1) or hit.group(2)))
 
     names = sorted(n for n in os.listdir(os.path.join(ROOT, *STAMP_EXAMPLES.split("/"))) if n.endswith(".json"))
     for name in names:

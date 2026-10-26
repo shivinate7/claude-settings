@@ -58,6 +58,7 @@ def kinds(root=None):
         for name, kind in _read(_extras(root))["kinds"].items():
             if name in found:
                 raise LayoutError("%s: kind %s is in the layout already" % (_extras(root), name))
+            _safe(kind["path"], _extras(root))
             found[name] = dict(kind, set="extra")
     return found
 
@@ -83,6 +84,25 @@ def candidates(root, name):
     return (first,) if first == then else (first, then)
 
 
+def _safe(found, where):
+    """`found` when it is a relative path inside the repo, else LayoutError."""
+    parts = found.replace("\\", "/").split("/")
+    if os.path.isabs(found) or found.startswith(("/", "\\")) or ".." in parts or ":" in parts[0]:
+        raise LayoutError("%s: path %r is not inside the repo" % (where, found))
+    return found
+
+
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
+
+
+if __name__ == "__main__":
+    import sys
+    # python3 lint/layout.py path <root> <kind>: one path, for a shell step.
+    if len(sys.argv) != 4 or sys.argv[1] != "path":
+        sys.exit("usage: layout.py path <root> <kind>")
+    try:
+        print(path(os.path.abspath(sys.argv[2]), sys.argv[3]))
+    except (LayoutError, KeyError) as err:
+        sys.exit("layout: %s" % err)

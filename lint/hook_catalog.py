@@ -796,6 +796,9 @@ def main(argv):
     except Unreadable as err:
         emit("hook_catalog: cannot read %s\n" % err)
         return 2
+    except layout.LayoutError as err:
+        emit("hook_catalog: cannot read the layout: %s\n" % err)
+        return 2
 
 
 if __name__ == "__main__":
