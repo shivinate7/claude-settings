@@ -370,6 +370,10 @@ GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer 
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
+GHSTATPEND = os.path.join(ROOT, "ghstatpend")  # a green check run, and one commit status still pending
+GHSTATRED = os.path.join(ROOT, "ghstatred")    # a green check run, and one commit status failed
+GHPAGE2 = os.path.join(ROOT, "ghpage2")        # the failed check run is on the second page of the check runs
+CURREPO = os.path.join(ROOT, "currepo")        # a checkout on the branch `feat`, the head of the one pull request the fake gh lists
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
@@ -732,15 +736,64 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, sys, time
+FAKE_GH_PY = r'''import json, os, re, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
-if args[:1] == ["pr"] and not all(word in args for word in state["need"]):
-    state["broken"] = True
+
+
+def parse(argv):
+    """The args after `gh api` -> (path, fields, flags). Query values in the path become fields, as gh sends them."""
+    path, fields, flags, i = "", {}, set(), 0
+    argv = [part for x in argv for part in (x.split("=", 1) if x.startswith("--") and "=" in x else [x])]
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-X", "--method", "-H", "--header", "-q", "--jq"):
+            i += 2
+        elif a in ("-f", "-F", "--field", "--raw-field"):
+            k, _, v = argv[i + 1].partition("="); fields[k] = v; i += 2
+        elif a.startswith("-"):
+            flags.add(a); i += 1
+        else:
+            path = a; i += 1
+    path, _, query = path.partition("?")
+    for pair in filter(None, query.split("&")):
+        k, _, v = pair.partition("="); fields.setdefault(k, v)
+    return path, fields, flags
+
+
+def api_error(code, message):
+    print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
+    sys.exit(1)
+
+
+def listing(items, key, fields, flags, top=None):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+    size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
+    pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
+    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
+    if "--slurp" in flags:
+        return json.dumps(bodies)
+    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+
+
+RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
+          "skipping": ("completed", "skipped"), "cancel": ("completed", "cancelled")}
+STATUS_OF = {"pass": "success", "fail": "failure", "pending": "pending", "error": "error"}
+
+path, fields, flags = parse(args[1:]) if args[:1] == ["api"] else ("", {}, set())
+if any("&" in a for a in args):  # the Windows .cmd form of this fake lets cmd.exe split the command at '&': send query values with -f
+    print("fake gh: an argument holds '&'"); sys.exit(1)
+if path:
+    # Every REST call names the repo it was asked for (repos/y/x/...), and the pull request read names the number (.../pulls/12).
+    for word in state["need"]:
+        if ("/" in word and "repos/" + word + "/" not in path) or ("/" not in word and "/pulls/" in path and "/pulls/" + word not in path):
+            state["broken"] = True
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
@@ -748,28 +801,51 @@ if state["broken"]:
     print("boom")
     sys.exit(1)
 if not args:
-    print(json.dumps({"baseRefName": state["pr"]["baseRefName"]}))
-elif args[:2] == ["pr", "view"]:
-    fields = args[args.index("--json") + 1].split(",")
-    print(json.dumps({k: state["pr"][k] for k in fields}))
-elif args[:2] == ["pr", "checks"]:
-    print(json.dumps(state["checks"]))
+    print(json.dumps({"base": state["pr"]["base"]["ref"]}))
 elif args[:2] == ["run", "list"]:
     print(json.dumps(state["runs"]))
+elif args[:1] != ["api"]:
+    print(GRAPHQL)  # gh pr ..., gh repo view: GraphQL, which a Claude Code cloud session refuses
+    sys.exit(1)
 else:
-    print("fake gh: unhandled " + " ".join(args), file=sys.stderr)
-    sys.exit(2)
+    m = re.match(r"^repos/(?:\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)/(.*)$", path)
+    rel = m.group(1) if m else ""
+    head = state["pr"]["head"]["sha"]
+    if re.fullmatch(r"pulls/\d+", rel):
+        print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
+    elif rel == "pulls":
+        print(listing([dict(state["pr"], number=state["number"])], None, fields, flags))
+    elif rel in ("commits/%s/check-runs" % head, "commits/%s/status" % head):
+        if rel.endswith("check-runs"):
+            runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
+                     "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
+                     "started_at": None, "completed_at": None} for i, c in enumerate(state["checks"])]
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+        else:
+            sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
+                   for i, c in enumerate(state["statuses"])]
+            states = {s["state"] for s in sts}
+            combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": head, "total_count": len(sts)}))
+    else:
+        api_error(404, "Not Found")
 '''
 
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
-                 cwd_name=""):
+                 cwd_name="", statuses=None, page_cap=100):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
+
+    The stand-in speaks the REST API the way `gh api` does (c53: a Claude Code cloud session answers
+    GraphQL with HTTP 403, and so does this stand-in): the pull request, the open pull requests, the
+    check runs of its head and the commit statuses of its head. `statuses` are commit statuses in
+    the check-row form; a head with none has the combined state "pending" on GitHub, as here.
+    `page_cap` is the page size GitHub gives: a list read takes one page unless it asks for all.
 
     `delay_s` is a plain float number of seconds, slept inside the fake's own Python process
     before it answers. It needs no external `sleep`/`ping` and so has none of the whole-second or
@@ -799,14 +875,17 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     fixture, not a fact to route around.
     """
     os.makedirs(folder, exist_ok=True)
-    # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: a
-    # `pr view` returns exactly the fields it was asked for, `pr checks` the check rows, `run list`
-    # the workflow runs. No argument at all answers the base alone, which is what
-    # _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
+    # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: `pulls/<n>`
+    # the pull request, `pulls` the open ones, `commits/<sha>/check-runs` and `commits/<sha>/status` the
+    # checks of its head, `run list` the workflow runs. No argument at all answers the base alone, which is
+    # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
-        "pr": {"baseRefName": base, "headRefOid": "abc1234", "headRefName": "feat",
-               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "body": ""},
+        "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
+               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
+        "number": 12,
         "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
+        "statuses": statuses if statuses is not None else [],
+        "page_cap": page_cap,
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "gates"}],
         "broken": broken,
@@ -963,13 +1042,14 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    # merge.py's shared_deadline splits one budget across the read's three calls, so a
-    # delay only a little past the per-call figure that used to be the cutoff no longer exhausts
-    # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
-    # whole shared budget on its own, whichever call absorbs the time.
+    # merge.py's shared_deadline splits one budget across the read's calls (c53: four on REST: the pull request, the check
+    # runs, the commit statuses, the workflow runs), so a delay only a little past the per-call figure that used to be the
+    # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
+    # time: keep it above MERGE_READ_TIMEOUT.
     make_fake_gh(GHSLOW, "main", delay=20)
-    # 3.5s per call stands in for real gh latency (3.0-3.9s): slower than the 3s MERGE_READ_TIMEOUT,
-    # nowhere near a hang.
+    # 3.5s per call stands in for real gh latency (3.0-3.9s, measured on Windows for gh's GraphQL calls): nowhere near a hang.
+    # c53: the read makes four REST calls, 4 * 3.5s = 14s, which fits the 25s MERGE_READ_TIMEOUT (the slowest measured call, 3.9s,
+    # makes 15.6s). The latency of a REST call is unmeasured, so the figure stays the measured one.
     make_fake_gh(GHWARM, "main", delay_s=3.5)
     # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
     # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
@@ -982,6 +1062,11 @@ def build_fixtures():
     make_fake_gh(GHHANG, "main", delay=10)
     make_fake_gh(GHEMPTY, "main", checks=[], runs=[])
     make_fake_gh(GHCWD, "main", cwd_name="ctxrepo")
+    make_fake_gh(GHSTATPEND, "main", statuses=[{"name": "deploy", "bucket": "pending", "link": ""}])
+    make_fake_gh(GHSTATRED, "main", statuses=[{"name": "deploy", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHPAGE2, "main", page_cap=2, checks=[{"name": "lint", "bucket": "pass", "link": ""},
+                                                      {"name": "unit", "bucket": "pass", "link": ""},
+                                                      {"name": "gates", "bucket": "fail", "link": ""}])
     write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
     # The guard finds the merge tool beside its own real path, or in the clone the global rules
     # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
@@ -1002,6 +1087,13 @@ def build_fixtures():
         LINKS_MADE = SYMWT_MADE = True
     except Exception:  # no symlink privilege: the link cases skip, as they did before
         LINKS_MADE = SYMWT_MADE = False
+
+
+def _build_currepo():
+    """CURREPO: a repo on the branch `feat`. The fake gh lists one open pull request whose head is `feat`, so a merge named by no number reads that one."""
+    os.makedirs(CURREPO, exist_ok=True)
+    run_vcs(CURREPO, "init", "-q", "-b", "feat", ".")
+    run_vcs(CURREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
 
 
 def _build_ctxrepo():
@@ -1544,6 +1636,7 @@ _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
 # list is every path it creates, and the config folders that point into a repo are listed with it,
 # so a case that names only PTRCFG still gets PTRMAIN built.
 lazy_fixture([CTXREPO], _build_ctxrepo)
+lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
@@ -1599,6 +1692,21 @@ PROJ_HOOK = slash(os.path.join(PROJ, ".claude", "hooks", "g.py"))
 PROJ_HOOKDIR = slash(os.path.join(PROJ, ".claude", "hooks"))
 CLONE_SETTINGS = slash(os.path.join(CLONE, "settings.json"))
 PY_PATH = os.path.dirname(sys.executable)
+
+
+def _program_folder(name):
+    """The folder that holds `name`, found on this process's own PATH. A raise when there is none: a case that needs the program on the
+    guard's narrow PATH cannot run without it."""
+    found = shutil.which(name, path=os.environ.get("PATH"))
+    if not found:
+        raise RuntimeError("test_guard: %r is not on this process's PATH, and the cases that read the current branch need it on the guard's" % name)
+    return os.path.dirname(found)
+
+
+# c53: a merge that names no pull request reads the branch of the working directory, so Host.pr_number runs `git rev-parse` (the old
+# `gh pr view` ran git itself). The guard's narrow PATH is the fake gh's folder and the interpreter's, and on CI the interpreter's folder
+# (the toolcache) has no git: those cases add git's own folder.
+GIT_PATH = _program_folder(VCS)
 
 
 # =========================================================================== 1. shared trees
@@ -7238,8 +7346,8 @@ sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NO
 sh("merge: an unreadable base is allowed once the head checks read green",
    "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHBLANK + os.pathsep + PY_PATH,
    config=MERGECFG)
-sh("merge: no number is allowed", "gh pr merge", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge: no number is allowed, and reads the pull request of the current branch", "gh pr merge", "allow",
+   cwd=CURREPO, env_path=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH, config=MERGECFG)
 add("merge: a call of the merge tool on a green head is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
@@ -7303,8 +7411,11 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 GREEN_ON = GHMAIN + os.pathsep + PY_PATH
 for _fake, _word, _label in (
     (GHPEND, "pending", "a pending check"),
-    (GHRED, "red", "a failed check"),
+    (GHRED, "settled: red", "a failed check"),
     (GHRUNPEND, "pending", "a workflow run not finished"),
+    (GHSTATPEND, "pending", "a pending commit status beside a green check run"),
+    (GHSTATRED, "settled: red", "a failed commit status beside a green check run"),
+    (GHPAGE2, "settled: red", "a failed check run on the second page"),
 ):
     sh("merge-checks: %s denies" % _label, "gh pr merge 12 --squash", "deny", "merge-checks",
        carries=_word, cwd=NOGIT, env_path=_fake + os.pathsep + PY_PATH, config=MERGECFG)
@@ -7323,7 +7434,7 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
     carries="pending", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
-    carries="red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
+    carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
 sh("merge-checks: the pull request and repo of the call are the ones read",
@@ -7341,6 +7452,21 @@ sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
    env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
 # so a settled, all-green head still reads as unknown and the gate cries wolf on passing CI.
+# c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
+sh("merge-checks: a branch name is read through the open pull request list", "gh pr merge feat --squash", "allow", silent=True,
+   cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+sh("merge-checks: a branch name over a pending head denies", "gh pr merge feat --squash", "deny", "merge-checks", carries="pending",
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# A broken read denies as unknown too (the GraphQL 403 does), so each denial must also name what it could not resolve: the branch, or that no branch can be read.
+sh("merge-checks: a branch with no open pull request is unknown, and denies", "gh pr merge other --squash", "deny", "merge-checks",
+   carries="other", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+sh("merge-checks: no number on a branch with no open pull request is unknown, and denies", "gh pr merge", "deny", "merge-checks",
+   carries="main", cwd=GITMAIN, env_path=GREEN_ON + os.pathsep + GIT_PATH, config=MERGECFG)
+sh("merge-checks: no number outside a checkout is unknown, and denies", "gh pr merge", "deny", "merge-checks",
+   carries="branch", cwd=NOGIT, env_path=GREEN_ON + os.pathsep + GIT_PATH, config=MERGECFG)
+# No -R: the URL alone names the repo, so every call must go to repos/y/x (GHNEED breaks any call that names another repo).
+sh("merge-checks: a pull request URL names its number and its repo", "gh pr merge https://github.com/y/x/pull/12 --squash", "allow", silent=True,
+   cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
 sh("merge-checks: a head as slow as real gh, but green, still allows",
    "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHWARM + os.pathsep + PY_PATH,
    config=MERGECFG)
@@ -11749,6 +11875,27 @@ def merge_import_exits_case():
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
 
 
+HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
+HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
+
+
+def guard_merge_read_timeout():
+    """MERGE_READ_TIMEOUT of the guard under test, parsed from the guard_merge.py beside it (an import
+    would run the module). None when the file or the assignment is not there or is not a plain number."""
+    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "guard_merge.py")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MERGE_READ_TIMEOUT" for t in node.targets)
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))
+                and not isinstance(node.value.value, bool)):
+            return float(node.value.value)
+    return None
+
+
 def merge_hang_timeout_case():
     """A `gh` that never answers must still end in a deny, and that deny must not depend on the
     hook's 60s budget being outlived first.
@@ -11756,9 +11903,13 @@ def merge_hang_timeout_case():
     The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
     checks), and this is pinned everywhere.
 
-    The wall-time half -- the read must finish well inside the 60s hook budget, bounded here at
-    ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
-    subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
+    The wall-time half -- the read must finish well inside the 60s hook budget -- is bounded in two
+    parts. The read ends within MERGE_READ_TIMEOUT (read from the guard under test) plus
+    HANG_MARGIN_S, so a read that outlives its own budget fails. And that budget plus its margin
+    stays under HANG_CEILING_S, on every OS, so a bound that follows the constant cannot bless a
+    budget that nears the hook's 60s. The first part is asserted on POSIX only. MEASURED on
+    Windows: GHHANG is a `.cmd` fake, and subprocess.run's kill on timeout only reaches the
+    cmd.exe it directly spawned, never the
     ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
     captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until
     ping's FULL configured wait elapses, not until the kill. That is a fixture artifact of
@@ -11768,6 +11919,13 @@ def merge_hang_timeout_case():
     `.cmd` fake can be killed on time here, so there is nothing truthful left to assert for wall
     time on Windows; skip it there, loudly, rather than fake a shorter wait or a looser bound.
     """
+    budget = guard_merge_read_timeout()
+    if budget is None:
+        return False, "MERGE_READ_TIMEOUT cannot be read as a number from the guard_merge.py beside the guard under test"
+    bound = budget + HANG_MARGIN_S
+    if bound > HANG_CEILING_S:   # no run: a read budget this long is not inside the hook's 60s, whatever the fake does
+        return False, ("MERGE_READ_TIMEOUT %gs plus %gs of margin is over %gs: a hung gh could outlive the hook's 60s budget"
+                       % (budget, HANG_MARGIN_S, HANG_CEILING_S))
     started = time.time()
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
@@ -11780,14 +11938,15 @@ def merge_hang_timeout_case():
         problems.append("expected deny, got %s" % got)
     elif "could not run" not in reason:
         problems.append("expected the could-not-run reason, got %r" % reason[:120])
-    if os.name != "nt" and elapsed >= 15:
-        problems.append("the judgement took %.1fs, at or past the 15s bound" % elapsed)
+    if os.name != "nt" and elapsed >= bound:
+        problems.append("the judgement took %.1fs, at or past the %gs bound (MERGE_READ_TIMEOUT %gs plus %gs)"
+                        % (elapsed, bound, budget, HANG_MARGIN_S))
     if problems:
         return False, "; ".join(problems)
     note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
             "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
             if os.name == "nt" else
-            "denied as unknown in %.1fs, inside the 60s hook budget" % elapsed)
+            "denied as unknown in %.1fs, inside the %gs bound and the 60s hook budget" % (elapsed, bound))
     return True, note
 
 
