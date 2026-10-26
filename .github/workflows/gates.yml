@@ -159,6 +159,9 @@ jobs:
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
+      - name: Auto-mode allow entry suite
+        run: python3 hooks/test_auto_mode_allow.py
+
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
