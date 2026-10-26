@@ -132,19 +132,26 @@ cfg() { # APPS_LIST [JQ_FILTER]: the whole config, with the filter applied last
     '{team_id:"TEAMFAKE01",device_udid:"FAKE-DEVICE-0001",asc_key_path:$key,asc_key_id:"KEYFAKE001",asc_issuer_id:"00000000-0000-0000-0000-00000000FAKE",repo_url:$url,apps:$apps}' | jq "${2:-.}"
 }
 copy_in() { jq -cn --arg f "$1" --arg t "$2" '{copy_in:[{from:$f,to:$t}]}'; }   # an EXTRA object for app
+acct() { # HOME [JQ_FILTER]: the account file under HOME, with fake values. The filter is applied last.
+  mkdir -p "$1/.config/ios-ship"
+  jq -n --arg key "$work/key.p8" \
+    '{team_id:"TEAMACCT01",device_udid:"FAKE-DEVICE-ACCT",asc_key_path:$key,asc_key_id:"KEYACCT001",asc_issuer_id:"11111111-1111-1111-1111-11111111FAKE"}' \
+    | jq "${2:-.}" > "$1/.config/ios-ship/account.json"
+}
 
-# tool_exec HOME JOB CONFIG ARGS...: the tool in place of this subshell, so $! is the tool's own PID. Clean environment.
+# tool_exec HOME JOB [CONFIG] ARGS...: the tool in place of this subshell, so $! is the tool's own PID. Clean environment.
+# It runs from run_dir when a case sets it (a subshell), else from elsewhere/.
 # SIGINT and SIGTERM are reset to the default, so a signal a case sends reaches the tool when the case started it in the background.
 tool_exec() {
   local home=$1; shift
-  cd "$work/elsewhere" && exec env -i HOME="$home" PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" \
+  cd "${run_dir:-$work/elsewhere}" && exec env -i HOME="$home" PATH="$stubs:$PATH" CALL_LOG="$calls" TMPDIR="$work/tmp" REAL_GIT="$REAL_GIT" REAL_DATE="$REAL_DATE" REAL_CP="$REAL_CP" \
     DATE_COUNTER="$work/datecount" COPY_PROBE="${COPY_PROBE:-}" XCODEGEN_TOUCH="${XCODEGEN_TOUCH:-}" CP_PARTIAL="${CP_PARTIAL:-}" \
     XCODEBUILD_RC="${XCODEBUILD_RC:-0}" XCODEBUILD_OUT="${XCODEBUILD_OUT:-}" XCODEBUILD_SLEEP="${XCODEBUILD_SLEEP:-}" \
     XCODEBUILD_FAIL_KIND="${XCODEBUILD_FAIL_KIND:-}" XCODEBUILD_FAIL_SCHEME="${XCODEBUILD_FAIL_SCHEME:-}" XCODEBUILD_HANG="${XCODEBUILD_HANG:-}" \
     XCODEBUILD_LOCK_EXPORT="${XCODEBUILD_LOCK_EXPORT:-}" XCODEBUILD_PID_FILE="${XCODEBUILD_PID_FILE:-}" \
     XCRUN_FAIL="${XCRUN_FAIL:-}" XCRUN_OUT="${XCRUN_OUT:-}" LAUNCH_FAIL="${LAUNCH_FAIL:-}" OSASCRIPT_HANG="${OSASCRIPT_HANG:-}" \
     STEP_TIMEOUT="${STEP_TIMEOUT:-}" REINSTALL_HOME="${REINSTALL_HOME:-}" TEAM_ID="${TEAM_ID:-}" DEVICE_UDID="${DEVICE_UDID:-}" \
-    ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" \
+    ASC_KEY_PATH="${ASC_KEY_PATH:-}" ASC_KEY_ID="${ASC_KEY_ID:-}" ASC_ISSUER_ID="${ASC_ISSUER_ID:-}" PHONE_APPS_JSON="${PHONE_APPS_JSON:-}" \
     perl -e '$SIG{INT} = $SIG{TERM} = "DEFAULT"; alarm shift; exec @ARGV' "${LIMIT:-60}" "$tool" "$@"
 }
 # run JOB CONFIG HOME ARGS...: the tool, from elsewhere/. Sets rc and fills $out. BG=1 starts it in the background and sets RUN_PID.
@@ -161,6 +168,15 @@ run() {
 }
 built() { grep -q '^xcodebuild' "$calls"; }
 args_have() { grep -q -- "$1" "$calls.args"; }
+# run_in DIR JOB HOME ARGS...: the tool with no CONFIG argument, run from DIR. Stdout goes to $work/stdout, stderr to $out.
+run_in() {
+  local dir=$1 job=$2 home=$3; shift 3
+  rm -rf "$work/tmp"; mkdir -p "$home" "$work/tmp"; : > "$calls"; : > "$calls.args"; : > "$calls.probe"; : > "$calls.plist"; rm -f "$work/datecount"
+  ( run_dir=$dir tool_exec "$home" "$job" "$@" ) > "$work/stdout" 2> "$out"; rc=$?
+}
+# trace FILE: the last run's call order and args, with the random scratch and export folder names made fixed, so two runs compare.
+trace() { { cat "$calls"; sed -E 's/ios-ship-(scratch|export)\.[A-Za-z0-9]+/ios-ship-\1.X/g' "$calls.args"; } > "$1"; }
+outside_repo() { ! "$REAL_GIT" -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 
 # ---- testflight world: a bare origin plus a clone that holds the config and the secrets' .gitignore ----
 tfconf=$work/repo/tools/ios-ship.json
@@ -773,6 +789,124 @@ home=$work/ci6home; COPY_PROBE="$(repo_of "$home" AdBlock)/ios/Secret.xcconfig" 
 need "exit $rc" test "$rc" -eq 0
 need "tilde not expanded to HOME" grep -qx 'build present' "$calls.probe"
 end_case "install: ~/ in copy_in.from expands to HOME"
+
+# ===================== account file and an optional CONFIG =====================
+# The account values come from env first, then the repo config, then $HOME/.config/ios-ship/account.json.
+# Each case that writes an account file uses its own fixture HOME, so no case reads another case's file.
+one_app "" 'del(.team_id,.device_udid,.asc_key_path,.asc_key_id,.asc_issuer_id)'; acct "$work/acct1"
+run testflight "$tfconf" "$work/acct1"
+need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
+need "account team not used" args_have 'DEVELOPMENT_TEAM=TEAMACCT01'
+need "account key ID not used" args_have '-authenticationKeyID KEYACCT001 '
+end_case "tf: the account file supplies every ID the config lacks"
+one_app "" 'del(.device_udid,.asc_key_path,.asc_key_id,.asc_issuer_id)'; acct "$work/acct2"
+run testflight "$tfconf" "$work/acct2"
+need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
+need "config team not used" args_have 'DEVELOPMENT_TEAM=TEAMFAKE01'
+need "account team beat the config" not args_have 'DEVELOPMENT_TEAM=TEAMACCT01'
+end_case "tf: the config's team ID wins over the account file"
+one_app "" 'del(.device_udid,.asc_key_path,.asc_key_id,.asc_issuer_id)'; acct "$work/acct3"
+TEAM_ID=TEAMENV003 run testflight "$tfconf" "$work/acct3"
+need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
+need "env team not used" args_have 'DEVELOPMENT_TEAM=TEAMENV003'
+need "config team used" not args_have 'DEVELOPMENT_TEAM=TEAMFAKE01'
+need "account team used" not args_have 'DEVELOPMENT_TEAM=TEAMACCT01'
+end_case "tf: an env team ID wins over the config and the account file"
+# A key unset in env, config and account file is refused. The notice names the config, the account file and the env var.
+for pair in team_id:TEAM_ID asc_key_path:ASC_KEY_PATH asc_key_id:ASC_KEY_ID asc_issuer_id:ASC_ISSUER_ID; do
+  k=${pair%%:*}; ev=${pair#*:}
+  one_app "" "del(.$k)"; acct "$work/acct-$k" "del(.$k)"
+  run testflight "$tfconf" "$work/acct-$k"
+  need "$k: rc=$rc, want non-zero" test "$rc" -ne 0
+  need "$k: build ran" not built
+  need "$k: notice lacks the config path: $(tail -1 "$out")" grep -qF "$tfconf" "$out"
+  need "$k: notice lacks the account file" grep -qF "$work/acct-$k/.config/ios-ship/account.json" "$out"
+  need "$k: notice lacks $ev" grep -qF "$ev" "$out"
+  end_case "tf: $k unset in env, config and account file is refused, and the notice names both files and $ev"
+done
+icfg "$(apps "$(app AdBlock)")" 'del(.team_id,.device_udid,.asc_key_path,.asc_key_id,.asc_issuer_id)'; acct "$work/acct-i1"
+install_run "$work/acct-i1"
+need "exit $rc" test "$rc" -eq 0
+need "account team not used" args_have 'DEVELOPMENT_TEAM=TEAMACCT01'
+need "account phone not used" args_have 'destination id=FAKE-DEVICE-ACCT '
+end_case "install: the account file supplies the phone and the team"
+icfg "$(apps "$(app AdBlock)")" 'del(.device_udid)'; acct "$work/acct-i2" 'del(.device_udid)'
+install_run "$work/acct-i2"
+need "exit $rc, want non-zero" test "$rc" -ne 0
+need "a clone or build ran" test -z "$(non_notify)"
+need "notice lacks the config path: $(tail -1 "$out")" grep -qF "$iconf" "$out"
+need "notice lacks the account file" grep -qF "$work/acct-i2/.config/ios-ship/account.json" "$out"
+need "notice lacks DEVICE_UDID" grep -qF DEVICE_UDID "$out"
+end_case "install: device_udid unset in env, config and account file is refused, and the notice names both files and DEVICE_UDID"
+
+# No CONFIG: the default is tools/ios-ship.json at the git toplevel of the current folder. It runs the calls that passing that path runs.
+one_app; run testflight "$tfconf" "$work/home"
+need "passed CONFIG: rc=$rc" test "$rc" -eq 0
+trace "$work/explicit.trace"
+run_in "$work/repo" testflight "$work/home"
+need "no CONFIG: rc=$rc: $(cat "$work/stdout" "$out" | tail -1)" test "$rc" -eq 0
+need "no CONFIG: no xcodebuild call" built
+trace "$work/implicit.trace"
+need "no CONFIG ran other calls than passing CONFIG" cmp -s "$work/implicit.trace" "$work/explicit.trace"
+end_case "tf: no CONFIG in a repo with tools/ios-ship.json runs the same calls as passing it"
+one_app; run testflight "$tfconf" "$work/home"
+need "passed CONFIG: rc=$rc" test "$rc" -eq 0
+trace "$work/explicit.trace"
+run_in "$work/repo/ios" testflight "$work/home"
+need "no CONFIG from a subfolder: rc=$rc: $(cat "$work/stdout" "$out" | tail -1)" test "$rc" -eq 0
+trace "$work/implicit.trace"
+need "no CONFIG from a subfolder ran other calls than passing CONFIG" cmp -s "$work/implicit.trace" "$work/explicit.trace"
+end_case "tf: no CONFIG from a subfolder of the repo finds the repo's tools/ios-ship.json"
+icfg "$(apps "$(app AdBlock)")"
+install_run "$work/n1" --no-install
+need "passed CONFIG: rc=$rc" test "$rc" -eq 0
+trace "$work/explicit.trace"
+run_in "$work/cfgrepo" install "$work/n2" --no-install
+need "no CONFIG: rc=$rc: $(cat "$work/stdout" "$out" | tail -1)" test "$rc" -eq 0
+trace "$work/implicit.trace"
+need "no CONFIG ran other calls than passing CONFIG" cmp -s "$work/implicit.trace" "$work/explicit.trace"
+end_case "install: no CONFIG in a repo, with --no-install right after the job, runs the same calls as passing it"
+
+one_app; run testflight "$tfconf" "$work/home" --export-only
+need "passed CONFIG: rc=$rc" test "$rc" -eq 0
+trace "$work/explicit.trace"
+run_in "$work/repo" testflight "$work/home" --export-only
+need "no CONFIG: rc=$rc: $(cat "$work/stdout" "$out" | tail -1)" test "$rc" -eq 0
+trace "$work/implicit.trace"
+need "no CONFIG ran other calls than passing CONFIG" cmp -s "$work/implicit.trace" "$work/explicit.trace"
+end_case "tf: no CONFIG with --export-only right after the job runs the same calls as passing it"
+
+# No CONFIG and no repo config: exit 2 with one line on stderr, and nothing is built.
+mkdir -p "$work/nowhere"
+"$REAL_GIT" init -q -b main "$work/norepo" >> "$work/git.log" 2>&1
+for job in testflight install; do
+  run_in "$work/nowhere" "$job" "$work/n3"
+  need "$job: the folder is inside a git repo" outside_repo "$work/nowhere"
+  need "$job: rc=$rc, want 2" test "$rc" -eq 2
+  need "$job: stdout is not empty" test ! -s "$work/stdout"
+  need "$job: stderr is not one line" test "$(wc -l < "$out" | tr -d ' ')" -eq 1
+  need "$job: the line does not name tools/ios-ship.json: $(cat "$out")" grep -qF 'tools/ios-ship.json' "$out"
+  need "$job: xcodebuild ran" not built
+  end_case "$job: no CONFIG outside a git repo exits 2 with one line and no xcodebuild"
+done
+for job in testflight install; do
+  run_in "$work/norepo" "$job" "$work/n4"
+  need "$job: rc=$rc, want 2" test "$rc" -eq 2
+  need "$job: stdout is not empty" test ! -s "$work/stdout"
+  need "$job: stderr is not one line" test "$(wc -l < "$out" | tr -d ' ')" -eq 1
+  need "$job: the line does not name tools/ios-ship.json: $(cat "$out")" grep -qF 'tools/ios-ship.json' "$out"
+  need "$job: xcodebuild ran" not built
+  end_case "$job: no CONFIG in a repo without tools/ios-ship.json exits 2 with one line and no xcodebuild"
+done
+
+# PHONE_APPS_JSON is the old install variable: install refuses it and names the replacement.
+icfg "$(apps "$(app AdBlock)")"
+PHONE_APPS_JSON='[{"name":"AdBlock"}]' install_run "$work/pj"
+need "exit $rc, want 2" test "$rc" -eq 2
+need "notice lacks --app: $(tail -1 "$out")" grep -qF -- '--app' "$out"
+need "notice lacks tools/ios-ship.json" grep -qF 'tools/ios-ship.json' "$out"
+need "xcodebuild ran" not built
+end_case "install: PHONE_APPS_JSON is refused with exit 2, and the notice names --app and tools/ios-ship.json"
 
 # ===================== run folder: sweep and teardown (decisions/test-temp-standard.md) =====================
 # The probe child sweeps the same temp root on its first request, prints its folder, and exits.
