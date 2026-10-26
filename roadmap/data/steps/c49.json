@@ -1,7 +1,7 @@
 {
   "title": "A ruling on a behaviour covers every test that expects the old one",
   "phase": "cleanup",
-  "status": "review",
+  "status": "active",
   "order": 104.2,
   "why": "Your gripe, Oct 26: a session asked you again whether it may change an older test that expects a behaviour you ruled out at 21:27 (a rule save clears the partly-sent mark). It said your word covered one test, and a failing test only changes on your word.",
   "note": "Built Oct 26 on batch-oct26: draft PR #589 (a ruling covers its stale tests), head 3d648b0, two Sonnet review rounds, all findings fixed, local lints green. CLAUDE.md: outcomes-tests-are-claims sends a stale test to the owner only when no ruling covers it; outcomes-word-covers-named-act adds that the owner's ruling covers each test and path expecting exactly what it ruled out, cited with its time. Builder and reviewer gain class (d): an owner ruling in the brief or records; a neighbouring test stays class (c). Deviation: CLAUDE.md word count 2898 to 2909, since each added clause closes a hole review found. Head sent to the build advisor to join the batch.",
