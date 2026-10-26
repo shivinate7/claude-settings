@@ -1,6 +1,6 @@
 ---
 name: compliance-check
-description: Use when the user asks how well a repo follows the global rules, or says "compliance check", "audit this repo against CLAUDE.md", or "bring this repo into shape". Not for ordinary code edits. Reads the repo, scores it per rule group, and gives a ranked plan of lanes.
+description: Use when the user asks how well a repo follows the global rules, or says "compliance check", "audit this repo against CLAUDE.md", or "bring this repo into shape". Not for ordinary code edits. Reads the repo, scores it per rule group, folder shape and screen readiness, and gives a ranked plan of lanes.
 ---
 
 Audit the current repo (the child) against the global rules (the parent). Read and report
@@ -36,6 +36,12 @@ parent's install. If a file is missing or unreadable, mark the rule `unknown`.
 Probe only what lives in the child's tree, from `probes.md` in this skill folder. A rule about
 session practice, with no trace in the tree, is `n/a (session)`.
 
+Three groups read the tree, not a rule prefix. Each comes after the rule groups:
+
+- `Layout`: folder shape against `lint/layout.json` and the child's extras file.
+- `Design`: screen readiness against `ux/`.
+- `Copies`: held for the copy finder. Until its probe file lands, report it as `unknown - no probe`.
+
 ## 3. Run the probes
 
 Run each probe in `probes.md` from the child's root. Run the copy probe in `copies.md` too. One bounded command per probe, and keep
@@ -46,14 +52,16 @@ not repeat its steps.
 
 ## 4. Scorecard
 
-One line per group, in the order of step 2:
+One line per group, in the order of step 2, then Layout, Design and Copies:
 
 ```
 <Group>: <in shape | partial | out | parent-covered | n/a | unknown> - <finding> (<file:line or command>)
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
-known score, and lists each unknown probe after it. Under the group lines, name each parent rule
+known score, and lists each unknown probe after it. Layout and Design list each item under the
+group line, with its own grade, so one score never hides a gap. A child with no extras file
+scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
 
 ## 5. Plan
