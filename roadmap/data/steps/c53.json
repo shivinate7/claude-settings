@@ -1,0 +1,10 @@
+{
+  "title": "The merge tool works from a cloud session (REST calls, no GraphQL)",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.8,
+  "why": "Cloud build threads hold your standing merge grant, which says merge only through merge/merge.py. merge.py cannot run in a cloud session today.",
+  "note": "Checked Oct 26 at claude-settings 149f4bc5 from the build advisor's cloud container. Finding: gh works through the session proxy for REST (gh api repos/... answers, with admin rights), but GitHub GraphQL is refused with HTTP 403 ('not available from Claude Code sessions'). gh auth status reports a failed login, which is misleading: REST calls still work. merge.py calls gh pr view (2), gh pr list, gh pr checks, gh pr merge and gh repo view, which all use GraphQL, so each fails in the cloud. gh run list and gh api already use REST. Fix: one home in merge.py for these five reads and the merge, on gh api REST routes (pulls, check-runs and statuses, pulls/{n}/merge with sha), kept working on the Mac and Windows. It touches a gate's verdict (which checks count as green), so it is a lane with a test-author, builder and fresh reviewer. The proxy also offers CCR REST routes for draft/ready and auto-merge: POST /repos/{o}/{r}/pulls/{n}/ccr/ready_for_review. Advisor pick: build it right after the pilot, before batch 1, so every later batch merges itself.",
+  "ask": "No brief yet. Waits on your pick for the pilot's merge path.",
+  "updatedAt": "2026-10-26T03:40:00Z"
+}
