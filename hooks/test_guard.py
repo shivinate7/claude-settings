@@ -10612,8 +10612,7 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
-# ---- designer: the design folder only (owner, 2026-10-26, waiting-page item 15; decision
-# design-agents). A designer writes mockups, not product code. The folder is the `design` kind of
+# ---- designer: the design folder only (decision design-agents). A designer writes mockups, not product code. The folder is the `design` kind of
 # lint/layout.json, read from the file. Failure classes: false allow (a path outside the folder, or a
 # near-miss name, slips through) and false deny (a mockup, its notes, or a scratch file is blocked).
 DZ = dict(agent_id="dz1", agent_type="designer", cwd=GITMAIN)
@@ -11786,8 +11785,8 @@ add("ceiling: Agent Plan with model opus is allowed (standing word)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
 add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing word)", "allow",
     tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
-# The designer and the design reviewer run Opus by the owner's standing word (2026-10-26, waiting-page
-# item 15, decision design-agents). A near-miss role name earns no word.
+# The designer and the design reviewer run Opus by the owner's standing word
+# (decision design-agents). A near-miss role name earns no word.
 for _role in ("designer", "design-reviewer"):
     for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
         add("ceiling: %s %s on %s is allowed (standing word)" % (_tool, _role, _model), "allow",
