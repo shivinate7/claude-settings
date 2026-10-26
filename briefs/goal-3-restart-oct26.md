@@ -17,5 +17,5 @@ against claude-settings main 149f4bc5 (#574).
 Paste this into a fresh, plain claude-settings session (no /goal):
 
 ```
-Alert test for c31. Do nothing else. In one line, tell me a test question comes in 2 minutes. Then run one AskUserQuestion with the question "Did this reach you as a desktop banner, a phone push, or nothing?" and options banner, push, nothing. After I answer, report what I picked and stop.
+Alert test for c31. Do nothing else. Wait 90 seconds first (Start-Sleep 90 in PowerShell; if waiting is refused, ask at once and say so), so I can minimize the app. Then run one AskUserQuestion with the question "Did this reach you as a desktop banner, a phone push, or nothing?" and options banner, push, nothing. After I answer, report what I picked and stop.
 ```
