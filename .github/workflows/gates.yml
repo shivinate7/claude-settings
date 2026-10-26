@@ -774,14 +774,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: c62 probe (temporary)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        env:
-          C62_ROUNDS: "200"
-        run: python hooks/c62_probe.py
-
       - name: Guard fixture suite
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && github.event_name != 'workflow_dispatch' && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
         run: python hooks/test_guard.py
 
       - name: Guard fixture suite (Windows slice)

@@ -1536,6 +1536,10 @@ MUTATIONS = [
      '    if not _claim(path, raw):\n        return None\n',
      '',
      "override", 'override: a call that read a one-act pass before it was spent is refused'),
+    ("override: the claim marker names the session, not the pass, so a new pass is refused",
+     'marker = "%s.%s.claim" % (path, hashlib.sha256(raw).hexdigest()[:32])',
+     'marker = "%s.claim" % path',
+     "override", 'override: a call that read a one-act pass before it was spent is refused'),
 ]
 
 
