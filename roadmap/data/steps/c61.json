@@ -1,0 +1,10 @@
+{
+  "title": "Main's push run goes fully green: the Windows guard and merge jobs fit their caps",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.35,
+  "why": "A main that is never fully green hides the day it really breaks.",
+  "note": "Finding, Oct 26 (build advisor 2, main e5525a6 after #586): gates-windows-guard and gates-windows-merge ended 'cancelled' on main's push run. Lanes d6 and c47 part 1 saw the same pair hit their 15 and 20 minute caps on full non-PR suites; on PR runs they pass. So main's push run is never fully green. Rule git-integration-branch-merge: a job that ends at its cap with no red step is re-capped or split. Fix, one cloud lane: measure each job's full-suite time on Windows first, then re-cap or split in gates.yml. Placed ahead of c50 (triage, Oct 26): main's own run is the check every batch trusts, and the fix needs no answer from you. The build advisor briefs it.",
+  "ask": "",
+  "updatedAt": "2026-10-26T08:45:00Z"
+}
