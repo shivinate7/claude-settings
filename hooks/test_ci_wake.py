@@ -1230,8 +1230,8 @@ def case_wait_for_lists_back_off_like_the_status_reads():
 # answer ends in seconds. A verdict case uses 15 s: once the deadline has passed, watch_run makes no status
 # read (by design), so a tight deadline under a slow stub start would drop the status-read check.
 VERDICT_DEADLINE = "15"
-REPO_APP = "shivinate7/home-app"   # the PR's repo
-REPO_HOME = "shivinate7/home"      # the folder's repo: records only, no workflow files
+REPO_APP = "shivinate7/home"            # the PR's repo
+REPO_HOME = "shivinate7/home-archive"   # the folder's repo: no workflow files
 
 
 def wf(state="active", repo=None):
