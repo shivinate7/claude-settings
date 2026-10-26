@@ -1,0 +1,10 @@
+{
+  "title": "A slow browser install never cancels the gates job",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.36,
+  "why": "A slow download mirror must not turn a good batch red.",
+  "note": "Finding, Oct 26 (build advisor 2, from d6's shared screenshot command): the gates job on batch PR #603 was cancelled at its 36-minute cap inside the \"shoot fixture suite\" step. Its playwright install --with-deps chromium took over 11 minutes on slow apt mirrors, against 27 s on #595's run. The step has no timeout of its own and shares the job's cap. Re-run once by the build advisor. Fix, one small cloud lane: give the step its own timeout-minutes, or move the shoot suite to its own job, and consider caching the browser; needs no answer from you. Placed ahead of c44 (triage, Oct 26): it can cancel any batch run, like c61 and c62, so it follows them.",
+  "ask": "",
+  "updatedAt": "2026-10-26T10:50:00Z"
+}
