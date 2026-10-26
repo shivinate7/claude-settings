@@ -1,38 +1,36 @@
-# o13: one name per thing, the claude-settings glossary
+# o13: one word per meaning, a proposal for shiv's yes
 
-Cloud build thread brief. Build advisor (2), Oct 26, against claude-settings main bf084df.
-Base: main bf084df; never rebase onto main after review. claude-settings only: each child repo's own
-GLOSSARY.md is Roll out; do not touch other repos. Where the file lives in the shared layout is o2's;
-put it at the repo root now.
+Cloud build thread brief. Build advisor (4), Oct 26, against claude-settings main 3b96ce8.
+Base: main 3b96ce8. claude-settings only; never push to other repos. Push roadmap edits to the
+branch only; only Triage the roadmap (3) republishes.
+
+## Done already
+
+GLOSSARY.md with 17 workflow terms landed in #597 (batch #595). This lane does not redo it.
 
 ## Rulings
 
-- Owner, Oct 26: GLOSSARY.md. claude-settings holds only terms that matter in every repo; each repo
-  holds its own domain terms and never redefines a global one.
-- Advisor picks, standing: pointed at from CLAUDE.md, not inlined; borrow from mattpocock/skills
-  ubiquitous-language, credited, rather than install it.
+- shiv, Oct 26 (page item 10, a): a lane proposes one word per meaning, for his yes.
+- shiv's gripe, Oct 26: too many overlapping words (gates, harnesses, steps, checks, tests and
+  more). The fix covers them all, not only those examples.
+- shiv, Oct 26: claude-settings holds only terms that matter in every repo; each repo its own
+  domain terms. Other repos follow the roll-out ruling (item 16); do not touch them.
 
-## Task
+## Task (proposal only; rename nothing yet)
 
-1. GLOSSARY.md: the workflow nouns as one table (term, meaning in one STE sentence, home: the file
-   or record that owns it, "not:" names to avoid). Start from: lane, batch, integration PR,
-   worktree, handoff, step, ruling, decision, debt, note, guard, gate, check, owner, override pass,
-   orchestrator, builder, reviewer. Take each meaning from the rule or record that defines it; never
-   invent one. A term with two meanings in the repo today: list it, pick neither, park it in the PR body.
-2. CLAUDE.md: one pointer sentence (STE). agents/builder.md, agents/reviewer.md and the Plan brief
-   path: one line each to check new names against the glossary.
-3. A cheap CI check: each row's home path exists, and no changed file adds a path segment that a
-   row lists under "not:". Give it one home in lint/ and a step in gates.yml.
-4. Optional, only if small: a glossary skill that seeds a repo's GLOSSARY.md from a template.
-
-## Failure classes and proof
-
-- Test-author first, red on main: a row whose home is missing fails; a new path using a "not:"
-  name fails; a mention of a "not:" word in prose does not (false alarm); a clean tree passes.
-- Rule count: rule_audit's pinned counts move only by any new anchor; say which bucket.
-- A fresh Sonnet reviewer reads the diff (it adds a check).
+1. List every workflow word that shares a meaning with another, across GLOSSARY.md, CLAUDE.md,
+   rules, agents/, skills/, hooks/ messages, lint/ messages, output-styles/ and docs/. Measure use
+   counts with grep; never estimate.
+2. For each group: the meanings in play (quote the defining sentence and its file), the word you
+   propose for each meaning, the words to retire, the use count each change touches, and the
+   risk (a hook, check or rule anchor that reads the word).
+3. Write it to plans/o13-one-word-per-meaning.md on the roadmap branch (pull before the write).
+   Plain words first, one table per group, a pick for each. Cap: 2 pages.
+4. Send a 10-line summary with the file path to "Answer all waiting decisions in one place"
+   (cmsg_01DoF7thf3iq2Srr1UsfXgh2ADTZhQexksM43HTmuCPZMa) for shiv's waiting page, and the same to
+   the build advisor. The rename lane is briefed only after shiv's yes.
 
 ## Report
 
-Cap 20 lines: Done, Deviations, Next. Send the green, reviewed head and branch to
-"Advise the claude-settings build (2)". No question for shiv: park any in the PR body.
+Cap 15 lines: Done, Deviations, Next. Include "Port to other repos: yes or no, and why".
+Report to "Advise the claude-settings build (4)" (cmsg_01DoF7thf3iq2Srr1UsfXgh2EyHwiKacoTT56k4JHuc2RT).
