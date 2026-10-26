@@ -3,7 +3,7 @@
 The records page lists the records of a repo: its rules, decisions, debts and plans.
 
 Plain words, one row each, and the model and
-effort beside it, like the model table in the decision subagent-model-cap. The page is
+effort beside it, like the model table in the decision agent-model-cap. The page is
 generated and never edited by hand. Each description comes from the source it describes, so
 the page cannot drift from it.
 
@@ -67,7 +67,7 @@ import layout  # noqa: E402  the one home of where records live (lint/layout.jso
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
-TABLE_NAME = "subagent-model-cap.md"  # the model table, a decision record
+TABLE_NAME = "agent-model-cap.md"  # the model table, a decision record
 INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
 CELL_CAP = 1000  # ceiling on a description cell, in characters, the ellipsis included. It sits above the longest cell, so none is cut (decision catalog-cells-never-cut).
@@ -336,7 +336,7 @@ Where each text comes from:
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, and must hold a `SOURCE.md`, which says where it came from. The page omits that file's text.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
-Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
+Model and effort come from the model table (decision `agent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
 
 """
 

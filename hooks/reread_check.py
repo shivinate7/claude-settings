@@ -5,7 +5,7 @@ Modes:
 - --post-compact: After compaction, sets the session's flag that its handoff is not read.
 - --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
   file is that handoff. Never denies the read. A payload with `agent_id` (the hook
-  fired inside a subagent) clears nothing: only the session's own Read counts.
+  fired inside an agent) clears nothing: only the session's own Read counts.
 - --stop: At Stop, while the session's flag that its handoff is not read is set and the
   handoff exists, blocks once per turn and names the handoff path.
 

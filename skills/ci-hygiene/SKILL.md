@@ -11,8 +11,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 0. **Read the visibility first.** Run `gh repo view --json visibility`. See `snippets.md`,
    section 11. Note which steps apply. Steps tagged **(private repos)** save billed minutes only.
    The **Public repos** section applies to a public repo. An internal repo counts as private.
-1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
-   Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
+1. **Measure first.** Rank the CI step times of a finished run. Optimize the slowest CI step only.
+   Never guess which CI step is slow. Measure wall time on the slowest job, not runner minutes
    alone: a cut off a job that is not the slowest saves money, not waiting. **(private repos)**
    Also read the billed minutes each week, and set a spending alarm in the billing settings.
    See `snippets.md`.
@@ -20,7 +20,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    beside each time: CPU use, and what else ran. A time taken under load does not compare with
    one taken on a quiet machine.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
-   step may already run in parallel, or be cached.
+   CI step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe). A check that cannot

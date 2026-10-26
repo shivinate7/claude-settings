@@ -41,7 +41,7 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
-  - `ci`: a step name that appears in a `- name:` line of .github/workflows/gates.yml.
+  - `ci`: a CI step name that appears in a `- name:` line of .github/workflows/gates.yml.
   - `unmechanized`: the literal token, paired with a `reason` of real length. A rule a check
     could still cover needs a row saying so, and saying why.
   - `judgment`: the same shape and reason floor as `unmechanized`, with its own pin. A rule
@@ -94,7 +94,7 @@ WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 # Where a rule id sits in each call that writes a guard.log line (0-based argument index).
-GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}
+GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 
 # FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
@@ -367,7 +367,7 @@ def _string_constants(node) -> set:
 def guard_rule_names(text: str, path: str = "<source>"):
     """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
     that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
-    record() (third argument) or ask_step() (first), by position or as `rule=`; the table in
+    record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
     diff_rule(); and the `code, why = {...}` role-scope table. A call that passes a variable names
     no id. An f-string id cannot be listed, so it raises ValueError naming `path:line`: a rule
     that can fire but is not listed would hide from a never-fired cull."""
@@ -399,7 +399,7 @@ def guard_rule_names(text: str, path: str = "<source>"):
 
 def emitted_rule_ids(root: str = ROOT) -> set:
     """Every rule id the guard can write to guard.log: the one home for that list.
-    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `subagent-model-cap`
+    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `agent-model-cap`
     reverts). No hook writes an STE code now."""
     ids = set()
     config_watch = os.path.join(root, "hooks", "config_watch.py")

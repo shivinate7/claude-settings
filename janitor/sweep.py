@@ -1614,7 +1614,7 @@ def _matching_checkout(cwd: str, checkout_paths):
 
 def _under_agent_worktree(cwd: str) -> bool:
     """True when CWD sits under a `.claude/worktrees/<name>` checkout. No session record names a
-    subagent, so the sweep cannot tell a running subagent's worktree from an ended one. It leaves
+    agent, so the sweep cannot tell a running agent's worktree from an ended one. It leaves
     those folders to janitor/agent_end_reap.py (agent-end-reap-stops-what-a-finished-agent-left),
     which runs when the harness says the agent ended."""
     parts = os.path.normcase(os.path.realpath(cwd)).replace("\\", "/").split("/")

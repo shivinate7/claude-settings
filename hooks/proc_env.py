@@ -3,7 +3,7 @@
 The one home of that read (decision a-kill-by-pid-needs-an-owned-pid). The guard asks it before it
 allows a kill of a PPID-1 pid; the SessionEnd sweep asks it before it stops a scratchpad orphan.
 
-A server a subagent's Bash call starts holds `CLAUDE_CODE_SESSION_ID=<the session's id>` in its
+A server an agent's Bash call starts holds `CLAUDE_CODE_SESSION_ID=<the session's id>` in its
 exec-time environment, the same id the hook payload carries as `session_id`. No agent-level tag
 exists. The tool's own zsh does not hold it at exec (the shell sets it afterwards), so a forked
 shell stub reads untagged. Read on macOS; the Linux `/proc` read is unmeasured live.

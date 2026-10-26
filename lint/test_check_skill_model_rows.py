@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Cases for lint/check_skill_model_rows.py. Run: python3 lint/test_check_skill_model_rows.py
 
-decisions/subagent-model-cap.md gets one row per skill under skills/.
+decisions/agent-model-cap.md gets one row per skill under skills/.
 Each row says "no model pin; runs on the caller's model". These cases pin the check that enforces it.
 
 Interface the check must meet (the builder builds to it):
 - A standalone script. It finds the repo from its own path, as lint/check_landed_dirs.py does.
-  It reads decisions/subagent-model-cap.md and the folders directly under skills/.
+  It reads decisions/agent-model-cap.md and the folders directly under skills/.
 - A skill is a folder directly under skills/ that holds a file named exactly SKILL.md (case
   exact, so skill.md does not count). Dot folders and __pycache__ are never skills.
   A folder without SKILL.md, and a stray file, need no row.
@@ -37,7 +37,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CHECK = os.path.join(HERE, "check_skill_model_rows.py")
-RECORD = "decisions/subagent-model-cap.md"
+RECORD = "decisions/agent-model-cap.md"
 GATES = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
@@ -227,7 +227,7 @@ class Coverage(unittest.TestCase):
     def test_unreadable_input_fails_with_a_message(self):
         # The record and skills/ cases use no skill rows, so an input read as empty cannot pass.
         cases = {
-            "record missing": (skills("alpha"), "subagent-model-cap.md"),
+            "record missing": (skills("alpha"), "agent-model-cap.md"),
             "skills folder missing": ({RECORD: record([])}, "skills"),
             "skills is a file": ({RECORD: record([]), "skills": "not a folder\n"}, "skills"),
         }
@@ -316,7 +316,7 @@ class Fences(unittest.TestCase):
 
 class OpenFences(unittest.TestCase):
     """An unclosed fence or comment hides every later line. The check fails visibly, and names the open one
-    and the line it starts on, so a reader does not hunt for the cause (subagent-model-cap)."""
+    and the line it starts on, so a reader does not hunt for the cause (agent-model-cap)."""
 
     def said(self, opener, closer, hidden):
         """-> (exit code, output, start line, record). `hidden` is the skills whose rows sit after the opener."""

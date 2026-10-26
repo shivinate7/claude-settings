@@ -227,7 +227,7 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(out["total"]["project"], "TOTAL")
         names = [p["project"] for p in out["projects"]]
         self.assertIn("proj_json", names)
-        for key in ("sessions", "worker_transcripts", "answers", "memory_writes",
+        for key in ("sessions", "agent_transcripts", "answers", "memory_writes",
                     "scratchpad_writes", "ruling_lines", "process_only_lines",
                     "reach_found", "reach_not_found", "unknown"):
             self.assertIn(key, out["total"])
@@ -250,41 +250,41 @@ class RulingCensusTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0)
         self.assertIn("project", run.stdout)
-        self.assertIn("worker transcripts", run.stdout)
+        self.assertIn("agent transcripts", run.stdout)
         self.assertIn("TOTAL", run.stdout)
         self.assertIn(ruling_census.NOT_FOUND_NOTE, run.stdout)
         self.assertIn("Timed out:", run.stdout)
 
-    def test_07_worker_transcript_folds_in_but_is_not_a_session(self):
-        # A worker transcript lives at <project>/<session-id>/subagents/*.jsonl. Its memory
+    def test_07_agent_transcript_folds_in_but_is_not_a_session(self):
+        # An agent transcript lives at <project>/<session-id>/subagents/*.jsonl. Its memory
         # writes, scratchpad writes and answers count. Its own session slot does not: only
         # the top-level *.jsonl files are sessions. Its "ruling" lines are not folded in
         # either (see the module docstring).
         project_dir = self.make_project("proj_nested")
         write_transcript([human("top", cwd=self.repo)],
                           os.path.join(project_dir, "top.jsonl"))
-        worker_dir = os.path.join(project_dir, "top", "subagents")
-        os.makedirs(worker_dir, exist_ok=True)
-        worker_records = [
+        agent_dir = os.path.join(project_dir, "top", "subagents")
+        os.makedirs(agent_dir, exist_ok=True)
+        agent_records = [
             human("child", cwd=self.repo),
             tool_use_msg("Write", {
                 "file_path": "/tmp/scratchpad/child.txt",
-                "content": "a worker scratch note",
+                "content": "an agent scratch note",
             }, id_="w_write_1"),
             tool_result_msg("w_write_1"),
             tool_use_msg("AskUserQuestion", {"questions": [{"question": "Q?"}]},
                          id_="w_ask_1"),
             tool_result_msg("w_ask_1",
                              'Your questions have been answered: "Q?"="Yes". Continue.'),
-            assistant_text("A worker line about a ruling that should not be folded in."),
+            assistant_text("An agent line about a ruling that should not be folded in."),
         ]
-        write_transcript(worker_records, os.path.join(worker_dir, "child.jsonl"))
+        write_transcript(agent_records, os.path.join(agent_dir, "child.jsonl"))
 
         timeouts = [0]
         rows, _total = ruling_census.run_census(self.root, None, timeouts)
         counts = dict(rows)["proj_nested"]
         self.assertEqual(counts["sessions"], 1)
-        self.assertEqual(counts["worker_transcripts"], 1)
+        self.assertEqual(counts["agent_transcripts"], 1)
         self.assertEqual(counts["scratchpad_writes"], 1)
         self.assertEqual(counts["answers"], 1)
         self.assertEqual(counts["ruling_lines"], 0)
@@ -590,22 +590,22 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(ruling_census.cap_text("short text"), "short text")
         self.assertIsNone(ruling_census.cap_text(None))
 
-    def test_26_sample_includes_worker_transcript_answers(self):
-        project_dir = self.make_project("proj_sample_worker")
+    def test_26_sample_includes_agent_transcript_answers(self):
+        project_dir = self.make_project("proj_sample_agent")
         write_transcript([human("top", cwd=self.repo)],
                           os.path.join(project_dir, "top.jsonl"))
-        worker_dir = os.path.join(project_dir, "top", "subagents")
-        os.makedirs(worker_dir, exist_ok=True)
-        worker_records = [
+        agent_dir = os.path.join(project_dir, "top", "subagents")
+        os.makedirs(agent_dir, exist_ok=True)
+        agent_records = [
             human("child", cwd=self.repo),
             tool_use_msg("AskUserQuestion", {"questions": [{"question": "WQ?"}]},
                          id_="w_ask_1"),
-            tool_result_msg("w_ask_1", 'Answered: "WQ?"="Worker answer". Continue.'),
+            tool_result_msg("w_ask_1", 'Answered: "WQ?"="Agent answer". Continue.'),
         ]
-        write_transcript(worker_records, os.path.join(worker_dir, "child.jsonl"))
+        write_transcript(agent_records, os.path.join(agent_dir, "child.jsonl"))
         pools = ruling_census.collect_sample_pools(self.root)
-        answers = {item["answer"] for item in pools["proj_sample_worker"]}
-        self.assertIn("Worker answer", answers)
+        answers = {item["answer"] for item in pools["proj_sample_agent"]}
+        self.assertIn("Agent answer", answers)
 
     def test_27_present_only_keeps_only_the_present_project(self):
         # proj_present_missing's cwd points at a directory that does not exist on this

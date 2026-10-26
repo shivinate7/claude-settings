@@ -18,8 +18,8 @@ The predicate is the act's direction:
 - A word that is no known action is a pathspec, read as a push. A known action that is neither a
   read nor a push falls on the stack side.
 
-The stack refusal points the worker at the two reads that stay allowed and at a commit on a branch
-of the worker's own. It names no forbidden action. Reason: the harness's worktree reminder names
+The stack refusal points the agent at the two reads that stay allowed and at a commit on a branch
+of the agent's own. It names no forbidden action. Reason: the harness's worktree reminder names
 `apply` and `drop`, which this rule forbids in a shared checkout. That reminder is not in this
 repository and is not changed here.
 

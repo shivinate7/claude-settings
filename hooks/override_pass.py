@@ -8,18 +8,18 @@ judge() in hooks/guard.py registers finds an act no pass lifts (decision owner-o
 A pass is the file <config dir>/state/override/<session_id>.json, {"kind": "once"|"timed",
 "until": ISO-8601 UTC}. It covers only the session that typed it. state/ is frozen against Claude's
 writes, so a session cannot grant itself a pass. It is valid only while now < until.
-  once   `override`, or `override <reason>`: the next refused act, or 10 minutes. A subagent's call
+  once   `override`, or `override <reason>`: the next refused act, or 10 minutes. An agent's call
          never spends it. The reason, on one line, goes to guard.log.
   timed  `override 15m`, `override 2h`, `override 15` (minutes): every refused act until the end.
-         It reaches subagents. The owner picks the length, so there is no cap.
+         It reaches agents. The owner picks the length, so there is no cap.
   `override off` ends any pass at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
   nothing (an intended "off" must never become a grant). A later line starting with the word grants
   nothing.
 An Opus pass is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null or one role}. It lives beside the override pass, so the two never
-replace each other. It lifts only the Opus spawn ask of guard rule subagent-model-cap, never that
-rule's settings-write ask, and it reaches subagents.
+replace each other. It lifts only the Opus spawn ask of guard rule agent-model-cap, never that
+rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
@@ -47,7 +47,7 @@ PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the f
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus pass needs its unit
-OPUS_RULE = "subagent-model-cap"  # the one rule an Opus pass lifts, and only its spawn ask
+OPUS_RULE = "agent-model-cap"  # the one rule an Opus pass lifts, and only its spawn ask
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan and Explore,
 # which run Opus by standing word (OPUS_STANDING_ROLES in hooks/guard.py).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",

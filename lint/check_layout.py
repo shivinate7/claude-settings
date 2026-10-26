@@ -7,7 +7,7 @@ Three things can drift from it, and this check reads each:
   1. The guard's literal. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
      its own literal. That literal must equal LAYOUT_FILE in lint/layout.py.
   2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
-     mutation harnesses aside. A string constant there may not name a record
+     mutation tests aside. A string constant there may not name a record
      path: a layout or legacy path of a record or listed kind, followed by `/` or holding one, at
      either end or inside (`decisions/`, `docs/decisions`, `x/decisions/a.md`), or a bare folder
      name passed to a `join` or a `/` (`Path(root) / "decisions"`).
@@ -33,7 +33,7 @@ ROOT = os.path.dirname(HERE)
 
 GUARD = "hooks/guard.py"
 GUARD_NAME = "RECORD_LAYOUT_FILE"
-READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and harnesses aside
+READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and mutation tests aside
 NOT_READERS = ("test_", "mutate_", "prove_")
 ACTION_INPUTS = (("actions/ruling-kind/action.yml", "records-dir"), ("actions/ste-lint/action.yml", "decisions-dir"))
 ACTION_SCRIPTS = ("actions/ruling-kind/check.sh", "actions/ste-lint/run.sh")

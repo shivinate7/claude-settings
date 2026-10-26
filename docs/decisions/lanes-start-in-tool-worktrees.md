@@ -20,7 +20,7 @@ Named limits, each a form Claude rarely writes:
 - A repo named only by `--git-dir`, and a target that holds a variable (`$HOME/wt`), read as unknown and pass.
 - A hand-typed read-only checkout (a review or a "before" image) is denied. EnterWorktree serves that need too.
 
-Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only a subagent's call. The Agent prompt hook in `settings.json` judges brief contents, and its block names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
+Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its block names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two lane agents wrote into the main clone. Landed 2026-10-26.
 

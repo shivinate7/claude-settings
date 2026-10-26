@@ -13,7 +13,7 @@ the hook launchers in settings.json: python3, then python, skipping a path under
 Microsoft Store alias). These cases stub uname and python on a PATH of their own, so any host runs them.
 
 Never runs a wide delete: HOME and the cwd are temp dirs, and the module refuses to run if the shim
-under test is the real rm. RM_SHIM_UNDER_TEST overrides the shim path (red proofs on a scratch shim).
+under test is the real rm. RM_SHIM_UNDER_TEST overrides the shim path (red runs on a scratch shim).
 Tests live here, not in bin/: bin/ is landed on PATH.
 """
 import os, re, shutil, subprocess, sys, tempfile, unittest

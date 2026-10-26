@@ -3637,7 +3637,7 @@ class AgentEndReapTests(unittest.TestCase):
         self.same(sweep._matching_checkout(os.path.join(self.repo, "f"), [self.repo, self.wts["reapA"]]),
                   self.repo)
 
-    def test_subagent_stop_names_the_agent_worktree_from_any_cwd(self):
+    def test_agent_stop_names_the_agent_worktree_from_any_cwd(self):
         for cwd in (self.wts["reapA"], self.repo):
             target = self.reap.target_worktree(
                 {"hook_event_name": "SubagentStop", "agent_id": "reapA", "cwd": cwd})
@@ -3688,7 +3688,7 @@ class AgentEndReapTests(unittest.TestCase):
             cleanup()
 
     def test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper(self):
-        # No session record names a subagent, so the sweep skips every `.claude/worktrees/*` cwd,
+        # No session record names an agent, so the sweep skips every `.claude/worktrees/*` cwd,
         # even a proven orphan.
         pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapB"])
         try:
@@ -3897,7 +3897,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         with self.subTest(arm=name):
             self.assert_own_left(subject)
 
-    def test_subagent_stop_keeps_its_own_clean_pushed_worktree(self):
+    def test_agent_stop_keeps_its_own_clean_pushed_worktree(self):
         # The hook keeps the own tree at agent end. Stop and WorktreeRemove name no worktree to end.
         self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.primary}))
         own = self.add("trigger")
@@ -5346,7 +5346,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
         self.assertKept(tree, out)
 
-    # ---- (i) a detached tree: the red-proof checkout a test-author makes under .claude/worktrees
+    # ---- (i) a detached tree: the red-run checkout a test-author makes under .claude/worktrees
 
     def test_i_removes_a_detached_tree_on_a_pushed_commit_idle_5h(self):
         """No local branch holds the commit. It lives on the pushed lane, so the tree can go."""

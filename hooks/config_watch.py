@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The PostToolUse and Stop watch on the subagent model cap.
+"""The PostToolUse and Stop watch on the agent model cap.
 
 Modes:
-- PostToolUse: After a write or shell call, checks the subagent model cap in each watched
+- PostToolUse: After a write or shell call, checks the agent model cap in each watched
   settings file. Reverts a cap change that the guard did not ask about, or a raise past its
   expiry time.
-- Stop: At the end of the turn, checks the subagent model cap in each watched settings file.
+- Stop: At the end of the turn, checks the agent model cap in each watched settings file.
   Reverts a cap change that no tool call explains, or a raise past its expiry time.
 
 Claude Code runs this file after every tool call that matches, and again when the turn ends:
@@ -29,7 +29,7 @@ guard's ask is the layer for a shell write from a subdirectory or another worktr
 ask is the first layer and this revert is the second.
 
 THIS IS REVERT AND REPORT, NOT PREVENTION. The write lands and is then undone. That is acceptable
-here and nowhere wider: the cap takes effect when a subagent is next spawned, and the restore
+here and nowhere wider: the cap takes effect when an agent is next spawned, and the restore
 happens before the next tool call can spawn one.
 
 DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported, never denied. So
@@ -39,15 +39,15 @@ reverted, and only when the guard did not ask about it.
 THE EXPIRY. An approved lift is revoked at its deadline (decision `opus-grant-expires`, an Opus grant expires within 24 hours).
 
 The fix reads a second field the override file carries OUTSIDE its `env` block:
-`_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
-`env` is exported into every subagent's shell, which an expiry timestamp has no business being.
-And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
+`_agentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
+`env` is exported into every agent's shell, which an expiry timestamp has no business being.
+And a key inside `env` is read by `guard.AGENT_CAP_KEY`, which would turn a plain expiry write
 into a second cap-change ask the field is not one. The guard's PreToolUse ask never sees this field,
 and only this watch reads it. See decision `opus-grant-expires` (an Opus grant expires within 24 hours).
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file
-never changes again and only the clock moves. The deadline is bad when `_subagentCapUntil` is
+never changes again and only the clock moves. The deadline is bad when `_agentCapUntil` is
 missing, unparseable, already passed, or more than 24 hours ahead of now. A field written
 INSIDE `env` by mistake reads as its own problem, not as "missing": the owner can see the
 field, so the message says where it belongs instead of pretending it is absent. A bad
@@ -140,7 +140,7 @@ STORE_DIR_NAME = "state"
 STORE_SUB = "config-watch"
 
 REVERT_MESSAGE = (
-    "Guard (subagent-model-cap): an unasked write changed the subagent model cap in {where}. "
+    "Guard (agent-model-cap): an unasked write changed the agent model cap in {where}. "
     "Tool: {tool}. Command: {what}. Reading: {change}. "
     "The previous content is back in place and the rejected content is kept at {kept}. "
     "The PreToolUse guard could not read this write, so it asked nobody. "
@@ -148,22 +148,22 @@ REVERT_MESSAGE = (
 )
 
 UNKNOWN_MESSAGE = (
-    "Guard (subagent-model-cap): {where} sets the subagent model cap and this session holds no "
+    "Guard (agent-model-cap): {where} sets the agent model cap and this session holds no "
     "baseline for it, so the guard cannot tell a lift from the file's own starting state. "
     "Reading: {change}. Nothing was changed. Check the file by hand."
 )
 
 EXPIRE_MESSAGE = (
-    "Guard (subagent-model-cap): the subagent model cap override in {where} expired. "
-    "_subagentCapUntil is {problem}. "
+    "Guard (agent-model-cap): the agent model cap override in {where} expired. "
+    "_agentCapUntil is {problem}. "
     "The pre-override content is back in place and the lifted content is kept at {kept}. "
-    "To lift the cap again, set _subagentCapUntil to an ISO-8601 time no more than 24 hours "
+    "To lift the cap again, set _agentCapUntil to an ISO-8601 time no more than 24 hours "
     "ahead, and approve the write."
 )
 
 EXPIRE_UNKNOWN_MESSAGE = (
-    "Guard (subagent-model-cap): {where} sets the subagent model cap above Sonnet and "
-    "_subagentCapUntil is {problem}, but this session holds no pre-override content to restore. "
+    "Guard (agent-model-cap): {where} sets the agent model cap above Sonnet and "
+    "_agentCapUntil is {problem}, but this session holds no pre-override content to restore. "
     "Reading: {change}. Nothing was changed. Check the file by hand."
 )
 
@@ -357,17 +357,21 @@ def reading_text(reading) -> str:
 
 # ------------------------------------------------------------------ the expiry
 #
-# `_subagentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
+# `_agentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
 # text scan. That keeps it out of `env` (see the module docstring: an `env` key is exported into
-# every subagent's shell, and a key inside `env` is what `guard.SUBAGENT_CAP_KEY` reads). It also
+# every agent's shell, and a key inside `env` is what `guard.AGENT_CAP_KEY` reads). It also
 # keeps this watch the ONLY reader of it, so the PreToolUse ask never fires on this field alone.
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
-EXPIRY_FIELD = "_subagentCapUntil"
+EXPIRY_FIELD = "_agentCapUntil"
+# The field's old name, read too until OLD_NAME_ENDS, so a deadline written before the rename still
+# counts. Delete both lines and the old name's reader on that day.
+OLD_EXPIRY_FIELD = "_subagentCapUntil"
+OLD_NAME_ENDS = "2026-11-09"
 EXPIRY_MAX_AHEAD_HOURS = 24
 
 
-# A `_FORCE` key is an on/off flag (decision `subagent-model-cap`), so these values set no model.
+# A `_FORCE` key is an on/off flag (decision `agent-model-cap`), so these values set no model.
 _FORCE_FLAGS = ("0", "1", "true", "false")
 
 
@@ -411,12 +415,12 @@ def next_prior(reading, was, baseline):
 
 EXPIRY_WRONG_PLACE = (
     "inside the env block, not at the top level -- env keys are exported into every "
-    "subagent's shell"
+    "agent's shell"
 )
 
 
 def cap_expiry_location(content):
-    """Return (where, value) for `_subagentCapUntil`, read from the PARSED document only.
+    """Return (where, value) for `_agentCapUntil`, read from the PARSED document only.
 
     `where` is "top" when the field sits where it belongs, "env" when it sits inside the
     `env` block instead -- a mistake, not an absence, and the message must say so rather than
@@ -431,19 +435,19 @@ def cap_expiry_location(content):
         return (None, None)
     if not isinstance(parsed, dict):
         return (None, None)
-    value = parsed.get(EXPIRY_FIELD)
-    if isinstance(value, str):
-        return ("top", value)
     env = parsed.get("env")
-    if isinstance(env, dict):
-        value = env.get(EXPIRY_FIELD)
+    for field in (EXPIRY_FIELD, OLD_EXPIRY_FIELD):
+        value = parsed.get(field)
+        if isinstance(value, str):
+            return ("top", value)
+        value = env.get(field) if isinstance(env, dict) else None
         if isinstance(value, str):
             return ("env", value)
     return (None, None)
 
 
 def expiry_problem(content, clock=None) -> str:
-    """Return why `_subagentCapUntil` fails, or '' when it names a valid, current deadline.
+    """Return why `_agentCapUntil` fails, or '' when it names a valid, current deadline.
 
     `clock` lets a caller inject the instant this check reads as "now". It defaults to None,
     and a None reads the real clock, `datetime.now(timezone.utc)`, AT CALL TIME. Production
@@ -605,7 +609,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
                 return UNKNOWN_MESSAGE.format(
                     where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
             save_baseline(path, baseline["content"], baseline.get("prior"))
-            guard.record(tool or "Stop", "reverted", "subagent-model-cap",
+            guard.record(tool or "Stop", "reverted", "agent-model-cap",
                          guard.log_path_and_text(path, reading_text(reading)))
             return REVERT_MESSAGE.format(
                 where=safe(path, guard.CAP_MAX_PATH),
@@ -636,7 +640,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
             where=safe(path, guard.CAP_MAX_PATH), problem=problem,
             change=reading_text(reading))
     save_baseline(path, baseline["prior"], None)
-    guard.record(tool or "Stop", "reverted", "subagent-model-cap",
+    guard.record(tool or "Stop", "reverted", "agent-model-cap",
                  guard.log_path_and_text(path, "expired: " + problem))
     return EXPIRE_MESSAGE.format(
         where=safe(path, guard.CAP_MAX_PATH), problem=problem,

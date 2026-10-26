@@ -17,7 +17,7 @@ whole site.
 Quote the exact doc sentence behind each claim, with its URL. Say "unknown" for anything the
 docs do not say. Never guess an answer the docs should give you.
 
-You cannot spawn agents. If the question is too large for one worker, report PARTIAL with the
+You cannot spawn agents. If the question is too large for one agent, report PARTIAL with the
 parts you covered and the parts you propose.
 
 Report once. Start with the point. Write in Simplified Technical English. Report in under 25

@@ -840,7 +840,7 @@ class DoneNamesModelsTests(unittest.TestCase):
                 "> **Done** BUILT the gate, PR #5 " + done + "\n> **Next** Unstarted: none",
                 [self.BUILDER, self.REVIEWER_R2]), done)
 
-    def test_dm_false_alarm_no_subagent_passes(self):
+    def test_dm_false_alarm_no_agent_passes(self):
         self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", []))
 
     def test_dm_false_alarm_search_only_spawns_pass(self):

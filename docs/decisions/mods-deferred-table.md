@@ -21,7 +21,7 @@ same vetting as the first eight mods (desktop support first). No row authorizes 
 
 Parked, not built, flag to the owner as later items:
 
-- An `agent.spawn` hook sets a subagent's model. It would replace the guard deny for the step-up rule (reviewer rounds 2 and 3 on Sonnet, builder try 3 on Opus) with correct spawns.
+- An `agent.spawn` hook sets an agent's model. It would replace the guard deny for the step-up rule (reviewer rounds 2 and 3 on Sonnet, builder try 3 on Opus) with correct spawns.
 - A `$.audio` sound when a session starts waiting on the owner. No community mod uses `$.audio`.
 
 ## Unvetted candidates

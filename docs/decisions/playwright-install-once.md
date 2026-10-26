@@ -1,17 +1,17 @@
-# One Playwright install, never from a subagent
+# One Playwright install, never from an agent
 
 ## The ruling
 
 Rule `playwright-install` in `hooks/guard.py`:
 
-1. A subagent never runs a Playwright browser install, in any form. The browsers are shared in
+1. An agent never runs a Playwright browser install, in any form. The browsers are shared in
    `~/Library/Caches/ms-playwright`. The orchestrator installs once.
 2. A main session installs only under Node 22, through
    `npx -y node@22 node_modules/playwright/cli.js install <browser>`.
 3. `settings.json` sets `PLAYWRIGHT_SKIP_BROWSER_GC=1` for every session, so an install never removes
    another project's browser build. The guard does not check this.
 
-Reason: parallel subagent installs under Node 26.11 hung, fought over the shared `__dirlock` and
+Reason: parallel agent installs under Node 26.11 hung, fought over the shared `__dirlock` and
 blocked other projects. The Node 26 hang is measured in playwright-browsers-path.
 
 Kind: process

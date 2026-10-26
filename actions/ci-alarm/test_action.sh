@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red proof with a fake `gh`: a red latest run opens the issue; red-then-fixed and self-red do not.
+# Red run with a fake `gh`: a red latest run opens the issue; red-then-fixed and self-red do not.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 tmp="$(mktemp -d)"; mkdir "$tmp/bin"

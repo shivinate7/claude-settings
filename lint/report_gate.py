@@ -282,7 +282,7 @@ def bare_cite(text):
     return ""
 
 
-# reports-done-names-models: a Done item that subagents built or reviewed names each one's role
+# reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
@@ -429,7 +429,7 @@ def main():
     models = done_models_problem(text, spawned) if shape_ok else ""
     if models:
         reasons.append(
-            "Model-name gate: a Done item that subagents built or reviewed names each one's role "
+            "Model-name gate: a Done item that agents built or reviewed names each one's role "
             "and model, like \"(builder sonnet, reviewer sonnet)\". Here: " + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(

@@ -4,7 +4,7 @@
 // simulator tool and logs every call. The pixel checks decode each PNG in the browser's own canvas,
 // not with the tool's isBlank, so a defect there cannot hide here. No Playwright or no Chromium:
 // skipped on a laptop, a fail in CI (testing/skip-locally-fail-in-ci.mjs).
-// Seam: SHOOT_UNDER_TEST is the script to run, for a red proof against another checkout.
+// Seam: SHOOT_UNDER_TEST is the script to run, for a red run against another checkout.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

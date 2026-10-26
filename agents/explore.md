@@ -14,7 +14,7 @@ Search first, then read excerpts around each hit. Never read a whole long file. 
 conclusion with file:line. Say "unknown" for anything you could not find. Never guess an
 answer the code should give you.
 
-You cannot spawn agents. If the search is too large for one worker, report PARTIAL with the
+You cannot spawn agents. If the search is too large for one agent, report PARTIAL with the
 slices you covered and the slices you propose.
 
 Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.

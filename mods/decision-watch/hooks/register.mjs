@@ -4,7 +4,7 @@
 // as a notice (decision decision-watch-mod-limits). It never blocks and never changes the turn result.
 //
 // turn.complete returns next(e) after at most SEEN_WAIT_MS (500 ms), for the "STOP seen" line. The lookup and
-//               the judging run in the background, one judge at a time. A subagent turn (agentId set) is skipped,
+//               the judging run in the background, one judge at a time. An agent turn (agentId set) is skipped,
 //               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). The
 //               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
 //               handler never ran; turn.* events pass. The event carries no transcript path, so the judge

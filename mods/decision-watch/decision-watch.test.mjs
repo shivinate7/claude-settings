@@ -42,7 +42,7 @@ const ALLOW_REPLY = '{"verdict": "ALLOW"}'
 const FLAG_REPLY = '{"verdict": "FLAG", "why": "reversed silently"}'
 // The message texts are read from the script, so the fake python prints what the Stop hook prints today.
 const SCRIPT_SRC = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
-const MODEL_CAP = fileURLToPath(new URL('../../docs/decisions/subagent-model-cap.md', import.meta.url))
+const MODEL_CAP = fileURLToPath(new URL('../../docs/decisions/agent-model-cap.md', import.meta.url))
 const scriptSource = readFileSync(SCRIPT_SRC, 'utf8')
 const pyConst = name => {
   const m = scriptSource.match(new RegExp('^' + name + ' = "(.*)"$', 'm'))
@@ -250,7 +250,7 @@ const stopEvent = (extra = {}) => ({
 })
 
 // A turn.complete as the host raises it (TurnCompleteInput): no session id, cwd or transcript path. agentId is set
-// on a subagent's turn and absent on the main loop.
+// on an agent's turn and absent on the main loop.
 const turnEvent = (extra = {}) => ({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer', ...extra })
 
 async function fire(h, event, e = {}, nextValue) {
@@ -302,10 +302,10 @@ await test('turn.complete trigger 1: a main-loop turn (no agentId) starts one ju
   same(stdin.transcript_path, TRANSCRIPT, 'stdin transcript_path, the one /dw derives')
 })
 
-await test('turn.complete trigger 2: a subagent turn (agentId set) starts no judge and returns next(e); the main turn after it judges', async () => {
+await test('turn.complete trigger 2: an agent turn (agentId set) starts no judge and returns next(e); the main turn after it judges', async () => {
   const h = await load(host())
   const NEXT = { text: 'sub answer' }
-  assert.equal(await within(fire(h, 'turn.complete', turnEvent({ agentId: 'agent-7' }), NEXT), 1000, 'the subagent turn'), NEXT)
+  assert.equal(await within(fire(h, 'turn.complete', turnEvent({ agentId: 'agent-7' }), NEXT), 1000, 'the agent turn'), NEXT)
   await settle(60)
   same(h.procs.length, 0, 'process calls')
   same(h.modelReqs.length, 0, 'model calls')
@@ -314,7 +314,7 @@ await test('turn.complete trigger 2: a subagent turn (agentId set) starts no jud
   await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
   same(emits(h).length, 1, 'phase 1 runs for the main turn')
-  assert.doesNotMatch(allLog(h), /SKIP busy/, 'the subagent turn held the judge slot')
+  assert.doesNotMatch(allLog(h), /SKIP busy/, 'the agent turn held the judge slot')
 })
 
 // A mod with no classic.Stop handler passes. A mod that keeps one must still return next(e) and judge nothing.
@@ -718,7 +718,7 @@ await test('toast failure: a FLAG whose toast throws is logged, and a log line n
   assert.match(await logged, /toast/i, 'no log line names the toast failure')
 })
 
-// ---- the model table (decision subagent-model-cap): a mod that calls a model has a row
+// ---- the model table (decision agent-model-cap): a mod that calls a model has a row
 
 await test('model table: a row names mods/decision-watch, and that row names haiku', () => {
   const rows = readFileSync(MODEL_CAP, 'utf8').split('\n').filter(l => l.startsWith('|'))

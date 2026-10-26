@@ -17,7 +17,7 @@
 # below must be classified right first: the scanner reads line 1 only, so a comment opener, a quote
 # or a template literal in a later line must not make it see a #! line.
 #
-# Seam. REPO_UNDER_TEST is the repo root both checks read, for a red or green proof against another
+# Seam. REPO_UNDER_TEST is the repo root both checks read, for a red or green run against another
 # checkout. It defaults to the folder of this file.
 #   CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_USER_ENV_KEY, CLAUDE_SETTINGS_FORCE_COPY=1: as in
 #   install-no-gap.test.ps1.
