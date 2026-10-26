@@ -236,6 +236,12 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      - name: Glossary fixture suite
+        run: python3 lint/test_check_glossary.py
+
+      - name: Glossary homes and avoided names
+        run: python3 lint/check_glossary.py
+
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
 
