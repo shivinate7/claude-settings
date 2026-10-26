@@ -12,7 +12,7 @@ Owner rulings, 2026-10-22 10:18 CDT:
   - for each option, what the owner gains and loses;
   - a recommendation;
   - no unexplained ids, and nothing that points outside the box.
-- Premises show in the box as `Based on:` lines. The reviewer checks that the lines exist and name a source kind, one of the kinds in `premise-format` (a premise names its source). The hook prompt lists those kinds itself, because a hook cannot point at `decisions/`. Class `QuestionReviewer` in `lint/test_settings_matcher.py` keeps that list equal to the record. It does not check a premise against `decisions/`. An outside advisor session carries that check.
+- Premises show in the box as `Based on:` lines. The reviewer checks that the lines exist and name a source kind, one of the kinds in `premise-format` (a premise names its source). The hook prompt lists those kinds itself, because a hook cannot point at `decisions/`. Class `QuestionReviewer` in `lint/test_settings_matcher.py` keeps that list equal to the record. It does not check a premise against `decisions/`, and no other check does.
 - A failed or timed-out agent hook lets the question through.
 - The reviewer judges the box alone. Whether the agent can read the chat, or `transcript_path`, is unmeasured.
 - `lint/test_settings_matcher.py` (class `QuestionReviewer`) pins the hook: one agent hook, an Opus id, the agent-hook keys only, and each rubric item named in the prompt.
