@@ -32,8 +32,7 @@ behaviour, and a test that expects the old behaviour is only one route to it.
    expects the same behaviour in one pass (search, then run them), and re-point them all in the same lane.
    Report the list. The reviewer checks that each re-pointed test expects exactly the ruled-out behaviour,
    and flags any that pins something next to it; that one goes back to class (c).
-4. Class (c) stays for a test whose behaviour has no ruling. It still asks the advisor first
-   (questions-ask-advisor-first).
+4. Class (c) stays for a test whose behaviour has no ruling. It still goes to the owner.
 5. docs/records.md and lint/rule_mechanisms.json: keep their lines for the two rules true.
 
 Keep the CLAUDE.md word count flat or lower: rewrite in place, cut words elsewhere in the same two rules if
