@@ -30,8 +30,10 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 MAX_BYTES = 1_000_000
 MIN_BYTES = 200  # a byte-equal file smaller than this is boilerplate, not a copy
@@ -49,7 +51,7 @@ DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def list_files(root):
     """Tracked files when root is a git tree, else every file outside SKIP_DIRS."""
     if os.path.exists(os.path.join(root, ".git")):
-        proc = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
+        proc = _nowindow.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
         if proc.returncode != 0:
             return None  # a walk would add untracked files, so the result is unknown
         return sorted(p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p)
