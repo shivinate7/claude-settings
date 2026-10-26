@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's subagent-model-floor never sees those calls.
 """
-import json, os, re, unittest
+import json, os, re, subprocess, sys, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -312,9 +312,13 @@ class QuestionReviewer(unittest.TestCase):
         found = sorted(ev for ev, entries in events.items() if "question_outcome" in json.dumps(entries))
         self.assertEqual(found, [], "a hook still names question_outcome under: %s" % found)
 
-    def test_question_outcome_script_is_gone(self):
+    def test_question_outcome_script_is_a_stub(self):
+        # A running session may still call it, so it stays as an exit-0 stub (lint/check_hook_stubs.py).
         script = os.path.join(os.path.dirname(SETTINGS), "hooks", "question_outcome.py")
-        self.assertFalse(os.path.exists(script), "hooks/question_outcome.py still exists")
+        r = subprocess.run([sys.executable, script], input='{"tool_name": "AskUserQuestion"}',
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""),
+                         "hooks/question_outcome.py must exit 0 and print nothing")
 
 
 # The STE write gate and the markdown sweep are not wired in settings.json.
