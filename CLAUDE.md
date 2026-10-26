@@ -74,7 +74,7 @@ rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's
 verdict with one bounded command. Never scroll a log to find out whether something
 passed.<!-- rule:tokens-verdict-not-stream --> Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log.<!-- rule:tokens-run-through-verdict --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
 never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running.
-Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
+Drop the narration.<!-- rule:tokens-compacting-keep-essentials --> Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. Keep it when it is needed before the first file read.<!-- rule:tokens-folder-rules-load-by-path -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> Surface ambiguity instead
 of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an item without saying so.<!-- rule:building-never-drop-item-silently --> Give
@@ -88,7 +88,7 @@ the design abandoned.<!-- rule:building-land-design-or-abandon --> Memory stays 
 file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term --> Comment only what complex code does and why. Never narrate history or review rounds.<!-- rule:building-comments-say-why -->
 
 **Speak plainly.** Give every id a short plain name the first time it appears, like "D12, short titles for
-records". That covers decision and debt ids, roadmap step ids, lane numbers, PR and issue numbers, commit hashes, rule anchors, and hook and script names. Never cite a bare id. A numbered id carries no order, so state the work order in words.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
+records". That covers decision and debt ids, roadmap step ids, lane numbers, PR and issue numbers, commit hashes, rule anchors, and hook and script names. Never cite a bare id. A numbered id carries no order, so state the work order in words.<!-- rule:speak-cite-id-plus-gloss --> `GLOSSARY.md`, beside this file, gives each workflow thing one name. Use that name. A repo glossary adds its own terms and never defines a term from that file again.<!-- rule:speak-one-name-per-thing --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
 the history.<!-- rule:speak-rewrite-superseded-in-place -->
 

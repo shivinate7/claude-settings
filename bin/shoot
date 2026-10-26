@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+// shoot [--config F] [--out DIR]: one PNG per route x width x theme, then one verdict line.
+// F defaults to .claude/shoot.json in the current folder. DIR defaults to a new shoot-* folder in the temp folder.
+// Config keys (decision shoot-is-one-shared-command):
+//   baseUrl (required; a path in it is kept: base http://h/app and route /a shoot http://h/app/a),
+//   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
+//   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
+//   fullPage (default true), timeoutMs (per route, default 15000), simulator (an iOS simulator UDID, optional).
+// A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or a blank image (one colour only).
+// The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
+// Playwright: the installed package only. This tool never runs `playwright install`.
+// Exit: 0 every shot passed, 1 a shot failed, 2 it could not run (usage, config, no Playwright, no browser).
+// Cost: one browser process per run, closed at exit. No daemon, no watcher.
+// Test seam: SHOOT_PLAYWRIGHT names the module to load (default playwright).
+"use strict";
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const zlib = require("zlib");
+const { createRequire } = require("module");
+const { execFileSync } = require("child_process");
+
+function die(msg) { console.log("shoot: " + msg); process.exit(2); }
+
+function args(argv) {
+  const o = { config: path.join(".claude", "shoot.json"), out: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if ((a === "--config" || a === "--out") && i + 1 < argv.length) o[a.slice(2)] = argv[++i];
+    else die("usage: shoot [--config FILE] [--out DIR]");
+  }
+  return o;
+}
+
+function readConfig(file) {
+  let c;
+  try { c = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { die(`cannot read config ${file}: ${e.message.split("\n")[0]}`); }
+  if (!c || typeof c.baseUrl !== "string" || !c.baseUrl) die(`config ${file} needs baseUrl`);
+  if (!Array.isArray(c.routes) || !c.routes.length) die(`config ${file} needs a non-empty routes list`);
+  const routes = c.routes.map((r) => (typeof r === "string" ? { path: r } : r));
+  if (routes.some((r) => !r || typeof r.path !== "string")) die(`config ${file}: each route is a string or {name, path}`);
+  const names = new Map();
+  for (const r of routes) {
+    const n = slug(r.name || r.path);
+    if (names.has(n)) die(`config ${file}: routes ${names.get(n)} and ${r.path} both write ${n}-*.png`);
+    names.set(n, r.path);
+  }
+  const sizes = c.sizes ?? [1440, 820, 390];
+  if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
+  const themes = c.themes ?? ["light", "dark"];
+  if (!Array.isArray(themes) || !themes.length || themes.some((t) => t !== "light" && t !== "dark")) die(`config ${file}: themes holds light and dark only`);
+  return {
+    baseUrl: c.baseUrl, routes, sizes, themes,
+    height: c.height ?? 900, fullPage: c.fullPage ?? true, timeoutMs: c.timeoutMs ?? 15000,
+    simulator: c.simulator || null,
+  };
+}
+
+// The installed package, from the global paths first, then the current repo's node_modules.
+function loadPlaywright() {
+  const id = process.env.SHOOT_PLAYWRIGHT || "playwright";
+  for (const req of [require, createRequire(path.join(process.cwd(), "package.json"))]) {
+    try { return req(id); } catch { /* next */ }
+  }
+  die(`FAIL: Playwright is missing: require('${id}') does not resolve. Install the playwright package; this tool never installs it.`);
+}
+
+// Joins as text, so a path in baseUrl survives a route that starts with "/" (new URL would drop it).
+function join(base, p) { return base.replace(/\/+$/, "") + "/" + p.replace(/^\/+/, ""); }
+
+function slug(s) { return s.replace(/^\/+/, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "root"; }
+
+// True when every pixel of an 8-bit, non-interlaced PNG (what Chromium writes) has one colour.
+// Any other PNG form reads as not blank, so this check can only add a fail, never hide one.
+function isBlank(buf) {
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20), depth = buf[24], type = buf[25], lace = buf[28];
+  const ch = { 2: 3, 6: 4 }[type];
+  if (depth !== 8 || !ch || lace) return false;
+  const idat = [];
+  for (let p = 8; p < buf.length;) {
+    const len = buf.readUInt32BE(p), kind = buf.toString("ascii", p + 4, p + 8);
+    if (kind === "IDAT") idat.push(buf.subarray(p + 8, p + 8 + len));
+    p += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat)), stride = w * ch;
+  let prev = Buffer.alloc(stride), first = null;
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], row = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= ch ? row[x - ch] : 0, b = prev[x], c = x >= ch ? prev[x - ch] : 0;
+      let add = 0;
+      if (f === 1) add = a; else if (f === 2) add = b; else if (f === 3) add = (a + b) >> 1;
+      else if (f === 4) { const q = a + b - c, pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c); add = pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      row[x] = (row[x] + add) & 255;
+    }
+    if (!first) first = row.subarray(0, ch);
+    for (let x = 0; x < stride; x += ch) if (row.compare(first, 0, ch, x, x + ch)) return false;
+    prev = row;
+  }
+  return true;
+}
+
+// The simulator shot. Booted state comes from `simctl list`; a device not booted is a skip.
+function simShot(udid, out) {
+  let list;
+  try { list = JSON.parse(execFileSync("xcrun", ["simctl", "list", "devices", "-j"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 })); }
+  catch (e) { return { skip: `simulator ${udid}: simctl unavailable (${String(e.message).split("\n")[0]})` }; }
+  const dev = Object.values(list.devices || {}).flat().find((d) => d && d.udid === udid);
+  if (!dev) return { skip: `simulator ${udid}: no such device` };
+  if (dev.state !== "Booted") return { skip: `simulator ${udid}: not booted (${dev.state}); shoot never boots one` };
+  const file = path.join(out, `simulator-${udid}.png`);
+  try { execFileSync("xcrun", ["simctl", "io", udid, "screenshot", file], { stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }); }
+  catch (e) { return { fail: `simulator ${udid}: screenshot failed (${String(e.message).split("\n")[0]})` }; }
+  return fs.existsSync(file) ? { file } : { fail: `simulator ${udid}: screenshot wrote no file` };
+}
+
+async function main() {
+  const o = args(process.argv.slice(2));
+  const cfg = readConfig(o.config);
+  const pw = loadPlaywright();
+  const out = o.out ? path.resolve(o.out) : fs.mkdtempSync(path.join(os.tmpdir(), "shoot-"));
+  fs.mkdirSync(out, { recursive: true });
+  let browser;
+  try { browser = await pw.chromium.launch(); }
+  catch (e) { die(`FAIL: Chromium did not launch: ${String(e.message).split("\n")[0]}. This tool never runs playwright install.`); }
+  const fails = [], skips = [];
+  let shots = 0;
+  try {
+    for (const theme of cfg.themes) {
+      for (const width of cfg.sizes) {
+        const ctx = await browser.newContext({ viewport: { width, height: cfg.height }, colorScheme: theme });
+        try {
+          for (const r of cfg.routes) {
+            shots++;
+            const name = `${slug(r.name || r.path)}-${width}-${theme}`;
+            const url = join(cfg.baseUrl, r.path);
+            const page = await ctx.newPage();
+            try {
+              const res = await page.goto(url, { waitUntil: "load", timeout: cfg.timeoutMs });
+              if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
+              const png = await page.screenshot({ path: path.join(out, name + ".png"), fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
+              if (isBlank(png)) fails.push(`${name}: blank image (one colour) at ${url}`);
+            } catch (e) {
+              fails.push(`${name}: ${String(e.message).split("\n")[0]}`);
+            } finally {
+              await page.close().catch(() => {});
+            }
+          }
+        } finally {
+          await ctx.close().catch(() => {});
+        }
+      }
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  if (cfg.simulator) {
+    const s = simShot(cfg.simulator, out);
+    if (s.skip) skips.push(s.skip);
+    else { shots++; if (s.fail) fails.push(s.fail); }
+  }
+  for (const f of fails) console.log("shoot: FAIL " + f);
+  for (const s of skips) console.log("shoot: SKIP " + s);
+  console.log(`shoot: ${fails.length ? "FAIL" : "PASS"} ${shots} shots, ${fails.length} failed${skips.length ? `, ${skips.length} skipped` : ""}, out=${out}`);
+  process.exit(fails.length ? 1 : 0);
+}
+
+if (require.main === module) main().catch((e) => die(`FAIL: ${String(e && e.stack || e).split("\n")[0]}`));
+module.exports = { isBlank };

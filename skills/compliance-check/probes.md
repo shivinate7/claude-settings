@@ -9,6 +9,7 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | --- | --- | --- |
 | `ste_lint.py` | `python3 $P/lint/ste_lint.py --fail-on error --quiet <child *.md>` | STE errors in child prose |
 | `check_record_slugs.py` | `cd <records parent> && python3 $P/lint/check_record_slugs.py decisions/*.md debts/*.md` | slugs over 32 characters |
+| `check_claude_md_size.py` | `python3 $P/lint/check_claude_md_size.py` | a CLAUDE.md over 200 lines (warns only) |
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 

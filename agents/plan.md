@@ -15,6 +15,8 @@ with its source kind). Check each against `decisions/`, `debts/`, the owner's re
 named in the brief, and the code. Mark each holds, fails, or unknown. Name every premise that
 fails, and any simpler route the facts open. Put this list at the top of the plan.
 
+Check each new name in the plan against `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
+
 Read the code the task touches first. Then give the plan: the steps in order, the files each
 step changes, the risks, and the check that proves each step done. Cite file:line for every
 claim about the code. Say "unknown" for anything you could not find. Surface ambiguity

@@ -45,6 +45,7 @@ jobs:
       mods: ${{ steps.scope.outputs.mods }}
       guard: ${{ steps.scope.outputs.guard }}
       sweep: ${{ steps.scope.outputs.sweep }}
+      shoot: ${{ steps.scope.outputs.shoot }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -221,6 +222,9 @@ jobs:
       - name: Hook platform exit fixture suite
         run: python3 lint/test_hook_platform_exit.py
 
+      - name: Hook stub fixture suite
+        run: python3 lint/test_check_hook_stubs.py
+
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
@@ -233,8 +237,23 @@ jobs:
       - name: Hook catalog check
         run: python3 lint/hook_catalog.py --check
 
+      - name: Hook stub check
+        run: python3 lint/check_hook_stubs.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      - name: CLAUDE.md size fixture suite
+        run: python3 lint/test_check_claude_md_size.py
+
+      - name: CLAUDE.md size (warns, never fails)
+        run: python3 lint/check_claude_md_size.py
+
+      - name: Glossary fixture suite
+        run: python3 lint/test_check_glossary.py
+
+      - name: Glossary homes and avoided names
+        run: python3 lint/check_glossary.py
 
       - name: Mod version bump
         run: python3 lint/check_mod_versions.py
@@ -363,6 +382,17 @@ jobs:
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
+
+      # bin/shoot needs Playwright and Chromium, and this runner has neither. The step installs the
+      # copy that .github/shoot/package-lock.json pins. bin/shoot itself never installs either.
+      - name: shoot fixture suite
+        if: ${{ needs.scope.outputs.shoot == 'true' }}
+        shell: bash
+        run: |
+          npm ci --prefix .github/shoot --ignore-scripts --no-audit --no-fund
+          .github/shoot/node_modules/.bin/playwright install --with-deps chromium
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
+
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the

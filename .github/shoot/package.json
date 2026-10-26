@@ -1,0 +1,8 @@
+{
+  "name": "claude-settings-shoot-ci",
+  "private": true,
+  "description": "The Playwright that CI installs for the bin/shoot suite (gates.yml, step 'shoot fixture suite'). bin/shoot itself never installs it.",
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
