@@ -10,6 +10,7 @@ The contract of `bin/shoot`:
 
 - `shoot [--config F] [--out DIR]`. F defaults to `.claude/shoot.json` in the current folder.
 - The config holds `baseUrl`, `routes`, `sizes` (widths, default 1440, 820 and 390), `themes` (light and dark, set by `prefers-color-scheme`) and an optional `simulator` UDID.
+- A path in `baseUrl` is kept: base `http://h/app` and route `/a` take `http://h/app/a`. Two routes that write one file name are a config error.
 - It writes one PNG for each route, width and theme to a folder, and prints one verdict line: the shot count, the fail count and the folder.
 - A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or an image of one colour only.
 - It uses the installed Playwright package only. If the package is missing, it prints one line that names it and exits 2. It never runs `playwright install`.

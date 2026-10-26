@@ -23,6 +23,7 @@ const require = createRequire(import.meta.url);
 const PAGES = {
   "/content.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}
     @media (prefers-color-scheme: dark){body{background:#000;color:#eee}}</style><h1>Shoot fixture</h1><p>Known content.</p>`,
+  "/app/prefixed.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}</style><h1>Under a prefix</h1>`,
   "/blank.html": `<!doctype html><style>body{margin:0;background:#fff}</style>`,
 };
 let server, base, tmp, browser;
@@ -129,6 +130,19 @@ test("a route that times out is a fail", async (t) => {
   const r = await run({ routes: ["/slow.html"], sizes: [820], themes: ["light"], timeoutMs: 1500 });
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /shoot: FAIL slow\.html-820-light: .*Timeout/i);
+});
+
+test("a path in baseUrl is kept for a route that starts with /", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ baseUrl: `${base}/app/`, routes: ["/prefixed.html"], sizes: [820], themes: ["light"] });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs, ["prefixed.html-820-light.png"]);
+});
+
+test("two routes that write one file name are a config error, not an overwrite", async () => {
+  const r = await run({ routes: ["/a/b", "/a_b"], sizes: [820], themes: ["light"] });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /both write a_b-\*\.png/);
 });
 
 test("missing Playwright: one line naming it, exit 2, no install", async () => {

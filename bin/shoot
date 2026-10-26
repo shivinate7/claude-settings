@@ -2,7 +2,8 @@
 // shoot [--config F] [--out DIR]: one PNG per route x width x theme, then one verdict line.
 // F defaults to .claude/shoot.json in the current folder. DIR defaults to a new shoot-* folder in the temp folder.
 // Config keys (decision shoot-is-one-shared-command):
-//   baseUrl (required), routes (required: "/path" strings or {name, path}), sizes (widths, default 1440, 820, 390),
+//   baseUrl (required; a path in it is kept: base http://h/app and route /a shoot http://h/app/a),
+//   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
 //   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
 //   fullPage (default true), timeoutMs (per route, default 15000), simulator (an iOS simulator UDID, optional).
 // A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or a blank image (one colour only).
@@ -38,6 +39,12 @@ function readConfig(file) {
   if (!Array.isArray(c.routes) || !c.routes.length) die(`config ${file} needs a non-empty routes list`);
   const routes = c.routes.map((r) => (typeof r === "string" ? { path: r } : r));
   if (routes.some((r) => !r || typeof r.path !== "string")) die(`config ${file}: each route is a string or {name, path}`);
+  const names = new Map();
+  for (const r of routes) {
+    const n = slug(r.name || r.path);
+    if (names.has(n)) die(`config ${file}: routes ${names.get(n)} and ${r.path} both write ${n}-*.png`);
+    names.set(n, r.path);
+  }
   const sizes = c.sizes ?? [1440, 820, 390];
   if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
   const themes = c.themes ?? ["light", "dark"];
@@ -57,6 +64,9 @@ function loadPlaywright() {
   }
   die(`FAIL: Playwright is missing: require('${id}') does not resolve. Install the playwright package; this tool never installs it.`);
 }
+
+// Joins as text, so a path in baseUrl survives a route that starts with "/" (new URL would drop it).
+function join(base, p) { return base.replace(/\/+$/, "") + "/" + p.replace(/^\/+/, ""); }
 
 function slug(s) { return s.replace(/^\/+/, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "root"; }
 
@@ -93,13 +103,13 @@ function isBlank(buf) {
 // The simulator shot. Booted state comes from `simctl list`; a device not booted is a skip.
 function simShot(udid, out) {
   let list;
-  try { list = JSON.parse(execFileSync("xcrun", ["simctl", "list", "devices", "-j"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); }
+  try { list = JSON.parse(execFileSync("xcrun", ["simctl", "list", "devices", "-j"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 })); }
   catch (e) { return { skip: `simulator ${udid}: simctl unavailable (${String(e.message).split("\n")[0]})` }; }
   const dev = Object.values(list.devices || {}).flat().find((d) => d && d.udid === udid);
   if (!dev) return { skip: `simulator ${udid}: no such device` };
   if (dev.state !== "Booted") return { skip: `simulator ${udid}: not booted (${dev.state}); shoot never boots one` };
   const file = path.join(out, `simulator-${udid}.png`);
-  try { execFileSync("xcrun", ["simctl", "io", udid, "screenshot", file], { stdio: ["ignore", "pipe", "pipe"] }); }
+  try { execFileSync("xcrun", ["simctl", "io", udid, "screenshot", file], { stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }); }
   catch (e) { return { fail: `simulator ${udid}: screenshot failed (${String(e.message).split("\n")[0]})` }; }
   return fs.existsSync(file) ? { file } : { fail: `simulator ${udid}: screenshot wrote no file` };
 }
@@ -123,7 +133,7 @@ async function main() {
           for (const r of cfg.routes) {
             shots++;
             const name = `${slug(r.name || r.path)}-${width}-${theme}`;
-            const url = new URL(r.path, cfg.baseUrl).href;
+            const url = join(cfg.baseUrl, r.path);
             const page = await ctx.newPage();
             try {
               const res = await page.goto(url, { waitUntil: "load", timeout: cfg.timeoutMs });
