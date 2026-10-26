@@ -41,9 +41,11 @@ The page hides an item with status `closed`. It shows an item as answered when `
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
 3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
-   - While an agent, a lane or a background command runs, open no question box. Put the question
+   - While an agent, a lane or a background command of this session runs, or starts in the same
+     response, open no question box. Put the question
      and the page URL in the reply, and keep orchestrating. A box stops the session until the owner
-     answers, and what runs goes on with no one to brake it.
+     answers, and what runs goes on with no one to brake it. You may end the turn: each agent's end
+     wakes the session.
    - With nothing running, ask in the terminal question box too, and put the page URL in the box.
 4. Keep working on what does not depend on the answer.
 

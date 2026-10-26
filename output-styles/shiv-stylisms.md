@@ -37,7 +37,9 @@ Short and plain are one goal. Never trade one for the other.
   names one premise in plain words and its kind, as `premise-format` (a premise names its
   source) sets.<!-- rule:style-question-based-on -->
 - Put all a question needs inside the question box: its text, its options, or an option's
-  preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
+  preview. Text written before the box may not show. While work runs there is no box (rule
+  `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
+  question stands alone there.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only a step that needs my decision,
   my login, or an act the safety rules keep for me. Name which one, and the check that shows
