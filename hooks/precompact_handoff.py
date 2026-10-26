@@ -12,7 +12,7 @@ Modes:
 - --session-end: At SessionEnd with reason clear, writes a pointer file that holds the old
   session id and the project folder, so the next session can find the old handoff.
 
-Spec: decisions/precompact-handoff.md. Three modes, one file. No mode calls a model:
+Spec: docs/decisions/precompact-handoff.md. Three modes, one file. No mode calls a model:
 the owner rejected a `claude -p` child, since it needs its own command-line login, and
 the desktop app has none.
 
@@ -46,7 +46,7 @@ the desktop app has none.
   pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
   "no handoff". It also names the new session's own handoff. Every reorient then sweeps
   unusable pointers and stale .dir and .reread records (sweep()).
-  Spec: decisions/precompact-handoff.md, item 8.
+  Spec: docs/decisions/precompact-handoff.md, item 8.
 
 Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
@@ -66,7 +66,7 @@ NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
 DEFAULT_WINDOW = 500_000
-# The source kinds of a handoff premise, strongest first. decisions/premise-format.md says what
+# The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 _PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
@@ -89,7 +89,7 @@ def state_path(session_id):
 def handoff_path(session_id):
     """The session's own handoff: per session and outside git, so concurrent sessions on
     their own branches never collide on it, and outside Temp, so temp cleanup never
-    reaches it (decisions/precompact-handoff.md). It lives in <config_dir>/handoffs/, not
+    reaches it (docs/decisions/precompact-handoff.md). It lives in <config_dir>/handoffs/, not
     the frozen state dir, so a session can write it. The digest, .json and .nudge.json
     stay in state/handoff/."""
     return os.path.join(config_dir(), "handoffs", "%s.md" % session_id)
@@ -113,7 +113,7 @@ def prompt_path():
 
 def build_digest(transcript_path, cap=DIGEST_CAP):
     """User and assistant text only, tool results and thinking dropped, last `cap`
-    characters kept (the tail: newest text matters most, see decisions/precompact-
+    characters kept (the tail: newest text matters most, see docs/decisions/precompact-
     handoff.md's "Known limits"). Raises OSError when the transcript cannot be read, so
     the caller can tell "nothing to digest" from "an empty session"."""
     parts = []
@@ -345,7 +345,7 @@ def run_reorient_cleared(payload):
     handoff is named, or none when it has none: never another session's. fork: no pointer
     (it can name an older cleared session), only the newest handoff for the dir. Either way,
     with no pointer the newest handoff for the dir. ponytail: matches by dir only, so two
-    sessions clearing in one dir at once can swap pointers (decisions/precompact-handoff.md, item 8)."""
+    sessions clearing in one dir at once can swap pointers (docs/decisions/precompact-handoff.md, item 8)."""
     session_id = payload.get("session_id", "")
     cwd = payload.get("cwd") or os.getcwd()
     ensure_handoff_dir(session_id)

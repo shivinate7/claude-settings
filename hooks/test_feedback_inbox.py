@@ -352,7 +352,7 @@ def judged_notes(items):
 
 def sonnet_ids():
     """The Sonnet model ids in the model table of decisions/subagent-model-cap.md."""
-    text = read_file(os.path.join(REPO, "decisions", "subagent-model-cap.md"))
+    text = read_file(os.path.join(REPO, "docs", "decisions", "subagent-model-cap.md"))
     return re.findall(r"\|\s*(claude-sonnet-[\w-]+)\s*\|", text)
 
 

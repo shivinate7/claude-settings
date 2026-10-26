@@ -42,7 +42,7 @@ const ALLOW_REPLY = '{"verdict": "ALLOW"}'
 const FLAG_REPLY = '{"verdict": "FLAG", "why": "reversed silently"}'
 // The message texts are read from the script, so the fake python prints what the Stop hook prints today.
 const SCRIPT_SRC = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
-const MODEL_CAP = fileURLToPath(new URL('../../decisions/subagent-model-cap.md', import.meta.url))
+const MODEL_CAP = fileURLToPath(new URL('../../docs/decisions/subagent-model-cap.md', import.meta.url))
 const scriptSource = readFileSync(SCRIPT_SRC, 'utf8')
 const pyConst = name => {
   const m = scriptSource.match(new RegExp('^' + name + ' = "(.*)"$', 'm'))

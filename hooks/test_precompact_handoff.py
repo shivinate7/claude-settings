@@ -939,7 +939,7 @@ def case_premise_kinds_one_home():
     Record: decisions/premise-format.md, one table row per kind, the kind in backticks in
     the first cell. Exactly one decision may carry that table."""
     homes = {}
-    ddir = os.path.join(REPO_ROOT, "decisions")
+    ddir = os.path.join(REPO_ROOT, "docs", "decisions")
     for name in sorted(os.listdir(ddir)):
         if name.endswith(".md"):
             with open(os.path.join(ddir, name), "r", encoding="utf-8") as f:

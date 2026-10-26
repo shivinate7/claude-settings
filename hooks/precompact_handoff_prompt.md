@@ -42,7 +42,7 @@ The handoff holds these sections, in this order:
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
   `## Working premises`. One line each, in this form:
   `- P1 [ruling|measured|read|notes|assumed] <claim>. Source: <where>. Checked <date or never>.`
-  The kinds and what each means: decisions/premise-format.md. A fact with no source is
+  The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
   `assumed`.
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
@@ -58,7 +58,7 @@ weak or stale premise, check it. Then rewrite its line with the new source and d
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each
-kind, and which kinds are weak: decisions/premise-format.md.
+kind, and which kinds are weak: docs/decisions/premise-format.md.
 
 ## 6. Update the plan, only when it changed
 
