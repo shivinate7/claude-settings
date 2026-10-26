@@ -84,8 +84,10 @@ BRANCH_DELETE_DENY_REASON = (
     "and no remote ref contains it. Deleting it loses the only copy. "
     "Remedy: archive it on origin, then delete it. Run "
     "`git push origin <branch>:refs/heads/archive/<branch>`, then `git branch -D <branch>`, "
-    "with <branch> the name you are deleting. The push keeps the work, so this rule then "
-    "allows the delete. Nothing is lost, so this needs no question to the owner."
+    "with <branch> the name you are deleting. If origin already holds that archive name at "
+    "another tip, push to a new name such as `archive/<branch>-2`, never with force. Once the "
+    "push succeeds, the work is kept, so this rule allows the delete. Nothing is lost, so this "
+    "needs no question to the owner."
 )
 # A worktree removal always denies here too. The tree it deletes is not the tree the command RUNS
 # in, so the running checkout's own worktree-ness (the split every other arm in this rule reads)
