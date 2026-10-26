@@ -426,7 +426,7 @@ class LiveWork(Fixture):
         self.write_live({"readAt": "2026-10-26T21:00:00Z",
                          "threads": [{"title": "A", "state": "working", "step": "zz9"},
                                      {"title": "B", "state": "working", "step": "c2"},
-                                     {"title": "C", "state": "working", "step": "c1"}]})
+                                     {"title": "C", "state": "working", "step": "c1"}], "pulls": []})
         _, out = self.build_from_main("--live", str(self.live))
         self.assertIn("live threads naming no open step: zz9 (A), c2 (B)", out)
 
@@ -436,12 +436,34 @@ class LiveWork(Fixture):
         self.assertTrue(self.panel(page)["read"].startswith("unknown (the live file could not be read"))
 
     def test_missing_read_at_reads_unknown(self):
-        self.write_live({"threads": []})
+        self.write_live({"threads": [], "pulls": []})
         page, _ = self.build_from_main("--live", str(self.live))
-        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no readAt)")
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file's readAt is not an ISO time: None)")
+
+    def test_missing_threads_or_pulls_list_reads_unknown(self):
+        self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": []})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
+        self.assertNotIn("threads", build_info(page)["live"])
+
+    def test_read_at_that_is_not_a_time_reads_unknown(self):
+        self.write_live({"readAt": "yesterday", "threads": [], "pulls": []})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertTrue(self.panel(page)["read"].startswith("unknown (the live file's readAt is not an ISO time"))
+
+    def test_a_true_pull_number_is_skipped(self):
+        self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": [], "pulls": [{"number": True, "title": "t"}]})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(build_info(page)["live"]["skipped"], ["pull 1"])
+
+    def test_unread_steps_make_strays_unknown_not_listed(self):
+        self.assertEqual(build.live_work(None, None)["read"][:7], "unknown")
+        self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": [{"title": "A", "state": "working", "step": "c1"}],
+                         "pulls": []})
+        self.assertEqual(build.live_work(str(self.live), None)["strays"], ["unknown (the steps could not be read)"])
 
     def test_markup_in_a_thread_title_cannot_reach_the_page_script(self):
-        self.write_live({"readAt": "x", "threads": [{"title": "</script><!-- y", "state": "working"}]})
+        self.write_live({"readAt": "x", "threads": [{"title": "</script><!-- y", "state": "working"}], "pulls": []})
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertNotIn("</script><!--", page)
 

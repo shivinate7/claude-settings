@@ -50,7 +50,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
-- With no `--live`, the strip reads "unknown" and says why. A local session's state does not show
+- With no `--live`, with no `threads` or `pulls` list, or with a `readAt` that is not an ISO time, the
+  strip or its stamp reads "unknown" and says why. A local session's state does not show
   yet: that waits on step o8's option (c), each session writing its own line.
 
 ## A merge marks a step

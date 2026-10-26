@@ -894,7 +894,7 @@ function unavailable(){
   if(!el) return;
   const NAME = {blocked:'Waiting on you', working:'Working', review_ready:'Ready for review', failed:'Failed', stopped:'Stopped', done:'Done'};
   const when = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
-  const link = (url, text) => url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
+  const link = (url, text) => /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
   if(!Array.isArray(w.threads)){
     el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by the roadmap builder)')}</span></summary>`;
     return;

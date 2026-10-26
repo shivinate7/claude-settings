@@ -416,8 +416,8 @@ def live_work(path, steps):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches": [{"name", "updatedAt"?}]}.
-    An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
+    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}]}.
+    A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`.
     """
     if not path:
@@ -429,8 +429,13 @@ def live_work(path, steps):
     if not isinstance(raw, dict):
         return {"read": "unknown (the live file is not a JSON object)"}
     read = raw.get("readAt")
-    if not isinstance(read, str) or not read:
-        read = "unknown (the live file has no readAt)"
+    try:
+        datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        read = "unknown (the live file's readAt is not an ISO time: %r)" % (read,)
+    missing = [key for key in ("threads", "pulls") if key not in raw]
+    if missing:
+        return {"read": "unknown (the live file has no %s list)" % " or ".join(missing)}
     skipped, strays = [], []
 
     def keep(kind, rows, ok):
@@ -447,10 +452,14 @@ def live_work(path, steps):
     text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
     threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
                    and (r.get("step") is None or isinstance(r["step"], str)))
-    pulls = keep("pull", raw.get("pulls", []), lambda r: isinstance(r.get("number"), int) and text(r, "title"))
+    pulls = keep("pull", raw.get("pulls", []), 
+                 lambda r: type(r.get("number")) is int and text(r, "title"))
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     for row in threads:
         sid = row.get("step") or None
+        if sid and steps is None:
+            strays = ["unknown (the steps could not be read)"]
+            break
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
@@ -562,7 +571,7 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_work(args.live, data["steps"] if data else {})
+    info["live"] = live_work(args.live, data["steps"] if data else None)
     info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
