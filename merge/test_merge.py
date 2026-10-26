@@ -1313,7 +1313,7 @@ class CutLanes(Env):
         lane_batch(self, "lane1", "lane2")
         real = merge.sh
         def broken(args, *a, **k):
-            if "--merges" in args:
+            if "log" in args and any("%x01" in a for a in args):  # lane_tips' one git log: merges and reverts
                 if isinstance(effect, BaseException):
                     raise effect
                 return effect
