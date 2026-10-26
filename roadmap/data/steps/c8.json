@@ -1,10 +1,10 @@
 {
   "ask": "Draft the sandbox settings and the test list for the Mac trial.",
-  "note": "Oct 17: the sandbox runs on macOS, Linux and WSL2; on native Windows, Claude Code runs commands unsandboxed. Trial on the Mac only. No guard code retires from this step any more. Lower value than planned: worth an hour for real protection on the Mac, but no longer the hook-lines cut. Add failIfUnavailable to the settings.",
+  "note": "Repo and roadmap disagree, Oct 26: decision adoptions-declined-2026-09-28 (claude-settings 149f4bc) declines sandbox mode, because every network host and tool needs an allow entry and the guard plus deny rules give most of the gain; it reopens only on a guard bypass those miss. This step (Oct 17) plans a Mac trial anyway. Facts from Oct 17: the sandbox runs on macOS, Linux and WSL2, not native Windows, so no guard code retires; worth about an hour for real protection on the Mac; add failIfUnavailable. Proposed to triage: close unless you want the trial despite the decision.",
   "order": 450,
   "phase": "later",
   "status": "todo",
   "title": "Try the sandbox on your Mac",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "The OS blocks writes outside the repo however a command is spelled. Since Windows stays native (Oct 17), this protects Mac sessions only, and the guard code it would have replaced stays for Windows."
 }

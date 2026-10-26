@@ -1,8 +1,9 @@
 {
+  "note": "Checked Oct 26 at 149f4bc: lint/rule_audit.py passes a guard row on the rule name guard.py passes to refuse(), with no test required; proof for guard rules sits in hooks/mutate_guard.py. So a guard rule with no test still passes CI. Overlaps c23 (cull the guard itself) and c10 (cull what never fired): a rule with no test is a cull candidate. Proposed to triage: fold into c23.",
   "order": 460,
   "phase": "later",
   "status": "todo",
   "title": "Optional: fail a guard rule with no test",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "One new rule_audit case keeps future prose deletions honest."
 }

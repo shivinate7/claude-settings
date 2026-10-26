@@ -1,8 +1,9 @@
 {
+  "note": "Not started. Waits for o4 (rework compliance-check). Cull first in each repo. q_max had 759 debts and 560 decisions on Oct 17; not rechecked (q_max is not in this project's repos).",
   "order": 310,
   "phase": "rollout",
   "status": "todo",
   "title": "Run compliance-check on each child repo",
-  "updatedAt": "2026-10-17T17:20:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Cull first in each one. q_max has 759 debts and 560 decisions."
 }

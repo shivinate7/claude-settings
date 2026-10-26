@@ -1,8 +1,9 @@
 {
+  "note": "Superseded, Oct 26: cloud sessions ship Chromium and Playwright with no setup; Claude in Chrome and the desktop app's browser pane cover local sessions (mcp__Claude_Browser is allowed in claude-settings settings.json at 149f4bc); home-app allows headless Chrome (owner, Oct 21). What is left is a shared screenshot script, which is d6. Proposed to triage: close, or merge into d6.",
   "order": 270,
   "phase": "design",
   "status": "todo",
   "title": "Install a browser MCP for every session",
-  "updatedAt": "2026-10-17T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Playwright or Chrome DevTools MCP, set up globally, so any repo and any cloud session can render a page and look at it."
 }

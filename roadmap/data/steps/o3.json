@@ -1,8 +1,9 @@
 {
+  "note": "Checked Oct 26: claude-settings CLAUDE.md is 106 lines (149f4bc) and home-app's is 30 (f8a59b2), both under 200. banchi and q_max not checked (not in this project's repos). Proposed to triage: move to Roll out as a per-repo check, or close for claude-settings.",
   "order": 120,
   "phase": "organize",
   "status": "todo",
   "title": "Shrink each CLAUDE.md toward 200 lines",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Long files cost context and lower how well rules are followed. Keep AGENTS.md as a symlink."
 }

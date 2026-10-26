@@ -1,9 +1,10 @@
 {
   "ask": "The cull is done. Write the organize-phase brief, starting with the rules folder and ui.md.",
+  "note": "Checked Oct 26 at 149f4bc: claude-settings has no .claude/rules/ folder (.claude/ holds only CLAUDE.md). o2's layout already puts .claude/rules/ in every repo. Proposed to triage: run this as part of o2 (one layout for every repo), with ui.md as the first rule.",
   "order": 125,
   "phase": "organize",
   "status": "todo",
   "title": "Install a rules folder with a UI rule",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "A path-scoped rule loads design guidance whenever an agent touches a .tsx, .css or .swift file."
 }

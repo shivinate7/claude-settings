@@ -1,9 +1,9 @@
 {
-  "note": "Added Oct 20: container queries. A shared component (a card, a panel, a toolbar) adapts to the width of the box it sits in, not the screen, so the same component works in a sidebar and in the main column with no per-page copy (the one-home rule, o11). Use them inside reusable components; keep page-level layout on the layout primitives and a few screen breakpoints. Web only: the Swift side uses its own fit-to-space tools (ViewThatFits, size classes) for the same job. Limit: each container breakpoint is one more state to screenshot and test, so add one only where a component really changes shape.",
+  "note": "Added Oct 20: container queries inside shared components (a card adapts to its box, not the screen), so one component serves a sidebar and a main column with no copy (o11). Page layout stays on a few layout primitives and screen breakpoints. Swift uses its own tools (ViewThatFits, size classes). Limit: each container breakpoint is one more state to screenshot, so add one only where a component changes shape. Not started; no change since Oct 20.",
   "order": 255,
   "phase": "design",
   "status": "todo",
   "title": "Space with containers, not margins",
-  "updatedAt": "2026-10-20T19:03:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "gap on parents, a few layout primitives, clamp() tokens for fluid spacing, and banchi's per-file ratchet. This is the direct fix for centering and gap problems."
 }

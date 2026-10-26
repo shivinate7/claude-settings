@@ -1,9 +1,9 @@
 {
-  "note": "Done Oct 20: #525 (the map skill moves here, with a format version) merged the map work; the skill is at skills/plain-english-map (decision map-skill-lives-here). #457 closed unmerged. Left: delete branch batch-map, in the next batch. q_max follow-up (from its load report, not checked here): its vendored copy drifted and its PR 969 fails the drift guard; once q_max uses the shared skill, the skill's tests (about 460 s per q_max CI run) move here. That part belongs to Roll out.",
+  "note": "Done Oct 20: #525 (the map skill moves into claude-settings) carried the map work; the skill is skills/plain-english-map (decision map-skill-lives-here); #457 closed unmerged. Branch batch-map is gone (checked Oct 26). Left for Roll out: q_max's vendored copy drifted and its PR 969 fails the drift guard; once q_max uses the shared skill, the skill's tests move here.",
   "order": 160,
   "phase": "organize",
   "status": "done",
   "title": "Merge the map PR #457",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "After the cull. Fix its failing gates check, and consider generated structure with advisory checks."
 }

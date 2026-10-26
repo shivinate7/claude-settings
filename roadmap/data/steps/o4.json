@@ -1,10 +1,10 @@
 {
   "ask": "Draft the compliance-check rework with layout and design groups.",
+  "note": "The layout group reads o2's layout file plus each repo's extras file, and reports any folder that is neither (Oct 22). o12 leaves compliance-check's update to this step. r1 (run it on each child repo) waits for this. Waits for o2.",
   "order": 130,
   "phase": "organize",
   "status": "todo",
   "title": "Rework compliance-check",
-  "updatedAt": "2026-10-21T17:30:00Z",
-  "why": "Add layout and design groups, so it can see folder shape and screen readiness, not only CLAUDE.md rules.",
-  "note": "The layout group reads the layout file that o2 (one layout for every repo) adds to claude-settings, plus each repo's extras file, so it reports any folder that is neither (Oct 22)."
+  "updatedAt": "2026-10-26T05:30:00Z",
+  "why": "Add layout and design groups, so it can see folder shape and screen readiness, not only CLAUDE.md rules."
 }

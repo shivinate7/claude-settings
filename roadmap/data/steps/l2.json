@@ -1,8 +1,9 @@
 {
+  "note": "Not started; no change since Oct 17. Overlaps d2 (the design reviewer, which already picks the model for visual judgment) and d9 (a picture of each option). Proposed to triage: fold the second-model critic into d2 as an option, and drop Stitch and Figma Make unless you still want to explore directions outside Claude.",
   "order": 420,
   "phase": "later",
   "status": "todo",
   "title": "Add a second design opinion",
-  "updatedAt": "2026-10-17T17:20:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "A second-model critic, or Stitch or Figma Make for exploring directions before a build."
 }

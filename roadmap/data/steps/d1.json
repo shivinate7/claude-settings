@@ -1,10 +1,10 @@
 {
   "ask": "Draft the designer agent definition and its write-scope guard, and decide: does the designer run /design itself, or do you run it and hand the canvas to the builder?",
-  "note": "Route with one test: does the lane touch a screen? Needs a standing exception to the Sonnet ceiling, like the third builder try (fits c17, Opus on your word). Canvas: Claude Code's /design drafts the mockup as artboards on a Claude Design canvas, published as an artifact; /design-sync pulls the repo's design system in first, and a finished design hands back to Claude Code to build (needs v2.1.234 or later; the standalone claude.ai/design site closes Dec 14, 2026, the Design artifact type stays). Review: you select an element on the published mockup, comment and Send to Claude; the builder reads the threads before building. Comments need your Enterprise account with the artifact shared in the organization; on Max, use a copy-as-prompt button.",
+  "note": "Checked Oct 26 at claude-settings 149f4bc: agents/ has no designer. Rule roles-sonnet-is-the-ceiling allows Opus only for Plan, the advisor and a builder's third try, so a designer on Opus needs your word as a standing exception; write it with d2's (the design reviewer) as one ruling. Route: one test, does the lane touch a screen. Canvas, as read Oct 17 and not rechecked: Claude Code's /design drafts artboards on a Claude Design canvas, published as an artifact. Review: you comment on an element of the published mockup; comments need your Enterprise account with in-organization sharing. Finding Oct 26: home-app already keeps an HTML mockup per redesign in docs/design/ (six at f8a59b2), a working pattern the designer can copy. Open: does the designer run /design itself, or do you run it and hand the canvas to the builder.",
   "order": 210,
   "phase": "design",
   "status": "todo",
   "title": "Add a designer agent",
-  "updatedAt": "2026-10-21T17:30:00Z",
+  "updatedAt": "2026-10-26T05:30:00Z",
   "why": "Opus makes a mockup for every screen lane, so Sonnet builds to a picture of the target, and you comment on the exact element."
 }
