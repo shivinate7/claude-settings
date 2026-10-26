@@ -199,7 +199,6 @@ class LaneCap(unittest.TestCase):
         self.assertNotIn("todo.md", out)
 
 
-
 PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
 
 
@@ -213,7 +212,7 @@ class ProbesText(unittest.TestCase):
     def test_probes_fall_back_to_python(self):
         text = self.text()
         self.assertIn("PY=$(command -v python3 || command -v python)", text)
-        self.assertNotRegex(text, r"`python3? \$P/")
+        self.assertNotRegex(text, r"\bpython3? \$P/")
 
     def test_cite_probe_finds_each_id_form(self):
         # Each pattern is unescaped as a shell does in double quotes, then run through grep.
