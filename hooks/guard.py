@@ -731,7 +731,7 @@ SILENT_WRITE_QUIET_REASON = (
 #
 # An agent resumed after the harness auto-removed its worktree loses BOTH the folder and the
 # branch, so git alone cannot tell "never had a worktree" from "worktree was removed". A RECORD
-# is needed: decisions/an-agent-outside-its-home-tree-must-stop.md.
+# is needed: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
 #
 # The record lives under the CLONE's git common directory, not inside any one worktree, so it
 # survives that worktree's removal (`git_common_dir` above). Unmeasured: Windows, and the
@@ -1635,7 +1635,7 @@ def diff_rule(role: str) -> str:
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
     """Log a role's diff at commit or push for the reviewer. Never blocks: the base can count the
-    parent branch's files as the agent's own (decisions/builders-cannot-edit-tests.md)."""
+    parent branch's files as the agent's own (docs/decisions/builders-cannot-edit-tests.md)."""
     found, _ = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
@@ -2341,7 +2341,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
 # ------------------------------------------------------------------ impeccable is review-only
 #
-# decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
+# docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
 IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
@@ -2429,7 +2429,7 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
@@ -2506,7 +2506,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -2647,7 +2647,7 @@ def judge(payload) -> None:
 
     # Every non-empty string path field the call carries is judged, so a decoy in one field hides
     # no denied path, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
-    # runs over all fields, then the 7b notes, then the 8 asks (decisions/builders-cannot-edit-tests.md,
+    # runs over all fields, then the 7b notes, then the 8 asks (docs/decisions/builders-cannot-edit-tests.md,
     # "Judge the result").
     targets = write_targets(tool_input)
     for target in targets:

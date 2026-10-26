@@ -1098,7 +1098,7 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
     # that exercises the whole sequence, `worktree_home_case`.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',

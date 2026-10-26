@@ -485,7 +485,7 @@ def case_model_failures_fail_open_with_no_deny():
 def case_model_row_names_the_call():
     # The model-per-role table has one row for this hook's model call; the row's model and effort
     # must equal what the call uses (decision_watch.MODEL and its --effort argument).
-    record = os.path.join(os.path.dirname(HERE), "decisions", "subagent-model-cap.md")
+    record = os.path.join(os.path.dirname(HERE), "docs", "decisions", "subagent-model-cap.md")
     try:
         with open(record, encoding="utf-8") as f:
             rows = [line for line in f if line.startswith("|") and "hooks/sendmessage_state.py" in line]

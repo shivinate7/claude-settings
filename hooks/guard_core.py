@@ -1507,7 +1507,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 #
 # A builder that cannot pass a test may otherwise delete it, skip it, or rewrite it to pass.
 #
-# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). The act is a
+# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (docs/decisions/predicate-is-the-act.md). The act is a
 # test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
 # `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit

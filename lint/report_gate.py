@@ -33,7 +33,7 @@ from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 # side by side, both under the repo root and under ~/.claude, so the hop from one to its
 # sibling holds in both places. A regex over
 # the raw command text cannot tell a quoted probe string, or a heredoc body, from an
-# actual git write. See decisions/predicate-is-the-act.md.
+# actual git write. See docs/decisions/predicate-is-the-act.md.
 # It loads only when the turn ran a shell or landing tool, so an event the gate ignores,
 # a rewrite turn and an idle turn never pay for it.
 guard = None

@@ -67,10 +67,10 @@ class PlanPremises(unittest.TestCase):
         found = [p for p in paragraphs if p.startswith("Premises first")]
         self.assertEqual(len(found), 1, "agents/plan.md needs one 'Premises first' paragraph")
         self.assertIn("`premise-format`", found[0])
-        # One home for the kinds: decisions/premise-format.md. The plan agent points at it.
-        with open(os.path.join(ROOT, "decisions", "premise-format.md"), encoding="utf-8") as handle:
+        # One home for the kinds: docs/decisions/premise-format.md. The plan agent points at it.
+        with open(os.path.join(ROOT, "docs", "decisions", "premise-format.md"), encoding="utf-8") as handle:
             kinds = KIND_ROW.findall(handle.read())
-        self.assertTrue(kinds, "no kind rows in decisions/premise-format.md")
+        self.assertTrue(kinds, "no kind rows in docs/decisions/premise-format.md")
         for kind in kinds:
             with self.subTest(kind=kind):
                 self.assertIsNone(re.search(r"\b%s\b" % kind, found[0], re.I),
