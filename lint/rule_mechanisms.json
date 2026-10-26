@@ -22,13 +22,13 @@
     "outcomes-tests-are-claims": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, or possibly-stale is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 3-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
+        "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, possibly-stale, or already-ruled-out is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 4-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
       }
     },
     "outcomes-word-covers-named-act": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a stated act matches the literal word given, versus a variant of it, is a judgment call on wording. No hook parses an instruction and an action for a match."
+        "reason": "Whether a stated act matches the literal word given, versus a variant of it, and whether a test expects exactly the behaviour a ruling ruled out, are judgment calls on wording. No hook parses an instruction and an action for a match."
       }
     },
     "outcomes-mechanize-rules": {
