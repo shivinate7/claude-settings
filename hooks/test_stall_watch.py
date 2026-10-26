@@ -79,13 +79,13 @@ def case(fn):
 def posix_case(fn):
     """A case that needs the posix hook. Off posix the hook is silent by design, so the case
     reports SKIP there, never PASS (decision: stall_watch is posix-only)."""
-    def gated():
+    def posix_only():
         if os.name != "posix":
             raise Skip("posix only: the hook is silent on os.name %r" % os.name)
         return fn()
-    gated.__doc__ = fn.__doc__
-    gated.__name__ = fn.__name__
-    CASES.append(gated)
+    posix_only.__doc__ = fn.__doc__
+    posix_only.__name__ = fn.__name__
+    CASES.append(posix_only)
     return fn
 
 

@@ -41,7 +41,7 @@ age. A shell whose output file is not found is listed as unknown. It prints one 
 the model to stop the shell or tell the owner.
 
 The hook exits 0 and never blocks. A crash never refuses a call, as advisory hooks stay fail-open
-(`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
+(`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
 
 - Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another

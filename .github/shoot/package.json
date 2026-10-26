@@ -1,7 +1,7 @@
 {
   "name": "claude-settings-shoot-ci",
   "private": true,
-  "description": "The Playwright that CI installs for the bin/shoot suite (gates.yml, job 'gates-shoot'). bin/shoot itself never installs it.",
+  "description": "The Playwright that CI installs for the bin/shoot suite (checks.yml, job 'checks-shoot'). bin/shoot itself never installs it.",
   "dependencies": {
     "playwright": "1.64.1"
   }

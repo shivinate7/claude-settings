@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cases for the owner feedback inbox: the capture hook and the Stop gate. Standard library only,
+"""Cases for the owner feedback inbox: the capture hook and the Stop guard. Standard library only,
 and no test runner.
 
 Run it from the repository root:
@@ -84,7 +84,7 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing.
     home is any non-empty text after `->`.
 
-Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). A Stop hook. Stdin
+Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd. It reads the inbox and the
   handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md. Exit 0 in every case. Stdout is one JSON
   object or nothing.
@@ -97,7 +97,7 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
     missing.
   - A malformed item line is an offence: a `- fb-` line whose id is not a token, such as
     `- fb- [task] -> x` or a bare `- fb-`. The reason quotes the line's text after the leading
-    `- `, for example `fb- [task] -> x`. The gate does not crash on it.
+    `- `, for example `fb- [task] -> x`. The guard does not crash on it.
   - An item line that ends with `[closed]` is closed. Its id is not required in the handoff. Its
     kind and home are still checked.
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
@@ -118,7 +118,7 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
   - A malformed item line is never listed as an id. The other ids and the capture line still print.
 
 Readings taken here, where the record says "every owner message between the two":
-  the opening prompt is captured; `x fb` and `fbi ...` are captured while open; the gate's jotting
+  the opening prompt is captured; `x fb` and `fbi ...` are captured while open; the guard's jotting
   checks apply to a closed inbox too, because those messages were still captured.
 
 The expected strings are hardcoded here. The reader in this file follows the format above.
@@ -137,7 +137,7 @@ from datetime import datetime, timedelta, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
-GATE_PATH = os.environ.get("FEEDBACK_GATE_UNDER_TEST") or os.path.join(HERE, "feedback_gate.py")
+GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
 ROOT = tempfile.mkdtemp(prefix="feedback_inbox_cases_")
@@ -352,8 +352,8 @@ def at(minutes):
     return (CLOCK_START + timedelta(minutes=minutes)).isoformat()
 
 
-def gate(cfg, sid, stop_active=False):
-    return run(GATE_PATH, payload({"hook_event_name": "Stop", "session_id": sid,
+def guard(cfg, sid, stop_active=False):
+    return run(GUARD_PATH, payload({"hook_event_name": "Stop", "session_id": sid,
                                    "stop_hook_active": stop_active, "cwd": cfg}), cfg)
 
 
@@ -462,7 +462,7 @@ def captured_texts(cfg, sid):
     return [b["text"] for b in read_blocks(read_or_empty(inbox_of(cfg, sid)))]
 
 
-def gate_json(p):
+def guard_json(p):
     try:
         obj = json.loads(p.out)
     except ValueError:
@@ -475,7 +475,7 @@ def is_block(obj):
 
 
 def block_reason(p):
-    obj = gate_json(p)
+    obj = guard_json(p)
     if is_block(obj) and isinstance(obj.get("reason"), str):
         return obj["reason"]
     return None
@@ -510,7 +510,7 @@ def expect_silent(name, p):
 
 
 def expect_reminder(name, p):
-    obj = gate_json(p)
+    obj = guard_json(p)
     check(name, p.code == 0 and obj is not None and not is_block(obj)
           and reminder_of(obj) is not None, p.desc())
 
@@ -523,7 +523,7 @@ def expect_block(name, p, named=(), unnamed=(), reminder=None):
     for n in unnamed:
         check("%s: does not name %s" % (name, n), n not in reason, reason)
     if reminder is not None:
-        has = reminder_of(gate_json(p)) is not None
+        has = reminder_of(guard_json(p)) is not None
         check("%s: %s" % (name, "carries the reminder" if reminder else "no reminder"),
               has == reminder, p.desc())
 
@@ -541,7 +541,7 @@ def case_closed_by_default():
 
 def case_opener_captured_with_central_time():
     cfg, sid = new_cfg(), "opener"
-    text = "fb: the gate is too strict on Stop"
+    text = "fb: the guard is too strict on Stop"
     p = capture(cfg, sid, text)
     check("opener: hook ran (one Central line, exit 0)", ran_central(p), p.desc())
     blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
@@ -562,7 +562,7 @@ def case_opener_captured_with_central_time():
 
 
 def case_opener_forms():
-    for sid, text in (("form-no-colon", "fb the gate is too strict"),
+    for sid, text in (("form-no-colon", "fb the guard is too strict"),
                       ("form-newline", "fb:\nline two of the burst")):
         cfg = new_cfg()
         p = capture(cfg, sid, text)
@@ -768,24 +768,24 @@ def case_sessions_are_isolated():
           (captured_texts(cfg, "iso-a"), captured_texts(cfg, "iso-b")))
 
 
-# --------------------------------------------------------------------------- gate cases
+# --------------------------------------------------------------------------- guard cases
 
-def case_gate_no_inbox_and_empty_inbox_pass_silently():
+def case_guard_no_inbox_and_empty_inbox_pass_silently():
     cfg = new_cfg()
-    expect_silent("gate: no inbox file passes silently", gate(cfg, "no-inbox"))
+    expect_silent("guard: no inbox file passes silently", guard(cfg, "no-inbox"))
     write_file(inbox_of(cfg, "empty-inbox"), "")
-    expect_silent("gate: empty inbox passes silently", gate(cfg, "empty-inbox"))
+    expect_silent("guard: empty inbox passes silently", guard(cfg, "empty-inbox"))
 
 
-def case_gate_all_jotted_passes_silently():
+def case_guard_all_jotted_passes_silently():
     cfg, sid = new_cfg(), "jotted"
     write_file(inbox_of(cfg, sid), render_block("fb: a jotted burst\nsecond line",
                                                 items=JOTTED_ITEMS))
     write_file(handoff_of(cfg, sid), JOTTED_HANDOFF)
-    expect_silent("gate: all jotted, open ids in the handoff, passes silently", gate(cfg, sid))
+    expect_silent("guard: all jotted, open ids in the handoff, passes silently", guard(cfg, sid))
 
 
-def case_gate_message_without_items_blocks_and_names_it():
+def case_guard_message_without_items_blocks_and_names_it():
     cfg, sid = new_cfg(), "no-items"
     text_b = "second message, no items jotted"
     write_file(inbox_of(cfg, sid),
@@ -793,12 +793,12 @@ def case_gate_message_without_items_blocks_and_names_it():
                             items=("- fb-0958-2 [task] -> handoff",))
                + render_block(text_b, header="2026-10-13 10:09 CDT (UTC-05:00)"))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
-    p = gate(cfg, sid)
+    p = guard(cfg, sid)
     reason = block_reason(p) or ""
-    expect_block("gate: message with no items", p)
-    check("gate: the reason names the message with no items",
+    expect_block("guard: message with no items", p)
+    check("guard: the reason names the message with no items",
           names_message(reason, "2026-10-13 10:09", text_b), reason)
-    check("gate: the reason does not name the jotted first message",
+    check("guard: the reason does not name the jotted first message",
           "2026-10-13 10:04" not in reason, reason)
 
 
@@ -810,124 +810,124 @@ BAD_ITEMS = (
 )
 
 
-def case_gate_item_without_kind_or_home_blocks():
+def case_guard_item_without_kind_or_home_blocks():
     for label, item, item_id in BAD_ITEMS:
         cfg, sid = new_cfg(), "bad-" + item_id
         write_file(inbox_of(cfg, sid), render_block("item with %s" % label, items=(item,)))
-        expect_block("gate: item with %s" % label, gate(cfg, sid), named=(item_id,))
+        expect_block("guard: item with %s" % label, guard(cfg, sid), named=(item_id,))
 
 
-def case_gate_open_item_missing_from_handoff_blocks():
+def case_guard_open_item_missing_from_handoff_blocks():
     cfg, sid = new_cfg(), "open-missing"
     items = ("- fb-0958-2 [ruling] -> NO HOME YET", "- fb-0958-3 [task] -> handoff",
              "- fb-0958-4 [standing] -> handoff")
     write_file(inbox_of(cfg, sid), render_block("open ids burst", items=items))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 ruling, NO HOME YET\n")
-    expect_block("gate: open task and standing missing from the handoff", gate(cfg, sid),
+    expect_block("guard: open task and standing missing from the handoff", guard(cfg, sid),
                  named=("fb-0958-3", "fb-0958-4"), unnamed=("fb-0958-2",))
-    expect_silent("gate: stop_hook_active gives nothing, even with missing open ids",
-                  gate(cfg, sid, stop_active=True))
+    expect_silent("guard: stop_hook_active gives nothing, even with missing open ids",
+                  guard(cfg, sid, stop_active=True))
 
 
-def case_gate_id_match_is_a_whole_token():
+def case_guard_id_match_is_a_whole_token():
     cfg, sid = new_cfg(), "boundary"
     write_file(inbox_of(cfg, sid),
                render_block("boundary", items=("- fb-0958-2 [task] -> handoff",)))
     write_file(handoff_of(cfg, sid), "- fb-0958-20 task, a different item\n")
-    expect_block("gate: fb-0958-20 in the handoff does not count for fb-0958-2", gate(cfg, sid),
+    expect_block("guard: fb-0958-20 in the handoff does not count for fb-0958-2", guard(cfg, sid),
                  named=("fb-0958-2",))
 
 
-def case_gate_handoff_rewrite_that_drops_an_item_blocks():
+def case_guard_handoff_rewrite_that_drops_an_item_blocks():
     cfg, sid = new_cfg(), "rewrite"
     write_file(inbox_of(cfg, sid), render_block(
         "two open items", items=("- fb-0958-2 [task] -> handoff",
                                  "- fb-0958-3 [ruling] -> NO HOME YET")))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task, kept\n")
-    expect_block("gate: a handoff rewrite that drops fb-0958-3 blocks", gate(cfg, sid),
+    expect_block("guard: a handoff rewrite that drops fb-0958-3 blocks", guard(cfg, sid),
                  named=("fb-0958-3",), unnamed=("fb-0958-2",))
 
 
-def case_gate_missing_handoff_counts_every_open_id_missing():
+def case_guard_missing_handoff_counts_every_open_id_missing():
     cfg, sid = new_cfg(), "no-handoff"
     write_file(inbox_of(cfg, sid), render_block("no handoff yet",
                                                 items=("- fb-0958-2 [ruling] -> NO HOME YET",)))
-    expect_block("gate: open ruling with no handoff file blocks", gate(cfg, sid),
+    expect_block("guard: open ruling with no handoff file blocks", guard(cfg, sid),
                  named=("fb-0958-2",))
 
 
-def case_gate_scanner_text_yields_no_phantom_block_or_item():
-    cfg, sid = new_cfg(), "scanner-gate"
+def case_guard_scanner_text_yields_no_phantom_block_or_item():
+    cfg, sid = new_cfg(), "scanner-guard"
     write_file(inbox_of(cfg, sid), render_block(SCANNER, header=BLOCK_HEADER, items=()))
-    p = gate(cfg, sid)
+    p = guard(cfg, sid)
     reason = block_reason(p) or ""
-    expect_block("gate: scanner text with no items blocks", p)
-    check("gate: the reason names the scanner message by its stamp or text",
+    expect_block("guard: scanner text with no items blocks", p)
+    check("guard: the reason names the scanner message by its stamp or text",
           names_message(reason, "2026-10-13 10:04", SCANNER), reason)
-    check("gate: the fake item inside the fence is not an open item", "fb-0999-1" not in reason,
+    check("guard: the fake item inside the fence is not an open item", "fb-0999-1" not in reason,
           reason)
-    check("gate: the fake header inside the fence is not a block", "2026-01-01" not in reason,
+    check("guard: the fake header inside the fence is not a block", "2026-01-01" not in reason,
           reason)
 
 
-def case_gate_scanner_text_with_real_items_passes_silently():
+def case_guard_scanner_text_with_real_items_passes_silently():
     cfg, sid = new_cfg(), "scanner-real"
     write_file(inbox_of(cfg, sid), render_block(SCANNER, items=("- fb-0958-2 [task] -> handoff",)))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
-    expect_silent("gate: scanner text with real items passes (fake fb-0999-1 is not read)",
-                  gate(cfg, sid))
+    expect_silent("guard: scanner text with real items passes (fake fb-0999-1 is not read)",
+                  guard(cfg, sid))
 
 
-def case_gate_malformed_item_line_blocks_and_names_it():
+def case_guard_malformed_item_line_blocks_and_names_it():
     cfg, sid = new_cfg(), "malformed-item"
     write_file(inbox_of(cfg, sid), render_block("malformed item beside a good one", items=(
         "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff")))
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
-    expect_block("gate: malformed `- fb- [task] -> x` beside a handed-off item", gate(cfg, sid),
+    expect_block("guard: malformed `- fb- [task] -> x` beside a handed-off item", guard(cfg, sid),
                  named=("fb- [task] -> x",), unnamed=("fb-0958-2",))
     cfg, sid = new_cfg(), "malformed-bare"
     write_file(inbox_of(cfg, sid), render_block("a bare fb- line", items=("- fb-",)))
-    expect_block("gate: bare `- fb-` line", gate(cfg, sid), named=("fb-",))
+    expect_block("guard: bare `- fb-` line", guard(cfg, sid), named=("fb-",))
 
 
-def case_gate_closed_item_is_not_required_in_handoff():
+def case_guard_closed_item_is_not_required_in_handoff():
     cfg, sid = new_cfg(), "closed-item"
     write_file(inbox_of(cfg, sid), render_block("closed task and ruling", items=(
         "- fb-0958-2 [task] -> handoff: done [closed]",
         "- fb-0958-3 [ruling] -> NO HOME YET [closed]")))
     write_file(handoff_of(cfg, sid), "# Handoff\n")
-    expect_silent("gate: closed task and ruling missing from the handoff pass silently",
-                  gate(cfg, sid))
+    expect_silent("guard: closed task and ruling missing from the handoff pass silently",
+                  guard(cfg, sid))
     cfg, sid = new_cfg(), "closed-and-open"
     write_file(inbox_of(cfg, sid), render_block("one closed, one open", items=(
         "- fb-0958-2 [task] -> handoff: done [closed]", "- fb-0958-4 [task] -> handoff")))
     write_file(handoff_of(cfg, sid), "# Handoff\n")
-    expect_block("gate: open task still required beside a closed one", gate(cfg, sid),
+    expect_block("guard: open task still required beside a closed one", guard(cfg, sid),
                  named=("fb-0958-4",), unnamed=("fb-0958-2",))
 
 
-def case_gate_notes_heading_is_plain_text():
+def case_guard_notes_heading_is_plain_text():
     cfg, sid = new_cfg(), "notes-heading"
     write_file(inbox_of(cfg, sid), render_block("jotted burst", items=(
         "- fb-0958-2 [task] -> handoff",)) + "### Notes\nsome notes the session wrote by hand\n")
     write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
-    expect_silent("gate: a ### Notes heading after a jotted message passes silently",
-                  gate(cfg, sid))
+    expect_silent("guard: a ### Notes heading after a jotted message passes silently",
+                  guard(cfg, sid))
     cfg, sid = new_cfg(), "notes-only"
     write_file(inbox_of(cfg, sid), "### Notes\nno captured message here\n")
-    expect_silent("gate: an inbox with only a ### Notes heading passes silently", gate(cfg, sid))
+    expect_silent("guard: an inbox with only a ### Notes heading passes silently", guard(cfg, sid))
 
 
-def case_gate_reminder_follows_capture_state():
+def case_guard_reminder_follows_capture_state():
     cfg, sid = new_cfg(), "open-jotted"
     if opened(cfg, sid, "fb: reminder check, jotted"):
         append_file(inbox_of(cfg, sid), "- fb-0958-2 [note] -> noted\n")
-        expect_reminder("open and jotted: reminder, no block", gate(cfg, sid))
+        expect_reminder("open and jotted: reminder, no block", guard(cfg, sid))
 
     cfg, sid = new_cfg(), "open-unjotted"
     if opened(cfg, sid, "fb: reminder check, unjotted"):
         block = read_blocks(read_file(inbox_of(cfg, sid)))[0]
-        p = gate(cfg, sid)
+        p = guard(cfg, sid)
         expect_block("open and unjotted: blocks", p, reminder=True)
         reason = block_reason(p) or ""
         check("open and unjotted: the block names the message",
@@ -938,14 +938,14 @@ def case_gate_reminder_follows_capture_state():
         append_file(inbox_of(cfg, sid), "- fb-0958-2 [note] -> noted\n")
         closed = capture(cfg, sid, "fb done")
         check("closed and jotted: fb done ran and is a close", ran_central(closed), closed.desc())
-        expect_silent("closed and jotted: silent, no reminder", gate(cfg, sid))
+        expect_silent("closed and jotted: silent, no reminder", guard(cfg, sid))
 
     cfg, sid = new_cfg(), "closed-unjotted"
     if opened(cfg, sid, "fb: reminder check, closed and unjotted"):
         closed = capture(cfg, sid, "fb done")
         check("closed and unjotted: fb done ran and is a close", ran_central(closed), closed.desc())
         block = read_blocks(read_file(inbox_of(cfg, sid)))[0]
-        p = gate(cfg, sid)
+        p = guard(cfg, sid)
         expect_block("closed and unjotted: blocks, no reminder", p, reminder=False)
         reason = block_reason(p) or ""
         check("closed and unjotted: the block names the message",
@@ -954,26 +954,26 @@ def case_gate_reminder_follows_capture_state():
     cfg, sid = new_cfg(), "open-stop-active"
     if opened(cfg, sid, "fb: reminder check, stop active"):
         expect_silent("open and unjotted, stop_hook_active: silent",
-                      gate(cfg, sid, stop_active=True))
+                      guard(cfg, sid, stop_active=True))
 
 
-def case_gate_unreadable_inbox_blocks_and_names_the_file():
+def case_guard_unreadable_inbox_blocks_and_names_the_file():
     cfg, sid = new_cfg(), "unreadable-dir"
     os.makedirs(inbox_of(cfg, sid))
-    expect_block("gate: unreadable inbox (a directory) blocks", gate(cfg, sid),
+    expect_block("guard: unreadable inbox (a directory) blocks", guard(cfg, sid),
                  named=(os.path.basename(inbox_of(cfg, sid)),))
 
     cfg, sid = new_cfg(), "unreadable-bytes"
     os.makedirs(os.path.dirname(inbox_of(cfg, sid)), exist_ok=True)
     with open(inbox_of(cfg, sid), "wb") as f:
         f.write(b"### 2026-10-13 10:04 CDT (UTC-05:00)\n\xff\xfe\x80 not UTF-8\n")
-    expect_block("gate: unreadable inbox (bytes that are not UTF-8) blocks", gate(cfg, sid),
+    expect_block("guard: unreadable inbox (bytes that are not UTF-8) blocks", guard(cfg, sid),
                  named=(os.path.basename(inbox_of(cfg, sid)),))
-    expect_silent("gate: unreadable inbox with stop_hook_active gives nothing",
-                  gate(cfg, sid, stop_active=True))
+    expect_silent("guard: unreadable inbox with stop_hook_active gives nothing",
+                  guard(cfg, sid, stop_active=True))
 
 
-def case_gate_reads_only_its_own_session():
+def case_guard_reads_only_its_own_session():
     cfg = new_cfg()
     write_file(inbox_of(cfg, "own"),
                render_block("own jotted", items=("- fb-0958-2 [task] -> handoff",)))
@@ -981,8 +981,8 @@ def case_gate_reads_only_its_own_session():
     write_file(inbox_of(cfg, "other"),
                render_block("other incomplete", items=("- fb-0958-9 [ruling] -> NO HOME YET",)))
     os.makedirs(inbox_of(cfg, "other-bad"))
-    expect_silent("gate: own session passes; other sessions' inboxes do not block it",
-                  gate(cfg, "own"))
+    expect_silent("guard: own session passes; other sessions' inboxes do not block it",
+                  guard(cfg, "own"))
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -1129,7 +1129,7 @@ def case_fb_done_prefix_opens_nothing_while_closed():
               and no_judge_call(cfg, before, p), p.desc())
 
 
-SAME_MSG_NOTE = "fb: the gate is too strict on Stop"
+SAME_MSG_NOTE = "fb: the guard is too strict on Stop"
 
 
 def case_fb_done_line_at_the_end_closes_in_the_same_message():
@@ -1325,9 +1325,9 @@ def case_judge_not_feedback_keeps_the_prompt_and_closes():
     check("judge not feedback: one note item under that message says judged not feedback, none elsewhere",
           len(judged_notes(block_items(cfg, sid, text))) == 1
           and not judged_notes(block_items(cfg, sid, kept[1])), block_items(cfg, sid, text))
-    g = gate(cfg, sid)
-    check("judge not feedback: the gate does not block on that message, and no capture reminder shows",
-          g.code == 0 and text not in (block_reason(g) or "") and reminder_of(gate_json(g)) is None,
+    g = guard(cfg, sid)
+    check("judge not feedback: the guard does not block on that message, and no capture reminder shows",
+          g.code == 0 and text not in (block_reason(g) or "") and reminder_of(guard_json(g)) is None,
           g.desc())
     before = calls_so_far(cfg)
     p = capture(cfg, sid, "a later plain prompt")
@@ -1422,15 +1422,15 @@ def table_quiet_gap():
     run_rows((case_quiet_gap_closes_capture, case_quiet_gap_ignores_notices))
 
 
-def table_gate_handoff_drops():
-    run_rows((case_gate_open_item_missing_from_handoff_blocks,
-              case_gate_handoff_rewrite_that_drops_an_item_blocks,
-              case_gate_missing_handoff_counts_every_open_id_missing))
+def table_guard_handoff_drops():
+    run_rows((case_guard_open_item_missing_from_handoff_blocks,
+              case_guard_handoff_rewrite_that_drops_an_item_blocks,
+              case_guard_missing_handoff_counts_every_open_id_missing))
 
 
-def table_gate_scanner_text():
-    run_rows((case_gate_scanner_text_yields_no_phantom_block_or_item,
-              case_gate_scanner_text_with_real_items_passes_silently))
+def table_guard_scanner_text():
+    run_rows((case_guard_scanner_text_yields_no_phantom_block_or_item,
+              case_guard_scanner_text_with_real_items_passes_silently))
 
 
 def table_reorient_forms():
@@ -1463,19 +1463,19 @@ CASES = (
     case_lone_surrogate_is_saved_or_said_not_saved,
     case_subagent_never_opens_closes_or_captures,
     case_sessions_are_isolated,
-    case_gate_no_inbox_and_empty_inbox_pass_silently,
-    case_gate_all_jotted_passes_silently,
-    case_gate_message_without_items_blocks_and_names_it,
-    case_gate_item_without_kind_or_home_blocks,
-    case_gate_malformed_item_line_blocks_and_names_it,
-    table_gate_handoff_drops,
-    case_gate_closed_item_is_not_required_in_handoff,
-    case_gate_id_match_is_a_whole_token,
-    table_gate_scanner_text,
-    case_gate_notes_heading_is_plain_text,
-    case_gate_reminder_follows_capture_state,
-    case_gate_unreadable_inbox_blocks_and_names_the_file,
-    case_gate_reads_only_its_own_session,
+    case_guard_no_inbox_and_empty_inbox_pass_silently,
+    case_guard_all_jotted_passes_silently,
+    case_guard_message_without_items_blocks_and_names_it,
+    case_guard_item_without_kind_or_home_blocks,
+    case_guard_malformed_item_line_blocks_and_names_it,
+    table_guard_handoff_drops,
+    case_guard_closed_item_is_not_required_in_handoff,
+    case_guard_id_match_is_a_whole_token,
+    table_guard_scanner_text,
+    case_guard_notes_heading_is_plain_text,
+    case_guard_reminder_follows_capture_state,
+    case_guard_unreadable_inbox_blocks_and_names_the_file,
+    case_guard_reads_only_its_own_session,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_judge_child_is_detached_hook_returns_first,  # last: it leaves a 5 s child running

@@ -7,7 +7,7 @@
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
 #   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
-#   ~/.claude/lint/*         -> STE linter and report gate: local symlinks, cloud copies
+#   ~/.claude/lint/*         -> STE linter and report guard: local symlinks, cloud copies
 #   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks, cloud copies
 #   ~/.claude/skills/<name>  -> one whole-directory symlink per shipped skill, local; cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
@@ -199,7 +199,7 @@ if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
 fi
 
 # put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
-# DEST is never absent or half-written (a gate hook reads it at any moment). In guard.py and
+# DEST is never absent or half-written (a guard hook reads it at any moment). In guard.py and
 # guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its
 # post-merge hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other
 # line is touched. STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh
@@ -379,7 +379,7 @@ land_guard_set() {
 }
 
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
-# agents/: one file per role (builder, reviewer). lint/: the STE linter and the report gate.
+# agents/: one file per role (builder, reviewer). lint/: the STE linter and the report guard.
 # Local: per-file symlink. Cloud: copy.
 #
 # Local mode also prunes: after landing every file the source defines now, it removes a

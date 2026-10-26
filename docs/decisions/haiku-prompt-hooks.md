@@ -8,7 +8,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 | Hook on | Rules it judges |
 |---|---|
-| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `subagent-model-cap` |
+| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit check of `subagent-model-cap` |
 | `SendMessage` | `parallelism-no-mid-task-talk` |
 
 - The Edit and Write judge on `docs/decisions/` is a command hook, `hooks/prose_judge.py`, at Haiku `xhigh`. It judges `speak-rewrite-superseded-in-place` and `rulings-declare-kind`.

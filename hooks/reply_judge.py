@@ -14,7 +14,7 @@ at once with no model call and no output. The count is a file per session under 
 
 Input Needed: a reply with an Input Needed item is judged on every Stop, besides the sample, so
 each handed-off step is checked for its reason and the check. The label is read in code, not by the
-model, from lint/report_gate.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
+model, from lint/report_guard.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
 import fails, the Stop is judged and one stderr line says so.
 
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
@@ -112,7 +112,7 @@ def count_this_stop(session_id):
 
 def has_input_needed(reply):
     """True when the reply has an Input Needed label line with an item that is not empty or none.
-    A reply with no such words returns False before report_gate loads. If LABEL_ORDER cannot be
+    A reply with no such words returns False before report_guard loads. If LABEL_ORDER cannot be
     read, return True (judge this Stop) and print one stderr line."""
     if "input needed" not in reply.casefold():
         return False
@@ -120,7 +120,7 @@ def has_input_needed(reply):
         lint = os.path.join(HERE, "..", "lint")
         if lint not in sys.path:
             sys.path.append(lint)
-        from report_gate import LABEL_ORDER
+        from report_guard import LABEL_ORDER
         want = next(l for l in LABEL_ORDER if "input" in l.casefold()).casefold()
         labels = {l.casefold() for l in LABEL_ORDER}
     except Exception as exc:

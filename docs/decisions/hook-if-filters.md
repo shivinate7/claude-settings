@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-21. The `if` field of a Claude Code hook filters only `config_watch`, by exact file names. The `prose_judge` suffix filter is parked. The `ste_gate` hook is removed (`ste-gate-fixes-not-nags`). A gate that silently skips is not worth the saving (`gate-hooks-fail-closed`, a gate whose script is missing refuses the call).
+Owner, 2026-10-21. The `if` field of a Claude Code hook filters only `config_watch`, by exact file names. The `prose_judge` suffix filter is parked. The `ste_gate` hook is removed (`ste-guard-fixes-not-nags`). A guard that silently skips is not worth the saving (`guard-hooks-fail-closed`, a guard whose script is missing refuses the call).
 
 Reopen the suffix filters only when both are true:
 

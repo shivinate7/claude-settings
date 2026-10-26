@@ -3,7 +3,7 @@
 
 Run as `feedback_judge.py <session_id> <time of the message, ISO-8601> <message>`. The capture hook has
 already saved the message. The judge call takes 8 s or more, so it runs here, off the prompt path.
-On {"feedback": false} the child adds a note item under that message, so the gate does not ask the
+On {"feedback": false} the child adds a note item under that message, so the guard does not ask the
 session to jot it, and closes capture. It closes only while that message is still the last captured
 one (the marker's text is its time). An error, a timeout, an odd answer, a newer message or an
 already closed capture changes nothing. Exit 0 always; stdout and stderr go nowhere.

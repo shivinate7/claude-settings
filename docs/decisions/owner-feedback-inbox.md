@@ -29,11 +29,11 @@ item of a burst and lost the rest.
   record. `task`: the handoff's next steps, or the repo's todo. `question` (answered in the reply):
   `answered`. `note` (context with no decision): `noted`. `standing` (a session-only process): the
   handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
-- **The gate.** A Stop check refuses to end a turn in three cases. A captured message has no items. An
+- **The guard.** A Stop guard refuses to end a turn in three cases. A captured message has no items. An
   item has no kind or home. An open item id is missing from the handoff. It reads ids, so a whole-file
   handoff rewrite that drops an item goes red. It exits on `stop_hook_active`, so it cannot loop.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
-  home holds it for good. The gate stops asking for a closed id in the handoff.
+  home holds it for good. The guard stops asking for a closed id in the handoff.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand. A wrong or late judge costs one
   extra saved message, never a lost one.

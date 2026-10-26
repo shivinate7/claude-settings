@@ -31,9 +31,9 @@ with capture open, `fb - done` is captured as a message.
 While open, each prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md in a
 backtick fence longer than any backtick run in the text. Open state is the marker file
 <session_id>.inbox.open beside it; its text is the time of the last captured message. `is_open` is the
-one home of "is capture open": feedback_gate.py and precompact_handoff.py call it. LOCAL_TIME_NOW
+one home of "is capture open": feedback_guard.py and precompact_handoff.py call it. LOCAL_TIME_NOW
 (ISO-8601 with an offset) replaces the clock; tests set it. `--subagent` never reads stdin and never
-captures. The gate that reads the inbox is feedback_gate.py.
+captures. The guard that reads the inbox is feedback_guard.py.
 """
 import json
 import os
@@ -107,7 +107,7 @@ def override_line(result):
 
 def inbox_paths(session_id):
     """(inbox, open marker) for a session, or None when the id cannot be a file name. The one home
-    of these paths: feedback_gate.py calls it. precompact_handoff owns the handoffs folder."""
+    of these paths: feedback_guard.py calls it. precompact_handoff owns the handoffs folder."""
     if not re.fullmatch(r"[\w.-]+", session_id or "") or session_id.startswith("."):
         return None
     import precompact_handoff

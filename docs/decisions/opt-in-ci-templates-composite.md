@@ -7,7 +7,7 @@ Six templates any repo can adopt live in one home and one shape: a composite act
 
 | Template | Home |
 | --- | --- |
-| All-jobs-passed gate | `actions/all-jobs-passed` |
+| All-jobs-passed check | `actions/all-jobs-passed` |
 | Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper) |
 | Weekly README link check | `actions/readme-links` (calls `ci-alarm/issue.sh`) |
 | Ruling kind check on a pull request | `actions/ruling-kind` (runs `lint/check_ruling_kind.py` on the caller's checkout) |
@@ -17,13 +17,13 @@ Six templates any repo can adopt live in one home and one shape: a composite act
 Why composite, not `workflow_call`:
 
 - `actions/ste-lint` and `actions/stamp` are composite and q_max consumes them with `uses: <repo>/actions/<name>@<sha>`. A second shape would be a second home.
-- The gate must be a step in the caller's own job. Its check name stays fixed, and the caller sets `needs` and `if: always()`. A reusable workflow adds a nested job name and cannot read the caller's `needs`.
+- The check must be a step in the caller's own job. Its check name stays fixed, and the caller sets `needs` and `if: always()`. A reusable workflow adds a nested job name and cannot read the caller's `needs`.
 - The caller keeps the trigger, `permissions`, runner and `timeout-minutes`. A reusable workflow would hide the grant that zizmor should see.
 - Logic lives in a script beside `action.yml`. The test runs that script, so the test and the action cannot drift.
 
 The main-ref hook lets local main move only to a commit origin already has. `gh pr merge` runs on GitHub and moves no local ref.
 
-`gates.yml` runs the six tests. It does not call the templates. CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
+`checks.yml` runs the six tests. It does not call the templates. CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
 
 Each template ships a test that goes red on its defect (`test_action.sh`, `test_readme_links.py`, `test_hook.sh`, `skip-locally-fail-in-ci.test.mjs`).
 

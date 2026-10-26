@@ -16,7 +16,7 @@
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
 - ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
-- bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges bare in a merge-tool repo with no bare-merge ask; merge-checks still gates it (hooks/guard.py)
+- bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges bare in a merge-tool repo with no bare-merge ask; merge-checks still checks it (hooks/guard.py)
 - bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks denies a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
@@ -57,9 +57,9 @@
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py, hooks/feedback_judge.py)
 - fb-judge-marker-race: the judge child can remove a fresh capture marker written in a microsecond gap, closing capture early (hooks/feedback_judge.py)
 - frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
-- gate-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (gate wrappers)
-- gate-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
-- gate-remedy-needs-bash: gate remedy names sh install.sh, which Bash cannot run while the guard is missing (gate wrappers)
+- guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
+- guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
+- guard-remedy-needs-bash: guard remedy names sh install.sh, which Bash cannot run while the guard is missing (guard wrappers)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
@@ -78,7 +78,7 @@
 - guard-heredoc-os-system: a python heredoc body calling os.system("git stash") is allowed; the guard does not read python bodies (guard_core, guard.py)
 - guard-home-delete-literal: rm -rf /home/x and rd /s /q C:\Users\x are allowed; the delete rule guards only the session user's home (hooks/guard.py)
 - guard-interp-heredoc-lone-quote: a lone ' in an interpreter heredoc body makes a later cited commit run unjudged (guard)
-- guard-log-extra-ci: an edit to lint/guard_log_report.py selects extra CI suites that do not read guard.log (.github/workflows/gates.yml)
+- guard-log-extra-ci: an edit to lint/guard_log_report.py selects extra CI suites that do not read guard.log (.github/workflows/checks.yml)
 - guard-log-install-skew: a six-field guard_core with an old decision_watch drops notes; only a partial copy splits them (guard_core, decision_watch)
 - guard-log-lines-lost: record() locks writes, but after 2 s of contention or a lock error it writes unlocked, and the crash path never locks (guard_core, guard.py)
 - guard-log-off-silent: a missing or old guard_core disables STE logging with no marker line, so the reader shows empty tables (lint/_transcript.py, guard_core)
@@ -122,15 +122,15 @@
 - inbox-midturn-prompt-untested: UserPromptSubmit fires for mid-turn owner messages (audit 2026-10-13); no test pins it (inbox hook)
 - inbox-partial-write-fence: a partial write, needing disk-full, can leave a fence open and merge later blocks into one message (inbox capture hook)
 - inbox-path-drop-silent: if the inbox path cannot be built, an fb message is dropped with one stderr line (inbox capture hook)
-- inbox-unreadable-drops-ids: an unreadable inbox drops open ids from the post-compaction note; the Stop gate still names the file (compact hook)
+- inbox-unreadable-drops-ids: an unreadable inbox drops open ids from the post-compaction note; the Stop guard still names the file (compact hook)
 - index-row-drop-no-finding: a records row can drop silently when a record is renamed to non-.md, or when one Drops-lines trailer excuses the page window-wide (hook_catalog.py, check_silent_undo.py)
 - install-early-exit-unlogged: refusals and lock timeouts exit before the start line, so the install log shows nothing (install.sh, install.ps1)
 - install-hook-path-from-checkout: the post-merge hook runs the installer from the pulling checkout; a linked worktree on main now refuses loudly (install.ps1)
 - install-lock-stale-by-age: the 10-minute stale lock can wedge the wait loop, let two waiters both break it, and let two runs overlap (install.sh, install.ps1, post-merge hook)
 - install-lock-trap-no-id: the EXIT trap removes the install lock without an id check, so an old run can free a later holder's lock (install.sh, post-merge hook text)
-- install-ps1-counts-store-alias: install.ps1 passes when the only python is the Windows Store alias, which then refuses every gated call (install.ps1)
+- install-ps1-counts-store-alias: install.ps1 passes when the only python is the Windows Store alias, which then refuses every guarded call (install.ps1)
 - install-reader-can-die-silent: two lines in HookReader sit outside its try, so a throw ends the test with no output (install-no-gap.test.ps1)
-- install-sh-no-python-warning: a Mac without python3 gets no install.sh warning; every gated call is refused with the no-python remedy (install.sh)
+- install-sh-no-python-warning: a Mac without python3 gets no install.sh warning; every guarded call is refused with the no-python remedy (install.sh)
 - install-sh-renames-no-retry: five mv calls outside put_file run once, so a Windows reader holding the file fails them (install.sh)
 - install-sh-retries-every-error: mv_retry retries any mv error where install.ps1 retries only codes 5 and 32; a real failure costs about 2.4 s (install.sh)
 - install-sh-retry-untested: no case makes mv fail then succeed, or fail 25 times (hooks/test_install_src.sh)
@@ -172,17 +172,17 @@
 - merge-net-stop-may-have-merged: NetStop text says run again though the merge may have landed; the rerun skips after-merge steps (merge/merge.py)
 - merge-notice-unrelated-number: a PR number elsewhere in a reply block can suppress a real unnamed merge notice (hooks/decision_watch.py)
 - merge-text-allows-untested: test rows allowing grep and git log commands naming merge words have no branch that can fail (hooks/test_guard.py)
-- mod-gate-name-edges: non-ASCII mod folder names come back quoted from git, and duplicate plugin names let an unbumped change pass (lint/check_mod_versions.py)
+- mod-check-name-edges: non-ASCII mod folder names come back quoted from git, and duplicate plugin names let an unbumped change pass (lint/check_mod_versions.py)
 - model-clip-unmeasured: prompt clips PROMPT_MAX_LEN and REPLY_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
-- mods-check-mjs-skipped: the mod test glob skips mods/plain-diff/check.mjs, so a red check.mjs passes CI (gates.yml)
-- mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (gates.yml)
+- mods-check-mjs-skipped: the mod test glob skips mods/plain-diff/check.mjs, so a red check.mjs passes CI (checks.yml)
+- mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (checks.yml)
 - mods-load-needs-new-session: a mod loads only in a session started after the change (marketplace load path)
 - mods-macos-untested: token-weather, desktop-statusline, plain-diff and session-board are untested on macOS (settings.json marketplace entry)
 - mods-marketplace-no-ref-pin: marketplace source follows the default branch with no ref pin, and auto-updates; a bad merge with a version bump reaches every machine within one session (settings.json)
-- mods-node-version-unpinned: runner Node version unknown; mod tests need Node 20.6 or later (gates.yml)
+- mods-node-version-unpinned: runner Node version unknown; mod tests need Node 20.6 or later (checks.yml)
 - mods-refresh-cadence-unmeasured: the docs say auto-update runs up to 10 minutes after a session's first message and the new version loads at the next launch; unmeasured on the owner's machines (settings.json marketplace entry)
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs)
-- mods-step-order-unpinned: no test pins the mod test step as last in the gates job (gates.yml)
+- mods-step-order-unpinned: no test pins the mod test step as last in the checks job (checks.yml)
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
 - mutant-crash-audit-missing: no audit that a non-watch mutant crashing for an unseen reason reads as a false KILLED (hooks/mutate_guard.py)
 - nesting-risk-unrecorded: nothing prompts a risk record when a repo raises subagent spawn depth (settings.json, deleted rule roles-workers-never-spawn)
@@ -273,7 +273,7 @@
 - smstate-answer-timeout-unrun: answer cases run with no reader timeout, so none uses the shipped value (hooks/test_sendmessage_state.py)
 - smstate-hold-deadlock-skips: the hold case prints SKIP at the harness cap, so a real deadlock does not fail (hooks/test_sendmessage_state.py)
 - smstate-hold-posix-unproven: no run shows the hold case red on POSIX with a hook that waits on the held pipe (hooks/test_sendmessage_state.py)
-- source-prose-scanner-cases: no test for a multi-line template literal or a lone quote in text in source-prose mode (lint/ste_lint.py, lint/test_gates.py)
+- source-prose-scanner-cases: no test for a multi-line template literal or a lone quote in text in source-prose mode (lint/ste_lint.py, lint/test_report_guard.py)
 - split-comment-shapes-unmeasured: the comment rule is unmeasured against every quoting shape a real shell accepts (hooks/guard.py split_segments)
 - split-paren-pkill-unpinned: row echo don't (x; pkill foo is gone; a break in the splitter's second reading passes unseen (hooks/guard_core.py, hooks/test_guard.py)
 - split-quoted-hash-unpinned: row echo a's # b'; pkill foo is gone; moving the comment check above the quote check passes unseen (hooks/guard_core.py, hooks/test_guard.py)
@@ -300,8 +300,8 @@
 - sweep-test-symlink-privilege: two tests in janitor/test_sweep.py error with WinError 1314 on a Windows host with no symlink right instead of skipping (janitor)
 - sweep-tests-sleep-bounds: _peak_concurrency uses a 0.2 s sleep; on a slow host a parallel-confirm mutant can survive (janitor/test_sweep.py)
 - symrun-link-gap-unmeasured: the symrun case needs a mixed-id window; the link route's gap is unmeasured and may flake on a loaded runner (install-no-gap.test.ps1, install.ps1)
-- test-guard-posix-gates-no-skip: two platform-gated case blocks (nt, darwin) print no SKIP row when dropped (hooks/test_guard.py near lines 2847 and 3167)
-- trigger-call-unchecked: whether a change touches a guard, gate or check is the reviewer's reading; no check reads that call (agents/reviewer.md)
+- test-guard-posix-blocks-no-skip: two platform-only case blocks (nt, darwin) print no SKIP row when dropped (hooks/test_guard.py near lines 2847 and 3167)
+- trigger-call-unchecked: whether a change touches a guard or check is the reviewer's reading; no check reads that call (agents/reviewer.md)
 - trigger-omits-agent-caps: the net-value trigger omits the settings.json env caps and model:/effort: lines in agents/*.md (settings.json, agents/*.md)
 - undo-scan-cr-nul-false-alarm: a lone CR or NUL in a changed line splits it in git log -p, so later lines count as lost; false alarm only (lint/check_silent_undo.py)
 - unknown-reads-nonbool-skips: the check prints SKIP for any non-bool answer such as 0, None or []; no real member returns one (lint/check_unknown_reads_contract.py)
@@ -326,7 +326,7 @@
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
 - precompact-compaction-before-checkpoint-small-model: the hook reads autoCompactWindow from settings.json but cannot see the model's own window, so a smaller model can compact before a checkpoint
-- precompact-stop-block-skips-other-gates: the reply after a checkpoint block runs with stop_hook_active set so other Stop gates skip it, and when another Stop hook blocks first the checkpoint fires one stop later
+- precompact-stop-block-skips-other-guards: the reply after a checkpoint block runs with stop_hook_active set so other Stop guards skip it, and when another Stop hook blocks first the checkpoint fires one stop later
 - precompact-rewrite-vs-append-unchecked: nothing checks that a session rewrote the handoff and did not append; the prompt asks and the owner reads the result
 - silent-undo-history-window-60: the --history audit misses a reversal older than --window (default 60 commits); --window 0 reads all history
 - silent-undo-git-utf8-replace: git() decodes output as UTF-8 with errors=replace, so two lines that differ only in bad bytes compare equal
@@ -337,7 +337,7 @@
 - clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
 - asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
 - foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
-- feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
+- feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the guard checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
 - sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
 - builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes write deny. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
 - memory-home-gaps: a Bash write that does not name the memory folder (cd plus relative path, variable, script) is out of reach. one rare false block when this session reads the folder while a peer writes. a ruling typed in chat and never written, and cloud sessions with no memory folder, leave no act to key on. a 'home: process-only' reflex is counted by lint/ruling_census.py only. Decision: memory-is-never-a-rulings-only-home
@@ -389,11 +389,11 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
-- guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write, SendMessage) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: guard-hooks-fail-closed
+- guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: guard-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: subagent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position
-- cp-into-frozen-dir: cp into a bare frozen directory (cp /tmp/x <config>/hooks/, -t, --target-directory) is allowed, and link is not in MUTATING_COMMAND (hooks/guard_frozen.py). no test pins these shapes. Decision: recovery-must-not-gate-on-its-own-state
+- cp-into-frozen-dir: cp into a bare frozen directory (cp /tmp/x <config>/hooks/, -t, --target-directory) is allowed, and link is not in MUTATING_COMMAND (hooks/guard_frozen.py). no test pins these shapes. Decision: recovery-independent-of-state
 - bg-end-roster-gaps: The end-note roster is closed: jest --watchAll, mocha -w, vitest -w, ng/nx serve, runserver, gunicorn, docker compose up, bundle exec, setsid, iex and Start-Job pass (hooks/guard_stream.py). Decision: background-needs-end-note
 - server-wrappers-unread: The background-end rule does not read uv run, poetry run, cross-env, concurrently, Start-Process, cmd /d /c, exec, x=$(...), yarn workspace dev or python -X utf8 -m (hooks/guard_stream.py). Decision: background-needs-end-note
 - node-file-server-unchecked: node <file> under run_in_background is not refused without an until: note, because the roster cannot tell a server script from a one-off script (hooks/guard_stream.py). Decision: background-needs-end-note
@@ -404,8 +404,8 @@
 - silent-undo-oracle-hides-cause: When the records page generator fails, the silent-undo check reports only hunk reversed and drops stderr. the generator run has no timeout (lint/check_silent_undo.py generated_page). Decision: records-index-at-merge
 - sendmessage-judge-blind-recvs: The busy-state layer reads an agent id, a uds: address, main and * as unseen and allows. only the wording judge covers them (hooks/sendmessage_state.py, mods/session-board/hooks/lib.mjs). Decision: subagent-model-cap
 - stamp-scan-frontmatter-links: The near-miss scan does not skip frontmatter or link targets (actions/stamp/stamp.mjs). Decision: none
-- step-up-prefix-forms: roles-third-try-steps-up counts only a line starting Round N of 3 or Try N of 3. forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: subagent-model-cap
-- step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: subagent-model-cap
+- step-up-prefix-forms: roles-third-round-steps-up counts only a line starting Round N of 3 (or the old Try N of 3, until 2026-11-09). forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: subagent-model-cap
+- step-up-plugin-types: roles-third-round-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: subagent-model-cap
 - step-up-sonnet-substring: the reviewer check is a substring match on sonnet, so a made-up model such as opus-sonnet passes. Decision: subagent-model-cap
 - step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is denied. the refusal names the fix. Decision: subagent-model-cap
 - floor-workflow-runtime-models: subagent-model-floor reads string literals in each agent( call. a model or role built at run time, or a call after a regex literal holding a quote, is unseen. Decision: subagent-model-cap
@@ -414,7 +414,7 @@
 - model-ceiling-fork-skill-inherit: a fork and a skill run in a subagent with model inherit run the main model. only the prose ceiling guards them. Decision: subagent-model-cap
 - model-ceiling-no-after-read: a spawn above Sonnet through a fork, a skill, a Workflow `agent()` call (literal or variable) or `start_session` passes without a prompt, because the guard reads only an Agent or Task call. nothing reads it after the turn. Cost accepted: one lane at higher spend. Decision: subagent-model-cap
 - under-provisioning-unguarded: nothing catches a too-weak model before the rework cycle, except the step-up and the floor. Decision: subagent-model-cap
-- done-line-tier-unchecked: no check reads which tier a lane ran, so a Done line need not name a tier above Sonnet. report_gate.py cannot see the model. Decision: subagent-model-cap
+- done-line-tier-unchecked: no check reads which tier a lane ran, so a Done line need not name a tier above Sonnet. report_guard.py cannot see the model. Decision: subagent-model-cap
 - detached-launch-heredoc-blind: an & job inside bash <<EOF is not seen, because the rule drops each heredoc body first. Decision: detached-launch-refused
 - agent-end-resume-fails-after-removal: a resume of a finished agent fails once its worktree is gone after the idle limit. the last agent's tree waits for the session-end sweep. Decision: when-a-worktree-may-be-removed
 - merge-net-retry-linux-unmeasured: bin/merge proof on the Mac clone is not measured. Linux is unmeasured. Decision: none
@@ -425,15 +425,15 @@
 - sim-owner-boot-recorded: the owner may boot the device a session call names, during that call. the hook then records it as the session's. Decision: sweep-shuts-down-idle-simulators
 - unattended-sweep-branch-reap: branch reap reads local origin/* refs, not ls-remote. The run refreshes them with `fetch --prune --no-tags`. The fetch names one remote, so refs of other remotes stay stale, as do all refs after a failed fetch; branches are still reaped then. A tombstone keeps 90 days. Decision: unattended-sweep-stops-proven-orphans
 - merge-config-defaults: three small behaviours have no test: the stamp.mjs failure line with its log path, the checkout path in the dirty-tree message, and the bare --unlock origin/HEAD-then-gh order. Decision: none
-- a-gates-allow-list-is-the-constant: check_landed_dirs catches a directory added to one side only, never one that neither side holds. the three patterns (import, emit, pin) are now unwritten guidance. Decision: none
+- allow-list-is-the-constant-gap: check_landed_dirs catches a directory added to one side only, never one that neither side holds. the three patterns (import, emit, pin) are now unwritten guidance. Decision: none
 - purge-keeps-younger-restore-ref: the restore point is the branch tip only, with no snapshot of dirty content, and the restore log is never compacted. untested. Decision: when-a-worktree-may-be-removed
 - ste-lint-gloss-collapse: no test pins that a title holding inline code collapses whole. Decision: none
 - install-sh-mv-retries: the 25 x 0.1 s retry budget in install.sh has no test and no pin to Move-OverFile in install.ps1. Decision: none
 - env-file-rule-false-alarms: The env-file guard refuses `ag -f` and `ack -f` (boolean -f), `grep -r --exclude=.env` and `rg -t py .env`. all four are safe. Where: hooks/guard_env.py. Decision: none
 - git-rm-cached-false-alarm: The push-delete guard denies `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
 - records-page-gen-false-alarm: The records-page guard denies a commit after a generator run in one call even when the page is unchanged, and reads `--root <other>`, `-h` and `--che` as runs. Where: hooks/guard_merge.py _runs_generator. Decision: records-index-at-merge
-- report-on-empty-turn-unchecked: The report gate returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_gate.py. Decision: claude-md-shrink
-- slug-cite-gloss-unchecked: The report gate checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_gate.py. Decision: claude-md-shrink
+- report-on-empty-turn-unchecked: The report guard returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_guard.py. Decision: claude-md-shrink
+- slug-cite-gloss-unchecked: The report guard checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_guard.py. Decision: claude-md-shrink
 - stash-reminder-text-outside-repo: The harness worktree reminder still tells a worker to push a tagged stash entry, which guard_shared_tree.py now denies. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
 - token-read-accepted-risk: The guard blocks writes to the hook-token state folder but not reads, so a session can print the token into its transcript. .credentials.json carries the same risk. Decision: reply-judge-samples-never-blocks
 - ruling-kind-lint-scope: The lint checks each Plan line present and that a Home exists, not which platforms a ruling needs nor that the home enforces it. Decision: rulings-declare-kind
@@ -445,7 +445,7 @@
 - stall-watch-log-and-child: After a stall report the temp-directory log stays and nothing removes it. a command that backgrounds its own child is not watched (the guard denies that shape). Decision: stall-watch
 - stall-watch-backslash: A trailing backslash continuation or an odd run of backslashes at the end of a command: the hook probes /bin/sh and doubles the last backslash when sh keeps it literal. Decision: stall-watch
 - build-dirs-reap-limits: A crashed agent whose SubagentStop never fires keeps its build output until build-disk-guard lands, as does scratchpad derived data. a resumed agent rebuilds cold. on Windows a link swapped in between rename and delete is not covered. Decision: build-dirs-reaped-at-agent-end
-- build-dirs-reopen-triggers: Reopen the build-folder reap on a hook_cancelled or timedOut:true end, a folder deleted outside the gates, a link followed, or trash names that nothing deletes. Decision: build-dirs-reaped-at-agent-end
+- build-dirs-reopen-triggers: Reopen the build-folder reap on a hook_cancelled or timedOut:true end, a folder deleted outside the checks, a link followed, or trash names that nothing deletes. Decision: build-dirs-reaped-at-agent-end
 - plain-diff-untracked-files: The plain-diff mod diffs against HEAD or the empty tree. untracked files are not shown. Decision: plain-diff-mod-limits
 - impeccable-guard-limits: The impeccable-review-only guard allows 'audit then polish' in one call and does not read through the launchers pnpx, bun x, timeout N, cmd /c or powershell -Command. Decision: design-skills
 - builder-test-edit-pins-cut: the ruff --ignore and symlink false-alarm pins and the main-checkout log stop now lives only in guard code and tests. Decision: builders-cannot-edit-tests
@@ -461,7 +461,7 @@
 - frozen-var-interpreter-and-psenv: rule 7 misses a write by an interpreter (python -c) and a PowerShell $env:D assignment. Unmeasured: how often a session reaches a frozen path by an open shape. Decision: frozen-path-resolves-shell-vars
 - frozen-var-loose-token-match: the token match is loose. echo D=<frozen>, a commit message, URL or heredoc body counts as an assignment, so a later write to "$D" is refused. The owner accepted this false alarm. Decision: frozen-path-resolves-shell-vars
 - worktree-remove-quoted-link-name: a symlink whose name git quotes, such as one with a space or an accent, still counts as work when the guard judges a worktree remove. Decision: agent-worktree-discard-is-noted
-- ci-templates-wrappers-unmeasured: the all-jobs-passed and ci-alarm gates are proved on their scripts, not on a hosted runner. the action.yml wrappers are unmeasured on a real run. Decision: opt-in-ci-templates-composite
+- ci-templates-wrappers-unmeasured: the all-jobs-passed and ci-alarm checks are proved on their scripts, not on a hosted runner. the action.yml wrappers are unmeasured on a real run. Decision: opt-in-ci-templates-composite
 - model-cap-alias-rows-merged: Alias, availableModels and /model picker rows in subagent-model-cap are one row now. the haiku 'follows Claude Code' wording is gone. Decision: subagent-model-cap
 - discard-fail-closed-list-in-code-only: The shape list that keeps the ask in a linked worktree now lives only in hooks/guard_shared_tree.py. Decision: agent-worktree-discard-is-noted
 - silent-undo-flag-print-no-cap-unrecorded: The 'print every flagged line, no cap' choice left the decision and is unverified in lint/check_silent_undo.py. Decision: silent-undo-check-design
@@ -503,7 +503,7 @@
 - delete-rule-quoted-text: the first DESTRUCTIVE_DELETE pattern has no UnquotedStart wrapper, so quoted text such as `echo "rm -r -f ."` or `echo "del -Recurse -Force C:/"` is denied as a delete; the second pattern skips quoted text (hooks/guard_push_delete.py). Checked on the patterns and the guard's deny loop, not through a full guard run. Decision: rm-path-wrapper (an rm shim on PATH, with the guard holding the line on Windows)
 - rm-guard-home-parents-pass: the guard refuses a recursive delete of the working folder and every folder above it. It does not refuse a folder above home when the working folder is outside it, so `rm -r C:/Users` passes from D:/proj. The Mac and Linux shim refuses it (hooks/guard_push_delete.py _parent_target, hooks/guard_rm_var.py _rm_target_bad). Checked on the two functions, not through a full guard run. Decision: rm-path-wrapper (an rm shim on PATH, with the guard holding the line on Windows)
 - eol-scan-bom-env-u: the eol scan reads line 1 as ASCII. A UTF-8 BOM then hides a #! line. The scan also reads the name after `env -u` (as in `#!/usr/bin/env -S -u NAME bash`) as the interpreter. An extensionless shell script with either form is not scanned for CR, and a .sh name still is (install-bin-eol.test.ps1 Get-FirstLine, Get-Interpreter). Measured with the real functions on fixtures, 2026-10-22. Decision: shell-scripts-check-out-lf (shell scripts check out with LF)
-- pointer-windows-cap-unmeasured: the pointer-windows job caps (10 min for the job, 3 min for the eol step) have no measured run time in this repo; the job comment cites the debt measured-time-table (no table of measured times), which holds whole-run figures only (.github/workflows/gates.yml). Unmeasured: no CI read was made. Decision: none
+- pointer-windows-cap-unmeasured: the pointer-windows job caps (10 min for the job, 3 min for the eol step) have no measured run time in this repo; the job comment cites the debt measured-time-table (no table of measured times), which holds whole-run figures only (.github/workflows/checks.yml). Unmeasured: no CI read was made. Decision: none
 - scratchpad-shared-per-session: the guard keys a scratchpad by session id, and a subagent carries its parent's id. So every agent of one session shares one scratchpad. A test-author may overwrite another agent's folder in it. Only another session's scratchpad is refused (hooks/guard.py role_write_hit, hooks/guard_shared_tree.py under_session_scratchpad). A test-author overwrite was reported, not re-observed. Decision: an-agent-outside-its-home-tree-must-stop (an agent outside its home tree must stop)
 - question-agent-hook-block-unmeasured: what a block from the AskUserQuestion agent hook does to the turn is unmeasured, and no test runs the hook against a live defect (settings.json PreToolUse AskUserQuestion). Decision: question-reviewer-agent-hook (one agent hook reviews each question)
 - deadline-floor-no-stamp: a repo with no .github/stamp.json waits the 45-minute default, not the largest job cap plus 5 (merge/merge.py load_config). Decision: none
@@ -511,7 +511,7 @@
 - janitor-git-timeout-load: janitor/test_sweep.py runs fixture git with a 10 s timeout, which a loaded Windows host exceeds (measured 2026-10-22, two local runs aborted). Decision: none
 - cap-floor-base-only: the merge wait floor reads the base branch's workflows. A PR that adds or raises a job cap is not floored in its own merge. The tool stops with "Still pending" and a re-run resumes (merge/merge.py load_config). Decision: none (skill ci-hygiene step 5)
 - cap-label-no-step-data: the "re-cap or split" label needs only a cancel at the full cap, so a red step followed by a hung always() step gets it too (merge/merge.py checks). Decision: none (skill ci-hygiene step 5)
-- cap-floor-counts-all-jobs: the floor counts every workflow job, gating or not, so a long nightly job lengthens every merge wait and the lock TTL (merge/merge.py load_config). Decision: none (skill ci-hygiene step 5)
+- cap-floor-counts-all-jobs: the floor counts every workflow job, required or not, so a long nightly job lengthens every merge wait and the lock TTL (merge/merge.py load_config). Decision: none (skill ci-hygiene step 5)
 - job-caps-scan-limits: job_caps keeps a trailing "# comment" in a job name's id, and a 4-space-indented workflow gives no floor and no warning; other repos' workflows were not read (merge/merge.py job_caps). Decision: none (skill ci-hygiene step 5)
 - temp-sweep-copies-session-reader: janitor/temp_sweep.py live_session_ids copies guard_core.session_records, and a truncated record of a live session lets its idle folder go. Decision: windows-temp-sweep (the janitor removes an idle session's temp folder)
 - temp-sweep-untested-paths: no test pins the unreadable sessions folder, the deadline stop or _sweep_roots returning 1, and the temp sweep's stderr lines and exit code name no reader (janitor/test_sweep.py, docs/decisions/windows-temp-sweep.md). Decision: windows-temp-sweep (the janitor removes an idle session's temp folder)
@@ -522,7 +522,7 @@
 - install-hkcu-msix-copy: an install.ps1 started from a Claude-spawned shell on a packaged (MSIX) Claude may write its HKCU Path change to the package's private copy (install.ps1 Path write; machine note this-machine-msix-appdata). Unproven. Decision: none
 - temp-helpers-predate-standard: existing test temp helpers in this repo, such as actions/stamp/test_stamp.mjs withTempDir, do not follow the run-folder standard; the rule binds new or touched temp code. Decision: test-temp-standard (one run folder per test run)
 - test-guard-root-predates-standard: hooks/test_guard.py keeps its own run folder and sweep, a second copy of lint/_test_temp.py. Move it onto lint/_test_temp.py when a lane touches it. Decision: test-temp-standard
-- gh-api-write-unguarded: `gh api` with a field and no method sends a POST, and no guard refuses it now, an API merge included; `gh pr merge` keeps its own gate. Owner, 2026-10-25 16:07 CDT, accepted this when the rule was culled. Decision: cull-rules (how a cull runs)
+- gh-api-write-unguarded: `gh api` with a field and no method sends a POST, and no guard refuses it now, an API merge included; `gh pr merge` keeps its own check. Owner, 2026-10-25 16:07 CDT, accepted this when the rule was culled. Decision: cull-rules (how a cull runs)
 - ios-ship-install-case-gaps: lint/test_ios_ship.sh has no install case for the late copy_in_check, a half-made copy, or the launch stdin from /dev/null. No case reads $ARCHIVE in after_archive. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
 - ios-ship-install-term-runs-on: on TERM to bin/ios-ship install, only the run_app subshell traps; the build and install go on, and the copy stays until the build ends. Predates the tool's port. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
 - ios-ship-recheck-skips-untracked: bin/ios-ship require_untouched reads tracked files only, so a prebuild that writes an untracked, non-ignored file passes; the next run's clean check refuses it. Archive and after_archive steps are not re-checked. Decision: ios-ship-is-one-shared-tool (one shared tool to ship iOS apps)
@@ -540,7 +540,7 @@
 - own-lock-idle-floor-untested: no case pins the 30 min own-lock floor from above (31 min attended reaps), or a fast run with no batch keeping an own lock (janitor/test_sweep.py OwnAgentLockTests)
 - skill-fallback-unpinned: a non-.md path under skills/plain-english-map/, or package*.json, turns `mods` on only through harness-scope.sh's fallback to every flag. No test pins it. A narrower arm that forgets `mods` would skip the skill tests. Decision: none
 - inline-copy-names-skill-path: lint/test_windows_split.py INLINE_COPY flags any run command that names plain-english-map, so a later lint or copy step on that path is a false red. Decision: none
-- hook-stubs-one-path-form: lint/check_hook_stubs.py sees only the `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>` form and assumes each installed path equals the repo path. A hook written another way, or an install that maps a folder differently, passes unchecked. Every settings.json in the window uses that form today. Decision: gate-hooks-fail-closed (gate hooks fail closed)
+- hook-stubs-one-path-form: lint/check_hook_stubs.py sees only the `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>` form and assumes each installed path equals the repo path. A hook written another way, or an install that maps a folder differently, passes unchecked. Every settings.json in the window uses that form today. Decision: guard-hooks-fail-closed (guard hooks fail closed)
 - merge-tree-removal-no-idle-wait: merge/merge.py cut_branch removes the merged branch's tree with no idle wait. A follow-up to a finished builder after the merge finds its tree and its ignored files gone. No committed work is lost. Decision: when-a-worktree-may-be-removed (when a worktree may be removed)
 - merge-tree-base-is-pr-head: cut_branch judges the tree against the PR head, which holds only under the merge method "merge". A squash or rebase method needs the new main commit as the base. Decision: when-a-worktree-may-be-removed (when a worktree may be removed)
 - merge-tree-stale-lock-goes: cut_branch follows the sweep's stale agent lock rule, so a tree locked by a dead host is unlocked and removed. Decision: the-janitor-is-one-machine-wide-sweep (the janitor is one machine-wide sweep)
@@ -553,3 +553,4 @@
 - design-review-context-autoload: design-review Reviewer B: a 'Design Context' section in a repo's CLAUDE.md still auto-loads into Reviewer B (from c68, Oct 26). A note until it causes a real incident. Decision: none
 - lanecap-quoted-longer-phrase: lint/compliance_probes.py lanecap exempts a cap only when a quote pair wraps the match exactly. So a quoted longer phrase ("keep at most 3 lanes open") is still a hit to read; "(owner" and owner-plus-date can pass a deliberate form. False alarms on citations, which the reader sees. Decision: none
 - design-probe-vendored-skill-shot: lint/compliance_probes.py design reports skills/impeccable/scripts/modern-screenshot.umd.js in claude-settings as an own screenshot command, because the vendored skill sits in a non-dot folder. Child repos are unaffected. Decision: shoot-is-one-shared-command (one shared screenshot command)
+- try-marker-sunset: hooks/guard.py counts the old builder marker `Try N of 3` beside `Round N of 3` until 2026-11-09. Then drop `try` from STEP_UP_MARKER and BUILDER_KINDS, with its test cases and mutants. Decision: subagent-model-cap

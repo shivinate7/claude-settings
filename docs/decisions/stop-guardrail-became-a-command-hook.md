@@ -10,7 +10,7 @@ script `hooks/decision_watch.py`, which takes the same Stop JSON with no permiss
 (`decision-watch-mod-limits`). A direct run of the script with no split flag runs `claude -p`, isolated,
 as below.
 
-- **The gate is an ACTUAL on-disk change to a protected path.** `git status` against HEAD, scoped to this
+- **The guard is an ACTUAL on-disk change to a protected path.** `git status` against HEAD, scoped to this
   turn by mtime, gives the files this turn touched. A broad keyword net
   over each path decides whether a file looks protected, plus `guard.is_settings_file`. When nothing
   looks protected, the hook prints nothing and never spawns a model. Otherwise the judge gets the diff, or
@@ -43,7 +43,7 @@ as below.
 Measured 2026-09-22 over every session transcript on this machine since 2026-09-15: the agent hook gave
 34 real flags and about 60 "Unable to verify" answers, which track the `auto` permission mode. The 34
 flags were 8 real incidents; one unresolved finding was re-flagged at ten Stops. An outbound
-`SendMessage` or `Task` with no disk change also gave false positives, so the gate keys on the disk.
+`SendMessage` or `Task` with no disk change also gave false positives, so the guard keys on the disk.
 
 Kind: process
 Home: hooks/decision_watch.py

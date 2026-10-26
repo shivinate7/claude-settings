@@ -213,7 +213,7 @@ def case_allow_approved():
 
 # --------------------------------------------------------------------------- case 3
 # No file changed at all, only an outbound SendMessage instructing a peer to delete a
-# rule that has not executed yet. This shape alone is a false positive, so it must not gate
+# rule that has not executed yet. This shape alone is a false positive, so it must not guard
 # a model call by itself. Silent, and the model is never even called.
 
 def case_outbound_alone_no_disk_change():
@@ -295,7 +295,7 @@ def case_last_human_reader_skips_a_peer_record():
     t1 = "2026-09-22T10:00:05.000Z"
     t2 = "2026-09-22T10:00:09.000Z"
     records = [
-        human_record("rename the gate", T0),
+        human_record("rename the guard", T0),
         assistant_record(text="Asking a peer."),
         peer_record("Answer: yes, rename it.", t1),
         assistant_record(text="Renamed."),

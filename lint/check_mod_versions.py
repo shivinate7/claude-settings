@@ -7,7 +7,7 @@ mods/ with a plugin.json, and every folder .claude-plugin/marketplace.json lists
 The diff is origin/main...HEAD (the merge base), so a main that moved ahead does not flag a plugin
 this branch never touched. Plugins are matched by plugin.json "name", not by folder: the install
 cache keys by name, so a folder move that keeps name and version fails. A name with no match at the
-merge base is new and passes if its version is valid. A folder deleted whole is not gated. A version
+merge base is new and passes if its version is valid. A folder deleted whole is not checked. A version
 is MAJOR.MINOR.PATCH, numbers only: a prerelease is refused. A leading BOM is ignored. An unreadable
 diff, plugin.json or marketplace.json exits 1, also outside CI.
 

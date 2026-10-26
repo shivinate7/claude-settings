@@ -380,7 +380,7 @@ def inbox_note(session_id):
     item ids (ruling, task, standing) from <session_id>.inbox.md, and whether `fb` capture is still
     open. "" when there is nothing to say. Never raises: the reorient message must still print."""
     try:
-        import feedback_gate
+        import feedback_guard
         import local_time
         paths = local_time.inbox_paths(session_id)
         if paths is None:
@@ -392,7 +392,7 @@ def inbox_note(session_id):
     try:  # an unreadable inbox must not hide the "still open" line below
         if os.path.exists(paths[0]):
             with open(paths[0], encoding="utf-8") as f:
-                ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
+                ids = feedback_guard.open_ids(feedback_guard.parse(f.read()))
             if ids:
                 note += " Open feedback items: %s. Keep each in the handoff." % ", ".join(ids)
     except Exception as e:

@@ -402,7 +402,7 @@ def _is_primary_checkout(entry_path: str):
     called with a linked worktree's own path, and the real primary checkout would then stop
     matching `root`, stop being excluded, and be judged like any worktree. Git's own refusal to
     remove a main working tree is not a guard this program may lean on
-    (verification-recovery-not-gated-on-own-state).
+    (verification-recovery-independent-of-state).
 
     Every worktree of one clone shares one git directory (`--git-common-dir`). The primary
     checkout is the one worktree whose OWN git directory (`--git-dir`) equals it. A linked
@@ -474,7 +474,7 @@ def own_agent_lock_verdict(reason: str):
     """True when REASON is an Agent-tool lock whose live holder is this process or one of its
     ancestors (the calling session's own Claude process). False for any other reason, or a holder
     outside the ancestry. None when a pid read could not tell. The caller still owns the clean,
-    merged, idle, session and process gates: this reads the holder only."""
+    merged, idle, session and process checks: this reads the holder only."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
@@ -2157,7 +2157,7 @@ def processes_in(path: str):
 
 # ------------------------------------------------------------------ acting on a reapable listener
 #
-# Reached only from `sweep_repo`'s own `if confirm and decision["action"] == "reap":` gate,
+# Reached only from `sweep_repo`'s own `if confirm and decision["action"] == "reap":` check,
 # exactly the shape branches and worktrees already use. A signal is sent by PID NUMBER alone,
 # never by a name or a command-line pattern (CLAUDE.md: "Never kill a process you did not
 # start. Treat `pkill -f` and `lsof -t` as machine-wide.") -- every pid reaching `send_signal`

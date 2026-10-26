@@ -3,7 +3,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File install-no-gap.test.ps1
 #
 # The defect: with no symlink rights, install.ps1 deletes each landed copy and then copies it
-# again. Between the two steps the file is absent. The gate hooks fail closed on a missing
+# again. Between the two steps the file is absent. The guard hooks fail closed on a missing
 # script, so every session is refused for as long as the gap lasts.
 #
 # The main case runs install.ps1 once, then re-runs it 20 times against a scratch clone and a

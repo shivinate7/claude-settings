@@ -15,7 +15,7 @@ task, because nothing linked the ruling to a plan. The line format is in `lint/c
   Only pull requests run the check. A push to main and the nightly run skip it, by design.
 - The lint checks every record the pull request adds or changes, against the pull request base. A
   missing base ref reads as unknown: locally the lint exits 0, in CI it fails. A bad `--dir` or
-  `records-dir` makes the lint exit non-zero and name the folder (gate-hooks-fail-closed).
+  `records-dir` makes the lint exit non-zero and name the folder (guard-hooks-fail-closed).
 - In another repo's pull request, a `Home: rule:<id>` resolves against that repo's CLAUDE.md and the
   claude-settings CLAUDE.md. The action reads the second from its own checkout at the pinned sha, with no
   network read. With none readable, a `rule:` Home is red. q_max adopts the format and sets

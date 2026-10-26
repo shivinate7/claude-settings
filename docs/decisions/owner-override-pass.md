@@ -46,9 +46,9 @@ Orchestrator's call, not an owner word: the required unit, the role list, and th
 
 - Owner, 2026-10-18 15:34 CDT: a write to a frozen path, and a command that sets a git location variable (`git-env-set-denied`, a git-env-set command is denied).
 - Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
-- Owner, 2026-10-18 16:25 CDT: the role and model guards (the settings-write ask of `subagent-model-cap`, `subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards).
+- Owner, 2026-10-18 16:25 CDT: the role and model guards (the settings-write ask of `subagent-model-cap`, `subagent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards).
 - Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps a subagent inside its own worktree (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop).
-- Orchestrator's call, because no pass check reaches them: the missing-module deny in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (`sendmessage_state`, the prompt judges, the question reviewer agent hook).
+- Orchestrator's call, because no pass check reaches them: the missing-module deny in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse guard (`sendmessage_state`, the prompt judges, the question reviewer agent hook).
 
 Why: the owner needs a way to force through a refusal that blocks real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
 

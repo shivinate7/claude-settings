@@ -2,14 +2,14 @@
 
 ## The ruling
 
-Judge a guard by the act it must catch, never by the spelling of the act. When a gate needs a list of
+Judge a guard by the act it must catch, never by the spelling of the act. When a guard needs a list of
 shapes, the predicate is wrong. Look for the primitive that records the act itself. Reason: a list of
 shapes records the ways people were seen to write a file. It can only grow and can never close.
 
 `hooks/decision_watch.py` reads the act this way. It does not read command text. Its predicate is a
 file under the turn's working directory, with an mtime newer than the last human message, and dirty
 against HEAD. The markdown sweep (`md_sweep.py`) used the same predicate for a markdown file written
-through Bash. The sweep is removed (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`).
+through Bash. The sweep is removed (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
 
 - The last human message carries an ISO timestamp in the transcript. That marks the start of the turn.
 - The git check removes the large false positive: a `git pull` or a branch switch rewrites many

@@ -15,7 +15,7 @@ Owner, 2026-10-25: one tool, `bin/ios-ship`, builds and ships the owner's iOS ap
 
 Why: a command-line build cannot see the Xcode account ("No Accounts"), so each app repo had its own copy of the key IDs and of a near-identical script. Three copies drifted. One tool gives one place to fix the clean-main check and the cleanup of secret files. One account file means that a new phone or a key rotation is one edit, not three. It cannot live in this repo, which is public.
 
-Protected by `lint/test_ios_ship.sh` (the clean-main refusals, the `copy_in` cleanup, the account-file order, the default config, the profile retry, the fake-ID fixtures) and the `shell-macos` job in `.github/workflows/gates.yml`.
+Protected by `lint/test_ios_ship.sh` (the clean-main refusals, the `copy_in` cleanup, the account-file order, the default config, the profile retry, the fake-ID fixtures) and the `shell-macos` job in `.github/workflows/checks.yml`.
 
 ## Limits
 

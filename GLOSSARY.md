@@ -27,8 +27,9 @@ one name for each thing, and a list of names to avoid.
 | decision | A record in `docs/decisions/` for one question. It holds the ruling, the reason, and the kind and home of the ruling. | `rule:git-one-entry-per-question`, `docs/decisions/rulings-declare-kind.md` | `ADR` |
 | debt | A known gap or deferred work that Claude is likely to hit in normal work. Each debt is one file in `docs/debts/`. | `docs/debts/README.md` | — |
 | note | A finding that Claude is not likely to hit in normal work. Each note is one line in `docs/debts/notes.md`. | `rule:roles-holes-are-debts`, `docs/debts/notes.md` | — |
-| guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | — |
-| check | A lint, test or CI job that passes or fails a change. A check never asks. | `docs/decisions/guard-guards-mistakes-only.md` | — |
+| guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | `gate` |
+| check | A lint, test or CI job that passes or fails a change. A check never asks. `lint/rule_audit.py` names a rule held by one the kind `check`. | `docs/decisions/guard-guards-mistakes-only.md` | `gate`, `merge gate` |
+| round | One review and the fix after it. A change gets at most three. A builder's round N is the build or fix that review round N reads; its brief says `Round N of 3`. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | `try` |
 | owner | The person who owns these repos. Only the owner's word makes a ruling, an override pass or a merge grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-word-covers-named-act` | — |
 | override pass | A prompt from the owner that starts with `override`. The guard then lets a refusal or an ask through, once or for a set time. | `docs/decisions/owner-override-pass.md` | — |
 | orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
@@ -43,6 +44,3 @@ owner picks one, say which meaning you use.
 - **step.** (1) A roadmap step: one item of planned work (`rule:speak-cite-id-plus-gloss`).
   (2) A CI step: one `- name:` entry in a workflow job (`lint/rule_audit.py`, kind `ci`).
   (3) A command step: one command in a shell chain (`docs/decisions/ask-steps-run-alone.md`).
-- **gate.** (1) A hook that can block a tool call or a reply (`docs/decisions/gate-hooks-fail-closed.md`,
-  `lint/report_gate.py`). (2) Any file that enforces a rule and has a test that proves it
-  (`lint/rule_audit.py`, kind `gate`), lints included.
