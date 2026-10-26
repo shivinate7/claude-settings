@@ -844,7 +844,8 @@ class HookLoadsNoGuardModule(unittest.TestCase):
         self.assertEqual(loaded, [], "one hook run loaded these guard modules")
 
 
-# THE SCRATCHPAD REAP (owner ruling). At SessionEnd the hook also stops each process whose PPID is 1,
+# THE SCRATCHPAD REAP (decision agent-end-reap-stops-what-a-finished-agent-left).
+# At SessionEnd the hook also stops each process whose PPID is 1,
 # whose environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and whose cwd sits
 # in the payload's `scratchpad_dir`. Both paths are realpath'd: macOS shows /var as /private/var, so
 # the payload names the /var form while the holder's cwd reads back as /private/var. Each holder is
