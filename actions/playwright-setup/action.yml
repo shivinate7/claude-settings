@@ -4,6 +4,7 @@ description: >
   already has the browsers' system libraries, and `--with-deps` once spent more than 11 min on a slow
   apt mirror. A missing library fails the suite when it cannot launch a browser, never skips it.
   The browser download is cached by the pinned Playwright version.
+  It needs playwright-core reachable from package-dir, so a pnpm strict layout is not supported.
 inputs:
   package-dir:
     description: "The folder whose package.json and package-lock.json pin playwright or @playwright/test."

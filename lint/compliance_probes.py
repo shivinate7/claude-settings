@@ -21,7 +21,8 @@ lanecap: a guessed lane cap in a brief or a plan (rule parallelism-no-guessed-la
   cites its owner or ruling source, "(owner, ...)" or "owner ... <date>", passes. A cap inside a pair
   of quotes is cited, and passes.
 playwright: a Playwright install that also runs apt (`--with-deps`, `install-deps`) in a workflow, an
-  action, a Makefile, a shell script or a package.json script. The runner image already has the
+  action, a Makefile, a shell script, a Dockerfile, a justfile, a Taskfile, a dev container file or a
+  package.json script. The runner image already has the
   browsers' libraries, and that apt step once timed a job out on a slow mirror. The shared
   actions/playwright-setup installs with no apt step. Comments do not count.
 """
@@ -242,7 +243,9 @@ def probe_lanecap(root):
     return finish("lanecap", lines, "in shape - %d brief or plan file(s) read" % len(where), 0)
 
 
-PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh)$")
+PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"
+                     r"|Dockerfile[^/]*|[^/]+\.Dockerfile|[Jj]ustfile|Taskfile[^/]*\.ya?ml|\.devcontainer/[^/]+)$")
+FOLDED = re.compile(r"^(\s*)(- )?[\w-]+:\s*>[+-]?\d?\s*$")
 PW_APT = re.compile(r"\bplaywright\b[^\n;&|]*\s(--with-deps\b|install-deps\b)")
 
 
@@ -262,6 +265,22 @@ def uncommented(text):
                 cut = i
                 break
         out.append(line[:cut])
+    return folded(out)
+
+
+def folded(lines):
+    """A YAML folded scalar (`run: >`) is one command over several lines, so its lines join onto
+    the key's line, and the line count stays the same."""
+    out, key, indent = [], None, 0
+    for line in lines:
+        if key is not None and (not line.strip() or len(line) - len(line.lstrip()) > indent):
+            out[key] += " " + line.strip()
+            out.append("")
+            continue
+        key, match = None, FOLDED.match(line)
+        if match:
+            key, indent = len(out), len(match[1])
+        out.append(line)
     return out
 
 

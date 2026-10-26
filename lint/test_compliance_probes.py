@@ -212,6 +212,11 @@ class Playwright(unittest.TestCase):
                 (wf, "      - run: |\n          npx playwright install \\\n            --with-deps chromium\n"),
                 (wf, "      - run: echo \"a # b\" && npx playwright install --with-deps\n"),
                 (wf, "      - name: Don't skip\n        run: npx playwright install --with-deps\n"),
+                (wf, "      - run: >\n          npx playwright install\n          --with-deps chromium\n"),
+                ("Dockerfile", "RUN npx playwright install --with-deps chromium\n"),
+                ("justfile", "e2e:\n    npx playwright install --with-deps\n"),
+                ("Taskfile.yml", "tasks:\n  e2e:\n    cmds:\n      - npx playwright install --with-deps\n"),
+                (".devcontainer/devcontainer.json", '{"postCreateCommand": "npx playwright install --with-deps"}\n'),
                 (".github/actions/web/action.yml", "    - run: npx playwright install --with-deps\n"),
                 ("Makefile", "e2e:\n\tnpx playwright install --with-deps\n"),
                 ("scripts/ci.sh", "npx playwright install --with-deps chromium\n"),
@@ -226,6 +231,8 @@ class Playwright(unittest.TestCase):
                                                "      - run: npx playwright install chromium  # never --with-deps\n"
                                                "      - run: echo \"don't\"  # playwright install-deps\n"
                                                "      - name: Don't use apt  # playwright install --with-deps\n")
+        repo.write(".github/workflows/b.yml", "      - run: >\n          npx playwright install chromium\n"
+                                              "      - run: echo done --with-deps\n")
         repo.write("docs/ci.md", "Never run `playwright install --with-deps`.\n")
         code, out = repo.run("playwright")
         self.assertEqual((code, out.strip()), (0, "playwright: in shape - no apt step"))
