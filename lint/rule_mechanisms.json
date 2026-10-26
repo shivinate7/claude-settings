@@ -145,7 +145,7 @@
     "parallelism-keep-going": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "A check would need the queue at turn end and each item's open questions; no file holds them. The owner deferred a Stop check that refuses an idle turn end until the gap repeats (step c59, Oct 26)."
+        "reason": "A check would need the queue at turn end, each item's open questions, and which follow-ups the session found; no file holds them. The owner deferred a Stop check that refuses an idle turn end until the gap repeats (step c59, Oct 26)."
       }
     },
     "parallelism-argue-max-parallelism": {
