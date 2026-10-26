@@ -1350,6 +1350,24 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: pushing pushed-work failed. "
                   "stderr: %s" % pushb.stderr.strip())
     run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # archived-work is as unique as unmerged-work, then gets the refusal's own handed remedy: its
+    # push step, read from the printed reason with the placeholder filled, run for real. The
+    # delete case below proves that the remedy, once run, makes the rule allow the delete.
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "archived-work")
+    write(os.path.join(BRANCHREPO, "a.txt"), "archived by the handed remedy\n")
+    run_vcs(BRANCHREPO, "add", "a.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "archived-work's commit")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # No handed push step leaves the branch the only copy, so that case goes red, not the suite.
+    _, refusal = decide({"raw": None, "tool": "Bash", "cwd": BRANCHREPO, "session": None,
+                         "env_path": None,
+                         "tool_input": {"command": VCS + " branch -D archived-work"}})
+    handed = re.search(r"`git (push [^`]*)`", refusal or "")
+    if handed:
+        archive = run_vcs(BRANCHREPO, *handed.group(1).replace("<branch>", "archived-work").split())
+        if archive.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: the branch-delete refusal's handed "
+                     "push failed. stderr: %s" % archive.stderr.strip())
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
@@ -2667,7 +2685,12 @@ sh("branch: a commit pushed to the remote is not the only copy",
 # THE ONLY-COPY CASE. unmerged-work is not an ancestor, its patch is not on origin/main, and no
 # remote ref contains it: this is the defect the plan measured against the live hook.
 sh("branch: a commit found nowhere else is the only copy, and the rule denies",
-   VCS + " branch -D unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
+   VCS + " branch -D unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO,
+   carries=("`git push origin <branch>:refs/heads/archive/<branch>`", "`git branch -D <branch>`",
+            "no question"),
+   lacks=("unmerged-work", "push the branch, or merge it"))
+sh("branch: the refusal's handed remedy, once run, makes the rule allow the delete",
+   VCS + " branch -D archived-work", "allow", cwd=BRANCHREPO)
 sh("branch: -d over the same only-copy branch still denies",
    VCS + " branch -d unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
 # TWO NAMES IN ONE CALL. One safe and one unsafe name still denies: one held-only-copy makes the
