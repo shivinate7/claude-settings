@@ -23,7 +23,7 @@ STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": 
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
-# The page script the roadmap branch's build.py put in front of the viewer (roadmap 496ddbc). The
+# The page script the roadmap branch's build.py put in front of the viewer. The
 # builder's stub must stay byte for byte this, so the viewer reads the data as it did.
 TODAY_STUB = """<script>
 (() => {
@@ -45,7 +45,7 @@ TODAY_STUB = """<script>
 })();
 </script>
 """
-# sha256 of roadmap/page/index.html on the roadmap branch at 496ddbc, the page the old builder used.
+# sha256 of the roadmap branch's roadmap/page/index.html, the page the old builder used.
 TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 

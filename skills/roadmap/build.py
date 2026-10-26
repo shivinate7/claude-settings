@@ -30,7 +30,6 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import urllib.parse
 
@@ -62,12 +61,14 @@ HEADER = re.compile(r"^@[0-9a-f]{40,64} \S+$")
 
 HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
+sys.path.insert(0, str(HERE.parent.parent / "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 
 def git(repo, *args, stdin=None):
     """git's stdout, or None when git cannot run or fails."""
     try:
-        done = subprocess.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
+        done = _nowindow.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
     except OSError:
         return None
@@ -121,7 +122,7 @@ class Ref:
         if not names:
             return {}
         try:
-            done = subprocess.run(["git", "-C", str(self.repo), "cat-file", "--batch"], capture_output=True,
+            done = _nowindow.run(["git", "-C", str(self.repo), "cat-file", "--batch"], capture_output=True,
                                   input="".join("%s:%s\n" % (self.ref, n) for n in names).encode("utf-8"))
         except OSError:
             return {}
