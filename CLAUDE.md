@@ -73,7 +73,7 @@ rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's
 verdict with one bounded command. Never scroll a log to find out whether something
 passed.<!-- rule:tokens-verdict-not-stream --> Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log.<!-- rule:tokens-run-through-verdict --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
 never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running.
-Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
+Drop the narration.<!-- rule:tokens-compacting-keep-essentials --> Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. Keep it when it is needed before the first file read.<!-- rule:tokens-folder-rules-load-by-path -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> Surface ambiguity instead
 of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an item without saying so.<!-- rule:building-never-drop-item-silently --> Give

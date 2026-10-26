@@ -336,6 +336,12 @@
         "reason": "Compaction content is a judgment call about what to keep. Nothing scores a compacted context against this rule."
       }
     },
+    "tokens-folder-rules-load-by-path": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether a section matters only under one folder, or is needed before the first file read, is a read of what the section governs. lint/check_claude_md_size.py warns past 200 lines, which prompts the move, but no check can judge which section moves."
+      }
+    },
     "building-never-guess-answer": {
       "mechanism": {
         "kind": "judgment",
