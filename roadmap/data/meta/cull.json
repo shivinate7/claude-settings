@@ -118,10 +118,18 @@
       "hooks": 49778,
       "label": "Main at #574, Oct 26, goal 3 batches 1, 2, 5 (not a cull batch)",
       "words": 2970
+    },
+    {
+      "at": "54f2dfd1",
+      "debts": 52,
+      "decisions": 113,
+      "hooks": 50812,
+      "label": "Main at #614, Oct 26, after seven batches #586-#614 (not a cull batch)",
+      "words": 3031
     }
   ],
   "closed": "Mon Oct 19, 10:18 am, owner ruling on the time box",
-  "note": "Measured by the advisor from the repo on Oct 19 at each merge on main, not from a session report. Counting: decision files excluding README; debt files excluding README and notes.md; all hooks/*.py lines including tests; CLAUDE.md words. Decisions baseline corrected 133 to 134 on Oct 17. Two batch numberings exist: 'Cull batch 1A-6' (#499-#508, Oct 17-18) and regular 'Batch 4/5' (#512, #513). The cull ended at cull batch 6; since then decisions rose 90 to 96 and debt files 16 to 27. Debts went to debts/notes.md as ruled (502 entries, 11,751 words; nothing loads it into sessions). Hook lines split at main: code 17,147 (baseline 16,963, +1.1%), tests 31,237 (baseline 30,233, +3.3%); #513 alone added 1,031, mostly tests plus hooks/override_pass.py (103 lines). Re-measured Oct 20 at 84d4076 by the advisor after the rebuild: hook code 17,441 and tests 31,820 (sum 49,261); debts/notes.md has 514 entries (515 lines). Re-measured Oct 23 at 1842e56 by the advisor: hook code 18,082 and tests 34,416 (sum 52,498); decisions 107; debts 51; CLAUDE.md 2,654 words. Goal 1 grew all four. Re-measured Oct 25 at f463787c by the advisor: hook code 17,558 and tests 32,339 (sum 49,897, down 2,601, mostly the STE hooks removed); decisions 110; debts 55; CLAUDE.md 2,800 words; debts/notes.md 524 entry lines. Hook lines fell; debts, decisions and CLAUDE.md words grew. Re-measured Oct 26 at 149f4bc5 by the advisor: hook code 17,462 and tests 32,316 (sum 49,778); decisions 111; debts 53; CLAUDE.md 2,970 words.",
+  "note": "Measured by the advisor from the repo on Oct 19 at each merge on main, not from a session report. Counting: decision files excluding README; debt files excluding README and notes.md; all hooks/*.py lines including tests; CLAUDE.md words. Decisions baseline corrected 133 to 134 on Oct 17. Two batch numberings exist: 'Cull batch 1A-6' (#499-#508, Oct 17-18) and regular 'Batch 4/5' (#512, #513). The cull ended at cull batch 6; since then decisions rose 90 to 96 and debt files 16 to 27. Debts went to debts/notes.md as ruled (502 entries, 11,751 words; nothing loads it into sessions). Hook lines split at main: code 17,147 (baseline 16,963, +1.1%), tests 31,237 (baseline 30,233, +3.3%); #513 alone added 1,031, mostly tests plus hooks/override_pass.py (103 lines). Re-measured Oct 20 at 84d4076 by the advisor after the rebuild: hook code 17,441 and tests 31,820 (sum 49,261); debts/notes.md has 514 entries (515 lines). Re-measured Oct 23 at 1842e56 by the advisor: hook code 18,082 and tests 34,416 (sum 52,498); decisions 107; debts 51; CLAUDE.md 2,654 words. Goal 1 grew all four. Re-measured Oct 25 at f463787c by the advisor: hook code 17,558 and tests 32,339 (sum 49,897, down 2,601, mostly the STE hooks removed); decisions 110; debts 55; CLAUDE.md 2,800 words; debts/notes.md 524 entry lines. Hook lines fell; debts, decisions and CLAUDE.md words grew. Re-measured Oct 26 at 149f4bc5 by the advisor: hook code 17,462 and tests 32,316 (sum 49,778); decisions 111; debts 53; CLAUDE.md 2,970 words. Re-measured Oct 26 at 54f2dfd1 by triage (3): hook code 17,840 and tests 32,972 (sum 50,812, up 1,034); decisions 113; debts 52; CLAUDE.md 3,031 words; debts/notes.md 549 entry lines.",
   "stopRule": "Debts and decisions each cut under 5% for two batches in a row; hook lines just go down.",
   "timebox": "Mon Oct 19"
 }
