@@ -41,9 +41,10 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*) on="$on code shoot " ;;
-      # merge.py: guard.py loads it. check_record_slugs.py: guard.py reads it. check_silent_undo.py: merge.py imports it.
+      # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
+      # check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
-      lint/check_record_slugs.py) on="$on $W $X code guard " ;;
+      lint/layout.json|lint/layout.py) on="$on $M $R $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;

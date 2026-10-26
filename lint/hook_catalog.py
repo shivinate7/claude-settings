@@ -3,7 +3,7 @@
 The records page lists the records of a repo: its rules, decisions, debts and plans.
 
 Plain words, one row each, and the model and
-effort beside it, like the model table in decisions/subagent-model-cap.md. The page is
+effort beside it, like the model table in the decision subagent-model-cap. The page is
 generated and never edited by hand. Each description comes from the source it describes, so
 the page cannot drift from it.
 
@@ -17,7 +17,7 @@ this script is in. It is never the working folder.
 
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
 for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
-files in decisions/, debts/ and plans/. A root with no record gets no records page. A record
+files in the record folders that lint/layout.json lists. A root with no record gets no records page. A record
 that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
@@ -63,10 +63,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
-TABLE = "decisions/subagent-model-cap.md"
+TABLE_NAME = "subagent-model-cap.md"  # the model table, a decision record
 INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
 CELL_CAP = 1000  # ceiling on a description cell, in characters, the ellipsis included. It sits above the longest cell, so none is cut (decision catalog-cells-never-cut).
@@ -308,7 +309,7 @@ def inline_summaries():
 def model_table():
     """{script path: (model, effort)} for each model-table row that names a script."""
     found = {}
-    for line in read(TABLE).split("\n"):
+    for line in read(layout.path(ROOT, "decisions") + "/" + TABLE_NAME).split("\n"):
         if not line.lstrip().startswith("|"):
             continue
         cells = split_cells(line)
@@ -486,9 +487,7 @@ def render():
 
 # ---- the records page --------------------------------------------------------------------------
 
-RECORDS_PAGE = "docs/records.md"
-RECORD_FOLDERS = ("decisions", "debts", "plans")
-NOTES_FILE = "debts/notes.md"  # the notes tier: one line per unlikely finding, not a record
+RECORDS_PAGE = layout.layout()["kinds"]["records-index"]["path"]
 SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -504,7 +503,7 @@ OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/` and `plans/`. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in {folders}. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
@@ -674,6 +673,11 @@ def decision_section(text):
     return {frozenset(["process"]): "Rulings", frozenset(["build"]): "Build designs"}.get(frozenset(kinds), "Unsorted decisions")
 
 
+def listed_folders():
+    """(kind, folder) for each kind the records page lists, in layout order."""
+    return [(kind, layout.path(ROOT, kind)) for kind, found in layout.kinds(ROOT).items() if found.get("listed")]
+
+
 def collect_records():
     """({section: [(slug, gist, link text, link)]}, problems). A page is written only when no problem stands."""
     rows = {name: [] for name in SECTIONS}
@@ -686,8 +690,9 @@ def collect_records():
                 rows["Mandates"].append((rule, gist, "CLAUDE.md", "../CLAUDE.md"))
             else:
                 problems.append("CLAUDE.md: the rule %s has no text before its marker" % rule)
-    for folder in RECORD_FOLDERS:
-        base = os.path.join(ROOT, folder)
+    notes = layout.path(ROOT, "debt-notes")  # the notes tier: one line per unlikely finding, not a record
+    for kind, folder in listed_folders():
+        base = os.path.join(ROOT, *folder.split("/"))
         try:
             names = sorted(os.listdir(base)) if os.path.isdir(base) else []
         except OSError as err:
@@ -698,18 +703,18 @@ def collect_records():
                 continue
             text = read(rel)
             problems += history_problems(rel, text)
-            if rel == NOTES_FILE:
+            if rel == notes:
                 continue
-            if folder == "decisions":
+            if kind == "decisions":
                 section, gist = decision_section(text), decision_gist(text)
-            elif folder == "debts":
+            elif kind == "debts":
                 section, gist = "Debts", debt_gist(text)
             else:
-                section, gist = folder.capitalize(), first_line_gist(text)
+                section, gist = kind.capitalize(), first_line_gist(text)
             if gist:
-                rows[section].append((name[:-3], gist, rel, "../" + rel))
+                rows.setdefault(section, []).append((name[:-3], gist, rel, "../" + rel))
             else:
-                problems.append("%s: %s" % (rel, "no **What.** line to make a gist from" if folder == "debts" else "no text to make a gist from"))
+                problems.append("%s: %s" % (rel, "no **What.** line to make a gist from" if kind == "debts" else "no text to make a gist from"))
     return rows, problems
 
 
@@ -718,8 +723,9 @@ def render_records():
     rows, problems = collect_records()
     if not any(rows.values()):
         return "", problems
-    page = RECORDS_INTRO
-    for name in SECTIONS:
+    listed = ["`%s/`" % folder for _kind, folder in listed_folders()]
+    page = RECORDS_INTRO.replace("{folders}", ", ".join(listed[:-1]) + " and " + listed[-1] if len(listed) > 1 else "".join(listed))
+    for name in rows:  # SECTIONS first, then each extra kind a repo lists
         found = rows[name] if name == "Mandates" else sorted(rows[name])
         if found:
             page += "## %s\n\n| Slug | Gist | Link |\n|---|---|---|\n" % name

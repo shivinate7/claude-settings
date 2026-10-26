@@ -34,10 +34,11 @@ inputs:
   decisions-dir:
     description: >
       Folder of D-nnn decision entries. STE001 then stops counting the words a gloss
-      tool inserts after a citation. Optional: the collapse turns on only when the
-      folder exists, so a repository with none sees no change. Pass '' to turn it off.
+      tool inserts after a citation. Empty, the default: the decisions folder that
+      lint/layout.json names. The collapse turns on only when the folder exists, so a
+      repository with none sees no change. Pass off to turn it off.
     required: false
-    default: "docs/decisions"
+    default: ""
 runs:
   using: composite
   steps:

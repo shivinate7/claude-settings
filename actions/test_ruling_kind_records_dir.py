@@ -3,8 +3,8 @@
 
     python3 actions/test_ruling_kind_records_dir.py
 
-The action checks the records folder named by its records-dir input. The input defaults to
-decisions, so a caller that sets nothing is checked as before. Stdlib only, so action.yml is
+The action checks the records folder named by its records-dir input. The input defaults to "",
+and then the lint takes the decisions folder from lint/layout.json. Stdlib only, so action.yml is
 read as text, not parsed as YAML. Shape only: test_action.sh runs the action end to end.
 The CheckShRecordsDir cases run check.sh itself in a fixture repo, with RECORDS_DIR set or unset.
 """
@@ -51,12 +51,12 @@ def input_block(text, name):
 
 
 class RecordsDirInput(unittest.TestCase):
-    def test_records_dir_input_defaults_to_decisions(self):
+    def test_records_dir_input_defaults_to_the_layout(self):
         block = input_block(read(ACTION_YML), "records-dir")
         self.assertIsNotNone(block, "action.yml has no inputs.records-dir")
         m = re.search(r"^\s+default:\s*['\"]?([^'\"\s]*)['\"]?\s*$", block, re.M)
         self.assertIsNotNone(m, "inputs.records-dir has no default")
-        self.assertEqual(m.group(1), "decisions")
+        self.assertEqual(m.group(1), "")
 
     def test_check_sh_passes_the_records_dir_to_the_lint(self):
         m = ENV_MAP.search(read(ACTION_YML))
@@ -65,9 +65,12 @@ class RecordsDirInput(unittest.TestCase):
         lint_lines = [line for line in read(CHECK_SH).split("\n")
                       if "check_ruling_kind.py" in line and not line.lstrip().startswith("#")]
         self.assertTrue(lint_lines, "check.sh does not run check_ruling_kind.py")
-        flag = re.compile(r"--dir\s+\"?\$\{?%s\}?\"?(?=\s|$)" % re.escape(name))
-        self.assertTrue(any(flag.search(line) for line in lint_lines),
-                        "the lint call in check.sh does not pass --dir \"$%s\"" % name)
+        # A set value goes to the lint as --dir; an empty one leaves --dir off, so the lint reads the layout.
+        flag = re.compile(r"\[ -n \"\$%s\" \] && (\w+)=\(--dir \"\$%s\"\)" % (re.escape(name), re.escape(name)))
+        found = flag.search(read(CHECK_SH))
+        self.assertIsNotNone(found, "check.sh does not build --dir \"$%s\" from a set value" % name)
+        self.assertTrue(any("${%s[@]" % found.group(1) in line for line in lint_lines),
+                        "the lint call in check.sh does not pass the --dir it built")
 
 
 GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
@@ -125,12 +128,21 @@ class CheckShRecordsDir(unittest.TestCase):
         rc, out = self.check()
         self.assertEqual(rc, 0, out)
 
+    def test_empty_records_dir_reads_the_layout(self):
+        # Empty is the action's default: no --dir, so the lint judges the layout's folder.
+        self.put("decisions/bad-ruling.md", "No kind line.\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "bad")
+        rc, out = self.check("")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("decisions/bad-ruling.md", out)
+
     def test_explicit_decisions_passes(self):
         rc, out = self.check("decisions")
         self.assertEqual(rc, 0, out)
 
     def test_unusable_records_dir_fails_and_names_it(self):
-        for value in ("decision", "docs/decisions-old", ".", "", "Decisions"):
+        for value in ("decision", "docs/decisions-old", ".", "Decisions"):
             with self.subTest(records_dir=value):
                 rc, out = self.check(value)
                 self.assertNotEqual(rc, 0, out)

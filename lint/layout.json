@@ -1,0 +1,65 @@
+{
+  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. Decision one-layout-every-repo.",
+  "extras": ".claude/layout-extras.json",
+  "kinds": {
+    "claude-md": {
+      "path": "CLAUDE.md",
+      "set": "core"
+    },
+    "agents-md": {
+      "path": "AGENTS.md",
+      "set": "core"
+    },
+    "rules": {
+      "path": ".claude/rules",
+      "set": "core"
+    },
+    "decisions": {
+      "path": "docs/decisions",
+      "set": "core",
+      "record": true,
+      "listed": true
+    },
+    "debts": {
+      "path": "docs/debts",
+      "set": "core",
+      "record": true,
+      "listed": true
+    },
+    "debt-notes": {
+      "path": "docs/debts/notes.md",
+      "set": "core"
+    },
+    "plans": {
+      "path": "docs/plans",
+      "set": "core",
+      "listed": true
+    },
+    "specs": {
+      "path": "docs/specs",
+      "set": "core"
+    },
+    "records-index": {
+      "path": "docs/records.md",
+      "set": "core"
+    },
+    "design": {
+      "path": "docs/design",
+      "set": "screens"
+    },
+    "tokens": {
+      "path": "tokens/tokens.json",
+      "set": "screens"
+    },
+    "shots": {
+      "path": "shots",
+      "set": "screens"
+    }
+  },
+  "legacy": {
+    "docs/decisions": "decisions",
+    "docs/debts": "debts",
+    "docs/debts/notes.md": "debts/notes.md",
+    "docs/plans": "plans"
+  }
+}
