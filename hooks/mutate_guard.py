@@ -1098,7 +1098,7 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
     # that exercises the whole sequence, `worktree_home_case`.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
@@ -1548,6 +1548,19 @@ MUTATIONS = [
      'marker = "%s.%s.claim" % (path, hashlib.sha256(raw).hexdigest()[:32])',
      'marker = "%s.claim" % path',
      "override", 'override: a call that read a one-act pass before it was spent is refused'),
+    # THE OPUS PASS (hooks/override_pass.py). It lifts only the Opus spawn ask, of its own role, until it ends.
+    ("opus pass: the scope check is dropped, so the Opus pass lifts any refusal",
+     'if rule == OPUS_RULE and spawn_role is not None else None',
+     'if True else None',
+     "override", 'opus pass: every other refusal and ask stands under it'),
+    ("opus pass: the role check is dropped, so a role pass lifts every role",
+     '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
+     '    if at >= until:',
+     "override", 'opus pass: `opus builders 2h` lifts only builder spawns'),
+    ("opus pass: the end instant still lifts",
+     '    if at >= until or (role is not None',
+     '    if at > until or (role is not None',
+     "override", 'opus pass: `opus 2h` lets an Opus spawn through'),
 ]
 
 

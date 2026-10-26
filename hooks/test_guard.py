@@ -1350,6 +1350,24 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: pushing pushed-work failed. "
                   "stderr: %s" % pushb.stderr.strip())
     run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # archived-work is as unique as unmerged-work, then gets the refusal's own handed remedy: its
+    # push step, read from the printed reason with the placeholder filled, run for real. The
+    # delete case below proves that the remedy, once run, makes the rule allow the delete.
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "archived-work")
+    write(os.path.join(BRANCHREPO, "a.txt"), "archived by the handed remedy\n")
+    run_vcs(BRANCHREPO, "add", "a.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "archived-work's commit")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # No handed push step leaves the branch the only copy, so that case goes red, not the suite.
+    _, refusal = decide({"raw": None, "tool": "Bash", "cwd": BRANCHREPO, "session": None,
+                         "env_path": None,
+                         "tool_input": {"command": VCS + " branch -D archived-work"}})
+    handed = re.search(r"`git (push [^`]*)`", refusal or "")
+    if handed:
+        archive = run_vcs(BRANCHREPO, *handed.group(1).replace("<branch>", "archived-work").split())
+        if archive.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: the branch-delete refusal's handed "
+                     "push failed. stderr: %s" % archive.stderr.strip())
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
@@ -2667,7 +2685,12 @@ sh("branch: a commit pushed to the remote is not the only copy",
 # THE ONLY-COPY CASE. unmerged-work is not an ancestor, its patch is not on origin/main, and no
 # remote ref contains it: this is the defect the plan measured against the live hook.
 sh("branch: a commit found nowhere else is the only copy, and the rule denies",
-   VCS + " branch -D unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
+   VCS + " branch -D unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO,
+   carries=("`git push origin <branch>:refs/heads/archive/<branch>`", "`git branch -D <branch>`",
+            "no question"),
+   lacks=("unmerged-work", "push the branch, or merge it"))
+sh("branch: the refusal's handed remedy, once run, makes the rule allow the delete",
+   VCS + " branch -D archived-work", "allow", cwd=BRANCHREPO)
 sh("branch: -d over the same only-copy branch still denies",
    VCS + " branch -d unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
 # TWO NAMES IN ONE CALL. One safe and one unsafe name still denies: one held-only-copy makes the
@@ -14397,6 +14420,251 @@ for _is_timed in (False, True):
         ("override: a timed pass lets an Opus spawn through until it ends" if _is_timed
          else "override: a one-act pass lets an Opus spawn through once, then it asks again",
          ov_opus_spawn_check(_is_timed)))
+
+
+# THE OPUS PASS (decision owner-override-pass). `opus <n>[m|h]` lifts only the Opus spawn ask of
+# subagent-model-cap, for the typing session and its subagents, until it ends. `opus <role> <n>[m|h]`
+# lifts it only for spawns of that role. Every other refusal and ask stands.
+OP_SECONDS = 2 * 3600  # the length of the pass these stories type: `opus 2h`
+OP_BUILDER = {"prompt": "Try 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
+OP_REVIEWER = {"prompt": "Round 3 of 3. Re-check the diff.", "model": "claude-opus-5-5",
+               "subagent_type": "reviewer"}
+
+
+def op_pass_path(config, session):
+    return os.path.join(config, "state", "override", "opus", session + ".json")
+
+
+def op_spawn(config, session, seconds, spawn=None, agent_id=None):
+    return ov_call("Agent", dict(spawn or OV_OPUS_SPAWN), NOGIT, config, session, seconds, agent_id)
+
+
+def op_timed_check():
+    """`opus 2h`: an Opus spawn asks with no pass, then goes through for the session and its subagents
+    until the pass ends, and asks again at the end instant."""
+    config, session, rule = ov_config("opus-timed"), "op-timed", "subagent-model-cap"
+    ok, why = ov_story([("with no pass", lambda: op_spawn(config, session, 0), "ask", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus 2h")
+    ok, why = ov_story([
+        ("first spawn", lambda: op_spawn(config, session, 60), "allow", rule),
+        ("a subagent's spawn", lambda: op_spawn(config, session, 120, agent_id=OV_AGENT), "allow", rule),
+        ("second spawn", lambda: op_spawn(config, session, 180), "allow", rule),
+        ("spawn just before the end", lambda: op_spawn(config, session, OP_SECONDS - 1), "allow", rule),
+        ("spawn at the end instant", lambda: op_spawn(config, session, OP_SECONDS), "ask", rule),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "asked with no pass, went through for the session and a subagent until the end"
+
+
+def op_minutes_check():
+    """`opus 15m` is fifteen minutes, and `opus off` ends the pass at once."""
+    config, session, rule = ov_config("opus-minutes"), "op-minutes", "subagent-model-cap"
+    note = ov_type(config, session, "opus 15m")
+    ok, why = ov_story([
+        ("spawn just before the end", lambda: op_spawn(config, session, OV_TIMED_SECONDS - 1), "allow", rule),
+        ("spawn at the end instant", lambda: op_spawn(config, session, OV_TIMED_SECONDS), "ask", rule),
+    ], note)
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "OPUS 2H", OV_TIMED_SECONDS + 60) or note
+    ok, why = ov_story([("after `OPUS 2H`", lambda: op_spawn(config, session, OV_TIMED_SECONDS + 90),
+                         "allow", rule)], note)
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus off", OV_TIMED_SECONDS + 120) or note
+    ok, why = ov_story([("after `opus off`", lambda: op_spawn(config, session, OV_TIMED_SECONDS + 150),
+                         "ask", rule)], note)
+    if not ok:
+        return False, why
+    return True, "15 minutes to the second, any case, and `opus off` ended it"
+
+
+def op_role_check():
+    """`opus builders 2h` lifts only builder spawns. A spawn of any other role still asks."""
+    config, session, rule = ov_config("opus-role"), "op-role", "subagent-model-cap"
+    ok, why = ov_story([("a builder with no pass", lambda: op_spawn(config, session, 0, OP_BUILDER),
+                         "ask", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus builders 2h")
+    ok, why = ov_story([
+        ("a builder", lambda: op_spawn(config, session, 60, OP_BUILDER), "allow", rule),
+        ("a subagent's builder", lambda: op_spawn(config, session, 90, OP_BUILDER, OV_AGENT), "allow", rule),
+        ("a general-purpose spawn", lambda: op_spawn(config, session, 120), "ask", rule),
+        ("a reviewer", lambda: op_spawn(config, session, 150, OP_REVIEWER), "ask", rule),
+        ("a spawn with no role", lambda: op_spawn(config, session, 180, {"prompt": "x", "model": "opus"}),
+         "ask", rule),
+    ], note)
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus reviewer 2h", 240) or note
+    ok, why = ov_story([
+        ("a reviewer after `opus reviewer 2h`", lambda: op_spawn(config, session, 270, OP_REVIEWER),
+         "allow", rule),
+        ("a builder after the new pass replaced the old", lambda: op_spawn(config, session, 300, OP_BUILDER),
+         "ask", rule),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "the role pass lifted only its own role, plural or singular"
+
+
+# Each prompt is ambiguous or not the word, so it grants nothing: the spawn still asks.
+OP_NOT_THE_WORD = (
+    "opus 2",                 # a bare number may name a model, so the unit is required
+    "opus 4.5",
+    "opus 2h please",
+    "opus builders",
+    "opus bogus 2h",
+    "opus builders reviewers 2h",
+    "opus off 2h",
+    "opus plan 2h",           # Plan already runs Opus by standing word
+    "use opus 2h",
+    "opus2h",
+    "opuses 2h",
+    "hi\nopus 2h",
+    "opus 2h\nand the rest",
+)
+
+
+def op_not_the_word_check():
+    config, rule = ov_config("opus-not-word"), "subagent-model-cap"
+    for n, prompt in enumerate(OP_NOT_THE_WORD):
+        session = "op-not-word-%d" % n
+        note = ov_type(config, session, prompt)
+        problem = ov_want(*op_spawn(config, session, 60), "ask", rule)
+        if problem:
+            return False, "after %r: %s; %s" % (prompt, problem, note or "typed")
+        if os.path.exists(op_pass_path(config, session)):
+            return False, "%r wrote an Opus pass file" % prompt
+    return True, "%d prompts granted nothing" % len(OP_NOT_THE_WORD)
+
+
+def op_scope_check():
+    """An Opus pass covers only the session that typed it."""
+    config, rule = ov_config("opus-scope"), "subagent-model-cap"
+    note = ov_type(config, "op-scope-a", "opus 2h")
+    ok, why = ov_story([
+        ("another session", lambda: op_spawn(config, "op-scope-b", 60), "ask", rule),
+        ("no session id", lambda: op_spawn(config, None, 90), "ask", rule),
+        ("the typing session", lambda: op_spawn(config, "op-scope-a", 120), "allow", rule),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "another session and an unnamed one asked, the typing session went through"
+
+
+def op_other_acts(config, session):
+    """Refusals an Opus pass never lifts: every rule but the Opus spawn ask, the settings-write ask of
+    the same rule included."""
+    lifted_by_override = tuple(OvAct(label, "Bash", {"command": command}, rule, want, cwd=cwd)
+                               for label, command, cwd, want, rule in (
+        ("a kill of a pgrep list", OV_KILL, NOGIT, "deny", "machine-wide-kill"),
+        ("a branch delete of a branch whose only copy is local", VCS + " branch -D unmerged-work",
+         BRANCHREPO, "deny", "shared-tree"),
+        ("a hard reset in a linked worktree", VCS + " reset --hard", GITWT, "ask", "shared-tree"),
+    ))
+    return lifted_by_override + ov_role_acts(config, session) + ov_frozen_acts(config, session) + (
+        ("a Write of the Opus pass file", "Write",
+         {"file_path": slash(op_pass_path(config, session)), "content": "{}"}, "frozen-path"),
+        ("a cp onto the Opus pass file", "Bash",
+         {"command": "cp /tmp/x.json " + slash(op_pass_path(config, session))}, "frozen-path"),
+    )
+
+
+def op_lifts_nothing_else_check():
+    """Under `opus 2h` every other refusal and ask stands, and a typed `override` is not spent by an
+    Opus spawn the Opus pass already lifts."""
+    config, session = ov_config("opus-only"), "op-only"
+    acts = [OvAct(*act) for act in op_other_acts(config, session)]
+    for act in acts:
+        problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
+        if problem:
+            return False, "%s with no pass: %s" % (act.label, problem)
+    note = ov_type(config, session, "opus 2h")
+    for act in acts:
+        problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
+        if problem:
+            return False, "%s under an Opus pass: %s; %s" % (act.label, problem, note or "typed")
+    note = ov_type(config, session, "override", 120) or note
+    ok, why = ov_story([
+        ("an Opus spawn beside a one-act override", lambda: op_spawn(config, session, 150), "allow",
+         "subagent-model-cap"),
+        ("a kill, the one-act override still unspent", lambda: ov_kill(config, session, 180), "allow",
+         "machine-wide-kill"),
+        ("a second kill, the override spent", lambda: ov_kill(config, session, 210), "deny",
+         "machine-wide-kill"),
+        ("an Opus spawn, the Opus pass still there", lambda: op_spawn(config, session, 240), "allow",
+         "subagent-model-cap"),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "%d other refusals stood under an Opus pass; it left a typed override unspent" % len(acts)
+
+
+def op_corrupt_check():
+    """An Opus pass file the guard cannot read, or one of another shape, is no pass."""
+    config, rule = ov_config("opus-corrupt"), "subagent-model-cap"
+    later = ov_clock(OP_SECONDS)
+    for name, body in (
+            ("text", "not json {"), ("empty", ""), ("list", "[]"),
+            ("no-until", '{"kind": "opus"}'),
+            ("timed-kind", '{"kind": "timed", "until": "%s"}' % later),
+            ("naive-until", '{"kind": "opus", "until": "2099-01-01T00:00:00"}'),
+            ("number-role", '{"kind": "opus", "until": "%s", "role": 7}' % later)):
+        session = "op-corrupt-" + name
+        write(op_pass_path(config, session), body)
+        problem = ov_want(*op_spawn(config, session, 60), "ask", rule)
+        if problem:
+            return False, "a %s Opus pass file: %s" % (name, problem)
+    return True, "seven unreadable or misshapen Opus pass files, each asked"
+
+
+def op_log_check():
+    """The grant writes one log line naming the pass, and each lifted spawn writes one line whose
+    decision cell says `opus-pass` and whose rule cell says subagent-model-cap."""
+    config, session = ov_config("opus-log"), "op-log-session"
+    log = os.path.join(config, "guard.log")
+    note = ov_type(config, session, "opus builders 2h")
+    try:
+        with open(log, encoding="utf-8") as handle:
+            granted = [l for l in handle.read().splitlines() if l.strip()]
+    except OSError:
+        granted = []
+    if len(granted) != 1 or "\topus-grant\tsubagent-model-cap\t" not in granted[0] or "builder" not in granted[0]:
+        return False, "the grant wrote %r, want one opus-grant line naming builder; %s" % (granted, note or "typed")
+    os.remove(log)
+    problem = ov_want(*op_spawn(config, session, 60, OP_BUILDER), "allow", "subagent-model-cap")
+    if problem:
+        return False, "the lifted spawn: %s; %s" % (problem, note or "typed")
+    with open(log, encoding="utf-8") as handle:
+        lines = [l for l in handle.read().splitlines() if l.strip()]
+    fields = lines[0].split("\t") if len(lines) == 1 else []
+    if len(fields) != 6 or fields[2:4] != ["opus-pass", "subagent-model-cap"] or fields[5] != session:
+        return False, "the lift wrote %r, want one opus-pass + subagent-model-cap line" % lines
+    os.remove(log)
+    note = ov_type(config, session, "opus off", 90) or note
+    with open(log, encoding="utf-8") as handle:
+        ended = [l for l in handle.read().splitlines() if l.strip()]
+    if len(ended) != 1 or "\topus-off\t" not in ended[0]:
+        return False, "`opus off` wrote %r, want one opus-off line" % ended
+    return True, "one line each for the grant, the lift and the end"
+
+
+for _label, _check in (
+    ("opus pass: `opus 2h` lets an Opus spawn through, a subagent's too, until it ends", op_timed_check),
+    ("opus pass: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
+    ("opus pass: `opus builders 2h` lifts only builder spawns", op_role_check),
+    ("opus pass: an ambiguous prompt grants nothing", op_not_the_word_check),
+    ("opus pass: it covers only the session that typed it", op_scope_check),
+    ("opus pass: every other refusal and ask stands under it", op_lifts_nothing_else_check),
+    ("opus pass: an unreadable or misshapen pass file is no pass", op_corrupt_check),
+    ("opus pass: the grant, each lift and the end each write one log line", op_log_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
 
 
 def ov_once_expiry_check():

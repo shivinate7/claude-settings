@@ -1477,19 +1477,20 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None) -> None:
     """Print a deny or an ask and exit, unless an owner override pass lifts it (decision
     owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. The
-    veto runs before the pass is taken, so a call that also holds a never-passed act spends no pass."""
+    veto runs before the pass is taken, so a call that also holds a never-passed act spends no pass.
+    spawn_role is set only on the Opus spawn ask, the one refusal an Opus pass may lift."""
     if not _vetoed():
         try:  # an import or read failure is no pass: the refusal stands
             import override_pass
-            lifted = override_pass.take(_pass_who[0], _pass_who[1], override_pass.now())
+            lifted = override_pass.take(_pass_who[0], _pass_who[1], override_pass.now(), rule, spawn_role)
         except Exception:
             lifted = None
         if lifted:
             record(tool, lifted, rule, matched)
-            if lifted == override_pass.PASSED:
+            if lifted in override_pass.LIFTS:
                 sys.exit(0)
     record(tool, decision, rule, matched)
     print(json.dumps({

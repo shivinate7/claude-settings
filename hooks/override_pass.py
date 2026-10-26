@@ -16,6 +16,13 @@ writes, so a session cannot grant itself a pass. It is valid only while now < un
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
   nothing (an intended "off" must never become a grant). A later line starting with the word grants
   nothing.
+An Opus pass is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
+"until": ISO-8601 UTC, "role": null or one role}. It lives beside the override pass, so the two never
+replace each other. It lifts only the Opus spawn ask of guard rule subagent-model-cap, never that
+rule's settings-write ask, and it reaches subagents.
+  `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
+         model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
+  `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
 A file that is missing, unreadable or corrupt is no pass. take() never raises into the guard: an
 error means no pass, so the refusal stands.
 
@@ -38,10 +45,20 @@ ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act pass waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's pass has ended
 PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
+OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
+OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus pass needs its unit
+OPUS_RULE = "subagent-model-cap"  # the one rule an Opus pass lifts, and only its spawn ask
+# The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan and Explore,
+# which run Opus by standing word (OPUS_STANDING_ROLES in hooks/guard.py).
+OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
+              "general-purpose", "claude")
 LOG_REASON_MAX = 300
 SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
 PASSED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when a pass file cannot be read
+OPUS_PASSED = "opus-pass"  # the log decision of an Opus spawn an Opus pass lifted
+OPUS_UNREAD = "opus-unread"  # the log decision when an Opus pass file cannot be read
+LIFTS = (PASSED, OPUS_PASSED)  # the take() results that let the act through
 
 
 def now():
@@ -50,16 +67,65 @@ def now():
     return local_time.clock()
 
 
-def _path(session_id):
+def _path(session_id, *folder):
+    """The session's override pass file, or with folder "opus" its Opus pass file. None when the id
+    cannot name a file."""
     if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id) or session_id[0] == ".":
         return None
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "state", "override", session_id + ".json")
+    return os.path.join(base, "state", "override", *folder, session_id + ".json")
+
+
+def _write(path, data):
+    """Write a pass file whole: a new file always replaces the old, unread."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    scratch = "%s.%s.tmp" % (path, uuid.uuid4().hex)
+    with open(scratch, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(scratch, path)
+
+
+def opus_role(word):
+    """The role a word names, singular or plural, from OPUS_ROLES, else None."""
+    word = word.lower()
+    for role in OPUS_ROLES:
+        if word in (role, role + "s"):
+            return role
+    return None
+
+
+def _grant_opus(session_id, rest, at):
+    """`opus <n>[m|h]`, `opus <role> <n>[m|h]` or `opus off` as the whole prompt. Returns ("opus",
+    until, role) for a new pass, ("opus-off", None) when one was removed, else None."""
+    path = _path(session_id, "opus")
+    words = rest.split()
+    if path is None or not words or (rest[:1] and not rest[:1].isspace()):
+        return None
+    if [w.lower() for w in words] == ["off"]:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return None
+        _log(session_id, "opus-off", "")
+        return "opus-off", None
+    role = opus_role(words[0]) if len(words) == 2 else None
+    length = OPUS_LENGTH.fullmatch(words[-1])
+    if not length or len(words) > 2 or (len(words) == 2 and role is None):
+        return None  # ambiguous: grants nothing
+    number, unit = length.groups()
+    until = at + (timedelta(hours=int(number)) if unit.lower() == "h" else timedelta(minutes=int(number)))
+    _write(path, {"kind": "opus", "until": until.astimezone(timezone.utc).isoformat(), "role": role})
+    _log(session_id, "opus-grant", "%s until %s" % (role or "every role", until.astimezone(timezone.utc).isoformat()))
+    return "opus", until, role
 
 
 def grant(session_id, prompt, at):
     """Write, replace or remove the session's pass for one owner prompt. Returns (kind, until) for a
-    new pass, ("off", None) when `override off` removed one, else None: the prompt is not the word."""
+    new pass, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
+    else None: the prompt is not a word."""
+    opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
+    if opus:
+        return _grant_opus(session_id, opus.group(1), at)
     said = PROMPT.match(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
     if not said or path is None:
@@ -83,11 +149,8 @@ def grant(session_id, prompt, at):
                       else timedelta(minutes=int(number)))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _sweep_claims(os.path.dirname(path))
-    scratch = "%s.%s.tmp" % (path, uuid.uuid4().hex)  # a new file always replaces the old, unread
-    with open(scratch, "w", encoding="utf-8") as handle:
-        json.dump({"kind": kind, "until": until.astimezone(timezone.utc).isoformat(),
-                   "id": uuid.uuid4().hex}, handle)  # the id gives each pass its own claim marker
-    os.replace(scratch, path)
+    _write(path, {"kind": kind, "until": until.astimezone(timezone.utc).isoformat(),
+                  "id": uuid.uuid4().hex})  # the id gives each pass its own claim marker
     if reason and kind == "once":
         _log_reason(session_id, reason, at)
     return kind, until
@@ -124,16 +187,49 @@ def _claim(path, raw):
 def _log_reason(session_id, reason, at):
     """Write the owner's reason as one guard.log line through the guard's own locked writer. A lone
     surrogate cannot be encoded, so it becomes `?` before the write rather than losing the line."""
-    import guard_core  # lazy: only a grant that has a reason needs it
+    _log(session_id, "override-reason", reason[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8"),
+         "owner-override-pass")
+
+
+def _log(session_id, decision, detail, rule=OPUS_RULE):
+    import guard_core  # lazy: only a grant that logs needs it
     guard_core.set_log_session(session_id)
-    guard_core.record("UserPromptSubmit", "override-reason", "owner-override-pass",
-                      reason[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8"))
+    guard_core.record("UserPromptSubmit", decision, rule, detail)
 
 
-def take(session_id, agent_id, at):
-    """PASSED when the pass lifts this refusal (a one-act pass is spent), UNREAD when the file exists
-    but cannot be read, else None. Of calls racing for one one-act pass, only the one that creates
-    its claim marker wins."""
+def _take_opus(session_id, spawn_role, at):
+    """OPUS_PASSED when the session's Opus pass covers a spawn of spawn_role now, OPUS_UNREAD when the
+    file exists but cannot be read, else None."""
+    path = _path(session_id, "opus")
+    if path is None:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        until, role = datetime.fromisoformat(data["until"]), data["role"]
+        if data["kind"] != "opus" or until.tzinfo is None or (role is not None and opus_role(role) != role):
+            return OPUS_UNREAD
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return OPUS_UNREAD
+    if at >= until or (role is not None and role != str(spawn_role).lower()):
+        return None
+    return OPUS_PASSED
+
+
+def take(session_id, agent_id, at, rule=None, spawn_role=None):
+    """PASSED when the override pass lifts this refusal (a one-act pass is spent), UNREAD when its file
+    exists but cannot be read, else None. Of calls racing for one one-act pass, only the one that
+    creates its claim marker wins. For the Opus spawn ask (rule OPUS_RULE with a spawn_role) the Opus
+    pass is read first, so a lift it covers spends no one-act pass."""
+    opus = _take_opus(session_id, spawn_role, at) if rule == OPUS_RULE and spawn_role is not None else None
+    if opus == OPUS_PASSED:
+        return opus
+    return _take_override(session_id, agent_id, at) or opus
+
+
+def _take_override(session_id, agent_id, at):
     path = _path(session_id)
     if path is None:
         return None

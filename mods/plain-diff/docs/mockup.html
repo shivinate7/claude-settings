@@ -23,7 +23,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class="">         run: python3 hooks/test_ruling_home.py
 </span><span class=""> 
 </span></code></pre></section>
-<section><h2>docs/decisions/plain-prose-lint.md <span class="dim">+7 -0</span></h2><p class="note">This rule now says a check may fix a mistake by itself instead of only blocking it. The fix counts as the check doing its job.</p><pre><code><span class="h">@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
+<section><h2>decisions/plain-prose-lint.md <span class="dim">+7 -0</span></h2><p class="note">This rule now says a check may fix a mistake by itself instead of only blocking it. The fix counts as the check doing its job.</p><pre><code><span class="h">@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
 </span><span class=""> single outcome. A rule nobody can see is not a rule. The owner ruled that a
 </span><span class=""> rule either blocks or does not exist.
 </span><span class=""> 
@@ -38,7 +38,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class=""> 
 </span><span class=""> Every one of the 32 tracked Markdown files in this repository, already
 </span></code></pre></section>
-<section><h2>docs/decisions/gate-hooks-fail-closed.md <span class="dim">+4 -0</span></h2><p class="note">A short line was added. If the text fixer crashes or runs too long, the gate falls back to plain checking. It never refuses the work because of that.</p><pre><code><span class="h">@@ -16,6 +16,10 @@ line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permi
+<section><h2>decisions/gate-hooks-fail-closed.md <span class="dim">+4 -0</span></h2><p class="note">A short line was added. If the text fixer crashes or runs too long, the gate falls back to plain checking. It never refuses the work because of that.</p><pre><code><span class="h">@@ -16,6 +16,10 @@ line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permi
 </span><span class=""> `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
 </span><span class=""> times out or crashes lets the call through (see Holes).
 </span><span class=""> 
@@ -50,7 +50,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class=""> are SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, and the SubagentStop guard.
 </span><span class=""> PreToolUse `stall_watch.py` and `sim_boot_record.py` stay advisory too: neither ever
 </span></code></pre></section>
-<section><h2>docs/decisions/ste-gate-fixes-not-nags.md <span class="dim">+70 -0</span></h2><p class="note">This new file explains why the writing check now fixes small mistakes for you. It lists what the fixer may change, what it must leave alone, and the known limits.</p><details><summary>Show diff (71 lines)</summary><pre><code><span class="h">@@ -0,0 +1,70 @@
+<section><h2>decisions/ste-gate-fixes-not-nags.md <span class="dim">+70 -0</span></h2><p class="note">This new file explains why the writing check now fixes small mistakes for you. It lists what the fixer may change, what it must leave alone, and the known limits.</p><details><summary>Show diff (71 lines)</summary><pre><code><span class="h">@@ -0,0 +1,70 @@
 </span><span class="a">+# The STE gate fixes what it can and denies the rest
 </span><span class="a">+
 </span><span class="a">+## The question
@@ -424,7 +424,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class=""> 
 </span><span class="d">-        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md", path)
 </span><span class="a">+        # Markdown only: fix what a word swap fixes, then lint the fixed text. A fixer crash
-</span><span class="a">+        # keeps today's behaviour (docs/decisions/gate-hooks-fail-closed.md): no rewrite, no refusal.
+</span><span class="a">+        # keeps today's behaviour (decisions/gate-hooks-fail-closed.md): no rewrite, no refusal.
 </span><span class="a">+        fixed_ti, note, written = None, "", full_text
 </span><span class="a">+        # Over STE_FIXER_MAX_BYTES the fixer is skipped and the plain lint decides.
 </span><span class="a">+        if not is_ui and len(text.encode("utf-8", "replace")) &lt;= max_bytes():
@@ -1104,7 +1104,7 @@ summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);m
 </span><span class="a">+        return os.path.join(d, "ste_gate.py"), marker
 </span><span class="a">+
 </span><span class="a">+    def test_11_fixer_crash_falls_back_to_deny_and_exits_zero(self):
-</span><span class="a">+        # Ruling (docs/decisions/gate-hooks-fail-closed.md): a crash does not refuse. The gate skips
+</span><span class="a">+        # Ruling (decisions/gate-hooks-fail-closed.md): a crash does not refuse. The gate skips
 </span><span class="a">+        # the rewrite, keeps today's behaviour (deny on the lint errors), exits 0, never 2.
 </span><span class="a">+        gate, marker = self._crash_gate()
 </span><span class="a">+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",

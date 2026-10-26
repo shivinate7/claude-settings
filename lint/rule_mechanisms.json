@@ -142,6 +142,12 @@
         "reason": "No check can tell a guessed lane count from a measured one in prose."
       }
     },
+    "parallelism-keep-going": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A check would need the queue at turn end and each item's open questions; no file holds them. The owner deferred a Stop check that refuses an idle turn end until the gap repeats (step c59, Oct 26)."
+      }
+    },
     "parallelism-argue-max-parallelism": {
       "mechanism": {
         "kind": "judgment",
@@ -154,6 +160,13 @@
         "ref": "shared-tree"
       },
       "test": "hooks/test_guard.py::worktree: a hard reset in the shared checkout denies"
+    },
+    "shared-trees-archive-then-delete": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "shared-tree"
+      },
+      "test": "hooks/test_guard.py::branch: the refusal's handed remedy, once run, makes the rule allow the delete"
     },
     "shared-trees-no-machine-wide-kill": {
       "mechanism": {
@@ -472,6 +485,13 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "The report gate accepts any in-order subset of the four labels, so it cannot see whether a label that stays in the report is empty or does not apply."
+      }
+    },
+    "reports-name-unstarted-items": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "test": "lint/test_gates.py::UnstartedItemsTests.test_un_red_builder_turn_without_line_blocks"
       }
     },
     "reports-batch-pace-numbers": {
