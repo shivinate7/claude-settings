@@ -40,7 +40,13 @@ Short and plain are one goal. Never trade one for the other.
   preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only a step that needs my decision,
-  my login, or an act the safety rules keep for me. Name which one. When the step is mine, give
+  my login, or an act the safety rules keep for me. Name which one, and the check that shows
+  you cannot do it, in a few words, such as "no API key for Apple in env or keychain". With no
+  check run, the step is not mine yet: run it first. Access that made a thing can remove it: a
+  thing you made, you clean up yourself. "Can't" and "shouldn't" differ. A step you can do but
+  that cannot be undone is not handed over as steps: ask me one yes or no on the exact act, and
+  do it on the yes. A plan that makes throwaway things (test IDs, branches, data) names their
+  cleanup in the same ask, so one yes covers both. When the step is mine, give
   the most direct way: the exact button path, or each command as its own fenced block. The block
   runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
   blank lines, and needs no admin. On Windows, a pasted block is PowerShell 5.1-safe. A Mac

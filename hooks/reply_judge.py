@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against four style rules. It runs on every fifth Stop and never blocks. A finding comes back as a note on the next turn.
+"""At Stop, a model (Haiku) judges the final reply against four style rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, and never blocks. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -11,6 +11,16 @@ hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 
 Sampling: the judge runs on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0. A skipped Stop returns
 at once with no model call and no output. The count is a file per session under the state folder.
+
+Input Needed: a reply that carries the label is judged on every Stop, besides the sample, so each
+handed-off step is checked for its reason and the check that showed the session cannot do it. The
+label is found by a string match in code, not by the model. The literal below is a copy of
+LABEL_ORDER in lint/report_gate.py: this hook runs from the config dir, where lint/ is absent, so
+an import would fail open and silently stop judging.
+
+A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
+first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <reason>`). The
+advisor reads these at each cull. guard_core loads only on a finding. A failed write is swallowed.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
 blocks nothing. A finding never blocks: the hook runs async, and a finding prints
@@ -30,6 +40,10 @@ OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
 SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
+INPUT_NEEDED = "Input Needed"  # copy of the report label in lint/report_gate.py LABEL_ORDER; see the docstring
+JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
+                "output-never-paste-passing-output", "output-never-hand-off-doable-step")
+JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
@@ -44,6 +58,9 @@ INSTRUCTIONS = (
     "The block sits outside the report blockquote. "
     "A command the reply already ran is not a step left to the owner. "
     "A command named in a report line as done work, a line that says what ran, is not a step left to the owner. "
+    "Each item under Input Needed names its reason (decision, login, or an act the safety rules keep for the owner) "
+    "and the check that showed the session cannot do it, such as no API key in env or keychain; "
+    "flag an item that names neither. "
     "Running background work never makes a reply unfinished. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
@@ -91,6 +108,18 @@ def count_this_stop(session_id):
     return n
 
 
+def log_finding(session_id, stop_n, reason):
+    """Write one guard.log line for a finding. Never raises."""
+    try:
+        import guard_core  # lazy: a Stop with no finding loads no guard
+        found = [(reason.find(r), r) for r in JUDGED_RULES if r in reason]
+        rule = min(found)[1] if found else JUDGE_RULE
+        guard_core.set_log_session(session_id)
+        guard_core.record("Stop", "noted", rule, "stop=%d %s" % (stop_n, " ".join(reason.split())))
+    except Exception:
+        pass
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -99,7 +128,8 @@ def main():
         reply = hook.get("last_assistant_message")
         if not isinstance(reply, str) or not reply.strip():
             return 0
-        if (count_this_stop(hook.get("session_id")) - 1) % SAMPLE_EVERY:
+        stop_n = count_this_stop(hook.get("session_id"))
+        if (stop_n - 1) % SAMPLE_EVERY and INPUT_NEEDED not in reply:
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(
@@ -113,6 +143,7 @@ def main():
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
+        log_finding(hook.get("session_id"), stop_n, reason)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
     return 0
 
