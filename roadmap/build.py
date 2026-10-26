@@ -11,6 +11,9 @@ NOTE_WORDS words; in phases that hold an active step, open steps untouched for S
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line. Cost: one git
 process per build, no file written.
+
+Before it builds, it refuses a tree with git conflict markers (step c72) in any tracked file under
+SCANNED, and writes no page. Cost: one more git process and one read of each scanned file per build.
 """
 import datetime
 import json
@@ -20,6 +23,9 @@ import subprocess
 NOTE_WORDS = 250
 STALE_DAYS = 5
 TOP = 5
+# roadmap.html is left out: build.py rewrites it, so a conflict there is resolved by building.
+SCANNED = ("roadmap", "briefs", "plans", "handoffs")
+OUTPUT = "roadmap/roadmap.html"
 
 ROOT = pathlib.Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -51,7 +57,39 @@ STUB = """<script>
 """
 
 
+def conflict_markers(repo):
+    """file:line of each conflict marker in the tracked files under SCANNED.
+
+    A `=======` line counts only between `<<<<<<< ` and `>>>>>>> `, so a Markdown setext heading passes.
+    """
+    out = subprocess.run(["git", "-C", str(repo), "ls-files", "-z", "--", *SCANNED],
+                         capture_output=True, text=True, check=True).stdout
+    hits = []
+    for name in sorted(set(filter(None, out.split("\0")))):
+        if name == OUTPUT:
+            continue
+        try:
+            lines = (repo / name).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        inside = False
+        for n, line in enumerate(lines, 1):
+            if line.startswith("<<<<<<< "):
+                inside = True
+            elif line.startswith(">>>>>>> "):
+                inside = False
+            elif not (inside and line == "======="):
+                continue
+            hits.append(f"{name}:{n}: {line}")
+    return hits
+
+
 def main():
+    hits = conflict_markers(ROOT.parent)
+    if hits:
+        print("Conflict markers, so no page was written. Resolve them, then build again:")
+        print("\n".join("  " + h for h in hits))
+        raise SystemExit(1)
     data = {"steps": load("steps"), "topics": load("topics"), "meta": load("meta")}
     page = (ROOT / "page" / "index.html").read_text(encoding="utf-8")
     stub = STUB % json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
