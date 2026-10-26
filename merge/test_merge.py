@@ -955,6 +955,53 @@ class CutLanes(Env):
             self.assertTrue(any("push" in c and "origin" in c and all(w in c for w in want) for c in calls), f"no leased delete push for {b}")
         self.assertFalse(self.lock_ref())
 
+    def merge_of(self, lane):
+        """The batch's newest merge commit for `lane`, on the other clone's feat."""
+        return sh(self.other, "git", "log", "-1", "--merges", "--format=%H", f"--grep=origin/{lane}' into", "feat")
+
+    def revert_on_batch(self, sha, merge=True):
+        """Revert `sha` on the batch (-m 1 for a merge commit) and push. -> the revert commit."""
+        o = self.other
+        sh(o, "git", "revert", *(["-m", "1"] if merge else []), "--no-edit", sha)
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_lane_whose_merge_was_reverted_on_the_batch_is_kept(self):
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_deleted(out, "lane2")  # control: the live lane still goes
+        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted although its merge was reverted")
+        lines = [l for l in out.splitlines() if "origin/lane1" in l]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("reverted", lines[0])
+
+    def test_a_lane_reverted_then_reapplied_is_deleted(self):
+        lane_batch(self, "lane1", "lane2")
+        rev = self.revert_on_batch(self.merge_of("lane1"))
+        self.revert_on_batch(rev, merge=False)  # revert the revert: the lane is live again
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1", "lane2")
+
+    def test_a_lane_reverted_then_merged_again_at_a_new_tip_is_deleted(self):
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "lane1", "origin/lane1")
+        put(os.path.join(o, "lane1-fix.txt"), "fix\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "lane lane1 fix"); sh(o, "git", "push", "-q", "origin", "lane1")
+        new_tip = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge remote-tracking branch 'origin/lane1' into feat", new_tip)
+        sh(o, "git", "push", "-q", "origin", "feat")
+        self.tips["lane1"] = new_tip
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane1", "lane2")
+
     def test_a_lane_pushed_to_after_the_merge_is_kept(self):
         tips = lane_batch(self, "lane1", "lane2")
         moved = []
@@ -1266,7 +1313,7 @@ class CutLanes(Env):
         lane_batch(self, "lane1", "lane2")
         real = merge.sh
         def broken(args, *a, **k):
-            if "--merges" in args:
+            if "log" in args and any("%x01" in a for a in args):  # lane_tips' one git log: merges and reverts
                 if isinstance(effect, BaseException):
                     raise effect
                 return effect
