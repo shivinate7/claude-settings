@@ -433,7 +433,7 @@ def live_work(path, steps):
         datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
     except (AttributeError, ValueError):
         read = "unknown (the live file's readAt is not an ISO time: %r)" % (read,)
-    missing = [key for key in ("threads", "pulls") if key not in raw]
+    missing = [key for key in ("threads", "pulls") if not isinstance(raw.get(key), list)]
     if missing:
         return {"read": "unknown (the live file has no %s list)" % " or ".join(missing)}
     skipped, strays = [], []
@@ -452,7 +452,7 @@ def live_work(path, steps):
     text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
     threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
                    and (r.get("step") is None or isinstance(r["step"], str)))
-    pulls = keep("pull", raw.get("pulls", []), 
+    pulls = keep("pull", raw.get("pulls", []),
                  lambda r: type(r.get("number")) is int and text(r, "title"))
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     for row in threads:
