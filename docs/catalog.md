@@ -75,6 +75,7 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `skills/plain-english-map` | skill | - | - | - | no model | none | Use only in a repository that has `map.config.json` at its root. Use when a change adds, moves or deletes a tracked code file, a migration table or a screen key, when a MAP check fails, or when the user says "update the map" or "plain-english map". Keeps the plain-English map in `docs/map/` in sync with the code, and builds the map page. |
 | `skills/project-ops` | skill | - | - | - | no model | none | Use when the owner asks to give a repo standing roles, counted hand-offs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits. |
 | `skills/roadmap` | skill | - | - | - | no model | none | Use when a session builds or publishes a repo's roadmap page, or the user says "build the roadmap" or "roadmap page". Bakes the steps on the repo's record branch and the record homes in the checkout into one read-only page, and prints the upkeep list for triage. |
+| `skills/waiting-page` | skill | - | - | - | no model | none | Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page, or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back. |
 
 ## External plugins
 

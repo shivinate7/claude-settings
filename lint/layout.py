@@ -3,7 +3,8 @@
 lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (the layout's
 "extras" path, read from the repo root): {"kinds": {"<name>": {"path": "<folder>", ...}}}. An
 extra kind may not replace a layout kind. The extras file may hold no kinds: it is also the mark
-that the repo has rolled out to the layout.
+that the repo has rolled out to the layout. Its "waiting-page" key holds the URL of the repo's
+waiting page (`waiting_page()`, skill waiting-page).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. Cause: each repo moves its own files in its own
@@ -92,6 +93,23 @@ def _safe(found, where):
     return found
 
 
+WAITING_PAGE = "waiting-page"  # the extras key that holds the repo's waiting page URL
+ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact/")
+
+
+def waiting_page(root):
+    """The URL of the waiting page of `root` (skill waiting-page), from its extras file. "unknown"
+    when the repo has no extras file or no key: a repo with no page is not an error."""
+    if not rolled_out(root):
+        return "unknown"
+    found = _read(_extras(root)).get(WAITING_PAGE)
+    if found is None:
+        return "unknown"
+    if not isinstance(found, str) or not found.startswith(ARTIFACT_LINK):
+        raise LayoutError("%s: %s is not a claude.ai artifact link" % (_extras(root), WAITING_PAGE))
+    return found
+
+
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
@@ -100,9 +118,13 @@ def folders(root, flag):
 if __name__ == "__main__":
     import sys
     # python3 lint/layout.py path <root> <kind>: one path, for a shell step.
-    if len(sys.argv) != 4 or sys.argv[1] != "path":
-        sys.exit("usage: layout.py path <root> <kind>")
+    # python3 lint/layout.py waiting-page <root>: the page URL, or "unknown".
+    if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] == WAITING_PAGE):
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page <root>")
     try:
-        print(path(os.path.abspath(sys.argv[2]), sys.argv[3]))
+        if sys.argv[1] == WAITING_PAGE:
+            print(waiting_page(os.path.abspath(sys.argv[2])))
+        else:
+            print(path(os.path.abspath(sys.argv[2]), sys.argv[3]))
     except (LayoutError, KeyError) as err:
         sys.exit("layout: %s" % err)

@@ -75,6 +75,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("plain-english-map"),
     os.path.normcase("project-ops"),
     os.path.normcase("roadmap"),
+    os.path.normcase("waiting-page"),
 )
 # THE LIVE PINNED CHECKOUT IS FROZEN (decision merge-reinstalls-from-main, ruling 1: no work runs in
 # the pinned checkout). The links in the config directory load

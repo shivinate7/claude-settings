@@ -123,6 +123,38 @@ class LayoutFile(Tree):
             self.layout.kinds(self.tree)
 
 
+class WaitingPage(Tree):
+    """The waiting page's URL is one key in a repo's extras file (skill waiting-page)."""
+    URL = "https://claude.ai/artifact/abc123"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_key_set_returns_the_url(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_no_extras_file_is_unknown_not_an_error(self):
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown")
+
+    def test_extras_file_without_the_key_is_unknown(self):
+        self.roll_out()
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown")
+
+    def test_a_key_that_is_not_a_claude_artifact_link_is_an_error(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://example.com/x"}))
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.waiting_page(self.tree)
+
+    def test_command_prints_the_url_or_unknown(self):
+        code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", self.tree], self.tree)
+        self.assertEqual((code, out.strip()), (0, "unknown"))
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
+        code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", self.tree], self.tree)
+        self.assertEqual((code, out.strip()), (0, self.URL))
+
+
 class Readers(Tree):
     """Each reader finds the records of a fixture repo under docs/, and of one at the legacy root."""
 
