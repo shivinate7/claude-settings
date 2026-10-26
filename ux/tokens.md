@@ -5,7 +5,9 @@ value. Ruling: record ux-house-rules (house UX rules). Owner ruling, 2026-10-11.
 
 ## Spacing and radius
 
-- Spacing uses a 4 px step. Every gap is a multiple of 4 px.
+- Spacing uses a 4 px step. Every fixed gap is a multiple of 4 px. A fluid token's two ends sit on
+  the step; its middle can fall between steps (see Fluid tokens).
+- Space tokens are `--space-N`, where step N is N x 4 px. `--space-2` is 8 px.
 - Corner radius is 8 px.
 
 Seen in: banchi, q_max, degen spec, sillage, feed-build, home-app.

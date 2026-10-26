@@ -12,7 +12,8 @@ Outcome: the space between two items has one home. A child that moves to another
 no stray margin, so the gaps stay the same from screen to screen.
 Check: pass when no child in a flex or grid list has a margin that spaces it from a sibling.
 A margin that offsets one item on purpose, such as `margin-inline-start: auto` to push an item
-to the end, is not spacing and passes.
+to the end, is not spacing and passes. Margins in prose and normal flow, outside a flex or grid
+container, pass.
 
 ```css
 /* Do */
@@ -26,7 +27,8 @@ When one item needs a larger space before it, split the list into two stacks ins
 stack with the larger gap. Do not give that item a margin.
 Source: mailaudit record spacing-on-4px-grid (claim 14 reads margin, padding and gap). q_max
 `src/index.css` `.aq-stack` spaces its children with `margin-top` and a larger margin before
-`.aq-section-divided`. That is the pattern this rule replaces.
+`.aq-section-divided`. That is the pattern this rule replaces. Do not migrate it on sight: move it
+when a lane changes that screen.
 
 ## ux-layout-primitives
 
