@@ -1,0 +1,10 @@
+{
+  "title": "A new shared lint module never breaks test fixtures, and a lane can run a whole gates job before sending",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.4,
+  "why": "Each red batch run costs a CI cycle and holds every lane in the batch.",
+  "note": "Finding, Oct 26 (build advisor 3): o2 lost three CI cycles (batches #608, #614) to test fixtures that copy a hand-picked list of lint/ files into a temp tree: test_check_silent_undo, actions/ruling-kind/test_action.sh, the guard mutant anchor. Each new shared module (here lint/layout.py) breaks every such fixture, and the gates job finds them one per run. The lane's local check list also skipped multi-line run: steps in gates.yml. Fix, one cloud lane, two parts in order: (a) the cause: one helper builds a fixture tree from git ls-files (or the whole lint/ folder), and every such fixture uses it, so none lists files; red first by adding a dummy shared module; (b) a bin/ command that runs every step of a named gates.yml job locally through verdict, multi-line run: steps included, so a lane runs the whole job before sending. Needs no answer from you. Placed ahead of c44 (triage, Oct 26): it costs CI cycles on every batch that adds a shared module.",
+  "ask": "",
+  "updatedAt": "2026-10-26T15:45:00Z"
+}
