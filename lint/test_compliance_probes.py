@@ -291,6 +291,7 @@ class Ios(unittest.TestCase):
         repo = self.edit(self.gold(), flow, "run: make app-build", "run: make app-build | tee test.log")
         repo = self.edit(repo, flow, "runs-on: macos-26", "runs-on: macos-26-xlarge")
         repo = self.edit(repo, "Makefile", "phone:\n\tios-ship install\n", "SHIP := ios-ship\nphone: ; $(SHIP) install\n")
+        repo = self.edit(repo, flow, "  macos:\n", "  macos:\n    name: macos-sim-build\n")
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
 

@@ -322,8 +322,8 @@ XCODEGEN = re.compile(r"(^|/)project\.yml$")
 SWIFT_VERSION = re.compile(r"\bSWIFT_VERSION\s*[:=]\s*\"?([0-9][0-9.]*)")
 TOOLS_VERSION = re.compile(r"^//\s*swift-tools-version:\s*([0-9][0-9.]*)", re.M)
 MODE_5 = re.compile(r"\bswift(LanguageModes|LanguageVersions)\s*:\s*\[[^\]]*\.v(ersion\(\"?)?5|\.swiftLanguageMode\(\s*\.v5\b")
-# A macOS image named anywhere in a workflow: runs-on, a matrix value or a labels list.
-MACOS_IMAGE = re.compile(r"(?<![\w.-])(macos-[\w.-]+)")
+# A macOS image on a runs-on line, or in a matrix `os:` or a `labels:` value. A job name is not an image.
+MACOS_IMAGE = re.compile(r"^\s*(?:-\s*)?(?:runs-on|os|labels)\s*:.*?(?<![\w.-])(macos-[\w.-]+)", re.M)
 RUNS_ON = re.compile(r"\bruns-on:")
 PACKAGE_TESTS = re.compile(r"\bswift\s+test\b|\bmake\s+(\S+\s+)*kit-test\b|\bmake\s+(\S+\s+)*native-check\b")
 APP_COMPILE = re.compile(r"\bxcodebuild\b(?!\s+-version)|\bmake\s+(\S+\s+)*(app-build|native-check)\b")
