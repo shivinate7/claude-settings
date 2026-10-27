@@ -440,26 +440,51 @@ def probe_ios(root):
 
 
 SCORES = "in shape|partial|out|parent-covered|n/a|unknown|not rolled out"
-TAIL = r": (%s) - (.*?)(?: \(([^()]*)\))?$" % SCORES
-GROUP_LINE = re.compile(r"^([^:\s-][^:]*)" + TAIL)
-ITEM_LINE = re.compile(r"^\s+(?:- )?([^:]+)" + TAIL)
+GRADES = "pass|gap|known gap|" + SCORES  # an item line's grade, as item() in the probes prints it
+# A probe's own group line may end at its score ("design: out"), or go on with no " - ".
+GROUP_LINE = re.compile(r"^([^:\s-][^:]*): (%s)(?:(?: - | )(.*?))?(?: \(([^()]*)\))?$" % SCORES)
+ITEM_LINE = re.compile(r"^\s+(?:- )?([^:]+): (%s) - (.*?)(?: \(([^()]*)\))?$" % GRADES)
+# A finding line with no grade ("  folder src/: neither ..."): the name ends at the first ": ".
+FINDING_LINE = re.compile(r"^\s+(?:- )?(.+?): (.*)$")
 UI_GAP_ROW = ("STE lint on UI files", "partial", "UI text the lint does not read: known gap, no UI linter",
               "lint/ui_suffixes.py")
 
 
 def scorecard(root):
-    """Rewrite the one scorecard file from the group lines on stdin."""
-    rows, notes, group = [], [], None
+    """Rewrite the one scorecard file from the group lines on stdin. A probe prints its item lines
+    before its own group line, named in lower case as in GROUPS; the skill writes them after."""
+    rows, notes, held, group = [], [], [], None
+
+    def item_row(name, line):
+        graded = ITEM_LINE.match(line)
+        if graded:
+            return ("%s: %s" % (name, graded.group(1)),) + graded.groups()[1:]
+        finding = FINDING_LINE.match(line)
+        return ("%s: %s" % (name, finding.group(1)), "finding", finding.group(2), None)
+
+    def flush(name):
+        if name is None:
+            notes.extend(line.strip() for line in held)
+        else:
+            rows.extend(item_row(name, line) for line in held)
+        del held[:]
+
     for line in sys.stdin.read().splitlines():
         found = GROUP_LINE.match(line)
-        item = None if found else ITEM_LINE.match(line)
         if found:
-            group = found.group(1)
-            rows.append((group,) + found.groups()[1:])
-        elif item and group:
-            rows.append(("%s: %s" % (group, item.group(1)),) + item.groups()[1:])
+            name = found.group(1)
+            if name in GROUPS and held:
+                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
+                flush(name)
+            else:
+                flush(group)
+                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
+            group = name
+        elif ITEM_LINE.match(line) or FINDING_LINE.match(line):
+            held.append(line)
         elif line.strip():
             notes.append(line.strip())
+    flush(group)
     rows.append(UI_GAP_ROW)
     text = "# Compliance scorecard\n\nRewritten in place on each run by compliance-check.\n\n"
     text += "| Group | Score | Gold standard | Gap | Source |\n| --- | --- | --- | --- | --- |\n"

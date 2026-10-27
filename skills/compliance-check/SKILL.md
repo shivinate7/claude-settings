@@ -77,8 +77,10 @@ lines into `python3 lint/compliance_probes.py scorecard <child root>`. It rewrit
 on each run. Never write a dated copy beside it. The file holds one table, with the columns
 Group, Score, Gold standard, Gap, Source. Gold standard is `in shape`. The script always adds a row
 `STE lint on UI files`, scored `partial`: the lint does not read UI text, and that is a known gap.
-An indented item line, `- <item>: <score> - <finding> (<source>)`, becomes its own row after its
-group row. The script keeps every other line under Notes and drops none. Report the UI gap as a known
+An indented item line, `- <item>: <grade> - <finding> (<source>)`, becomes its own row after its
+group row. Its grade is pass, gap or partial, not a group score. An indented line with no grade
+becomes a row scored `finding`. Raw probe output works too. The script keeps every other line under
+Notes and drops none. Report the UI gap as a known
 gap. Do not build a UI linter.
 
 ## 5. Plan

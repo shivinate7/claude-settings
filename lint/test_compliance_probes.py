@@ -455,11 +455,39 @@ class Scorecard(unittest.TestCase):
         self.assertEqual(first, self.run_card(repo, self.LINES)[1])
 
     def test_item_line_becomes_a_row_after_its_group(self):
-        _, body = self.run_card(Repo(self), "Design: partial - two gaps (a)\n  - screens: out - no config (b)\nLayout: in shape - ok (c)\n")
+        text = "Design: partial - two gaps (a)\n  - screens: gap - no config (b)\n  - sizes: pass - ok\nLayout: in shape - ok (c)\n"
+        _, body = self.run_card(Repo(self), text)
         rows = [line for line in body.splitlines() if line.startswith("| ")]
-        at = [i for i, line in enumerate(rows) if line.startswith("| Design: screens | out | in shape | no config | b |")]
-        self.assertEqual(len(at), 1, body)
-        self.assertTrue(rows[at[0] - 1].startswith("| Design | partial |"), body)
+        at = rows.index("| Design | partial | in shape | two gaps | a |")
+        self.assertEqual(rows[at + 1], "| Design: screens | gap | in shape | no config | b |", body)
+        self.assertEqual(rows[at + 2], "| Design: sizes | pass | in shape | ok | none cited |", body)
+        self.assertNotIn("## Notes", body)
+
+    def test_every_probe_item_line_becomes_a_row_after_its_group(self):
+        # Real probe output: each probe prints its item lines, then its group line.
+        repo = Repo(self).write("src/App.tsx").write("src/tokens.css").write("Makefile", "screenshot:\n\tnode s.mjs\n")
+        repo.write("briefs/b.md", "Run lanes one or two at a time.\nTwo lanes at a time (owner, 2026-10-12).\n")
+        repo.write(".github/workflows/ci.yml", "      - run: npx playwright install --with-deps chromium\n")
+        ios = Ios.gold(self)
+        flow = os.path.join(ios.root, ".github", "workflows", "ios.yml")
+        with open(flow, encoding="utf-8") as handle:
+            ios.write(".github/workflows/ios.yml", handle.read().replace("runs-on: macos-26", "runs-on: macos-latest"))
+        outs = [r.run(g)[1] for r, g in ((repo, "layout"), (repo, "design"), (repo, "lanecap"), (repo, "playwright"), (ios, "ios"))]
+        _, body = self.run_card(Repo(self), "".join(outs))
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        grades = set()
+        for out in outs:
+            lines = out.rstrip("\n").split("\n")
+            items, group = lines[:-1], lines[-1].split(": ", 1)[0]
+            self.assertTrue(items and all(i.startswith("  ") for i in items), out)
+            at = [n for n, row in enumerate(rows) if row.startswith("| %s | " % group)]
+            self.assertEqual(len(at), 1, body)
+            for n, line in enumerate(items, at[0] + 1):
+                name, rest = line.strip().split(": ", 1)
+                self.assertTrue(rows[n].startswith("| %s: %s | " % (group, name)), (line, body))
+                grades.add(rest.split(" - ", 1)[0] if " - " in rest else None)
+        self.assertTrue({"pass", "gap", "partial", "known gap", None} <= grades, grades)
+        self.assertNotIn("## Notes", body)
 
     def test_other_lines_are_kept_as_notes(self):
         out, body = self.run_card(Repo(self), "Layout: in shape - ok (c)\nCaution: rule x has no probe\n\n")
