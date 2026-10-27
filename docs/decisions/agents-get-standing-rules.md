@@ -19,7 +19,7 @@ Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief n
 
 Why: a brief that forgot one line let an agent stash, or push in the wrong form. `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
 
-Protected by `hooks/test_agent_brief.py`, run in `gates`, `gates-macos` and `gates-windows-rest`, with a REQUIRED entry in `lint/test_windows_split.py`.
+Protected by `hooks/test_agent_brief.py`, run in `checks`, `checks-macos` and `checks-windows-rest`, with a REQUIRED entry in `lint/test_windows_split.py`.
 
 Kind: build
 Plan: docs/decisions/agents-get-standing-rules.md#the-ruling (all)

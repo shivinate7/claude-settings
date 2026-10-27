@@ -3,8 +3,8 @@
 ## The ruling
 
 `main` of shivinate7/claude-settings requires the eleven checks that `.github/stamp.json`
-`merge.requiredChecks` names: scope, gates, gates-windows, gates-windows-guard, gates-mutate-guard,
-gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows, gates-shoot.
+`merge.requiredChecks` names: scope, checks, checks-windows, checks-windows-guard, checks-mutate-guard,
+checks-windows-merge, checks-windows-rest, checks-macos, shell-macos, pointer-windows, checks-shoot.
 
 - A merge needs a pull request and no approval.
 - `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).

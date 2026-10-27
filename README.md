@@ -17,7 +17,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `landed-dirs.txt` | The folders that both installers land. |
 | `agents/` | The agent roles, one file each. |
 | `hooks/` | The guard, the watches, and the other hook scripts. |
-| `lint/` | The Simplified Technical English linter, and the gates and checks that CI runs. |
+| `lint/` | The Simplified Technical English linter, and the checks and checks that CI runs. |
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `docs/design/` | The house UX rules. |
@@ -31,7 +31,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `tools/` | `mem-monitor.ps1`, a manual Windows memory monitor. No installer lands it, and no hook runs it. |
 | `docs/decisions/`, `docs/debts/`, `docs/plans/` | The records: one file per ruling, known gap or deferred item, and plan. See `docs/debts/README.md`. |
 | `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
-| `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
+| `.github/` | `checks.yml`, the CI that checks this repo, and this repo's stamp config. |
 | `.claude/` | Instructions that load only in sessions on this repo. |
 | `.gitattributes`, `.gitignore` | The line-ending rules, and the files that git leaves out. |
 | `.ste-lint-exclude` | The pathspecs that the STE lint leaves out, such as pinned third-party prose. |
@@ -94,7 +94,7 @@ with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
 
 ## How a change reaches you
 
-Edit a file here, commit, push, open a pull request against `main`. `.github/workflows/gates.yml`
+Edit a file here, commit, push, open a pull request against `main`. `.github/workflows/checks.yml`
 runs the guard fixture suite, its mutation test, the STE lint, and the rest of the checks
 named in that file. Merge only when you say so, or under a repo grant, per CLAUDE.md.
 
@@ -162,9 +162,9 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 ## Editing
 
 * A rule in `CLAUDE.md`: edit the file. Wrap the sentence in a `<!-- rule:<slug> --> ` anchor if
-  you want `lint/rule_audit.py` to hold you to naming its enforcement (a guard rule, a gate, a
+  you want `lint/rule_audit.py` to hold you to naming its enforcement (a guard rule, a check, a
   CI step, or `unmechanized` or `judgment` plus a reason) in `lint/rule_mechanisms.json`.
-  All the guard rules, gates, and their design rationale live as comments and numbered
+  All the guard rules, checks, and their design rationale live as comments and numbered
   decisions inside `hooks/guard.py` and `lint/`. Read there, not here, for the full list.
 * A new role: add `agents/<name>.md`. A project can override it with a project-level
   `.claude/agents/<name>.md` carrying the same `name`.
@@ -182,7 +182,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   PATH. Hook commands run under `sh` on Windows, so put Python on Git Bash's own PATH there.
   Python 3 ships with the Command Line Tools on macOS. When it is missing, run
   `xcode-select --install`. When Python is missing, the hook command exits silently, so a
-  machine without it just runs without the gates.
+  machine without it just runs without the checks.
 * **A symlink did not take on Windows.** Enable Developer Mode. Re-run `install.ps1` once, to
   replace the copies with real symlinks.
 * **An existing `~/.claude/CLAUDE.md` or `settings.json` had content you wanted to keep.** Both

@@ -1,4 +1,4 @@
-// The one home of the source-text readers the gate and the tests share.
+// The one home of the source-text readers the guard and the tests share.
 //
 // A LEAF: it imports nothing, so a check and a test can both import it with no side effect.
 

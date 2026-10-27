@@ -1880,7 +1880,7 @@ def apply_fixes(text: str) -> Tuple[str, int]:
     HTML blocks (pre, script, style, textarea, comments), inline code, links, images and
     quoted text stay as they are, and a line with no match is returned byte for byte.
     Run time is not proven linear for every input: a few mask patterns can scan to the end
-    of a long line from many starts. The gate bounds the input size and the run time."""
+    of a long line from many starts. The guard bounds the input size and the run time."""
     LAST_FIX_CODES.clear()
     lines = re.findall(r"[^\n]*\n|[^\n]+", text)
     labels = {_label(m.group(1)) for ln in lines for m in [_REF_DEF.match(ln)] if m}

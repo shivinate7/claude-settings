@@ -82,7 +82,7 @@ if bad:
     sys.stderr.write(
         "rm: refused in a Claude session. Operand %r is /, the home folder, the working folder or a parent "
         "of it, and no part of the call ran. Name a narrower folder, or ask the owner to do it. "
-        "No override lifts this refusal, because the shim runs inside the command, after the gate.\n" % bad[0])
+        "No override lifts this refusal, because the shim runs inside the command, after the guard.\n" % bad[0])
     sys.exit(3)
 PYEOF
 [ $? -eq 3 ] && exit 1

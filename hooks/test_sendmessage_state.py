@@ -129,7 +129,7 @@ if (mode === "idle" || mode === "waiting") {
         // The child writes "started" first, holds the inherited stdout for the hold, and writes "done"
         // as its last act, so it must outlive a kill of node alone. On Windows, node puts each plain
         // child in a job that dies with node, so the done-writer is detached; a tree kill still reaches
-        // it. "&&" gates done on the hold finishing: a kill of the hold must not reach it. Relative
+        // it. "&&" guards done on the hold finishing: a kill of the hold must not reach it. Relative
         // names, with cwd set, keep the cmd quoting free of spaces.
         const secs = Math.ceil(holdMs / 1000);
         const stdio = ["ignore", "inherit", "inherit"];

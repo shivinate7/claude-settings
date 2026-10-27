@@ -2322,16 +2322,16 @@ class SingleTierModeTests(unittest.TestCase):
         self.assertIn("not inside a repository", text)
 
 
-# --------------------------------------------------------------------------- the --confirm gate
+# --------------------------------------------------------------------------- the --confirm guard
 #
 # Every other confirm=False call in this file hits a REFUSED repository before either loop in
 # sweep_repo runs, so none reaches `if confirm and decision["action"] == "reap":`. This class
 # puts a REAPABLE branch and a REMOVABLE worktree in front of a confirm=False sweep and checks
 # that preview leaves both alone. It kills janitor/mutate_sweep.py's `--confirm: reap branches
 # for real with no --confirm on the line` mutant.
-class ConfirmGateTests(unittest.TestCase):
+class ConfirmGuardTests(unittest.TestCase):
     def test_preview_names_reapable_subjects_but_touches_neither(self):
-        root = os.path.join(ROOT, "confirm-gate-repo")
+        root = os.path.join(ROOT, "confirm-guard-repo")
         make_repo(root, {"f.txt": "x\n"})
         give_remote(root)
         # A branch identical to main's own tip: the ancestor test alone proves it empty, so it is
@@ -2340,8 +2340,8 @@ class ConfirmGateTests(unittest.TestCase):
         run_vcs(root, "checkout", "-q", "main")
         # A clean, unlocked worktree with no live session recorded against it: REMOVABLE, not
         # merely registered.
-        target = os.path.join(ROOT, "confirm-gate-worktree")
-        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-confirm-gate")
+        target = os.path.join(ROOT, "confirm-guard-worktree")
+        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-confirm-guard")
 
         # THE SUBJECT SET MUST NOT BE EMPTY before any verdict about it means anything (the same
         # rule every other case in this file follows; see the module docstring).
@@ -2356,7 +2356,7 @@ class ConfirmGateTests(unittest.TestCase):
             == os.path.normcase(os.path.realpath(target)) for e in entries_before
         ))
 
-        log_path = os.path.join(ROOT, "confirm-gate.log")
+        log_path = os.path.join(ROOT, "confirm-guard.log")
         result = sweep.sweep_repo(root, confirm=False, restore_log_path=log_path, attended=True)
         self.assertIsNone(result["refused"])
 
@@ -2375,7 +2375,7 @@ class ConfirmGateTests(unittest.TestCase):
         self.assertIsNotNone(worktree_decision, "the worktree must appear in the preview at all")
         self.assertEqual(worktree_decision["action"], "reap")
 
-        # And PREVIEW MUST NOT HAVE TOUCHED EITHER ONE: this is the assertion the gate itself
+        # And PREVIEW MUST NOT HAVE TOUCHED EITHER ONE: this is the assertion the guard itself
         # lives or dies on.
         branches_after = sweep.list_local_branches(root)
         self.assertIn("preview-should-not-touch", branches_after,
@@ -2888,7 +2888,7 @@ class PreviewCacheTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
 
     def test_only_a_preview_caches_and_the_guard_reads_come_back_after(self):
-        repo = os.path.join(ROOT, "cache-gate-repo")
+        repo = os.path.join(ROOT, "cache-guard-repo")
         seen = []
         real_git, real_records = sys.modules["git_reads"]._git, sys.modules["git_reads"].session_records
         with _Stub("_sweep_roots", lambda *a: seen.append(
@@ -4137,7 +4137,7 @@ class AgentEndRulingTests(_AgentEndFixture):
     `fire_under_host`). A fault that must land inside the stage (a faked cwd read, a lock taken
     mid-stage, a killed git call) runs `handle()` in this process instead: the same entry the
     hook's main calls. Real git and real processes everywhere else. The own tree is always kept:
-    a case about the removal race or the unreadable-pid gate runs on ANOTHER finished agent's
+    a case about the removal race or the unreadable-pid guard runs on ANOTHER finished agent's
     idle tree, where that stage still removes."""
 
     def run_in_process(self, agent, path):
@@ -4558,7 +4558,7 @@ class BuildDirReapTests(unittest.TestCase):
         wt = self.add_agent(primary, "bdrR")
         self.fill(wt, ("native/build",))
         build = os.path.realpath(os.path.join(wt, "native", "build"))
-        gate = threading.Event()
+        guard = threading.Event()
         renames = []
         real_rename, real_replace = os.rename, os.replace
 
@@ -4569,7 +4569,7 @@ class BuildDirReapTests(unittest.TestCase):
             return inner
 
         def held_delete(*args, **kwargs):
-            gate.wait(30)  # a delete made in the hook's own process waits here, so the hook hangs
+            guard.wait(30)  # a delete made in the hook's own process waits here, so the hook hangs
 
         payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrR",
                               "cwd": wt, "session_id": "bdr-cases"})
@@ -4582,7 +4582,7 @@ class BuildDirReapTests(unittest.TestCase):
             worker.start()
             worker.join(30)
             returned = not worker.is_alive()
-            gate.set()
+            guard.set()
             worker.join(30)
         self.assertTrue(returned, "the hook did not return while the delete was held")
         moves = [(src, dst) for src, dst in renames if src == build]

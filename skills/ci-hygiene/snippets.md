@@ -20,7 +20,7 @@ gh api /users/<owner>/settings/billing/usage --jq '.usageItems[] | select(.produ
 No template: a workflow token cannot read this endpoint, so an alarm would need a stored
 personal token. Set the budget alarm in the billing settings (Budgets and alerts) instead.
 
-## 3a. Gate a slow check on its inputs
+## 3a. Check a slow check on its inputs
 
 ```yaml
 on:
@@ -158,7 +158,7 @@ updates:
 Renovate (`renovate.json`) tracks three custom pins. It does not track actions.
 
 Audit with zizmor. Run the CI command from the repo root. It is the zizmor step of
-`.github/workflows/gates.yml`:
+`.github/workflows/checks.yml`:
 
 ```sh
 pipx run zizmor==1.30.1 .github/ actions/
@@ -174,7 +174,7 @@ gh run view <run-id> --json status,conclusion         # one read, after the noti
 Never run `gh run watch`: it makes about 131 API calls a minute. Never send a command's output
 to `/dev/null`.
 
-## 10. Prove a gate red
+## 10. Prove a check red
 
 ```sh
 cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
@@ -182,13 +182,13 @@ cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 pipx run zizmor==1.30.1 .github/ actions/   # must exit non-zero
 ```
 
-Gate a commit on the gate's own exit code. A pipe takes the exit code of its last command:
+Check a commit on the check's own exit code. A pipe takes the exit code of its last command:
 
 ```sh
-# Wrong: tail's exit code is the pipe's. A red gate still commits.
-<gate> | tail -1 && git commit -m "<subject>"
-# Right: the gate's exit code decides. Its output goes to a log.
-if <gate> > gate.log 2>&1; then git commit -m "<subject>"; else tail -n 20 gate.log; fi
+# Wrong: tail's exit code is the pipe's. A red check still commits.
+<check> | tail -1 && git commit -m "<subject>"
+# Right: the check's exit code decides. Its output goes to a log.
+if <check> > check.log 2>&1; then git commit -m "<subject>"; else tail -n 20 check.log; fi
 ```
 
 In bash, `set -o pipefail` makes a pipe fail when any stage fails.

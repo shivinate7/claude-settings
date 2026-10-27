@@ -442,7 +442,7 @@ class RealRepo(unittest.TestCase):
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
 
     def test_r9_session_start_refresh_has_its_text_markers(self):
-        # A text lint, not a behaviour test. The refresh stays inline: a move into a script gates
+        # A text lint, not a behaviour test. The refresh stays inline: a move into a script guards
         # recovery on an install.
         commands = [hook.get("command", "") for event, matcher, _cond, hook in registrations()
                     if event == "SessionStart" and matcher == "startup|resume" and hook.get("type") == "command"]
@@ -460,7 +460,7 @@ TABLE_TEXT = """# Model table
 
 | Point | Model | Effort |
 |---|---|---|
-| every other hook and gate | no model; plain code | n/a |
+| every other hook and guard | no model; plain code | n/a |
 | skill `alpha` | no model pin; runs on the caller's model | none |
 | judge (`hooks/ok_judge.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
 """
@@ -1041,11 +1041,11 @@ class RecordsPage(Tree):
         # Kind: process throughout. A ruling's first block of under 4 words
         # ("Yes.", "Owner, 2026-10-11:") gives the first sentence of "## The question". A 4-word block stays (green pin).
         cases = [
-            ("a bare yes", "Does the gate run first? It does.", "Yes.", "Does the gate run first?"),
+            ("a bare yes", "Does the guard run first? It does.", "Yes.", "Does the guard run first?"),
             ("a 3-word block", "Is the page rebuilt at merge? Yes.", "Yes, it is.", "Is the page rebuilt at merge?"),
             ("a dated owner line, then a short block", "Is the page rebuilt at merge? Yes.",
              "Owner, 2026-10-11:\n\nYes.\n\nThe page is rebuilt at merge.", "Is the page rebuilt at merge?"),
-            ("a 4-word block stays", "What runs first? The gate.", "The gate runs first.", "The gate runs first."),
+            ("a 4-word block stays", "What runs first? The guard.", "The guard runs first.", "The guard runs first."),
         ]
         extra = {"decisions/r%d.md" % i: "# T\n\n## The question\n\n%s\n\n## The ruling\n\n%s\n\nKind: process\n" % (q, r)
                  for i, (_name, q, r, _gist) in enumerate(cases)}

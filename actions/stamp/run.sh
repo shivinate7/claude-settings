@@ -3,7 +3,7 @@
 # directly (test_action.sh does exactly that) rather than only inside a GitHub Actions runner.
 #
 # MODE is "check", the only mode. It runs `stamp.mjs --check`. It needs only STAMP_JS and CONFIG.
-# No default branch, no gate, no commit, no push, so it runs with `contents: read` on any branch
+# No default branch, no check, no commit, no push, so it runs with `contents: read` on any branch
 # or pull request. BASE is optional. When set, it passes through as `--base`. When empty, it is
 # left out. Any other MODE, including the removed "stamp", is refused.
 set -euo pipefail

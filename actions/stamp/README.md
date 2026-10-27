@@ -271,7 +271,7 @@ uses: shivinate7/claude-settings/actions/stamp@<sha>
 | `base` | empty | The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
 
 **Mode `check`** runs `stamp.mjs --check --config <config>` and nothing else. When `base` is
-set, it adds `--base <base>`. It needs no default branch, no gate, no commit, and no push.
+set, it adds `--base <base>`. It needs no default branch, no check, no commit, and no push.
 It works with `contents: read`. Its checkout needs `fetch-depth: 0`. A shallow fetch of the
 base is not enough.
 
@@ -379,5 +379,5 @@ bash actions/stamp/test_action.sh   # run.sh, mode check, against a real git rem
 ```
 
 Both build their own temporary folders. Neither reads or writes this repository's own
-tree. Both run in `gates`, `gates-windows`, and `gates-macos` in
-`.github/workflows/gates.yml`.
+tree. Both run in `checks`, `checks-windows`, and `checks-macos` in
+`.github/workflows/checks.yml`.

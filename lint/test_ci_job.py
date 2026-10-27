@@ -3,7 +3,7 @@
 
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
-None of them may read PASS. The last class plans the real gates job: every step gets one line.
+None of them may read PASS. The last class plans the real checks job: every step gets one line.
 Run: python3 lint/test_ci_job.py
 """
 import os
@@ -16,7 +16,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
-GATES = os.path.join(HERE, "..", ".github", "workflows", "gates.yml")
+CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 ENV.pop("VERDICT_LOG", None)
@@ -239,7 +239,7 @@ class Usage(Job):
 
 
 class SteAction(Job):
-    """The gates STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
 
     def branch_with(self, text):
         def git(*a):
@@ -276,13 +276,13 @@ class SteAction(Job):
         self.assertEqual(self.verdicts(lines), ["not run locally"], out)
 
 
-class RealGates(unittest.TestCase):
-    def test_every_gates_step_gets_one_line(self):
+class RealChecks(unittest.TestCase):
+    def test_every_checks_step_gets_one_line(self):
         sys.path.insert(0, HERE)
         from workflow_steps import job_block, step_blocks
-        with open(GATES, encoding="utf-8") as f:
-            want = len(step_blocks(job_block(f.read(), "gates")))
-        done = subprocess.run([sys.executable, CI_JOB, "gates", "--plan", "--base", "origin/main"],
+        with open(CHECKS, encoding="utf-8") as f:
+            want = len(step_blocks(job_block(f.read(), "checks")))
+        done = subprocess.run([sys.executable, CI_JOB, "checks", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
         lines = done.stdout.splitlines()
         self.assertEqual(len(lines), want, done.stdout + done.stderr)
@@ -309,13 +309,13 @@ class LintMode(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
 
-    def test_lint_mode_lists_exactly_the_lint_steps_of_gates(self):
-        # An independent read: the gates job's single-line run: commands, matched by a pattern written here.
+    def test_lint_mode_lists_exactly_the_lint_steps_of_checks(self):
+        # An independent read: the checks job's single-line run: commands, matched by a pattern written here.
         want, name, inside = [], None, False
-        with open(GATES, encoding="utf-8") as f:
+        with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
-                    inside = line.strip() == "gates:"
+                    inside = line.strip() == "checks:"
                 if not inside:
                     continue
                 m = re.match(r"^      - name: (.*?)\s*$", line)
@@ -327,7 +327,7 @@ class LintMode(unittest.TestCase):
                 if re.match(r"^        uses: \S*actions/ste-lint\s*$", line):
                     want.append(name)  # the STE action: ci-job runs bin/ste-changed in its place
         self.assertGreater(len(want), 20)
-        done = subprocess.run([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", "origin/main"],
+        done = subprocess.run([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
         lines = done.stdout.splitlines()
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)

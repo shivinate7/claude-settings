@@ -19,8 +19,8 @@ This hook is also the owner feedback inbox's capture (decision owner-feedback-in
 UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md, with its
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice (a prompt that starts with a shared_names.MACHINE_TAGS tag) is never saved.
-`--agent` never reads stdin and never saves. The Stop gate that reads the inbox, and decides which
-messages need items, is feedback_gate.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
+`--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
+messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
 """
 import json
@@ -82,7 +82,7 @@ def override_line(result):
 
 def inbox_paths(session_id):
     """(inbox, turn state) for a session, or None when the id cannot be a file name. The one home
-    of these paths: feedback_gate.py calls it. precompact_handoff owns the handoffs folder."""
+    of these paths: feedback_guard.py calls it. precompact_handoff owns the handoffs folder."""
     if not re.fullmatch(r"[\w.-]+", session_id or "") or session_id.startswith("."):
         return None
     import precompact_handoff

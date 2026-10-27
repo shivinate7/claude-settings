@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook: decision/gate/settings watch (Stop). Replaces the `type: agent` guardrail.
+"""Claude Code hook: decision/guard/settings watch (Stop). Replaces the `type: agent` guardrail.
 
 WHAT THIS FILE DOES. A command hook. Command hooks receive the same Stop JSON
 (`transcript_path`, `session_id`, `cwd`) with no permission check at all, so the `auto`-mode
@@ -12,16 +12,16 @@ THE CHEAP PATH, FIRST. `changed_paths` reads this turn's dirty files from `git s
 the old markdown sweep did (see `docs/decisions/predicate-is-the-act.md`: a shape list of
 write commands can only grow, so this hook reads the filesystem's own act instead of
 parsing Bash text). `looks_protected` then asks, per file, whether the name or location
-marks it a decision, a gate, a CLAUDE.md, or a settings file. Settings files use
-`guard.is_settings_file`, the constant the guard itself emits (`decisions/a-gates-allow-
-list-is-the-constant.md`); the rest (`decisions/`, `CLAUDE.md`, a "gate"/"guard"/"build-
+marks it a decision, a guard, a CLAUDE.md, or a settings file. Settings files use
+`guard.is_settings_file`, the constant the guard itself emits (`decisions/a-guards-allow-
+list-is-the-constant.md`); the rest (`decisions/`, `CLAUDE.md`, a "guard"/"guard"/"build-
 order"/"rule"/"policy" name) has no such constant to import, because no code in this repo
-defines what a gate or a build-order file IS. That half stays a deliberately broad keyword
+defines what a guard or a build-order file IS. That half stays a deliberately broad keyword
 match: a triage filter that decides whether to spend a model call, never the verdict
 itself, so a false positive costs one subprocess call and a false negative skips judgment
 entirely.
 
-THE GATE. `run` gates every model call on `protected`, an ACTUAL on-disk change to a protected
+THE GUARD. `run` guards every model call on `protected`, an ACTUAL on-disk change to a protected
 path. `looks_concerning`'s outbound scan only enriches the evidence of a change that already
 triggered the call.
 
@@ -125,23 +125,23 @@ PEER_MESSAGE_TOOLS = ("SendMessage", "Task")
 
 # Deliberately broad: a substring match against a lowercased relative path, on top of
 # `guard.is_settings_file`. Named files this repo actually has (`decisions/*.md`,
-# `CLAUDE.md`, `lint/*_gate.py`, `hooks/guard.py`) all hit one of these. No code in this
-# repo defines "a gate" or "a build-order" as a constant to import instead, so this stays a
-# triage keyword net rather than a permit list (decisions/a-gates-allow-list-is-the-
+# `CLAUDE.md`, `lint/*_guard.py`, `hooks/guard.py`) all hit one of these. No code in this
+# repo defines "a guard" or "a build-order" as a constant to import instead, so this stays a
+# triage keyword net rather than a permit list (decisions/a-guards-allow-list-is-the-
 # constant.md governs permit lists, not a "should the model even look" filter).
 PROTECTED_PATH_HINTS = (
-    "decision", "claude.md", "gate", "guard", "build-order", "build_order", "buildorder",
+    "decision", "claude.md", "guard", "build-order", "build_order", "buildorder",
     "policy", "rule",
 )
 
 # Paired with a path/name hint above before a peer message counts as concerning. A message
-# that only mentions a gate file, with no instruction to act on it, is not a deviation.
+# that only mentions a guard file, with no instruction to act on it, is not a deviation.
 ACTION_WORDS = (
     "delete", "remove", "drop", "strip", "weaken", "disable", "bypass", "override",
     "reverse", "revert", "skip", "silence", "unmechanize",
 )
 
-UNKNOWN_PREFIX = "Decision watch: UNKNOWN, could not verify this turn against recorded decisions/gates/settings. "
+UNKNOWN_PREFIX = "Decision watch: UNKNOWN, could not verify this turn against recorded decisions/guards/settings. "
 FLAG_PREFIX = "Decision watch: FLAG. "
 
 # WHY_MAX_LEN bounds the model's own `why` text before it is printed into the parent
@@ -344,7 +344,7 @@ def changed_this_turn(cwd, baseline):
 # ------------------------------------------------------------------ the triage filter
 
 def looks_protected(rel_path, cwd):
-    """True when a path's name or location marks it a decision, gate, CLAUDE.md, or
+    """True when a path's name or location marks it a decision, guard, CLAUDE.md, or
     settings file. See the module docstring for why this stays a broad keyword net."""
     if guard.is_settings_file(rel_path, cwd):
         return True
@@ -362,7 +362,7 @@ def looks_concerning(tool_use):
     had not yet executed) and named the same shape in two of the three false positives
     overall (a role question, and a probe of a scratch copy rather than the real file). A
     peer being TOLD to do something is not the act CLAUDE.md's Verification rule protects
-    against; a real write to the real path is. `run` below now gates every model call on
+    against; a real write to the real path is. `run` below now guards every model call on
     `protected` (an actual on-disk change) being non-empty, full stop. This function still
     runs, but only to ENRICH the evidence a real protected change already triggered on,
     never to trigger by itself.
@@ -539,14 +539,14 @@ def incident_key(protected, evidence, contents=""):
 
 JUDGE_INSTRUCTIONS = (
     "You are a guardrail judging whether a coding session's turn silently changed a "
-    "decision, gate, build-order, CLAUDE.md rule, or settings value without visible "
+    "decision, guard, build-order, CLAUDE.md rule, or settings value without visible "
     "approval. Below are the diffs (or new-file text) of every protected file this turn "
     "touched, plus the chat text since the last human message. ALLOW if the change is "
     "additive or consistent, or the chat shows the assistant surfaced this exact change as "
-    "a question and the user approved it before the edit happened. FLAG if a rule, gate, "
+    "a question and the user approved it before the edit happened. FLAG if a rule, guard, "
     "build-order, decision, or setting was silently changed, weakened, removed, or "
     "reversed with no visible approval in the chat. Ignore anything unrelated to a "
-    "decision, gate, build-order, or setting. Be conservative: only flag a genuine "
+    "decision, guard, build-order, or setting. Be conservative: only flag a genuine "
     "unapproved override. Respond with exactly one JSON object and nothing else: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<short: which file, what changed, '
     'why it reads as unapproved>"}.'
@@ -774,7 +774,7 @@ def run(hook, model_call=invoke_model, expect_key=None):
     committed = [rel for rel in committed if looks_protected(rel, cwd)]
     protected += [rel for rel in committed if rel not in protected]
 
-    # GATE: an actual on-disk change to a protected path, full stop. An outbound
+    # GUARD: an actual on-disk change to a protected path, full stop. An outbound
     # SendMessage/Task alone no longer triggers a model call (see looks_concerning's
     # docstring for why the independent audit corrected this). Nothing executed yet is
     # not the act this hook exists to catch.
@@ -801,7 +801,7 @@ def run(hook, model_call=invoke_model, expect_key=None):
         evidence.append("%s (name only, over the per-Stop diff budget)" % rel)
 
     # Outbound SendMessage/Task calls only ENRICH the evidence once a real change has
-    # already gated the call; they cannot gate it by themselves.
+    # already guarded the call; they cannot guard it by themselves.
     outbound = [
         tu
         for rec in records_after(records, idx)
@@ -1143,8 +1143,8 @@ def config_notices(hook):
         hits = collect_paths(after, cwd)
         if merges:
             try:
-                import report_gate  # lint/report_gate.py, same-repo sibling package
-                merges = already_named(merges, report_gate.block_text(reader.last_reply(hook)))
+                import report_guard  # lint/report_guard.py, same-repo sibling package
+                merges = already_named(merges, report_guard.block_text(reader.last_reply(hook)))
             except Exception:
                 # Cannot tell whether the report already named the merge: still name it.
                 pass

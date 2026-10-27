@@ -569,7 +569,7 @@ case5() {
   name="case5: two clones of one origin, differing CLAUDE.md, prints exactly one line"
   co="$work/case5-checkout"; other="$work/case5-other"; cfg="$work/case5-cfg"
   # Both trees are real clones of the same origin URL (make_checkout's default), so the
-  # fix's same-repository gate passes and the raw content differs, so the line must print.
+  # fix's same-repository guard passes and the raw content differs, so the line must print.
   make_checkout "$co" "# checkout content, v1"
   make_checkout "$other" "# global content, different"
   mkdir -p "$cfg"
@@ -2439,7 +2439,7 @@ lock1sh() {
 }
 
 # ---- putfile_nogap1: put_file replaces a landed file by one rename over it, never by a delete -----
-# A gate hook reads a hook file at any moment, and a missing one fails closed. Install 2 replaces every file
+# A guard hook reads a hook file at any moment, and a missing one fails closed. Install 2 replaces every file
 # install 1 landed in hooks/. The mv shim logs "premv <dest> <present|absent> <bytes>" just before each
 # put_file rename. Each file needs a premv line that found the old file present. That fails a delete before the
 # rename, and a rewrite in place, which has no rename at all. The new file's size at that moment must be the

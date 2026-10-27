@@ -18,13 +18,13 @@ A process is stopped only when all of these answer a confirmed yes:
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
 
-Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the gates above hold for the whole
+Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the guards above hold for the whole
 worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
 a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
 the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
-Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
+Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the guards above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
@@ -175,7 +175,7 @@ def decide(target: str):
 
 
 def _decide(target: str):
-    """`decide` plus the cwd of every process read, for the build-folder gate."""
+    """`decide` plus the cwd of every process read, for the build-folder guard."""
     primary = sweep._is_primary_checkout(target)
     if primary is None:
         return "unreadable-subject", [], []
@@ -243,7 +243,7 @@ trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: s
 def reap_build_dirs(target: str, cwds):
     """Rename each proven build folder in TARGET to a trash name, then start one detached child
     that deletes those and every leftover trash name. Returns the folders renamed. The caller has
-    proven the worktree gates; this proves the folder gates: no link, no process cwd inside."""
+    proven the worktree guards; this proves the folder guards: no link, no process cwd inside."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
     if names is None:  # bad file: nothing, defaults included

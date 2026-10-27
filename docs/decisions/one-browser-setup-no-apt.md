@@ -10,13 +10,13 @@ Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite acti
 - Reads the pinned `playwright-core` version from that folder. No pin there stops the job with one line.
 - Caches `~/.cache/ms-playwright`, keyed by the runner OS, that version and the browsers.
 - Runs `playwright install <browsers>` (default `chromium`) with no `--with-deps`. The runner image already has the libraries. A missing library fails the suite, never skips it.
-- Callers pin it by commit SHA. The `gates-shoot` job is its first caller.
+- Callers pin it by commit SHA. The `checks-shoot` job is its first caller.
 
 `python3 lint/compliance_probes.py playwright <child root>` flags a Playwright install that runs apt (`--with-deps` or `install-deps`) in a CI or build file. It reads workflows, actions, Makefiles, shell scripts, Dockerfiles, justfiles, Taskfiles, dev container files and package.json scripts. Comments do not count. A folded YAML command (`run: >`) counts as one line.
 
 Why, a named incident: on 2026-10-26 the apt step of `playwright install --with-deps` spent more than 11 min on a slow Ubuntu mirror and cancelled a claude-settings batch run twice (roadmap step c64). The same day it timed out degen's batch PR 263. claude-settings had fixed it for itself, and the fix had no way to reach degen.
 
-Protected by `lint/test_compliance_probes.py` (class `Playwright`) and the `gates-shoot` job, which runs the action whenever its files change.
+Protected by `lint/test_compliance_probes.py` (class `Playwright`) and the `checks-shoot` job, which runs the action whenever its files change.
 
 ## Limits
 

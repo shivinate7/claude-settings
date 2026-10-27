@@ -2,8 +2,8 @@
 """Fixture tests for rule_audit.py.
 
 Each test builds a small CLAUDE.md fragment, a map, and (when it matters) a guard.py or
-gates.yml fragment in memory, then calls `check(...)` directly. No subprocess: the audit
-itself does not touch the transcript or the hook protocol the way report_gate does.
+checks.yml fragment in memory, then calls `check(...)` directly. No subprocess: the audit
+itself does not touch the transcript or the hook protocol the way report_guard does.
 
 Run with:
 
@@ -36,7 +36,7 @@ def dispatch():
 
 WORKFLOW_SRC = '''
 jobs:
-  gates:
+  checks:
     steps:
       - name: Guard fixture suite
         run: python3 hooks/test_guard.py
@@ -74,8 +74,8 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
                             judgment_expected=judgment_expected)
 
 
-def gate_map(mechanism):
-    mechanism = dict(mechanism, kind="gate")
+def check_map(mechanism):
+    mechanism = dict(mechanism, kind="check")
     return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
 
 
@@ -114,11 +114,11 @@ class RuleAuditTests(unittest.TestCase):
         problems = run(rule_map=rule_map)
         self.assertEqual(problems, [])
 
-    def test_row_naming_a_missing_gate_file_fails(self):
+    def test_row_naming_a_missing_check_file_fails(self):
         rule_map = {
             "rules": {
                 "shared-trees-no-destructive-git": {
-                    "mechanism": {"kind": "gate", "ref": "lint/does_not_exist.py"}
+                    "mechanism": {"kind": "check", "ref": "lint/does_not_exist.py"}
                 }
             }
         }
@@ -127,49 +127,49 @@ class RuleAuditTests(unittest.TestCase):
 
     def test_row_citing_a_needle_is_refused(self):
         # The old shape: a real file and a substring that is present. It must go red now.
-        rule_map = gate_map({"ref": "lint/rule_audit.py", "needle": "every rule anchor maps"})
+        rule_map = check_map({"ref": "lint/rule_audit.py", "needle": "every rule anchor maps"})
         problems = run(rule_map=rule_map)
         self.assertTrue(any("needle" in p for p in problems), problems)
 
-    def test_gate_row_with_no_test_and_no_setting_is_refused(self):
-        problems = run(rule_map=gate_map({"ref": "lint/rule_audit.py"}))
+    def test_check_row_with_no_test_and_no_setting_is_refused(self):
+        problems = run(rule_map=check_map({"ref": "lint/rule_audit.py"}))
         self.assertTrue(any("proves nothing" in p for p in problems), problems)
 
-    def test_gate_row_citing_a_real_test_passes(self):
-        problems = run(rule_map=gate_map({
+    def test_check_row_citing_a_real_test_passes(self):
+        problems = run(rule_map=check_map({
             "ref": "lint/rule_audit.py",
             "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
         self.assertEqual(problems, [])
 
-    def test_gate_row_citing_a_test_that_does_not_exist_fails(self):
-        problems = run(rule_map=gate_map({
+    def test_check_row_citing_a_test_that_does_not_exist_fails(self):
+        problems = run(rule_map=check_map({
             "ref": "lint/rule_audit.py",
             "test": "lint/test_rule_audit.py::RuleAuditTests.test_no_such_thing"}))
         self.assertTrue(any("does not resolve" in p for p in problems), problems)
 
-    def test_gate_row_citing_a_docstring_phrase_as_a_test_fails(self):
-        problems = run(rule_map=gate_map({
+    def test_check_row_citing_a_docstring_phrase_as_a_test_fails(self):
+        problems = run(rule_map=check_map({
             "ref": "hooks/test_guard.py",
             "test": "hooks/test_guard.py::drives the guard as Claude Code drives it"}))
         self.assertTrue(any("does not resolve" in p for p in problems), problems)
 
-    def test_gate_row_with_a_setting_that_holds_passes(self):
-        problems = run(rule_map=gate_map({
+    def test_check_row_with_a_setting_that_holds_passes(self):
+        problems = run(rule_map=check_map({
             "ref": "settings.json",
             "setting": {"file": "settings.json", "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
                         "equals": "sonnet"}}))
         self.assertEqual(problems, [])
 
-    def test_gate_row_with_a_wrong_setting_value_fails(self):
+    def test_check_row_with_a_wrong_setting_value_fails(self):
         # The name is present in settings.json; only the value is wrong.
-        problems = run(rule_map=gate_map({
+        problems = run(rule_map=check_map({
             "ref": "settings.json",
             "setting": {"file": "settings.json", "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
                         "equals": "opus"}}))
         self.assertTrue(any("does not hold" in p for p in problems), problems)
 
-    def test_gate_row_with_a_setting_name_absent_fails(self):
-        problems = run(rule_map=gate_map({
+    def test_check_row_with_a_setting_name_absent_fails(self):
+        problems = run(rule_map=check_map({
             "ref": "settings.json",
             "setting": {"file": "settings.json", "path": "env.NO_SUCH_NAME", "equals": "1"}}))
         self.assertTrue(any("does not hold" in p for p in problems), problems)
@@ -593,23 +593,23 @@ class CitationTests(unittest.TestCase):
 
     def test_test_file_that_never_touches_the_ref_is_red(self):
         with tempfile.TemporaryDirectory() as root:
-            for rel, body in (("gate.py", "x = 1\n"), ("test_other.py", "import os\n"),
-                              ("test_gate.py", "import gate\n"),
-                              ("test_run.py", "import subprocess\nsubprocess.run(['python3', 'lint/gate.py'])\n"),
-                              ("test_mention.py", "NOTE = 'lint/gate.py'\n")):
+            for rel, body in (("check.py", "x = 1\n"), ("test_other.py", "import os\n"),
+                              ("test_check.py", "import check\n"),
+                              ("test_run.py", "import subprocess\nsubprocess.run(['python3', 'lint/check.py'])\n"),
+                              ("test_mention.py", "NOTE = 'lint/check.py'\n")):
                 with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
                     f.write(body)
             self.assertIn("proves nothing",
-                          rule_audit.link_problem("test_other.py::t", "lint/gate.py", root))
-            self.assertIsNone(rule_audit.link_problem("test_gate.py::t", "lint/gate.py", root))
-            self.assertIsNone(rule_audit.link_problem("test_run.py::t", "lint/gate.py", root))
+                          rule_audit.link_problem("test_other.py::t", "lint/check.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_check.py::t", "lint/check.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_run.py::t", "lint/check.py", root))
             self.assertIn("proves nothing",
-                          rule_audit.link_problem("test_mention.py::t", "lint/gate.py", root))
-            self.assertIsNone(rule_audit.link_problem("gate.py::t", "gate.py", root))
+                          rule_audit.link_problem("test_mention.py::t", "lint/check.py", root))
+            self.assertIsNone(rule_audit.link_problem("check.py::t", "check.py", root))
 
     def test_row_whose_test_never_touches_its_ref_fails(self):
-        problems = run(rule_map=gate_map({
-            "ref": "lint/report_gate.py",
+        problems = run(rule_map=check_map({
+            "ref": "lint/report_guard.py",
             "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
         self.assertTrue(any("unlinked" in p for p in problems), problems)
 
@@ -690,7 +690,7 @@ class GuardRuleNamesTests(unittest.TestCase):
 
 
 class EmittedRuleIdsTests(unittest.TestCase):
-    """`emitted_rule_ids(root)` is the one list of every id the guard and the gates write to guard.log."""
+    """`emitted_rule_ids(root)` is the one list of every id the guard and the other guards write to guard.log."""
 
     def test_the_real_source_yields_every_id_the_old_regex_missed(self):
         ids = rule_audit.emitted_rule_ids()
@@ -707,11 +707,11 @@ class EmittedRuleIdsTests(unittest.TestCase):
 
     def ids_of(self, files):
         """The ids of a fixture root. A crash is a failure that names its cause: the root has no
-        gate file, because no hook writes an STE id now (decision ste-gate-fixes-not-nags)."""
+        check file, because no hook writes an STE id now (decision ste-guard-fixes-not-nags)."""
         try:
             return rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
         except FileNotFoundError as e:
-            self.fail("emitted_rule_ids reads a gate file the root does not have: %s" % e)
+            self.fail("emitted_rule_ids reads a check file the root does not have: %s" % e)
 
     def test_a_fixture_root_gives_guard_siblings_config_watch_and_no_test_file_and_no_ste_code(self):
         files = self.files()

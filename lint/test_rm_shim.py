@@ -198,7 +198,7 @@ class Shim(unittest.TestCase):
         self.assertRefused(["-rf", "/"], ["/"])
 
     def test_a_refusal_says_that_no_override_lifts_it(self):
-        # The shim runs inside the command, after the guard's gate, so an owner override cannot reach it
+        # The shim runs inside the command, after the guard, so an owner override cannot reach it
         # (decision owner-override). The refusal says so, in place of leaving the owner to type one.
         r = self.rm("-rf", "/")
         self.assertRefusal(r, ["-rf", "/"], ["/"])
@@ -256,7 +256,7 @@ class Shim(unittest.TestCase):
         self.assertIn("armed", r.stdout, "the shell's folder was not removed under it: " + r.stderr)
         self.assertRefusal(r, ["-rf", self.home], [self.home])
 
-    def test_a_file_in_the_cwd_named_like_a_stdlib_module_does_not_open_the_gate(self):
+    def test_a_file_in_the_cwd_named_like_a_stdlib_module_does_not_open_the_guard(self):
         # python3 puts the cwd on sys.path for `-c`, so a types.py there shadows the stdlib `types`. The
         # helper then fails to load, and the shim falls open to the real rm. Claude's cwd is a project
         # folder that holds files of any name; the shim must refuse HOME all the same.
@@ -293,7 +293,7 @@ class Shim(unittest.TestCase):
         self.assertFalse(os.path.exists(self.sub))
 
     def test_unset_does_not_refuse_the_fake_home(self):
-        # The case above cannot go red on a shim that ignores the gate: its target is safe anyway.
+        # The case above cannot go red on a shim that ignores the guard: its target is safe anyway.
         # Outside a Claude session the shim must do nothing.
         r = self.rm("-rf", self.home, claude=False)
         self.assertEqual(r.returncode, 0, r.stderr)

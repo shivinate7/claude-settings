@@ -37,7 +37,7 @@ Stop: stall_watch.py --stop
   log its command names, has not changed for the quiet age. A job closes on a <task-notification> with status completed, failed,
   killed or stopped (a user message, or a queued_command attachment record), or on the result of
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
-  unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix gate.
+  unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix guard.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
@@ -419,7 +419,7 @@ def stop():
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
             print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
-    except Exception:  # gate-hooks-fail-closed: a failed check prints nothing and does not block
+    except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     return 0
 

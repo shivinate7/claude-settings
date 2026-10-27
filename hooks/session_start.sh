@@ -73,7 +73,7 @@ fi
 #
 # This only means something when $toplevel is itself a second clone of the same repo the
 # pointer names, for example a lane worktree. In any other repo, the pointer's CLAUDE.md and
-# the checkout's CLAUDE.md differ by design, so the raw file compare below is gated on both
+# the checkout's CLAUDE.md differ by design, so the raw file compare below is guarded on both
 # trees sharing one origin. Read the origin fails closed: either remote missing or unreadable
 # means silence, never a printed line.
 config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -106,7 +106,7 @@ fi
 
 # The pointer checkout's HEAD must be `main`. `~/.claude/lint/*`, `~/.claude/hooks/*` and
 # `~/.claude/agents/*` are symlinks into that one checkout, so its branch decides which copy
-# of the rules and the gates every session on this machine runs. A branch left checked out
+# of the rules and the guards every session on this machine runs. A branch left checked out
 # there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
 # branch switch is a whole-tree act and another session may be working in it.
 # `.git` is a directory in a full clone and a file in a linked worktree (the pinned `<clone>-live`).

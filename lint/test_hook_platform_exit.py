@@ -5,7 +5,7 @@ Run: python3 lint/test_hook_platform_exit.py -v
 Each case runs the row's command string from settings.json (never a copy) through `sh -c`, with PATH
 set to one folder of stubs. A stub python records each start. Where the script does nothing, the row
 must exit 0, silent, with no python start. Where it works, the row must reach python.
-- stall_watch --hook: does nothing off posix (hook() returns at once). --stop has no posix gate, so
+- stall_watch --hook: does nothing off posix (hook() returns at once). --stop has no posix guard, so
   its row must still reach python on Windows.
 - sim_boot_record (Pre and Post rows): does nothing without xcrun.
 - ci_wake: watches only a `gh pr ready` call in the COMMAND (ci_wake.triggers). The row reads the
@@ -149,7 +149,7 @@ class SimBootRecord(Quiet):
                 self.assert_reaches_python(run_row(command, self.script), self.script)
 
     def test_rows_reach_python_on_windows_shell_with_xcrun(self):
-        # The gate is xcrun alone, not the platform.
+        # The guard is xcrun alone, not the platform.
         for ev, command in self.each_row():
             with self.subTest(event=ev):
                 self.assert_reaches_python(run_row(command, self.script, platform="nt"), self.script)

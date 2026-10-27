@@ -31,7 +31,7 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 # A Bash call that cannot touch a simulator skips the ~0.3 s `simctl list`. ponytail: a boot hidden
 # behind a script that never names these words goes unrecorded, and an unrecorded device is kept.
-BASH_GATE = re.compile(r"\b(?:simctl|xcodebuild|xcrun|xctest|fastlane|flutter|react-native|tuist|Simulator)\b|\bexpo\s+run:ios\b")
+BASH_GUARD = re.compile(r"\b(?:simctl|xcodebuild|xcrun|xctest|fastlane|flutter|react-native|tuist|Simulator)\b|\bexpo\s+run:ios\b")
 
 
 def devices():
@@ -144,7 +144,7 @@ def main():
         payload = json.load(sys.stdin)
         tool_input = payload.get("tool_input") or {}
         if payload.get("tool_name") == "Bash":
-            if not BASH_GATE.search(str(tool_input.get("command", ""))):
+            if not BASH_GUARD.search(str(tool_input.get("command", ""))):
                 return
         elif tool_input.get("action") != "launch":  # the MCP tool boots only on `launch`
             return

@@ -1,7 +1,7 @@
 // Plain English is the master copy of what the code does, and a check keeps `docs/map/` in sync with it.
 //
 // Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 8 MAP checks there.
-// The check bodies live here, in `mapChecks`. A host may register each one with its own gate.
+// The check bodies live here, in `mapChecks`. A host may register each one with its own guard.
 //
 // `migrationTables` strips SQL `--` comments first (`stripSqlComments` below — `ctx.stripComments`
 // is a JS/TS scanner and does not know SQL's `--` syntax, so it is not reused here), so a migration
@@ -736,7 +736,7 @@ const around = (sf, line) => {
 /** A stage makes a model call where its span, from its literal to the next stage's literal, hands a transport on. Returns { step, line }. */
 const stageCalls = (source, stages) => {
   const lines = blankCommentsAndStrings(source).split('\n'), out = [];
-  // `const gatedTransport = gate(countedTransport(...))` builds a transport. A name inside that initializer is a wrapper, not a call.
+  // `const guardedTransport = guard(countedTransport(...))` builds a transport. A name inside that initializer is a wrapper, not a call.
   const building = [], sf = parse('stage-calls.ts', source);
   kids(sf, (n) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && TRANSPORT_RE.test(n.name.text) && n.initializer)
@@ -962,7 +962,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
   });
 };
 
-// ---- The 8 MAP checks. One home for each body: a host may register them with its own gate, and the command below runs them. ----
+// ---- The 8 MAP checks. One home for each body: a host may register them with its own guard, and the command below runs them. ----
 const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */

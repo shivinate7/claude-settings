@@ -221,7 +221,7 @@ class ModVersionTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
-    def test_unlisted_folder_outside_mods_is_not_gated(self):
+    def test_unlisted_folder_outside_mods_is_not_guarded(self):
         self.base_files()
         self.plugin_tree("extras/bar", "bar", "0.1.0")  # has plugin.json, not listed by the marketplace
         self.commit_base()
@@ -397,7 +397,7 @@ class ModVersionTests(unittest.TestCase):
         self.assertTrue(token(out, "alpha"), out)
 
     def test_deleted_plugin_json_fails(self):
-        # The folder stays and its plugin.json goes. The gate must not read that as a new plugin.
+        # The folder stays and its plugin.json goes. The guard must not read that as a new plugin.
         self.base_files()
         self.commit_base()
         self.put("mods/alpha/hooks/x.mjs", "export const x = 2;\n")
@@ -419,7 +419,7 @@ class ModVersionTests(unittest.TestCase):
         self.assert_clear(out, "mods/alpha")
         self.assert_flags(out, "mods/beta", "0.1.0")
 
-    def test_unlisted_mods_folder_is_still_gated(self):
+    def test_unlisted_mods_folder_is_still_guarded(self):
         self.base_files()  # the marketplace lists alpha and beta only
         self.plugin_tree("mods/gamma", "gamma", "0.1.0")
         self.commit_base()
@@ -428,7 +428,7 @@ class ModVersionTests(unittest.TestCase):
         out = self.assert_fails()
         self.assert_flags(out, "mods/gamma", "0.1.0")
 
-    def test_marketplace_source_outside_mods_is_gated(self):
+    def test_marketplace_source_outside_mods_is_guarded(self):
         self.base_files(listed=("./mods/alpha", "./mods/beta", "./extras/foo"))
         self.plugin_tree("extras/foo", "foo", "0.1.0")
         self.commit_base()

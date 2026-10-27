@@ -3,12 +3,12 @@
 ## The ruling
 
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third round by standing grant,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
 An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
-or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Try 3 of 3` covers it.
+or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Round 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
@@ -28,7 +28,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's grant for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
+| builder, round 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
@@ -64,7 +64,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
-| every other hook and gate | no model; plain code | n/a |
+| every other hook and guard | no model; plain code | n/a |
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -85,9 +85,9 @@ cannot time out, so the guard allows Opus at round 3 and the owner's grant stays
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
-**The step-up.** Guard rule `roles-third-try-steps-up` reads the `Round N of 3` or `Try N of 3` line in
+**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` or `Try N of 3` line in
 the brief. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
-word. A try 3 builder needs Opus.
+word. A round 3 builder needs Opus.
 
 **No pin, and the ceiling is an ask.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
@@ -103,13 +103,13 @@ Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because c
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role Explore (the
-class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing grant, so
+class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has a `Round 3 of 3` line. A reviewer's round 3 is no standing grant, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override
 lifts the spawn ask like any other ask (`owner-override`); the ask on a settings write under the same
 id stays outside every override. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
-write that changes the fallback stays: a write is a standing change, not a dispatch. The gate sees only
+write that changes the fallback stays: a write is a standing change, not a dispatch. The guard sees only
 Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
 `start_session` on Opus. The static scan of a Workflow script reads only the Haiku floor, and a model set
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).

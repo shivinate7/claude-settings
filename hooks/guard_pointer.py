@@ -16,7 +16,7 @@ from guard_core import (
 #
 # `<config>/lint/*`, `<config>/hooks/*` and `<config>/agents/*` are PER-FILE SYMLINKS into one
 # checkout: the one the owner's global rules file names on its `@<path>` line. That checkout's HEAD
-# decides WHICH COPY of the rules and of the gates every session on this machine runs. The owner
+# decides WHICH COPY of the rules and of the guards every session on this machine runs. The owner
 # has stated the rule: that checkout's HEAD is always `main`.
 #
 # THE POINTER LINE IS PARSED HERE RATHER THAN IMPORTED. The three other readers of that line are
@@ -41,11 +41,11 @@ from guard_core import (
 #           plain argument shaped like a file. HEAD does not move, and rule 1 governs those calls
 #           unchanged.
 #   passes  the same commands in EVERY OTHER TREE, a linked worktree of this same clone included.
-#           A worktree has its own HEAD and its own top level, so it swaps no live gate.
+#           A worktree has its own HEAD and its own top level, so it swaps no live guard.
 #
 # NOT ON THIS LIST, on purpose. `git reset --hard <commit>` and `git merge` move the commit that
 # HEAD resolves to while leaving the checkout on the SAME BRANCH, so neither swaps the branch whose
-# copy of the gates runs, and `reset --hard` is already rule 1's subject. `git branch -f` cannot
+# copy of the guards runs, and `reset --hard` is already rule 1's subject. `git branch -f` cannot
 # touch a checked-out branch, because git itself refuses it. `git worktree add` moves no HEAD in
 # this checkout at all, and it is this rule's remedy.
 #
@@ -68,7 +68,7 @@ HEAD_MOVE_SUBCOMMANDS = ("checkout", "switch")
 POINTER_HEAD_REASON = (
     "Rule (pointer checkout): this one checkout is what the owner's global rules point at, and "
     "every session on this machine runs its hooks, its lint and its agents through symlinks into "
-    "it. Moving its HEAD off main makes unreviewed work the live gate for every session, "
+    "it. Moving its HEAD off main makes unreviewed work the live guard for every session, "
     "including the sessions reviewing that work. Its HEAD stays main. "
     "Remedy: build the change in a worktree of your own. Call the EnterWorktree tool to make one "
     "on a new branch, because git refuses a worktree for a branch this checkout already holds."

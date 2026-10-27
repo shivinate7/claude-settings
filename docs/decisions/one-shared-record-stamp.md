@@ -9,7 +9,7 @@ setting that names a repo's own claim command. A behavior that only one repo nee
 becomes a config field with a generic name, or the engine drops it. A shape that no config field can state
 without naming one repo goes to the owner as a question. Do not guess a fourth format into `stamp.mjs`.
 
-Reason: a parent that holds one repo's facts goes stale when that repo changes. A shared engine also re-gates a
+Reason: a parent that holds one repo's facts goes stale when that repo changes. A shared engine also re-guards a
 tree after a rejected push, which four separate tools do not.
 
 - Read each config field (`numbering`, `cite.template`, `regenerate`) from the repo's own claim tool. Never
