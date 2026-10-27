@@ -1,0 +1,5 @@
+# Outbox: c95 step 1a lane (Stop the full CI run timing out)
+
+- c95, finding (debt candidate): on run 40542065223 (push to main, 2026-10-27), the Windows "Record stamp engine fixture suite" hung for 23 min. Its normal max is 1.5 min (n=28). PR #715 gives that step a 5 min cap, so the next hang reads red at its own step. The cause of the hang is unknown, and no step owns it yet.
+- c95, note: merge/repaired_merges.py (PR #715) counts 0 repaired merges in the last 14 and 40 days. Its rule (b) reads the subject only and needs "#N" or the branch inside a merge subject, so it is a floor: a fix commit that names a batch only by its branch, in a plain subject, is missed. Lane fixes named by lane id (for example "Merge branch 'fix118' into batch-oct27o") are not counted either, because they repair a lane before it reaches main.
+- c95, note: PR #715 adds gates-guard and gates-windows-sweep to stamp.json requiredChecks. GitHub branch protection is shiv's setting and may still list the old 11 checks.
