@@ -30,8 +30,8 @@ Risk kind: incident, per `building-guard-needs-incident`: 2026-10-26 22:58 CDT, 
 mockups. Landed 2026-10-27.
 
 Limits: the word lists catch the common forms of a keep rule and of a current-view name, not every
-paraphrase. A view name that is also a plain word of the job (Packages, for mail) is refused only
-when the orchestrator passes it with `--current`; the spawn hook does not know view names. The
+paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
+The spawn hook does not know view names. The
 `Blind lanes:` line is the orchestrator's own count, not a count of spawned lanes.
 
 Cost: one python start per Agent or Task call. It writes no file but the guard.log line of a deny.

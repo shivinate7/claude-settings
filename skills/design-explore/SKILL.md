@@ -13,10 +13,10 @@ Each lane is one designer agent: agentType `designer`, Opus (`agent-model-cap`),
 worktree (`parallelism-each-own-checkout`).
 
 - **Blind lane.** Build the brief from the template `blind-brief.md` beside this file, and from
-  nothing else. It holds the user's job in their own words, the things the job handles, the device
-  and its poses, the brand palette, and fixed House rules and Deliver text. It never names the current
-  screen, a view of today's product, its code, a screenshot, a mockup, a path or link, the spec, the
-  tokens, or a keep or match rule. The orchestrator reads the job and the data from the spec or the
+  nothing else. It holds the user's job in their own words and the things the job handles. It
+  also holds the device and its poses, the brand palette, and fixed House rules and Deliver text. It never names the current
+  screen, a view of today's product or its code. It never names a screenshot, a mockup, a path or
+  link, the spec, the tokens, or a keep or match rule. The orchestrator reads the job and the data from the spec or the
   owner's words, and writes them in plain words. A blind lane shows ideas the repo's habits would
   hide. Each designer's worktree holds the code, spec, tokens and mockups, and the guard
   `designer-scope` limits writes only, so the brief and the designer's own instruction keep it blind.
@@ -39,10 +39,10 @@ designer.
    the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`). Write each brief to `<scratchpad>/design-explore/<screen>/<screen>-<kind>-<n>.md`.
-2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder> --current <view>`,
-   with one `--current` per view name of today's product that is not a plain word of the job, and
-   `--owner-asked-none "<words>"` only when the owner asked for no blind lane. Exit 0 is clean. On
-   exit 1, rewrite each brief it names and run it again. The same check runs at each designer spawn
+2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder>`. Add one
+   `--current <view>` per view name of today's product that is not a plain word of the job. If the
+   owner asked for no blind lane, add `--owner-asked-none "<words>"`. Exit 0 is clean. On exit 1,
+   rewrite each brief it names and run it again. The same check runs at each designer spawn
    (hook `blind_brief.py`), but only this run sees the whole set and the view names.
 3. **Name the files.** Each lane writes `<screen>-<kind>-<n>.html` and
    `<screen>-<kind>-<n>-notes.md` in the design folder. `<kind>` is `blind`, `informed` or
