@@ -3850,7 +3850,7 @@ sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
    "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
-# A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path (likely risk, seen 2026-10-27):
+# A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path (likely risk):
 # `cd X; rm -r.. <relative target>` is refused, because Claude Code's own critical-path prompt cannot
 # follow the cd, and a failed cd runs the rm in the working folder. The remedy names the target
 # under the cd folder. An absolute or variable target, and an rm with no -r, pass.
