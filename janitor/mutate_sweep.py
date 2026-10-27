@@ -809,9 +809,16 @@ MUTATIONS = [
 
     ('build dirs: the reap deletes under a live session or a primary checkout',
      'agent_end_reap',
-     '    if reason is None:\n        record["buildDirs"]',
-     '    if True:\n        record["buildDirs"]',
+     '    if reason is None:\n        # A build runs from the worktree root',
+     '    if True:\n        # A build runs from the worktree root',
      'test_a_live_session_inside_the_worktree_keeps_everything',
+     "posix"),
+
+    ('build dirs: a live build run from the worktree root loses its folder',
+     'agent_end_reap',
+     'if any(d["action"] != "reap" for d in decisions):',
+     'if False:',
+     'test_a_live_build_with_its_cwd_at_the_worktree_root_keeps_every_build_folder',
      "posix"),
 
     ('build dirs: a mis-shaped buildDirs value is not validated',
