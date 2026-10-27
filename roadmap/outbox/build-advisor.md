@@ -1,3 +1,0 @@
-- Closes (2026-10-27 00:08 CDT): o13 lane C (#638) merged alone as b5969a2.
-- Batch #677 (batch-oct27h: c111 #672, c110 #675, c103 #674, c106 #673) opened on b5969a2. c109 (#676) went back to its lane: it calls guard_core names that lane C renamed (set_pass_context and set_pass_veto), so on the merged tree an override cannot lift its deny.
-- c80 + c85 dispatched as one lane (same files), brief briefs/c80-c85-override-everywhere.md.

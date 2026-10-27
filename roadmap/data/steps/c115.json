@@ -1,0 +1,9 @@
+{
+  "title": "Each repo declares how cautious sessions are, so a private solo repo is not treated like a public one",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3398,
+  "why": "Your gripe, Oct 27 00:27 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2KS9SbaQEcZ87zvqdu7NrgF): sessions act equally cautious in every repo; a degen session checked and explained a harmless copy of field names in a private repo only you work in. Each repo carries a different real risk: claude-settings is public, ios-adblock is your own privacy tool.",
+  "note": "Each repo names a caution level beside its app kind (c113's layout config), with a default by visibility: public, or private with you as the only contributor. Public (claude-settings): careful about what lands in commits, PRs and artifacts. Private solo (degen, ios-adblock and the rest): act freely on the repo's own data; guard only real secrets (tokens, cookies, keys) and anything that leaves the machine. Sessions read the level and never infer caution. Some caution comes from your own repo rules (degen's \"keep the raw DM spike out of git\"), so the compliance-check skill lists each repo's caution rules for you to prune; pruning is yours at each repo's visit, building is not. Needs no answer. Port: yes; levels are set in claude-settings, each repo names only its level. Placed after c113 (triage, Oct 27): the same per-repo config, built together.",
+  "updatedAt": "2026-10-27T05:35:00Z"
+}
