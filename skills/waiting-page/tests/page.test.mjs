@@ -219,6 +219,7 @@ test("Accept every pick sends exactly one notice for the batch", async (t) => {
   await page.click("#useAll");
   await page.waitForFunction(() => window.__sent.length >= 1);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 300))); // a second send would land in this window
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -275,4 +276,34 @@ test("a not_found on the stored thread starts a new anchored thread", async (t) 
   assert.equal(s[0].threadId, "t-old");
   assert.ok(s[1].anchor && s[1].anchor.tag === "H1", "the new thread anchors at the h1");
   assert.equal(await page.evaluate(() => localStorage.getItem("waiting.thread")), "t-new-2");
+});
+
+test("a long note with control characters is cut to 4 KiB, keeps Owners, and is plain", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await page.fill(`#n-${DECISION.id}`, "x\u0001y\u0007z" + "é".repeat(6000));
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4096, "over 4 KiB");
+  assert.match(text, /Owners: test thread/);
+  assert.doesNotMatch(text, /[\u0000-\u0008\u000b-\u001f\u007f]/);
+  assert.match(text, /x y z/);
+});
+
+test("canSendToClaude is asked before the answer write", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await page.evaluate(() => {
+    window.__order = [];
+    const real = state.comments.canSendToClaude;
+    state.comments.canSendToClaude = async () => { window.__order.push("can"); return real(); };
+    const col = state.db.collection;
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const set = y.set; y.set = async (b) => { window.__order.push("set"); return set(b); }; return y; }; return x; };
+  });
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.__order), ["can", "set"]);
 });

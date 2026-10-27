@@ -185,21 +185,29 @@ function card(it) {
 const TOLD = "Saved. Claude was told.";
 const NOT_TOLD = "Saved. No session was told; reply in the thread to wake one.";
 const MAX_BYTES = 4096;
+const MAX_NOTE = 500;
+const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+// Owners come first so a cut at the byte cap never drops them.
 function noticeText(entries) {
-  const line = entries.map((e) => e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (e.note ? " (" + e.note.replace(/\s+/g, " ").trim() + ")" : "")).join(", ");
-  const owners = [...new Set(entries.map((e) => e.owner))].join(", ");
-  let text = "Saved on the waiting page: " + line + ". Owners: " + owners + ".";
+  const owners = [...new Set(entries.map((e) => e.owner || "?"))].join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : ""); }).join(", ");
+  let text = "Saved on the waiting page. Owners: " + owners + ". Items: " + line + ".";
   const enc = new TextEncoder();
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
   return text;
 }
-// One comment per save or batch, into the viewer's stored thread. It runs in the click handler's
-// chain, after the awaited write, so the platform still sees the viewer's gesture.
+// Asked before the answer write, so only the write and the send sit between the click and the send.
+// The platform wants the send to follow the viewer's own gesture. How long that holds on a slow
+// store is unmeasured.
+async function canTell() {
+  try { return !!state.comments && (await state.comments.canSendToClaude()) === "available"; } catch (e) { return false; }
+}
+// One comment per save or batch, into the viewer's stored thread.
 // Any failure only means "no session was told"; the save stands and nothing retries.
-async function notifyClaude(entries) {
+async function notifyClaude(entries, can) {
   try {
     const cm = state.comments;
-    if (!cm || (await cm.canSendToClaude()) !== "available") return false;
+    if (!cm || !can) return false;
     const text = noticeText(entries);
     let id = null;
     try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
@@ -222,6 +230,7 @@ async function save(it, btn, st) {
   if (it.kind === "decision") body.choice = d.choice || prev.choice || ""; else body.done = true;
   if (body.choice === NONE && !body.note.trim()) { st.className = "status"; st.textContent = "Add a note saying what you want instead, then save."; const n = $("n-" + it.id); if (n) n.focus(); return; }
   btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
+  const can = await canTell();
   try {
     await state.db.collection("answers").doc(it.id).set(body);
     delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
@@ -229,8 +238,8 @@ async function save(it, btn, st) {
     btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
     return;
   }
-  st.textContent = "Saved. Telling Claude…";
-  const told = await notifyClaude([{ n: it.n, choice: body.choice, note: body.note, owner: it.owner }]);
+  st.textContent = "Saved. Telling Claude…"; $("barStatus").textContent = "Item " + it.n + ": Saved. Telling Claude…";
+  const told = await notifyClaude([{ n: it.n, choice: body.choice, note: body.note, owner: it.owner }], can);
   state.notice[it.id] = told ? TOLD : NOT_TOLD;
   // An answered card leaves the list, so the bar carries the outcome too.
   $("barStatus").textContent = "Item " + it.n + ": " + state.notice[it.id];
@@ -285,12 +294,14 @@ $("useAll").addEventListener("click", async () => {
   if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
   $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
   $("barStatus").textContent = "Saving…";
+  const can = await canTell();
   const saved = [];
   for (const it of todo) {
     try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); saved.push({ n: it.n, choice: it.pick, note: "accepted pick", owner: it.owner }); }
-    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; if (saved.length) await notifyClaude(saved); return; }
+    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; if (saved.length) await notifyClaude(saved, can); return; }
   }
-  const told = await notifyClaude(saved);
+  $("barStatus").textContent = "Saved. Telling Claude…";
+  const told = await notifyClaude(saved, can);
   $("barStatus").textContent = "Saved " + todo.length + " picks. " + (told ? "Claude was told." : "No session was told; reply in the thread to wake one.");
 });
 
