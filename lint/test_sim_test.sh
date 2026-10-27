@@ -84,8 +84,8 @@ chmod +x "$stubs"/*
 booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
 fresh() { : > "$calls"; : > "$booted_file"; rm -f "$work/topcalls" "$work/mkdir_calls" "$work/started"; }
 # run [VAR=value...]: the tool runs with a temp HOME and its own PATH; out and rc are the result.
-rc=0; out=
-run() { out=$(env HOME="$work/home" "$@" "$script" -scheme X 2>&1); rc=$?; }
+rc=0
+run() { env HOME="$work/home" "$@" "$script" -scheme X > "$work/run.out" 2>&1; rc=$?; }
 steps() { grep -E '^(simctl (boot|shutdown) |xcodebuild)' "$calls" | awk '{print ($1=="xcodebuild") ? "run" : $2}' | tr '\n' ' '; }
 has_call() { grep -Fxq "$1" "$calls"; }
 rc_is() { [[ $rc -eq $1 ]]; }
@@ -147,13 +147,13 @@ end_case "18 failed boot exits non-zero and runs no xcodebuild"
 # sig_case SIGNAL: the tool boots its own simulator and waits in xcodebuild. A signal to the whole process group
 # (as a terminal sends it) must still shut that simulator down.
 sig_case() {
-  local sig=$1 pid i
+  local sig=$1 pid
   fresh
   set -m
   env HOME="$work/home" STUB_HANG=1 "$script" -scheme X > "$work/sig.out" 2>&1 &
   pid=$!
   set +m
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  for _ in $(seq 1 20); do
     [[ -e $work/started ]] && break
     "$REAL_SLEEP" 0.5
   done
