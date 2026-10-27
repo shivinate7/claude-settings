@@ -1,0 +1,3 @@
+# c130, republish every live waiting page on a look change
+
+- New step or note (touches c105, one colour wheel for every repo): `docs/design/repo-colours.json` is a hand copy of each repo's accent (Degen's from its `tokens.json`). When a repo changes its own accent, nothing updates the table or the page's `brand`, so the waiting page keeps the old colour. Fix idea: a check that reads each repo's named source and reports drift, or let a repo name its own colour in its extras file. shiv asked "can't a repo be able to pick what colors it uses" (cmsg_01DoF7thf3iq2Srr1UsfXgh2RLR9ApAqe47Chyjxe1AwLm). Answered: it can, by setting `brand` on its page; the gap is the drift.
