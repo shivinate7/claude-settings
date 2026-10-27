@@ -40,6 +40,8 @@ from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as f
 
 # bin/shoot holds the same default; lint/test_compliance_probes.py pins the two equal.
 SHOOT_CONFIG = ".claude/shoot.json"
+# The pinned CI image of the iOS standard (skills/ios-apps). The starter writes the same name; its test pins the two equal.
+IOS_RUNNER = "macos-26"
 # Claude Code's own folders in .claude. Claude Code fixes their names, so no repo chooses them.
 CLAUDE_CODE_DIRS = {"agents", "commands", "hooks", "skills", "output-styles", "worktrees"}
 TOKEN_FILE = re.compile(r"^(design[-_]?)?tokens\.(json|css|scss|ts|js|swift)$", re.I)
