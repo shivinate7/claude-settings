@@ -21,7 +21,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 - `items/<id>`: one per waiting item. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
-  with its plain name), `title`, `owner` (the session that will read the answer: the owning session), `home` (the step, PR or
+  with its plain name), `title`, `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to), `context` (plain text, line breaks kept).
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option

@@ -1,7 +1,7 @@
 ## Standing threads
 
 This roster is the one record of who holds each standing role. The coordinator updates it in the
-same turn that a role changes hands. A new coordinator reads it first. A thread reads it right before it messages a standing role.
+same turn that a role changes hands. A new coordinator reads it first. A thread reads it right before it messages a standing thread.
 
 - Triage (gatekeeper and page publisher): "<thread title>", <thread id>, since <date and time>.
 - Build advisor (dispatcher, build order, merge queue, integration branch): "<thread title>",
