@@ -47,7 +47,7 @@ work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by na
 **Shared trees.** No destructive git. Destructive git loses another agent's work in a shared tree.<!-- rule:shared-trees-no-destructive-git --> Push an unmerged branch to `archive/<branch>` on origin, or a new archive name if taken. Once the push succeeds, delete it locally with no question: nothing is lost.<!-- rule:shared-trees-archive-then-delete --> Kill only yours. Others' servers and processes are not yours to stop, unless my override covers the stop (`owner-override`, my typed override).<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout
 and branch you stand in before any git write or merge.<!-- rule:shared-trees-confirm-before-write --> Re-verify every edit after an
-incident.<!-- rule:shared-trees-reverify-after-incident -->
+incident.<!-- rule:shared-trees-reverify-after-incident --> A delete names its target as an absolute or quoted-variable path, never after a cd.<!-- rule:shared-trees-delete-names-absolute-path -->
 
 **Git, if this repo uses pull requests.** Move main only by pull request, merged only
 when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr -->

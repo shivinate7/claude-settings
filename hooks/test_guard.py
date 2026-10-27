@@ -3850,6 +3850,55 @@ sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
    "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
+# A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path (likely risk, seen 2026-10-27):
+# `cd X; rm -r.. <relative target>` is refused, because Claude Code's own critical-path prompt cannot
+# follow the cd, and a failed cd runs the rm in the working folder. The remedy names the target
+# under the cd folder. An absolute or variable target, and an rm with no -r, pass.
+sh("rm-var: the 2026-10-27 scratch delete, a cd then a relative glob, is refused",
+   "S=/private/tmp/claude-501/w/scratchpad; cd $S; rm -rf dl/*", "deny", "rm-after-cd",
+   cwd=NOGIT, carries=('rm -rf "${S:?}"/dl/*',))
+sh("rm-var: cd and && then a relative target is refused",
+   'cd "$S" && rm -rf dl', "deny", "rm-after-cd", cwd=NOGIT, carries=('rm -rf "${S:?}"/dl',))
+sh("rm-var: a cd to a literal path then a relative target names the joined path",
+   "cd /tmp/w && rm -r out/a", "deny", "rm-after-cd", cwd=NOGIT, carries=("rm -r /tmp/w/out/a",))
+sh("rm-var: a cd, another command, then a relative target is refused",
+   "cd /tmp/w; ls; rm -rf out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd and rm in a subshell is refused",
+   "(cd /tmp/w && rm -rf out)", "deny", "rm-after-cd", cwd=NOGIT, carries=("rm -rf /tmp/w/out",))
+sh("rm-var: a cd and rm after set -e is refused",
+   "set -e; cd /tmp/w; rm -rf out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd and rm in a brace group is refused",
+   "{ cd /tmp/w; rm -Rf out; }", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a long recursive flag after a cd is refused",
+   "cd /tmp/w && rm --recursive --force out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd to a command substitution prints the DIR placeholder, guarded",
+   "cd $(mktemp -d) && rm -rf out", "deny", "rm-after-cd", cwd=NOGIT,
+   carries=('rm -rf "${DIR:?}"/out',))
+sh("rm-var: a redirect word after the rm is no target",
+   "cd /tmp/w && rm -rf out 2>&1", "deny", "rm-after-cd", cwd=NOGIT, lacks=("2>&1",))
+sh("rm-var: a cd then an absolute target passes",
+   "cd /tmp/w && rm -rf /tmp/w/out", "allow", cwd=NOGIT)
+sh("rm-var: a cd then a quoted variable target passes",
+   'cd "$S"; rm -rf "$S"/dl', "allow", cwd=NOGIT)
+sh("rm-var: the remedy form passes",
+   'S=/tmp/w; rm -rf "$S"/dl/a', "allow", cwd=NOGIT)
+sh("rm-var: a cd then an rm with no -r passes",
+   "cd /tmp/w && rm out/a.txt", "allow", cwd=NOGIT)
+sh("rm-var: a cd then rm -f with no -r passes",
+   "cd /tmp/w; rm -f out/a.txt", "allow", cwd=NOGIT)
+sh("rm-var: a relative recursive delete with no cd passes",
+   "rm -rf out", "allow", cwd=NOGIT)
+sh("rm-var: an rm inside a quoted string after a cd passes",
+   'cd /tmp/w && echo "rm -rf out"', "allow", cwd=NOGIT)
+sh("rm-var: a semicolon and rm inside a quote after a cd pass",
+   "cd /tmp/w && echo \"don't; rm -rf out\"", "allow", cwd=NOGIT)
+sh("rm-var: an rm after a comment opener on the cd line passes",
+   "cd /tmp/w # it's; rm -rf out", "allow", cwd=NOGIT)
+sh("rm-var: a hash inside a word is no comment, the delete after a cd is refused",
+   "cd /tmp/w; rm -rf fix#3", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: an apostrophe in a comment after the rm does not hide it",
+   "cd /tmp/w; rm -rf out # the driver's shape", "deny", "rm-after-cd", cwd=NOGIT)
+
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
 # False alarms: each one only reads or writes a note, so each is allowed.
@@ -6307,9 +6356,9 @@ for _name, _command in (
     ("rd of the parent, no /s", "rd .."),
     ("rmdir /q of the parent, no /s", "rmdir /q .."),
     ("rd /s /q of a sibling", "rd /s /q ..\\sibling"),
-    ("a folder named after a folder change", "cd build && rm -rf ./out"),
+    ("a folder named after a folder change, by absolute path", "cd build && rm -rf /tmp/build/out"),
     ("a folder named after pushd", "pushd build && rm -r out"),
-    ("a folder named after a change to the parent", "cd .. && rm -rf ./build"),
+    ("a folder named after a change to the parent, by absolute path", "cd .. && rm -rf /tmp/build"),
     ("a child of the working folder by absolute path", 'rm -rf "%s/build"' % _CWD),
     ("a sibling whose name starts with the working folder's name", 'rm -rf "%s2"' % _CWD),
     ("a sibling of the working folder by absolute path", 'rm -rf "%s/sibling"' % _PARENT),
@@ -9885,7 +9934,7 @@ chained_ask("ask-alone: the discard piped to tee, a command with effects, still 
 chained_ask("ask-alone: the prune piped to sh, a command with effects, still denies",
             ASK_PRUNE + " | sh", cwd=WTPRUNE)
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
-            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
+            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf /tmp/y", cwd=NOGIT)
 
 # TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
 # escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
