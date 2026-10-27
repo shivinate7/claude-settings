@@ -4,3 +4,5 @@
 - 2026-10-27 01:49 CDT: batch #680 opened with c80+c85 (#679, override reaches every gate) alone; CI running.
 
 - 2026-10-27 02:05 CDT: batch #680 red on gates; lint/test_settings_matcher.py still reads the moved judges from settings.json. Closed; c80+c85 sent back to its lane. Defect: the lane suites did not include test_settings_matcher.
+
+- 2026-10-27 03:27 CDT: #679 went green after one pointer-windows re-run (a harness IOException in install-set.test.ps1:247, a file read while still held open; flaky). Its merge was refused because main moved (#664). Batch #683 now holds #679, #681 (c105) and #682 (c100), built from main d99ba766.
