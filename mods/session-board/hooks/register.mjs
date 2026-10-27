@@ -6,6 +6,7 @@ import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
+  GUARD_PY, QUESTION_RULE, liveAgentCount, questionRefusal, trackedTaskIds, taskNotice,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -23,6 +24,7 @@ let gitNextAt = 0 // an idle beat reads git from this time on; every read moves 
 let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
+const bgTasks = new Set() // background command and workflow task ids seen to start and not yet seen to end
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -97,10 +99,55 @@ export function register(on) {
   // The host runs the permission check inside next(): the ask is answered once next() returns.
   on('tool.call', async ($, e, next) => {
     try {
-      return await next(e)
+      const result = await next(e)
+      const out = result && result.result
+      const task = e.tool === 'Bash' ? out && out.backgroundTaskId : e.tool === 'Workflow' ? out && out.taskId : undefined
+      if (typeof task === 'string') bgTasks.add(task)
+      return result
     } finally {
       try { if (tracker.toolCall(e.tool_use_id)) await soon($, flush($, false)) } catch { /* ignore */ }
     }
+  }).catch(($, e, next) => next(e))
+
+  // The question-box check: refuse AskUserQuestion while this session's agents or background
+  // tasks run. Reads the agent list once per box, on demand; no timer, no new process unless it
+  // writes a guard.log line. An unreadable list fails open and says unknown.
+  on('tool.check', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const result = await next(e)
+    if (result && result.decision === 'deny') return result
+    let agents
+    try {
+      agents = liveAgentCount(await bounded($, $.agent.list()), e.agentId)
+    } catch (err) {
+      note($, 'question box allowed, running work unknown: ' + (err && err.message))
+      await soon($, guardLog($, 'noted', 'unknown: agent list unreadable'))
+      return result
+    }
+    const reason = questionRefusal(agents, bgTasks.size)
+    if (!reason) return result
+    await soon($, guardLog($, 'deny', `agents=${agents} tasks=${bgTasks.size}`))
+    return { decision: 'deny', reason }
+  }).catch(($, e, next) => next(e)) // a failure here lets the box through
+
+  // A background task's notice reaches the session when the task ends.
+  on('session.receive', async ($, e, next) => {
+    try {
+      if (e.origin && e.origin.kind === 'task-notification') {
+        const t = taskNotice(e.text)
+        if (t && t.status !== 'running') bgTasks.delete(t.id)
+      }
+    } catch { /* observing never changes the delivery */ }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The engine's own list of work in flight, at the main loop's turn end: it replaces the tracked
+  // set, so a missed notice lasts one turn at most.
+  on('classic.Stop', async ($, e, next) => {
+    try {
+      const ids = e.agent_id ? null : trackedTaskIds(e.background_tasks)
+      if (ids) { bgTasks.clear(); for (const id of ids) bgTasks.add(id) }
+    } catch { /* keep the tracked set */ }
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'board' }, async ($, e) => {
@@ -388,6 +435,34 @@ async function openSession($, id) {
   $.ui.invalidate('ui.render')
 }
 
+// The Claude config folder and its hooks folder; config is '' when no variable names one.
+async function configFolder($) {
+  const env = { CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), USERPROFILE: await $.env.get('USERPROFILE'), HOME: await $.env.get('HOME') }
+  // A drive-letter USERPROFILE means Windows; the mod has no platform call.
+  const win = /^[A-Za-z]:[\\/]/.test(env.USERPROFILE || '')
+  const config = configDir(env, win ? 'win32' : 'posix')
+  return { config, hooks: config ? config + (win ? '\\' : '/') + 'hooks' : '', win }
+}
+
+// One guard.log line through the guard's own locked writer (GUARD_PY), so the cull and the
+// guard-log report read it. One python start per line; a failure loses the line and nothing else.
+async function guardLog($, decision, matched) {
+  try {
+    const { config, hooks, win } = await configFolder($)
+    if (!config) return note($, 'guard.log line not written: no config folder')
+    const id = await ident($)
+    let why = ''
+    for (const py of win ? ['python', 'python3'] : ['python3', 'python']) {
+      try {
+        const r = await $.process.run([py, '-I', '-B', '-c', GUARD_PY, hooks, id, decision, QUESTION_RULE, matched], { cwd: config, timeoutMs: 10_000 })
+        if (r.exitCode === 0) return
+        why = clean(String(r.stderr).trim().split('\n').pop(), 100)
+      } catch (err) { why = clean(err && err.message, 100) }
+    }
+    note($, 'guard.log line failed: ' + why)
+  } catch (err) { note($, 'guard.log line failed: ' + (err && err.message)) }
+}
+
 // Python that reuses the installed handoff hook's own path functions, so no second copy of
 // the handoff path rules lives here. argv: hooks folder, session id, mode ("plan" makes no folder).
 const HANDOFF_PY = [
@@ -402,12 +477,8 @@ async function safeStop($, args) {
   const plan = String(args ?? '').trim() === 'plan'
   const id = await ident($)
   if (!isSessionId(id)) return safeStopPlan(null, ['this session id'])
-  const env = { CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), USERPROFILE: await $.env.get('USERPROFILE'), HOME: await $.env.get('HOME') }
-  // A drive-letter USERPROFILE means Windows; the mod has no platform call.
-  const win = /^[A-Za-z]:[\\/]/.test(env.USERPROFILE || '')
-  const config = configDir(env, win ? 'win32' : 'posix')
+  const { config, hooks, win } = await configFolder($)
   if (!config) return safeStopPlan(null, ['the config folder (set CLAUDE_CONFIG_DIR, HOME, or USERPROFILE)'])
-  const hooks = config + (win ? '\\' : '/') + 'hooks'
   const why = []
   let paths = null
   for (const py of ['python3', 'python']) {

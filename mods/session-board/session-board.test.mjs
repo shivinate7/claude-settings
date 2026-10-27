@@ -1215,6 +1215,137 @@ await test('config folder: CLAUDE_CONFIG_DIR wins; a posix HOME gives HOME/.clau
   same(configDir({ HOME: '/home/u' }, 'linux'), '/home/u/.claude', 'posix HOME')
 })
 
+// ---- the question-box check: AskUserQuestion is refused while this session's own work runs
+
+// The AskUserQuestion check alone, matched on its tool (the observer's tool.check matches every tool).
+async function askBox(h, e = {}, decision = 'allow') {
+  const hook = h.hooks.find(x => x.event === 'tool.check' && x.matcher.tool === 'AskUserQuestion')
+  if (!hook) throw new Error('no AskUserQuestion check')
+  return hook.fn(h.$, { tool: 'AskUserQuestion', input: { questions: [] }, tool_use_id: 'q1', ...e }, async () => ({ decision }))
+}
+async function bashBackground(h, useId, taskId) {
+  const hook = h.hooks.find(x => x.event === 'tool.call')
+  await hook.fn(h.$, { tool: 'Bash', input: { command: 'make test', run_in_background: true }, tool_use_id: useId }, async () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: taskId } }))
+}
+const notice = (taskId, status = 'completed') => `<task-notification>\n<task-id>${taskId}</task-id>\n<status>${status}</status>\n<summary>done</summary>\n</task-notification>`
+async function receive(h, text, kind = 'task-notification') {
+  const hook = h.hooks.find(x => x.event === 'session.receive')
+  if (!hook) throw new Error('no session.receive hook')
+  return hook.fn(h.$, { origin: { kind }, text }, async e => e)
+}
+async function stopWith(h, tasks, agentId) {
+  const hook = h.hooks.find(x => x.event === 'classic.Stop')
+  if (!hook) throw new Error('no classic.Stop hook')
+  return hook.fn(h.$, { hook_event_name: 'Stop', session_id: ID, background_tasks: tasks, ...(agentId ? { agent_id: agentId } : {}) }, async () => ({}))
+}
+const PYOK = () => ({ exitCode: 0, stdout: '', stderr: '' })
+const guardLines = h => h.pythonCalls.filter(a => a.some(x => String(x).includes('guard_core')))
+
+await test('question box: a live agent refuses it, and the refusal says what to do instead', async () => {
+  const h = await start({ liveAgents: [{ id: 'ag1', type: 'Explore', status: 'running', description: 'x' }], python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  const r = await askBox(h)
+  same(r && r.decision, 'deny', 'verdict')
+  assert.match(r.reason, /1 agent/, 'the reason counts the agents')
+  assert.match(r.reason, /reply/i, 'the reason says to ask in the reply')
+  assert.match(r.reason, /waiting page/i, 'the reason names the waiting page')
+  assert.match(r.reason, /keep working/i, 'the reason says to keep working')
+  await settle()
+  same(guardLines(h).length, 1, 'one guard.log line per refusal')
+  assert.ok(guardLines(h)[0].includes('deny'), 'the guard.log line is a deny')
+})
+
+await test('question box: a live background command refuses it, until its notice arrives', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  const r = await askBox(h)
+  same(r && r.decision, 'deny', 'verdict while it runs')
+  assert.match(r.reason, /1 background task/, 'the reason counts the tasks')
+  same((await receive(h, notice('task1'))).text, notice('task1'), 'the notice passes on unchanged')
+  same((await askBox(h)).decision, 'allow', 'verdict after its notice')
+})
+
+await test('question box: the turn-end list of background work replaces what the check tracked', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  await stopWith(h, [])
+  same((await askBox(h)).decision, 'allow', 'an empty list clears a missed notice')
+  await stopWith(h, [{ id: 'task9', type: 'shell', status: 'running', description: 'x' }])
+  same((await askBox(h)).decision, 'deny', 'a listed shell task refuses')
+  await stopWith(h, [], 'sub1')
+  same((await askBox(h)).decision, 'deny', "an agent's turn end leaves the session's list alone")
+})
+
+await test('question box: a background workflow refuses it, from its start and from the turn-end list', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  const hook = h.hooks.find(x => x.event === 'tool.call')
+  await hook.fn(h.$, { tool: 'Workflow', input: {}, tool_use_id: 'w1' }, async () => ({ result: { status: 'async_launched', taskId: 'wf1' } }))
+  same((await askBox(h)).decision, 'deny', 'verdict after its start')
+  await receive(h, notice('wf1'))
+  same((await askBox(h)).decision, 'allow', 'verdict after its notice')
+  await stopWith(h, [{ id: 'wf2', type: 'workflow', status: 'running', description: 'x' }, { id: 'm1', type: 'monitor', status: 'running', description: 'x' }])
+  const r = await askBox(h)
+  same(r.decision, 'deny', 'a listed workflow refuses')
+  assert.match(r.reason, /1 background task\b/, 'a monitor does not count')
+})
+
+await test('question box: nothing running lets it through', async () => {
+  const h = await start({ liveAgents: [{ id: 'ag1', type: 'Explore', status: 'completed', description: 'x' }, { id: 'ag2', type: 'x', status: 'idle', description: 'x' }] })
+  await fire(h, 'session.start', {})
+  same((await askBox(h)).decision, 'allow', 'ended and idle agents do not count')
+  same(h.pythonCalls.length, 0, 'an allowed box starts no process')
+})
+
+await test('question box: the asking agent does not count itself', async () => {
+  const h = await start({ liveAgents: [{ id: 'ag1', type: 'x', status: 'running', description: 'x' }] })
+  await fire(h, 'session.start', {})
+  same((await askBox(h, { agentId: 'ag1' })).decision, 'allow', 'its own loop')
+})
+
+await test('question box: an unreadable agent list fails open and says unknown', async () => {
+  const h = await start({ agentListThrow: true, python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  same((await askBox(h)).decision, 'allow', 'verdict')
+  await settle()
+  assert.ok(h.logs.some(l => /unknown/.test(l.text)), 'the debug log says unknown')
+  same(guardLines(h).length, 1, 'one guard.log line')
+  assert.ok(guardLines(h)[0].includes('noted') && guardLines(h)[0].some(x => /unknown/.test(String(x))), 'it is a noted unknown line')
+})
+
+await test('question box: a hung agent list fails open within its read budget', async () => {
+  const h = await start({ fake: false })
+  await fire(h, 'session.start', {})
+  h.$.agent.list = () => new Promise(() => {})
+  same(await within(lib.READ_BUDGET_MS + 1500, askBox(h)), 'done', 'the check returns')
+})
+
+await test('question box: an earlier deny stands and costs no read', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  let reads = 0
+  h.$.agent.list = async () => { reads++; return [] }
+  same((await askBox(h, {}, 'deny')).decision, 'deny', 'verdict')
+  same(reads, 0, 'no agent read')
+})
+
+await test("question box: GUARD_PY writes one guard.log line through the real guard_core writer", async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const hooks = fileURLToPath(new URL('../../hooks', import.meta.url))
+  const cfg = mkdtempSync(join(tmpdir(), 'sb-guardlog-'))
+  try {
+    const r = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-B', '-c', lib.GUARD_PY, hooks, ID, 'deny', lib.QUESTION_RULE, 'agents=1 tasks=0'], { cwd: cfg, env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, encoding: 'utf8' })
+    same(r.status, 0, 'python exit: ' + r.stderr)
+    const fields = readFileSync(join(cfg, 'guard.log'), 'utf8').trim().split('\t')
+    same(fields.slice(1), ['AskUserQuestion', 'deny', 'question-box-while-work', 'agents=1 tasks=0', ID], 'guard.log fields after the time')
+  } finally { rmSync(cfg, { recursive: true, force: true }) }
+})
+
 const fails = results.filter(r => r.startsWith('FAIL')).length
 console.log(results.join('\n'))
 console.log(`session-board pins: ${results.length - fails} pass, ${fails} fail of ${results.length}`)

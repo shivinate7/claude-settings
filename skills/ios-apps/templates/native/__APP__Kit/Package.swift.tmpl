@@ -1,0 +1,15 @@
+// swift-tools-version: 6.2
+// The app logic. Its tests run with `make kit-test`, in seconds, with no simulator.
+import PackageDescription
+
+let package = Package(
+    name: "__APP__Kit",
+    platforms: [.iOS(.v26), .macOS(.v26)],
+    products: [
+        .library(name: "__APP__Kit", targets: ["__APP__Kit"]),
+    ],
+    targets: [
+        .target(name: "__APP__Kit"),
+        .testTarget(name: "__APP__KitTests", dependencies: ["__APP__Kit"]),
+    ]
+)

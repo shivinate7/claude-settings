@@ -1,0 +1,65 @@
+# The fast checks of the iOS standard (claude-settings skills/ios-apps): the token check, the Kit
+# package tests and a compile of every app, on the pinned macOS image. The slow UI tests run once
+# per batch on the Mac (`make native-check`), never here. Drafts and docs-only changes skip the Mac job.
+name: ios
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  # Draft state is in the group, so a skipped draft run never cancels the real run on the same ref.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-draft{1}', github.ref, github.event.pull_request.draft) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  scope:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {contents: read}
+    outputs:
+      macos: ${{ steps.d.outputs.macos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: {fetch-depth: 0, persist-credentials: false}
+      - id: d
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          macos=true                                   # fail safe: run
+          if [ "$EVENT" = pull_request ]; then
+            if files=$(git diff --no-renames --name-only "$BASE" HEAD 2>/dev/null) && [ -n "$files" ]; then
+              grep -qvE '\.md$' <<< "$files" || macos=false   # docs only: every changed path is *.md
+            fi
+          fi
+          echo "macos=$macos" >> "$GITHUB_OUTPUT"
+  macos:
+    needs: scope
+    if: ${{ needs.scope.outputs.macos == 'true' }}
+    runs-on: __RUNNER__
+    timeout-minutes: 20
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: {persist-credentials: false}
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Tokens.swift matches tokens.json
+        run: make tokens-check
+      - name: Kit package tests
+        run: make kit-test
+      - name: Compile the app
+        run: make app-build
+  all-jobs-passed:
+    needs: [scope, macos]
+    if: ${{ always() && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # macos may be skipped only when scope ruled it out (docs-only change); then judge scope alone.
+      - uses: shivinate7/claude-settings/actions/all-jobs-passed@e305bdbcdb540ee20ba5104cd1a7ac1d9ebb27b7  # claude-settings main 2026-10-27, "Merge pull request #652 from shivinate7/batch-oct27a" (no tags)
+        with:
+          needs: ${{ needs.scope.outputs.macos == 'true' && toJSON(needs) || format('{{"scope":{0}}}', toJSON(needs.scope)) }}
