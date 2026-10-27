@@ -439,6 +439,8 @@ NAMES_DROPPED_ITEM = (  # (c) a dropped item is said
 )
 DONE_RESULT_LINE = "> **Done**\n> BUILT: the judge clause, commit abc1234, tests pass.\n"  # (d)
 
+VERDICT_OUTSIDE_DONE = "CI is green on the head."  # (e) a reported verdict outside Done
+
 
 def run_limits_reply(label, reply):
     run = run_hook(reply, answer=OK_ANSWER)
@@ -471,6 +473,12 @@ def case_limits_done_result_line_is_not_narration():
     sentences = run_limits_reply("Done result line", DONE_RESULT_LINE)
     check("limits, Done result line: a sentence says a result line such as tests pass in Done is not narration",
           has_pin(sentences, ("result",), ("done",), ("tests pass",), ("not narration", "never flag")), sentences)
+
+
+def case_limits_verdict_outside_done_is_not_narration():
+    sentences = run_limits_reply("verdict outside Done", VERDICT_OUTSIDE_DONE)
+    check("limits, verdict outside Done: a sentence says a reported result or verdict is not narration",
+          has_pin(sentences, ("result",), ("verdict",), ("anywhere",), ("not narration", "never flag")), sentences)
 
 
 # --------------------------------------------------------------------------- case 6
@@ -1156,6 +1164,7 @@ CASES = (
     case_limits_blocked_work_prompt_passes_it,
     case_limits_dropped_item_prompt_passes_it,
     case_limits_done_result_line_is_not_narration,
+    case_limits_verdict_outside_done_is_not_narration,
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_gate_is_not,
     table_sampling,

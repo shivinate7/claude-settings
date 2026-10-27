@@ -84,7 +84,9 @@ INSTRUCTIONS = (
     "such as \"staying under the 15-line cap\" or \"rule X holds\". "
     "Never flag a reply that says a limit blocked the work or changed the plan. "
     "Never flag a reply that names a skipped step or a dropped item. "
-    "A result line such as \"tests pass\" in Done is a result, not narration; never flag it. "
+    "A result or verdict the reply reports, anywhere in the reply, such as \"tests pass\" in Done, \"CI green\", "
+    "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
+    "Flag only a limit or rule named as a note on the session's own conduct. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )

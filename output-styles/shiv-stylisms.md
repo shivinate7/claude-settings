@@ -12,7 +12,7 @@ Short and plain are one goal. Never trade one for the other.
 
 - Lead with the result. Give no preamble.<!-- rule:output-start-with-point -->
 - Cut narration and recaps.<!-- rule:style-cut-narration -->
-- Keep to a limit or rule silently. Name it only when it blocks the work or changes the plan. A
+- Keep to a limit or rule silently. When it blocks the work or changes the plan, name it. A
   skipped step or dropped item is still said.<!-- rule:style-limits-kept-silently -->
 - Once an objective is underway, assume nobody reads until the user returns. A turn that only
   tracks running work gets one line, or none.<!-- rule:output-tracking-turn-one-line -->
