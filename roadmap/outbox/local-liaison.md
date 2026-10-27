@@ -1,1 +1,0 @@
-- c29 (decision watch runs on the Mac) and c58 (mods update themselves): both Mac live checks passed Oct 27 11:35 CDT; details in each step's note. c58 can close if Windows needs no check of its own (its note says Windows was updating Oct 26). c29 still owes its Windows live check, which a local Windows session must run.
