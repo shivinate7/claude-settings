@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -153,6 +153,22 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
         "$d"
     fi
+  fi
+fi
+
+# The repo's caution level, once per session: its facts and expected acts, so the session reads them and
+# never infers them. lint/layout.py caution is the one home (decision repo-kind-and-caution). A read that
+# cannot run is reported as unknown, never as a level. One python start, no file written.
+if [ -n "$d" ] && [ -f "$d/lint/layout.py" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    caution_text=$(python3 "$d/lint/layout.py" caution "$toplevel" 2>/dev/null) || caution_text=""
+  else
+    caution_text=""
+  fi
+  if [ -n "$caution_text" ]; then
+    printf '%s\n' "$caution_text" | sed 's/^/repo /'
+  else
+    printf 'repo caution: unknown, the level could not be read\n'
   fi
 fi
 
