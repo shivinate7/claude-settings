@@ -5,5 +5,5 @@
   "order": 103.395,
   "why": "Your gripe, Oct 26 (waiting page): \"would also prefer if there was a way that submitting questions resulted in a reaction\"; today you type \"submitted\" by hand.",
   "note": "Merged Oct 27 (PR 662 (a save on the waiting page sends a comment to Claude), head 0994c91), reviewed clear in 3 Sonnet rounds, 23 of 23 page tests green. How it works: after the answers write, the page calls comments.sendToClaude when canSendToClaude says available; that wakes each session watching the page, and the owning session routes its answers and replies in the thread. A failed send keeps the save and says no session was told. To turn it on, each live waiting page must be republished with the db and comments capabilities; a db-only page keeps working and wakes no one. Unmeasured: whether the platform's gesture window survives the store write; no run on a real page yet. Notes, not debts: a hung send leaves Accept every pick dead until reload; a card Save during a batch can send twice. Port: yes, through the skill.",
-  "updatedAt": "2026-10-27T03:40:00Z"
+  "updatedAt": "2026-10-27T03:45:00Z"
 }
