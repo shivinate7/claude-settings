@@ -940,7 +940,7 @@ const STAGE = {};
 function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
-  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off");
+  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off"); FITS.forEach((x) => x.fit()); // a frame fitted while hidden has no width; fit now, not at a later resize callback
   $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
