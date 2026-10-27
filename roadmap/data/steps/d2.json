@@ -1,10 +1,10 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 15, b): Opus for the design reviewer, with d1. Built in d1's lane, draft PR 625 (designer and design reviewer on Opus), head 072a067: agents/design-reviewer.md gives a verdict per screen at each size and theme against the mockup and the design rules. It runs at design-review's compare step, after the blind list, so blind reviewers A and B stay agentType reviewer and never see the spec.",
+  "note": "Ruling, Oct 26 (shiv, page item 15, b): Opus for the design reviewer, with d1. Built in d1's lane, PR 625 (designer and design reviewer on Opus), merged to main Oct 27: agents/design-reviewer.md gives a verdict per screen at each size and theme against the mockup and the design rules. It runs at design-review's compare step, after the blind list, so blind reviewers A and B stay agentType reviewer and never see the spec.",
   "order": 220,
   "phase": "design",
-  "status": "doing",
+  "status": "done",
   "title": "Add a design-reviewer agent",
-  "updatedAt": "2026-10-26T19:40:00Z",
+  "updatedAt": "2026-10-27T00:20:00Z",
   "why": "Opus judges screenshots instead of Haiku. Design-review gates every screen change, solo mode too.",
   "ask": "Brief sits in d1 (\"d1 and d2: a designer agent and a design-reviewer agent, both on Opus\"), briefs/d1-d2-designer-and-design-reviewer.md."
 }
