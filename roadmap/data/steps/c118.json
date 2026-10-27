@@ -1,0 +1,9 @@
+{
+  "title": "A decision always reaches a pick you can click: the question box, or the waiting page while work runs",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3381,
+  "why": "Your report, Oct 27 01:08 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2GRNiefnBpdPZFSr1xudMLJ, screenshot), seen for months: a session puts an A-or-B pick (degen's Faves import: stack a save's files or not) inside its end-of-turn report under Input Needed, with no question box.",
+  "note": "Cause, two parts (checked on claude-settings main 92bb864). (1) Since Oct 27 this is partly by design: c84 and c86 refuse the question box while the session's own agents or background commands run (the Faves copy was running), and the rule questions-go-to-owner sends the question to the reply and the waiting page instead. Whether degen's waiting page got this item is unknown. (2) The months before: the report format has an Input Needed label, and nothing checks that a pick with options leaves the report; the model writes it as text. The grey bar on the screenshot is the report's quoted block, not a hook. Fix: a Stop check that reads Input Needed; a pick with options passes only if the same turn opened the question box (nothing running) or wrote the item to the repo's waiting page (work running), and its reply links the page. Red first on the screenshot's report. Needs no answer. Port: yes, the check installs in every repo's sessions. Placed ahead of c117 (triage, Oct 27): a pick lost in a report stalls the work until you notice it.",
+  "updatedAt": "2026-10-27T06:15:00Z"
+}
