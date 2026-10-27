@@ -1166,37 +1166,63 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-def lane_tips(wt, base_ref, sha):
+def read_lanes(wt, base_ref, sha):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
     merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
-    undoes it, so an odd chain is a revert. Read before the merge.
-    A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
-    try:
-        c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
+    undoes it, so an odd chain is a revert. A read that fails raises."""
+    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
+    if c:
+        raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
+    undone, took = {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in
+    for rec in out.split("\0"):
+        parts = rec.strip().split("\x01", 2)
+        if len(parts) != 3:
+            continue
+        h, parents, body = parts
+        for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
+            undone[r] = h
+        for t in parents.split()[1:]:
+            took.setdefault(t, []).append(h)
+    def reverted(h):
+        n, seen = 0, set()
+        while h in undone and h not in seen:
+            seen.add(h)
+            h, n = undone[h], n + 1
+        return n % 2 == 1
+    tips = []
+    for t in took:
+        c, out = git(wt, "merge-base", "--is-ancestor", t, base_ref)
+        if c not in (0, 1):  # 1 is "not an ancestor"; any other code is a failed read
+            raise ValueError(f"git merge-base failed on {t[:9]}: " + (out.splitlines() or ["?"])[-1])
         if c:
-            raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
-        undone, took = {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in
-        for rec in out.split("\0"):
-            parts = rec.strip().split("\x01", 2)
-            if len(parts) != 3:
-                continue
-            h, parents, body = parts
-            for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
-                undone[r] = h
-            for t in parents.split()[1:]:
-                took.setdefault(t, []).append(h)
-        def reverted(h):
-            n, seen = 0, set()
-            while h in undone and h not in seen:
-                seen.add(h)
-                h, n = undone[h], n + 1
-            return n % 2 == 1
-        tips = [t for t in took if git(wt, "merge-base", "--is-ancestor", t, base_ref)[0]]
-        return tips, {t for t in tips if all(reverted(h) for h in took[t])}
+            tips.append(t)
+    return tips, {t for t in tips if all(reverted(h) for h in took[t])}
+
+def lane_tips(wt, base_ref, sha):
+    """read_lanes, read before the merge. A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
+    try:
+        return read_lanes(wt, base_ref, sha)
     except Exception as e:
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return [], set()
+
+def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
+    """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
+    the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
+    is claimed. A read that fails refuses too, unless the owner passed --undo-check-unknown-ok "<reason>"."""
+    try:
+        _, dropped = read_lanes(wt, base_ref, sha)
+    except Exception as e:
+        if unknown_ok.strip():
+            say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). Owner override, reason: {unknown_ok.strip()}")
+            return
+        raise Stop(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
+                   "If the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+    if dropped:
+        raise Dropped("the batch drops a lane by a revert of its merge (lane tip " + ", ".join(sorted(t[:9] for t in dropped))
+                      + "). Main would hold the revert, and the lane would lose its files when it merges main.\n"
+                      "Instead, rebuild the batch branch from main without the lane, then run again.")
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
@@ -1525,6 +1551,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
+            refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             current = holds_base(wt, f"origin/{base}", info["head"])
             current = current and ("BEHIND: " if "does not hold" in current else "UNKNOWN: ") + current + " --confirm refuses it."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
@@ -1570,6 +1597,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
+        refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok)
         stale = holds_base(wt, base_ref, info["head"])
         if stale:
             raise Stop(stale + " This run claimed nothing.")

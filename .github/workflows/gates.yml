@@ -261,6 +261,9 @@ jobs:
       - name: Layout fixture suite
         run: python3 lint/test_layout.py
 
+      - name: Label once fixture suite
+        run: python3 lint/test_label_once.py
+
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 

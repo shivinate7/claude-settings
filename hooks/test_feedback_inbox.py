@@ -16,53 +16,19 @@ Seams.
 Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A UserPromptSubmit
   hook. Stdin is one JSON object: hook_event_name, session_id, prompt, cwd. Stdout is one
   "Local time: ..." line. Exit 0. A write failure adds one stdout line; see below.
-  - While closed, a prompt whose first word is `fb` or `fb:` opens capture, and the opening prompt
-    is captured. Near-misses of the close form open nothing: `fb: done`, `fb  done` (two spaces),
-    a tab in place of the space in `fb done`, and `fb - done`. Plain `fb done` opens nothing.
-  - While closed, a prompt that starts with `fb done` or `fb: done` opens nothing, even with more
-    text after it (`fb done, more text`). That text is a new message to the session, not feedback.
-  - A prompt that opens with `fb` and ends with a line `fb done` saves the note and closes capture
-    in that same prompt: no open marker remains, and the next prompt is not saved.
-  - While open, a prompt that starts with `fb done` or `fb: done` closes capture and is not
-    captured, and neither is any text after those words. Surrounding
-    whitespace, trailing punctuation and letter case do not matter: `fb done.`, `FB done`,
-    `fb done now` and `fb done, also we should ...` all close. `fb  done` (two spaces) closes too.
-    `fb - done` does not close.
-  - While open, every owner prompt is captured verbatim, including `x fb` and `fbi ...`. Neither
-    closes capture.
-  - While closed, only the opener is captured; every other prompt is dropped.
+  - Every owner prompt is captured verbatim, in order. No word opens or closes capture: `fb`,
+    `fb:` and `fb done` are plain text.
   - A notice is never captured: a prompt that starts with `<task-notification>` or
-    `<system-reminder>` (shared_names.MACHINE_TAGS). A notice is not judged, does not close
-    capture, and is not an owner message. A tag quoted mid-message is owner text.
-  - Quiet time: an open capture closes when the last captured owner message is more than 10
-    minutes old. The prompt after that gap is not captured, and makes no judge call. The gap runs
-    from the last captured message, not from the opener. A fb opener after the gap opens again.
-    LOCAL_TIME_NOW (env, an ISO-8601 instant with an offset, such as 2026-10-14T18:00:00+00:00)
-    replaces the hook's clock when set: it drives the Local time line, the header stamp and the
-    gap. Tests set it. Nothing sleeps.
-  - Judge: every owner prompt is saved first. While open, each owner prompt that is not a close
-    form and not a notice is judged by the detached child hooks/feedback_judge.py, which the hook
-    starts and does not wait for. The child calls decision_watch.invoke_model with model
-    claude-sonnet-5-5 (the Sonnet row in decisions/agent-model-cap.md) and shape
-    {"feedback": (True, False)}. {"feedback": false} appends a note item,
-    `- fb-auto-<time> [note] -> judged not feedback`, under that message and closes capture, but
-    only while that message is still the last captured one. {"feedback": true}, a timeout, a
-    non-zero exit and an answer outside the shape change nothing. The opener, the close forms and
-    notices make no judge call.
-  - Seam: FEEDBACK_JUDGE_INLINE=1 makes the hook run the child in the foreground and wait for it to
-    exit. Tests set it. Without it the child runs detached, and the hook returns first. The child
-    inherits the hook's environment (PYTHONPATH and FB_JUDGE_* for the stub).
-  - While open, a lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD
-    (the replacement character) in its place, or stdout carries a line that says `not saved`.
-    Never silent. Capture stays open, and the inbox stays strict UTF-8.
-  - State is per session_id and survives across runs. Another session's prompts are never captured.
-  - `--agent` (a SubagentStart payload) prints the same hookSpecificOutput JSON and never opens,
-    closes or captures.
+    `<system-reminder>` (shared_names.MACHINE_TAGS). A tag quoted mid-message is owner text.
+  - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
+    replacement character) in its place, or stdout carries a line that says `not saved`. Never
+    silent. The inbox stays strict UTF-8.
+  - State is per session_id. Another session's prompts are never captured.
+  - `--agent` (a SubagentStart payload) prints the hookSpecificOutput JSON and never captures.
   - Fail open: empty stdin, non-JSON stdin, or a payload with no session_id gives exit 0, one
     Central line, and no file written.
   - Write failure: when the inbox cannot be written (a directory at its path, for example), stdout
-    keeps the Local time line and adds one line that contains `not saved`. The message is not
-    captured. The session jots it by hand. Exit 0.
+    keeps the Local time line and adds one line that contains `not saved`. Exit 0.
 
 Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 
@@ -88,10 +54,16 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd. It reads the inbox and the
   handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md. Exit 0 in every case. Stdout is one JSON
   object or nothing.
-  - stop_hook_active true: exit 0, nothing on stdout, at once.
+  - Bursts. A turn's messages are the ones captured since the last gate run. They are a burst when
+    they are two or more, or one message with three or more non-blank lines or two or more bullet
+    lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items. A lone message of
+    one or two plain lines never blocks, in any turn. A burst message with no items keeps blocking
+    at later turn ends until it is jotted. The gate keeps its turn state beside the inbox, in
+    <session_id>.inbox.turns. With no state file, every captured message counts as this turn's.
+  - stop_hook_active true: exit 0, nothing on stdout. It still counts the turn's messages.
   - No inbox, or an empty inbox: nothing on stdout.
   - A block is {"decision": "block", "reason": ...}. The reason names each offending id, or the
-    message by its Central stamp or the start of its text. Offences: a captured message with no
+    message by its Central stamp or the start of its text. Offences: a burst message with no
     items; an item with no kind, an unknown kind, or no home; an open standing item whose id is
     not in the handoff as a whole token. A missing handoff file means every open id is missing.
   - Tracked homes (decision owner-feedback-inbox, "Kinds and homes"). A ruling or task item, open
@@ -112,8 +84,6 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
-  - While capture is open, stdout carries "systemMessage" (the universal hook field) naming
-    `fb done`. It rides on a pass and on a block. While capture is closed, there is no systemMessage.
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -121,15 +91,9 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
   - open ids (ruling, task, standing) in the inbox:
     " Open feedback items: <ids>. Keep each standing item in the handoff, and give each ruling
     and task its tracked home: a decision record or rule, or the repo's todo or debt store."
-  - the open marker <session>.inbox.open exists: " Feedback capture is still open: the owner has not
-    sent `fb done`."
-  - both, items first. Neither: the message is unchanged. An unreadable inbox gives no note, one
-    stderr line, and the message still prints.
-  - A malformed item line is never listed as an id. The other ids and the capture line still print.
-
-Readings taken here, where the record says "every owner message between the two":
-  the opening prompt is captured; `x fb` and `fbi ...` are captured while open; the gate's jotting
-  checks apply to a closed inbox too, because those messages were still captured.
+  - None: the message is unchanged. An unreadable inbox gives no note, one stderr line, and the
+    message still prints.
+  - A malformed item line is never listed as an id. The other ids still print.
 
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
@@ -140,9 +104,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import uuid
-from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -151,7 +112,6 @@ GATE_PATH = os.environ.get("FEEDBACK_GATE_UNDER_TEST") or os.path.join(HERE, "fe
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
 ROOT = tempfile.mkdtemp(prefix="feedback_inbox_cases_")
-JUDGE_STUB_DIR = os.path.join(ROOT, "judge-stub")
 FAILED = []
 RED_CASES = []
 CASE_COUNT = [0]
@@ -173,12 +133,6 @@ SCANNER = (
     "Unicode: → and ✓ and café"
 )
 BLOCK_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
-JUDGE_MODEL = "claude-sonnet-5-5"  # the Sonnet id in the model table of decisions/agent-model-cap.md
-CLOCK_START = datetime(2026, 10, 14, 18, 0, tzinfo=timezone.utc)  # 13:00 CDT, far from a DST edge
-JUDGE_PATH = os.path.join(HERE, "feedback_judge.py")  # the detached judge child
-SLOW = "2"  # seconds the stub judge takes, in the cases that read the child's outcome
-NOTE_ITEM = re.compile(r"- fb-auto-\S+ \[note\] -> judged not feedback")
-
 JOTTED_ITEMS = (
     "- fb-0958-1 [ruling] -> decisions/a-ruling.md",
     "- fb-0958-2 [task] -> debts/a-task.md",
@@ -188,63 +142,6 @@ JOTTED_ITEMS = (
 )
 JOTTED_HANDOFF = "# Handoff\n- fb-0958-5 standing\n"
 
-
-# Judge seam. Every run of local_time.py and of feedback_judge.py loads this sitecustomize first
-# (PYTHONPATH, inherited by the detached child). It wraps subprocess.run and answers only calls
-# whose program is `claude`. The real invoke_model runs on top of it, so its argv (--model) and its
-# parse are exercised. After FB_JUDGE_DELAY seconds (default 0) it records the call, with the
-# script that made it, in the case's judge-calls.jsonl, and then answers. FB_JUDGE_ANSWER picks
-# the answer: still (default), not, timeout, exit1 or bad-shape. A loaded file says the stub ran.
-# A zero-call check counts only with a live call elsewhere in the same case.
-JUDGE_STUB_SOURCE = r'''
-import json
-import os
-import subprocess
-import sys
-import time
-
-_real_run = subprocess.run
-
-
-def _is_claude(argv):
-    if not isinstance(argv, (list, tuple)) or not argv:
-        return False
-    return os.path.basename(str(argv[0])).lower() in ("claude", "claude.exe", "claude.cmd")
-
-
-def _fake_run(argv, **kwargs):
-    if not _is_claude(argv):
-        return _real_run(argv, **kwargs)
-    stdin = kwargs.get("input")
-    if isinstance(stdin, bytes):
-        stdin = stdin.decode("utf-8", "replace")
-    time.sleep(float(os.environ.get("FB_JUDGE_DELAY") or 0))  # a real judge answers late
-    record = {"argv": list(argv), "prompt": stdin, "timeout": kwargs.get("timeout"),
-              "script": os.path.basename(sys.argv[0])}
-    with open(os.environ["FB_JUDGE_RECORD"], "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
-    answer = os.environ.get("FB_JUDGE_ANSWER", "still")
-    if answer == "timeout":
-        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
-    if answer == "exit1":
-        return subprocess.CompletedProcess(argv, 1, b"", b"stub judge exited 1")
-    if answer == "bad-shape":
-        text = json.dumps({"feedback": "maybe"})
-    else:
-        text = json.dumps({"feedback": answer != "not"})
-    envelope = json.dumps({"result": text})
-    return subprocess.CompletedProcess(argv, 0, envelope.encode("utf-8"), b"")
-
-
-with open(os.environ["FB_JUDGE_LOADED"], "w", encoding="utf-8") as f:
-    f.write("loaded")
-subprocess.run = _fake_run
-'''
-
-
-def install_judge_stub():
-    """Writes the judge stub into this run's scratch folder. Never into the repo."""
-    write_file(os.path.join(JUDGE_STUB_DIR, "sitecustomize.py"), JUDGE_STUB_SOURCE)
 
 
 def check(name, cond, detail=""):
@@ -258,8 +155,8 @@ def check(name, cond, detail=""):
 # --------------------------------------------------------------------------- harness helpers
 
 class Proc:
-    def __init__(self, code, out, err, loaded=None):
-        self.code, self.out, self.err, self.loaded = code, out, err, loaded  # loaded: judge stub ran
+    def __init__(self, code, out, err):
+        self.code, self.out, self.err = code, out, err
 
     def desc(self):
         return "rc=%s stdout=%r stderr=%r" % (self.code, self.out[-300:], self.err[-300:])
@@ -273,40 +170,21 @@ def new_cfg():
     return cfg
 
 
-JUDGE_ENV = ("FB_JUDGE_ANSWER", "FB_JUDGE_DELAY", "FB_JUDGE_RECORD", "FB_JUDGE_LOADED",
-             "LOCAL_TIME_NOW", "FEEDBACK_JUDGE_INLINE")
-
-
-def run(path, raw, cfg, args=(), judge="still", now=None, inline=True, delay="0"):
-    """Runs one hook script, or the judge child, the way the harness does. Returns a Proc. The hook
-    and the child load the judge stub. `judge` picks its answer, `delay` is its latency in seconds,
-    `now` (an ISO-8601 instant) is the hook's clock through LOCAL_TIME_NOW, and `inline` sets
-    FEEDBACK_JUDGE_INLINE=1, so the hook waits for the child."""
+def run(path, raw, cfg, args=()):
+    """Runs one hook script the way the harness does. Returns a Proc."""
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
-    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", *JUDGE_ENV):
+    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "LOCAL_TIME_NOW"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
-    loaded = None
-    if path in (LT_PATH, JUDGE_PATH):
-        loaded = os.path.join(os.path.dirname(cfg), "loaded-%s" % uuid.uuid4().hex)
-        inherited = [os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else []
-        env["PYTHONPATH"] = os.pathsep.join([JUDGE_STUB_DIR] + inherited)
-        env.update(FB_JUDGE_ANSWER=judge, FB_JUDGE_DELAY=delay, FB_JUDGE_RECORD=judge_log(cfg),
-                   FB_JUDGE_LOADED=loaded)
-        if inline:
-            env["FEEDBACK_JUDGE_INLINE"] = "1"
-        if now:
-            env["LOCAL_TIME_NOW"] = now
     try:
         cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=30)
     except subprocess.TimeoutExpired:
         return Proc(-1, "", "timed out after 30 s")
     return Proc(cp.returncode, cp.stdout.decode("utf-8", "replace"),
-                cp.stderr.decode("utf-8", "replace"),
-                loaded=os.path.exists(loaded) if loaded else None)
+                cp.stderr.decode("utf-8", "replace"))
 
 
 def payload(obj):
@@ -314,51 +192,9 @@ def payload(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
-def capture(cfg, sid, prompt, now=None, judge="still", inline=True, delay="0"):
+def capture(cfg, sid, prompt):
     return run(LT_PATH, payload({"hook_event_name": "UserPromptSubmit", "session_id": sid,
-                                 "prompt": prompt, "cwd": cfg}), cfg, judge=judge, now=now,
-               inline=inline, delay=delay)
-
-
-def judge_log(cfg):
-    return os.path.join(os.path.dirname(cfg), "judge-calls.jsonl")
-
-
-def judge_calls(cfg):
-    """Every call the judge stub recorded in this case, oldest first."""
-    path = judge_log(cfg)
-    if not os.path.exists(path):
-        return []
-    return [json.loads(line) for line in read_file(path).splitlines() if line.strip()]
-
-
-def model_of(call):
-    argv = call.get("argv") or []
-    return argv[argv.index("--model") + 1] if "--model" in argv[:-1] else None
-
-
-def block_items(cfg, sid, text):
-    """The item lines under the block whose verbatim text is `text`, or None when there is no such block."""
-    for block in read_blocks(read_or_empty(inbox_of(cfg, sid))):
-        if block["text"] == text:
-            return block["items"]
-    return None
-
-
-def judged_notes(items):
-    """The `judged not feedback` note items in a list of item lines."""
-    return [item for item in (items or []) if NOTE_ITEM.fullmatch(item)]
-
-
-def sonnet_ids():
-    """The Sonnet model ids in the model table of decisions/agent-model-cap.md."""
-    text = read_file(os.path.join(REPO, "docs", "decisions", "agent-model-cap.md"))
-    return re.findall(r"\|\s*(claude-sonnet-[\w-]+)\s*\|", text)
-
-
-def at(minutes):
-    """The LOCAL_TIME_NOW value: CLOCK_START plus some minutes."""
-    return (CLOCK_START + timedelta(minutes=minutes)).isoformat()
+                                 "prompt": prompt, "cwd": cfg}), cfg)
 
 
 def gate(cfg, sid, stop_active=False, cwd=None):
@@ -408,10 +244,6 @@ def fixture_repo():
         FIXTURE.append(make_repo("fixture", tracked=(
             "decisions/a-ruling.md", "debts/a-task.md", "CLAUDE.md")))
     return FIXTURE[0]
-
-
-def marker_of(cfg, sid):
-    return os.path.join(cfg, "handoffs", sid + ".inbox.open")
 
 
 def state_of(cfg, sid):
@@ -476,11 +308,6 @@ def ran_central(p):
     return p.code == 0 and "\n" not in line and CENTRAL.fullmatch(line) is not None
 
 
-def minutes_apart(a, b):
-    fmt = "%Y-%m-%d %H:%M"
-    return abs((datetime.strptime(a, fmt) - datetime.strptime(b, fmt)).total_seconds()) / 60
-
-
 def longest_run(text):
     return max((len(r) for r in re.findall(r"`+", text)), default=0)
 
@@ -534,13 +361,6 @@ def block_reason(p):
     return None
 
 
-def reminder_of(obj):
-    sm = obj.get("systemMessage") if obj else None
-    if isinstance(sm, str) and "fb done" in sm and "capture" in sm.lower():
-        return sm
-    return None
-
-
 def stamp_of(header):
     return STAMP.search(header).group(0)
 
@@ -550,136 +370,20 @@ def names_message(reason, stamp, text):
     return stamp in reason or text[:20] in reason
 
 
-def opened(cfg, sid, opener):
-    """Opens capture through the capture hook. False, with a red check, when that does not happen."""
-    p = capture(cfg, sid, opener)
-    ok = ran_central(p) and os.path.exists(inbox_of(cfg, sid))
-    check("capture precondition: %r opens capture" % opener, ok, p.desc())
-    return ok
-
-
 def expect_silent(name, p):
     check(name, p.code == 0 and p.out.strip() == "", p.desc())
 
 
-def expect_reminder(name, p):
-    obj = gate_json(p)
-    check(name, p.code == 0 and obj is not None and not is_block(obj)
-          and reminder_of(obj) is not None, p.desc())
-
-
-def expect_block(name, p, named=(), unnamed=(), reminder=None):
+def expect_block(name, p, named=(), unnamed=()):
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
     for n in named:
         check("%s: names %s" % (name, n), n in reason, reason)
     for n in unnamed:
         check("%s: does not name %s" % (name, n), n not in reason, reason)
-    if reminder is not None:
-        has = reminder_of(gate_json(p)) is not None
-        check("%s: %s" % (name, "carries the reminder" if reminder else "no reminder"),
-              has == reminder, p.desc())
 
 
 # --------------------------------------------------------------------------- capture cases
-
-def case_closed_by_default():
-    cfg, sid = new_cfg(), "closed-default"
-    for text in ("plain owner prompt", "fbi is not a trigger", "please x fb here", "fb done"):
-        p = capture(cfg, sid, text)
-        check("closed: hook ran for %r" % text, ran_central(p), p.desc())
-    check("closed: plain, fbi, x fb and fb done capture nothing (no inbox file)",
-          not os.path.exists(inbox_of(cfg, sid)), "inbox exists")
-
-
-def case_opener_captured_with_central_time():
-    cfg, sid = new_cfg(), "opener"
-    text = "fb: the gate is too strict on Stop"
-    p = capture(cfg, sid, text)
-    check("opener: hook ran (one Central line, exit 0)", ran_central(p), p.desc())
-    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
-    check("opener: one block, and it holds the opener verbatim",
-          len(blocks) == 1 and blocks[0]["text"] == text, blocks)
-    if not blocks:
-        return
-    m = HEADER.fullmatch(blocks[0]["header"])
-    local = CENTRAL.fullmatch(p.out.strip())
-    check("opener: header is a Central stamp with CDT or CST",
-          m is not None, blocks[0]["header"])
-    check("opener: header time is within a minute of the Local time line, same zone",
-          bool(m and local and m.group(2) == local.group(2)
-               and minutes_apart(m.group(1), local.group(1)) <= 1),
-          "header=%r stdout=%r" % (blocks[0]["header"], p.out))
-    check("opener: no items yet (the session jots them)", blocks[0]["items"] == [],
-          blocks[0]["items"])
-
-
-def case_opener_forms():
-    for sid, text in (("form-no-colon", "fb the gate is too strict"),
-                      ("form-newline", "fb:\nline two of the burst")):
-        cfg = new_cfg()
-        p = capture(cfg, sid, text)
-        check("opener form %r: hook ran" % sid, ran_central(p), p.desc())
-        check("opener form %r: opens, and the prompt is captured verbatim" % sid,
-              captured_texts(cfg, sid) == [text], captured_texts(cfg, sid))
-
-
-def case_open_survives_across_runs():
-    cfg, sid = new_cfg(), "open-run"
-    texts = ["fb: first point", "second point, plain", "third point with x fb inside",
-             "fbi fourth point"]
-    for text in texts:
-        p = capture(cfg, sid, text)
-        check("open run: hook ran for %r" % text, ran_central(p), p.desc())
-    check("open: every prompt captured in order, verbatim; x fb and fbi do not close",
-          captured_texts(cfg, sid) == texts, captured_texts(cfg, sid))
-
-
-def case_fb_done_closes_and_is_not_captured():
-    cfg, sid = new_cfg(), "close"
-    for text in ("fb: one", "fb done", "after close"):
-        p = capture(cfg, sid, text)
-        check("close: hook ran for %r" % text, ran_central(p), p.desc())
-    check("close: fb done is not captured and nothing after it is",
-          captured_texts(cfg, sid) == ["fb: one"], captured_texts(cfg, sid))
-    cfg, sid = new_cfg(), "close-newline"
-    for text in ("fb: two", "fb done\n", "after close two"):
-        p = capture(cfg, sid, text)
-        check("close with newline: hook ran for %r" % text, ran_central(p), p.desc())
-    check("close with newline: fb done plus newline closes, and is not captured",
-          captured_texts(cfg, sid) == ["fb: two"], captured_texts(cfg, sid))
-
-
-def case_fb_done_forms_close_capture():
-    for sid, closer in (("done-period", "fb done."), ("done-bang", "fb done!"),
-                        ("done-caps", "FB done"), ("done-colon", "fb: done"),
-                        ("done-two-spaces", "fb  done")):
-        cfg = new_cfg()
-        opened(cfg, sid, "fb: open the burst")
-        p = capture(cfg, sid, closer)
-        check("close form %r: hook ran" % closer, ran_central(p), p.desc())
-        check("close form %r: closes capture, and is not captured" % closer,
-              not os.path.exists(marker_of(cfg, sid))
-              and captured_texts(cfg, sid) == ["fb: open the burst"], captured_texts(cfg, sid))
-    cfg, sid = new_cfg(), "done-now"
-    opened(cfg, sid, "fb: open the burst")
-    p = capture(cfg, sid, "fb done now")
-    check("fb done now: hook ran", ran_central(p), p.desc())
-    check("fb done now: closes capture, and is not captured (owner ruling 2026-10-14)",
-          not os.path.exists(marker_of(cfg, sid))
-          and captured_texts(cfg, sid) == ["fb: open the burst"], captured_texts(cfg, sid))
-
-
-def case_near_miss_closers_open_nothing_while_closed():
-    for sid, text in (("near-colon", "fb: done"), ("near-two-spaces", "fb  done"),
-                      ("near-tab", "fb\tdone"), ("near-dash", "fb - done")):
-        cfg = new_cfg()
-        p = capture(cfg, sid, text)
-        check("near miss %r: hook ran" % text, ran_central(p), p.desc())
-        check("near miss %r: does not open capture (no marker, no inbox)" % text,
-              not os.path.exists(marker_of(cfg, sid))
-              and not os.path.exists(inbox_of(cfg, sid)), p.desc())
-
 
 def case_verbatim_scanner_text_is_fenced():
     cfg, sid = new_cfg(), "scanner"
@@ -722,15 +426,9 @@ def not_saved_check(name, p):
 
 
 def case_capture_write_failure_says_not_saved():
-    cfg, sid = new_cfg(), "write-fail-opener"
+    cfg, sid = new_cfg(), "write-fail"
     os.makedirs(inbox_of(cfg, sid))  # a directory at the inbox path: no write can land
-    not_saved_check("write failure, opener",
-                    capture(cfg, sid, "fb: a message the inbox cannot take"))
-    cfg, sid = new_cfg(), "write-fail-open"
-    os.makedirs(inbox_of(cfg, sid))
-    write_file(marker_of(cfg, sid), "")  # capture is already open
-    not_saved_check("write failure, capture open",
-                    capture(cfg, sid, "a later message in the burst"))
+    not_saved_check("write failure", capture(cfg, sid, "a message the inbox cannot take"))
 
 
 # A lone surrogate, as the payload's JSON escape. json.dumps writes the escape: the bytes are ASCII.
@@ -740,9 +438,8 @@ SURROGATE_SAVED = "a lone \ufffd surrogate in the middle of the burst"
 
 def case_lone_surrogate_is_saved_or_said_not_saved():
     cfg, sid = new_cfg(), "lone-surrogate"
-    opener = "fb: surrogate burst"
-    if not opened(cfg, sid, opener):
-        return
+    first = "the message before the surrogate"
+    check("lone surrogate: the first message ran", ran_central(capture(cfg, sid, first)))
     raw = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": sid,
                       "prompt": LONE_SURROGATE, "cwd": cfg}).encode("ascii")
     p = run(LT_PATH, raw, cfg)
@@ -758,9 +455,8 @@ def case_lone_surrogate_is_saved_or_said_not_saved():
         except UnicodeDecodeError:
             strict = False
     check("lone surrogate: an inbox that is written is strict UTF-8", strict, ascii(inbox))
-    check("lone surrogate: capture stays open", os.path.exists(marker_of(cfg, sid)), p.desc())
     texts = captured_texts(cfg, sid) if strict else None
-    saved = texts == [opener, SURROGATE_SAVED]
+    saved = texts == [first, SURROGATE_SAVED]
     told = any("not saved" in ln.lower() for ln in lines[1:])
     check("lone surrogate: saved with U+FFFD, or stdout says not saved (never silent)",
           saved or told, "saved=%s told=%s captured=%s %s"
@@ -781,43 +477,28 @@ def sub_payload(sid, prompt, cfg):
                     "agent_type": "test-author", "prompt": prompt, "cwd": cfg})
 
 
-def case_agent_never_opens_closes_or_captures():
-    cfg = new_cfg()
-    p0 = capture(cfg, "sub-open", "fb: opened by the owner")
-    check("agent: owner opener ran", ran_central(p0), p0.desc())
-    before = read_or_empty(inbox_of(cfg, "sub-open"))
-    p = run(LT_PATH, sub_payload("sub-open", "fb done", cfg), cfg, args=("--agent",))
-    check("agent: fb done payload prints the SubagentStart JSON", agent_ok(p), p.desc())
-    check("agent: an open inbox is unchanged by an agent fb done",
-          before != "" and read_or_empty(inbox_of(cfg, "sub-open")) == before, "changed")
-    p2 = capture(cfg, "sub-open", "still open after the agent")
-    check("agent: next owner prompt ran", ran_central(p2), p2.desc())
-    check("agent: capture is still open, the next owner prompt is captured",
-          captured_texts(cfg, "sub-open") == ["fb: opened by the owner",
-                                              "still open after the agent"],
-          captured_texts(cfg, "sub-open"))
-    q = run(LT_PATH, sub_payload("sub-closed", "fb: agent opener", cfg), cfg,
+def case_agent_never_captures():
+    cfg, sid = new_cfg(), "sub"
+    check("agent: owner prompt ran", ran_central(capture(cfg, sid, "owner prompt")))
+    before = read_or_empty(inbox_of(cfg, sid))
+    p = run(LT_PATH, sub_payload(sid, "an agent's own prompt", cfg), cfg, args=("--agent",))
+    check("agent: prints the SubagentStart JSON", agent_ok(p), p.desc())
+    check("agent: the inbox is unchanged by an agent prompt",
+          before != "" and read_or_empty(inbox_of(cfg, sid)) == before, "changed")
+    q = run(LT_PATH, sub_payload("sub-only", "an agent's prompt, no owner yet", cfg), cfg,
             args=("--agent",))
-    check("agent: fb: payload prints the SubagentStart JSON", agent_ok(q), q.desc())
-    p3 = capture(cfg, "sub-closed", "plain owner prompt after an agent opener")
-    check("agent: owner prompt after an agent opener ran", ran_central(p3), p3.desc())
-    check("agent: an agent opener does not open capture (no inbox file)",
-          not os.path.exists(inbox_of(cfg, "sub-closed")), "inbox exists")
+    check("agent: a second payload prints the SubagentStart JSON", agent_ok(q), q.desc())
+    check("agent: an agent prompt alone writes no inbox",
+          not os.path.exists(inbox_of(cfg, "sub-only")), "inbox exists")
 
 
 def case_sessions_are_isolated():
     cfg = new_cfg()
-    check("isolation: session a opener ran", ran_central(capture(cfg, "iso-a", "fb: a opener")))
-    p = capture(cfg, "iso-b", "plain prompt from session b")
-    check("isolation: session b plain prompt ran", ran_central(p), p.desc())
-    check("isolation: session b plain prompt is in neither inbox and b has no inbox",
-          not os.path.exists(inbox_of(cfg, "iso-b"))
-          and "plain prompt from session b" not in read_or_empty(inbox_of(cfg, "iso-a")),
-          read_or_empty(inbox_of(cfg, "iso-a")))
-    check("isolation: session b opener ran", ran_central(capture(cfg, "iso-b", "fb: b opener")))
-    check("isolation: b's opener lands in b's inbox only",
-          captured_texts(cfg, "iso-b") == ["fb: b opener"]
-          and captured_texts(cfg, "iso-a") == ["fb: a opener"],
+    check("isolation: session a ran", ran_central(capture(cfg, "iso-a", "a's message")))
+    check("isolation: session b ran", ran_central(capture(cfg, "iso-b", "b's message")))
+    check("isolation: each message lands in its own session's inbox only",
+          captured_texts(cfg, "iso-a") == ["a's message"]
+          and captured_texts(cfg, "iso-b") == ["b's message"],
           (captured_texts(cfg, "iso-a"), captured_texts(cfg, "iso-b")))
 
 
@@ -972,45 +653,6 @@ def case_gate_notes_heading_is_plain_text():
     expect_silent("gate: an inbox with only a ### Notes heading passes silently", gate(cfg, sid))
 
 
-def case_gate_reminder_follows_capture_state():
-    cfg, sid = new_cfg(), "open-jotted"
-    if opened(cfg, sid, "fb: reminder check, jotted"):
-        append_file(inbox_of(cfg, sid), "- fb-0958-2 [note] -> noted\n")
-        expect_reminder("open and jotted: reminder, no block", gate(cfg, sid))
-
-    cfg, sid = new_cfg(), "open-unjotted"
-    if opened(cfg, sid, "fb: reminder check, unjotted"):
-        block = read_blocks(read_file(inbox_of(cfg, sid)))[0]
-        p = gate(cfg, sid)
-        expect_block("open and unjotted: blocks", p, reminder=True)
-        reason = block_reason(p) or ""
-        check("open and unjotted: the block names the message",
-              names_message(reason, stamp_of(block["header"]), block["text"]), reason)
-
-    cfg, sid = new_cfg(), "closed-jotted"
-    if opened(cfg, sid, "fb: reminder check, closed and jotted"):
-        append_file(inbox_of(cfg, sid), "- fb-0958-2 [note] -> noted\n")
-        closed = capture(cfg, sid, "fb done")
-        check("closed and jotted: fb done ran and is a close", ran_central(closed), closed.desc())
-        expect_silent("closed and jotted: silent, no reminder", gate(cfg, sid))
-
-    cfg, sid = new_cfg(), "closed-unjotted"
-    if opened(cfg, sid, "fb: reminder check, closed and unjotted"):
-        closed = capture(cfg, sid, "fb done")
-        check("closed and unjotted: fb done ran and is a close", ran_central(closed), closed.desc())
-        block = read_blocks(read_file(inbox_of(cfg, sid)))[0]
-        p = gate(cfg, sid)
-        expect_block("closed and unjotted: blocks, no reminder", p, reminder=False)
-        reason = block_reason(p) or ""
-        check("closed and unjotted: the block names the message",
-              names_message(reason, stamp_of(block["header"]), block["text"]), reason)
-
-    cfg, sid = new_cfg(), "open-stop-active"
-    if opened(cfg, sid, "fb: reminder check, stop active"):
-        expect_silent("open and unjotted, stop_hook_active: silent",
-                      gate(cfg, sid, stop_active=True))
-
-
 def case_gate_unreadable_inbox_blocks_and_names_the_file():
     cfg, sid = new_cfg(), "unreadable-dir"
     os.makedirs(inbox_of(cfg, sid))
@@ -1158,7 +800,6 @@ def case_gate_unreadable_layout_fails_open_with_one_line():
 
 # --------------------------------------------------------------------------- reorient note
 
-NOTE_CAPTURE = " Feedback capture is still open: the owner has not sent `fb done`."
 KEEP = (" Keep each standing item in the handoff, and give each ruling and task its tracked home:"
         " a decision record or rule, or the repo's todo or debt store.")
 
@@ -1179,56 +820,29 @@ def case_reorient_lists_open_items_only():
               "fb-0999-1" not in p.out, p.desc())
 
 
-def case_reorient_capture_open_line():
-    cfg = new_cfg()
-    sid = "reo-marker"
-    write_file(marker_of(cfg, sid), "")
-    for ok_state in (False, True):
-        p = reorient(cfg, sid, ok_state)
-        tag = state_tag(ok_state)
-        check("reorient capture (%s): the capture line ends the message" % tag,
-              ends_with_note(p, NOTE_CAPTURE), p.desc())
-        check("reorient capture (%s): no items line without an inbox" % tag,
-              "Open feedback items" not in p.out, p.desc())
-
-
-def case_reorient_items_and_capture_line_together():
-    cfg = new_cfg()
-    sid = "reo-both"
-    write_file(inbox_of(cfg, sid), render_block("two open items", items=(
-        "- fb-0958-2 [task] -> handoff", "- fb-0958-3 [ruling] -> NO HOME YET")))
-    write_file(marker_of(cfg, sid), "")
-    note = " Open feedback items: fb-0958-2, fb-0958-3." + KEEP + NOTE_CAPTURE
-    for ok_state in (False, True):
-        p = reorient(cfg, sid, ok_state)
-        check("reorient both (%s): items line, then the capture line" % state_tag(ok_state),
-              ends_with_note(p, note), p.desc())
-
-
 def case_reorient_malformed_line_keeps_the_note():
     cfg, sid = new_cfg(), "reo-malformed"
     write_file(inbox_of(cfg, sid), render_block("burst with malformed lines", items=(
         "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff", "- fb-",
         "- fb-0958-3 [ruling] -> NO HOME YET")))
-    write_file(marker_of(cfg, sid), "")
-    note = " Open feedback items: fb-0958-2, fb-0958-3." + KEEP + NOTE_CAPTURE
+    note = " Open feedback items: fb-0958-2, fb-0958-3." + KEEP
     for ok_state in (False, True):
         p = reorient(cfg, sid, ok_state)
         tag = state_tag(ok_state)
-        check("reorient malformed (%s): good open ids and the capture line still print"
-              % tag, ends_with_note(p, note), p.desc())
+        check("reorient malformed (%s): good open ids still print" % tag,
+              ends_with_note(p, note), p.desc())
         check("reorient malformed (%s): the note does not fail on stderr" % tag,
               "inbox note failed" not in p.err, p.desc())
 
 
-def case_reorient_nothing_when_no_open_items_and_no_marker():
+def case_reorient_nothing_when_no_open_items():
     cfg = new_cfg()  # no inbox file at all
     sid = "reo-absent"
     for ok_state in (False, True):
         p = reorient(cfg, sid, ok_state)
         check("reorient absent (%s): the message is unchanged" % state_tag(ok_state),
               ends_with_note(p, ""), p.desc())
-    cfg2 = new_cfg()  # an inbox with question and note items only, and no marker
+    cfg2 = new_cfg()  # an inbox with question and note items only
     write_file(inbox_of(cfg2, sid), render_block("jotted only", items=(
         "- fb-0958-3 [question] -> answered", "- fb-0958-4 [note] -> noted")))
     p = reorient(cfg2, sid)
@@ -1256,7 +870,7 @@ def case_reorient_unreadable_inbox_prints_message_and_one_stderr_line():
                   len(err) == 1 and "inbox note failed" in err[0], p.desc())
 
 
-# --------------------------------------------------------------------------- close, notice, quiet and judge cases
+# --------------------------------------------------------------------------- capture-all and burst cases
 
 NOTICE_TASK = ("<task-notification>\n<task-id>a1b2c3</task-id>\n<status>completed</status>\n"
                "<summary>Agent \"lint sweep\" completed</summary>\n"
@@ -1264,312 +878,131 @@ NOTICE_TASK = ("<task-notification>\n<task-id>a1b2c3</task-id>\n<status>complete
 NOTICE_REMINDER = "<system-reminder>\nThe task tools have not been used recently.\n</system-reminder>"
 
 
-def calls_so_far(cfg):
-    return len(judge_calls(cfg))
-
-
-def no_judge_call(cfg, before, p):
-    """No judge call since `before`, and the stub ran, so zero really means the judge was not called."""
-    return bool(p.loaded) and calls_so_far(cfg) == before
-
-
-def case_fb_done_prefix_closes_and_drops_the_rest():
-    for sid, closer in (("prefix-comma", "fb done, also we should add a check"),
-                        ("prefix-colon", "fb: done, also one more point"),
-                        ("prefix-newline", "fb done\nmore after a newline"),
-                        ("prefix-caps", "FB DONE, don't save this")):
-        cfg = new_cfg()
-        opened(cfg, sid, "fb: open the burst")
-        before = calls_so_far(cfg)
-        p = capture(cfg, sid, closer)
-        check("close prefix %r: hook ran" % closer, ran_central(p), p.desc())
-        check("close prefix %r: closes capture, and the words and the rest are not saved" % closer,
-              not os.path.exists(marker_of(cfg, sid))
-              and captured_texts(cfg, sid) == ["fb: open the burst"], captured_texts(cfg, sid))
-        check("close prefix %r: the closing prompt makes no judge call" % closer,
-              no_judge_call(cfg, before, p), p.desc())
-
-
-def case_fb_done_prefix_opens_nothing_while_closed():
-    for sid, text in (("closed-prefix-comma", "fb done, more text"),
-                      ("closed-prefix-colon", "fb: done, more text")):
-        cfg = new_cfg()
-        before = calls_so_far(cfg)
+def case_every_owner_message_is_captured():
+    """No magic words: every owner prompt is saved, in order, verbatim. `fb` forms are plain text."""
+    cfg, sid = new_cfg(), "every"
+    texts = ["plain owner prompt", "fb: an old opener form", "fb done", "x fb and fbi",
+             "fb done, more text"]
+    for text in texts:
         p = capture(cfg, sid, text)
-        check("closed prefix %r: hook ran" % text, ran_central(p), p.desc())
-        check("closed prefix %r: opens nothing (no marker, no inbox), and makes no judge call" % text,
-              not os.path.exists(marker_of(cfg, sid)) and not os.path.exists(inbox_of(cfg, sid))
-              and no_judge_call(cfg, before, p), p.desc())
-
-
-SAME_MSG_NOTE = "fb: the gate is too strict on Stop"
-
-
-def case_fb_done_line_at_the_end_closes_in_the_same_message():
-    """A message that ends with `fb done` saves the note and closes capture in that same
-    message. The marker does not stay open, so the next message is not saved."""
-    cfg, sid = new_cfg(), "same-msg"
-    p = capture(cfg, sid, SAME_MSG_NOTE + "\nfb done", now=at(0))
-    check("same message: hook ran", ran_central(p), p.desc())
-    check("same message: the note is saved",
-          any(SAME_MSG_NOTE in text for text in captured_texts(cfg, sid)),
+        check("every: hook ran for %r" % text, ran_central(p), p.desc())
+    check("every: each prompt is captured in order, verbatim", captured_texts(cfg, sid) == texts,
           captured_texts(cfg, sid))
-    check("same message: no open marker remains after the hook",
-          not os.path.exists(marker_of(cfg, sid)), p.desc())
-    saved = captured_texts(cfg, sid)
-    p = capture(cfg, sid, "the owner's next message, after the close", now=at(1))
-    check("next message: hook ran", ran_central(p), p.desc())
-    check("next message: not saved, since the message before closed capture",
-          bool(saved) and captured_texts(cfg, sid) == saved, captured_texts(cfg, sid))
-
-
-def case_same_message_close_keeps_the_old_controls():
-    """Controls: `fb: X` alone opens capture, `fb done` alone closes it, and `fb done` quoted
-    mid-sentence does not close it (the close words count only at the start)."""
-    cfg, sid = new_cfg(), "same-msg-controls"
-    p = capture(cfg, sid, SAME_MSG_NOTE, now=at(0))
-    check("control opener: hook ran", ran_central(p), p.desc())
-    check("control opener: `fb: X` alone opens capture and is saved",
-          os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == [SAME_MSG_NOTE],
-          captured_texts(cfg, sid))
-    quoted = "I typed fb done by mistake, so keep this message"
-    p = capture(cfg, sid, quoted, now=at(1))
-    check("control quote: hook ran", ran_central(p), p.desc())
-    texts = [SAME_MSG_NOTE, quoted]
-    check("control quote: a mid-sentence `fb done` does not close: saved, marker stays",
-          os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == texts,
-          captured_texts(cfg, sid))
-    p = capture(cfg, sid, "fb done", now=at(2))
-    check("control closer: hook ran", ran_central(p), p.desc())
-    check("control closer: `fb done` alone closes capture and is not saved",
-          not os.path.exists(marker_of(cfg, sid))
-          and captured_texts(cfg, sid) == [SAME_MSG_NOTE, quoted], captured_texts(cfg, sid))
-
-
-def case_close_words_count_only_as_a_last_line():
-    """`fb done` closes only as the last line of a message. Inside a fence, in inline backticks, or
-    on the same line as other text, it does not close (decision owner-feedback-inbox; `fb: X fb done`
-    does not close either)."""
-    for sid, text in (("fence-block", "fb: X\n```\nfb done\n```"),
-                      ("fence-inline", "fb: X\n`fb done`"),
-                      ("one-line", "fb: X fb done")):
-        cfg = new_cfg()
-        p = capture(cfg, sid, text, now=at(0))
-        check("no close, opener %r: hook ran" % sid, ran_central(p), p.desc())
-        check("no close, opener %r: capture stays open, whole message saved verbatim" % sid,
-              os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == [text],
-              captured_texts(cfg, sid))
-    for sid, text in (("open-fence-block", "X\n```\nfb done\n```"),
-                      ("open-fence-inline", "X\n`fb done`"),
-                      ("open-one-line", "X fb done")):
-        cfg = new_cfg()
-        capture(cfg, sid, "fb: open the burst", now=at(0))
-        p = capture(cfg, sid, text, now=at(1))
-        check("no close, open %r: hook ran" % sid, ran_central(p), p.desc())
-        check("no close, open %r: capture stays open, message saved verbatim" % sid,
-              os.path.exists(marker_of(cfg, sid))
-              and captured_texts(cfg, sid) == ["fb: open the burst", text],
-              captured_texts(cfg, sid))
-
-
-def case_open_last_line_fb_done_starts_no_judge():
-    """With capture open, a message `X` plus a last line `fb done` saves X, closes capture, and
-    starts no judge child. Guards the `and not closing` clause in local_time.py capture()."""
-    cfg, sid = new_cfg(), "open-close-no-judge"
-    capture(cfg, sid, "fb: open the burst", now=at(0))
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, "X\nfb done", now=at(1))
-    check("open close: hook ran", ran_central(p), p.desc())
-    texts = captured_texts(cfg, sid)
-    check("open close: X is saved as the note, and capture closes",
-          not os.path.exists(marker_of(cfg, sid)) and len(texts) == 2
-          and texts[0] == "fb: open the burst" and texts[1].split("\n")[0] == "X", texts)
-    check("open close: the closing message starts no judge child (no judge call)",
-          no_judge_call(cfg, before, p), p.desc())
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("every: each header is a Central stamp", bool(blocks) and all(
+        HEADER.fullmatch(b["header"]) for b in blocks), [b["header"] for b in blocks])
+    check("every: no items yet (the session jots them)",
+          bool(blocks) and all(b["items"] == [] for b in blocks), blocks)
+    check("every: no open marker file is written",
+          not os.path.exists(os.path.join(cfg, "handoffs", sid + ".inbox.open")), "marker exists")
 
 
 def case_notices_are_never_captured():
     for label, notice in (("task-notification", NOTICE_TASK), ("system-reminder", NOTICE_REMINDER)):
         cfg, sid = new_cfg(), "notice-" + label
-        opened(cfg, sid, "fb: open the burst")
-        before = calls_so_far(cfg)
         p = capture(cfg, sid, notice)
         check("notice %s: hook ran" % label, ran_central(p), p.desc())
-        check("notice %s: not saved, capture stays open, and no judge call" % label,
-              captured_texts(cfg, sid) == ["fb: open the burst"]
-              and os.path.exists(marker_of(cfg, sid)) and no_judge_call(cfg, before, p),
+        check("notice %s: not saved" % label, not os.path.exists(inbox_of(cfg, sid)),
               captured_texts(cfg, sid))
-        before = calls_so_far(cfg)
-        capture(cfg, sid, "owner reply after the notice", delay=SLOW)
-        check("notice %s: the next owner prompt is saved, and judged once by the child" % label,
-              captured_texts(cfg, sid) == ["fb: open the burst", "owner reply after the notice"]
-              and calls_so_far(cfg) == before + 1, captured_texts(cfg, sid))
+        capture(cfg, sid, "owner reply after the notice")
+        check("notice %s: the next owner prompt is saved" % label,
+              captured_texts(cfg, sid) == ["owner reply after the notice"], captured_texts(cfg, sid))
+        expect_silent("notice %s: a notice is not a second message of a burst" % label,
+                      gate(cfg, sid))
     cfg, sid = new_cfg(), "notice-quoted"
-    opened(cfg, sid, "fb: open the burst")
     quoted = "the log shows a <task-notification> tag I did not expect; look into it"
     capture(cfg, sid, quoted)
     check("notice quoted mid-message: owner text, so it is captured",
-          captured_texts(cfg, sid) == ["fb: open the burst", quoted], captured_texts(cfg, sid))
+          captured_texts(cfg, sid) == [quoted], captured_texts(cfg, sid))
 
 
-def case_quiet_gap_closes_capture():
-    cfg, sid = new_cfg(), "quiet-gap"
-    first = capture(cfg, sid, "fb: quiet burst", now=at(0))
-    check("clock seam: LOCAL_TIME_NOW 18:00 UTC sets the Local time line to 13:00 CDT",
-          first.out.strip() == "Local time: 2026-10-14 13:00 CDT (UTC-05:00)", first.desc())
-    capture(cfg, sid, "second point, 8 minutes in", now=at(8), delay=SLOW)
-    capture(cfg, sid, "third point, 16 minutes in", now=at(16), delay=SLOW)
-    burst = ["fb: quiet burst", "second point, 8 minutes in", "third point, 16 minutes in"]
-    check("quiet: prompts 8 and 16 minutes in are captured (the gap runs from the last capture)",
-          captured_texts(cfg, sid) == burst, captured_texts(cfg, sid))
-    check("quiet: prompts 8 and 16 minutes in are each judged once, by the child",
-          calls_so_far(cfg) == 2, judge_calls(cfg))
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, "plain prompt after an 11 minute gap", now=at(27))
-    check("quiet: the prompt after an 11 minute gap is not saved, capture closes, no judge call",
-          ran_central(p) and not os.path.exists(marker_of(cfg, sid))
-          and captured_texts(cfg, sid) == burst and no_judge_call(cfg, before, p), p.desc())
-    capture(cfg, sid, "fb: new burst after the gap", now=at(28))
-    check("quiet: an opener after the gap is captured and opens capture again",
-          captured_texts(cfg, sid) == burst + ["fb: new burst after the gap"]
-          and os.path.exists(marker_of(cfg, sid)), captured_texts(cfg, sid))
+def turn(cfg, sid, *prompts):
+    """Captures each prompt, then runs the gate once, as one turn."""
+    for text in prompts:
+        p = capture(cfg, sid, text)
+        check("turn: hook ran for %r" % text[:40], ran_central(p), p.desc())
+    return gate(cfg, sid)
 
 
-def case_quiet_gap_ignores_notices():
-    cfg, sid = new_cfg(), "quiet-notice"
-    opener, point = "fb: burst with a notice in it", "owner point at 2 minutes"
-    capture(cfg, sid, opener, now=at(0))
-    capture(cfg, sid, point, now=at(2), delay=SLOW)  # the last captured owner message, judged live
-    check("quiet and notice: the owner point at 2 minutes is saved and judged once, by the child",
-          captured_texts(cfg, sid) == [opener, point] and calls_so_far(cfg) == 1, judge_calls(cfg))
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, NOTICE_TASK, now=at(8))
-    check("quiet and notice: a notice 8 minutes in is not saved, not judged, and does not close capture",
-          captured_texts(cfg, sid) == [opener, point]
-          and os.path.exists(marker_of(cfg, sid)) and no_judge_call(cfg, before, p), p.desc())
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, "owner prompt 11 minutes after the last owner message", now=at(13))
-    check("quiet and notice: 11 minutes after the owner point at 2 closes capture; not saved, no judge call",
-          ran_central(p) and not os.path.exists(marker_of(cfg, sid))
-          and captured_texts(cfg, sid) == [opener, point] and no_judge_call(cfg, before, p), p.desc())
+def case_one_line_messages_never_trigger_the_gate():
+    for sid, text in (("one-plain", "please also run the lint"),
+                      ("one-fb", "fb: the old opener on one line"),
+                      ("one-fb-done", "fb: a note\nfb done"),
+                      ("one-bullet", "- one bullet only"),
+                      ("two-lines", "first line\n\n\nsecond line after blanks")):
+        cfg = new_cfg()
+        expect_silent("non-burst %s: a lone short message passes" % sid, turn(cfg, sid, text))
+    cfg, sid = new_cfg(), "one-per-turn"
+    for n in range(3):
+        expect_silent("non-burst: one-line message %d, alone in its turn, passes" % n,
+                      turn(cfg, sid, "one-line message %d" % n))
 
 
-def case_judge_runs_once_per_open_prompt_with_the_sonnet_id():
-    cfg, sid = new_cfg(), "judge-once"
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, "plain prompt before any burst")
-    check("judge: a closed plain prompt makes no judge call", no_judge_call(cfg, before, p), p.desc())
-    before = calls_so_far(cfg)
-    opened(cfg, sid, "fb: judged burst")
-    check("judge: the opener makes no judge call", calls_so_far(cfg) == before, judge_calls(cfg))
-    text = "second point, plain"
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, text, delay=SLOW)
-    calls = judge_calls(cfg)[before:]
-    check("judge: an open plain prompt makes exactly one judge call",
-          len(calls) == 1 and bool(p.loaded), p.desc())
-    if calls:
-        timeout = calls[0].get("timeout")
-        check("judge: the call uses the Sonnet id from decisions/agent-model-cap.md",
-              model_of(calls[0]) == JUDGE_MODEL and JUDGE_MODEL in sonnet_ids(), calls[0].get("argv"))
-        check("judge: the call is made by feedback_judge.py, the detached child, not by the hook",
-              calls[0].get("script") == "feedback_judge.py", calls[0].get("script"))
-        check("judge: the prompt text reaches the judge",
-              text in (calls[0].get("prompt") or ""), calls[0].get("prompt"))
-        check("judge: its timeout is a positive number (the hook does not wait for it)",
-              isinstance(timeout, (int, float)) and timeout > 0, "judge timeout=%r" % (timeout,))
-    check("judge: the judged prompt is saved",
-          captured_texts(cfg, sid) == ["fb: judged burst", text], captured_texts(cfg, sid))
+def case_two_messages_in_a_turn_are_a_burst():
+    cfg, sid = new_cfg(), "burst-two"
+    p = turn(cfg, sid, "first short note", "second short note")
+    expect_block("burst of two: blocks", p, named=("first short note", "second short note"))
+    cfg, sid = new_cfg(), "burst-after-quiet"
+    expect_silent("burst after a quiet turn: the quiet turn passes", turn(cfg, sid, "earlier note"))
+    p = turn(cfg, sid, "burst one", "burst two")
+    expect_block("burst after a quiet turn: the burst blocks", p, named=("burst one", "burst two"),
+                 unnamed=("earlier note",))
 
 
-def case_judge_not_feedback_keeps_the_prompt_and_closes():
-    cfg, sid = new_cfg(), "judge-not"
-    kept = ["fb: burst the judge will close", "second point, still feedback"]
-    opened(cfg, sid, kept[0])
-    capture(cfg, sid, kept[1], delay=SLOW)
-    text = "ok, run the tests now"
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, text, judge="not", delay=SLOW)
-    check("judge not feedback: hook ran, and the child judged the prompt once",
-          ran_central(p) and calls_so_far(cfg) == before + 1, p.desc())
-    check("judge not feedback: the prompt is saved, and capture closes (marker gone)",
-          captured_texts(cfg, sid) == kept + [text] and not os.path.exists(marker_of(cfg, sid)),
-          captured_texts(cfg, sid))
-    check("judge not feedback: one note item under that message says judged not feedback, none elsewhere",
-          len(judged_notes(block_items(cfg, sid, text))) == 1
-          and not judged_notes(block_items(cfg, sid, kept[1])), block_items(cfg, sid, text))
-    g = gate(cfg, sid)
-    check("judge not feedback: the gate does not block on that message, and no capture reminder shows",
-          g.code == 0 and text not in (block_reason(g) or "") and reminder_of(gate_json(g)) is None,
-          g.desc())
-    before = calls_so_far(cfg)
-    p = capture(cfg, sid, "a later plain prompt")
-    check("judge not feedback: the next plain prompt is not saved and makes no judge call",
-          no_judge_call(cfg, before, p) and captured_texts(cfg, sid) == kept + [text], p.desc())
-    capture(cfg, sid, "fb: a new burst")
-    check("judge not feedback: an opener reopens capture",
-          captured_texts(cfg, sid) == kept + [text, "fb: a new burst"]
-          and os.path.exists(marker_of(cfg, sid)), captured_texts(cfg, sid))
+def case_long_or_bulleted_message_is_a_burst():
+    for sid, text in (("three-lines", "line one\nline two\nline three"),
+                      ("dash-bullets", "two fixes\n- a\n- b"),
+                      ("bullets-only", "- a\n* b"),
+                      ("numbered", "1. first\n2) second")):
+        cfg = new_cfg()
+        p = turn(cfg, sid, text)
+        expect_block("burst %s: blocks" % sid, p)
+        block = read_blocks(read_file(inbox_of(cfg, sid)))[0]
+        check("burst %s: the reason names the message" % sid,
+              names_message(block_reason(p) or "", stamp_of(block["header"]), text), block_reason(p))
 
 
-def case_judge_failure_keeps_capture_open_and_saves():
-    cfg, sid = new_cfg(), "judge-fail"
-    opened(cfg, sid, "fb: burst before the failures")
-    saved = ["fb: burst before the failures"]
-    for answer in ("timeout", "exit1", "bad-shape"):
-        text = "message while the judge answers %s" % answer
-        before = calls_so_far(cfg)
-        p = capture(cfg, sid, text, judge=answer, delay=SLOW)
-        saved.append(text)
-        check("judge %s: hook ran" % answer, ran_central(p), p.desc())
-        check("judge %s: judged once, and the prompt is saved with capture still open" % answer,
-              calls_so_far(cfg) == before + 1 and os.path.exists(marker_of(cfg, sid))
-              and captured_texts(cfg, sid) == saved, captured_texts(cfg, sid))
-        check("judge %s: no note item under the message" % answer,
-              block_items(cfg, sid, text) == [] and not judged_notes(block_items(cfg, sid, text)),
-              block_items(cfg, sid, text))
+def case_burst_jotted_passes():
+    cfg, sid = new_cfg(), "burst-jotted"
+    for text in ("first short note", "second short note"):
+        capture(cfg, sid, text)
+    inbox = inbox_of(cfg, sid)
+    s = read_file(inbox).split("\n")
+    out, closers = [], 0
+    for ln in s:
+        out.append(ln)
+        if ln == "```":
+            closers += 1
+            if closers % 2 == 0:
+                out.append("- fb-%d [note] -> noted" % closers)
+    write_file(inbox, "\n".join(out))
+    expect_silent("burst jotted: every message has an item, so it passes", gate(cfg, sid))
 
 
-def case_judge_child_closes_only_the_last_captured_message():
-    """The child closes capture only while the message it judged is still the last captured one.
-    The child runs in the foreground here, the way the inline seam runs it."""
-    cfg, sid = new_cfg(), "judge-last"
-    first, second = "first owner point", "second owner point, the last captured"
-    # The state is written directly. Setup captures would start detached children, and their late
-    # calls would race the counts. The blocks use the hook's format; the marker holds 18:04 UTC.
-    write_file(inbox_of(cfg, sid),
-               render_block("fb: burst for the last-message rule",
-                            header="2026-10-14 13:00 CDT (UTC-05:00)")
-               + render_block(first, header="2026-10-14 13:02 CDT (UTC-05:00)")
-               + render_block(second, header="2026-10-14 13:04 CDT (UTC-05:00)"))
-    write_file(marker_of(cfg, sid), at(4))
-    before = calls_so_far(cfg)
-    p = run(JUDGE_PATH, b"", cfg, args=(sid, at(2), first), judge="not")
-    check("last message: the child for an older message ran and made one judge call",
-          p.code == 0 and calls_so_far(cfg) == before + 1, p.desc())
-    check("last message: the older message gets no note, and capture stays open at the newer time",
-          block_items(cfg, sid, first) == [] and os.path.exists(marker_of(cfg, sid))
-          and read_or_empty(marker_of(cfg, sid)).strip() == at(4), read_or_empty(marker_of(cfg, sid)))
-    p = run(JUDGE_PATH, b"", cfg, args=(sid, at(4), second), judge="not")
-    check("last message: the child for the last captured message adds its note and closes capture",
-          p.code == 0 and len(judged_notes(block_items(cfg, sid, second))) == 1
-          and not os.path.exists(marker_of(cfg, sid)), p.desc())
+def case_unjotted_burst_keeps_blocking_in_later_turns():
+    cfg, sid = new_cfg(), "burst-later"
+    expect_block("later: the burst blocks", turn(cfg, sid, "burst one", "burst two"))
+    expect_silent("later: stop_hook_active passes", gate(cfg, sid, stop_active=True))
+    p = turn(cfg, sid, "a short note in the next turn")
+    expect_block("later: the unjotted burst still blocks", p, named=("burst one", "burst two"),
+                 unnamed=("a short note in the next",))
 
 
-def case_judge_child_is_detached_hook_returns_first():
-    """Without the seam the judge child is detached: the hook returns before a slow judge answers."""
-    cfg, sid = new_cfg(), "detached"
-    opener = "fb: burst while the judge is slow"
-    text = "a not-feedback prompt the slow judge will answer"
-    opened(cfg, sid, opener)
-    started = time.monotonic()
-    p = capture(cfg, sid, text, judge="not", inline=False, delay="5")
-    elapsed = time.monotonic() - started
-    check("detached: the hook returns in under 3 s while the judge sleeps 5 s",
-          ran_central(p) and elapsed < 3.0, "elapsed=%.2f s %s" % (elapsed, p.desc()))
-    check("detached: the prompt is saved, and no note or close has happened yet",
-          captured_texts(cfg, sid) == [opener, text] and os.path.exists(marker_of(cfg, sid))
-          and not judged_notes(block_items(cfg, sid, text)), captured_texts(cfg, sid))
+def case_stop_hook_active_still_counts_the_turn():
+    cfg, sid = new_cfg(), "active-counts"
+    capture(cfg, sid, "one short note")
+    expect_silent("active: stop_hook_active passes", gate(cfg, sid, stop_active=True))
+    expect_silent("active: the next turn's one short note is not joined to the last turn's",
+                  turn(cfg, sid, "another short note"))
+
+
+def case_damaged_turn_state_counts_every_message():
+    cfg, sid = new_cfg(), "damaged-state"
+    expect_silent("damaged: a lone note passes", turn(cfg, sid, "first short note"))
+    write_file(os.path.join(cfg, "handoffs", sid + ".inbox.turns"), "{not json")
+    p = turn(cfg, sid, "second short note")
+    expect_block("damaged: with no readable state, both messages count as one turn", p,
+                 named=("first short note", "second short note"))
 
 
 # Row tables. A row is one case body from above. A row that raises is red and names
@@ -1580,19 +1013,6 @@ def run_rows(rows):
             body()
         except Exception as exc:
             check("%s: case ran" % body.__name__, False, "%s: %s" % (type(exc).__name__, exc))
-
-
-def table_open_forms():
-    run_rows((case_open_survives_across_runs, case_opener_forms))
-
-
-def table_close_forms():
-    run_rows((case_fb_done_closes_and_is_not_captured, case_fb_done_forms_close_capture,
-              case_fb_done_prefix_closes_and_drops_the_rest))
-
-
-def table_quiet_gap():
-    run_rows((case_quiet_gap_closes_capture, case_quiet_gap_ignores_notices))
 
 
 def table_gate_handoff_drops():
@@ -1607,34 +1027,25 @@ def table_gate_scanner_text():
 
 
 def table_reorient_forms():
-    run_rows((case_reorient_lists_open_items_only, case_reorient_capture_open_line,
-              case_reorient_items_and_capture_line_together,
-              case_reorient_malformed_line_keeps_the_note,
-              case_reorient_nothing_when_no_open_items_and_no_marker))
+    run_rows((case_reorient_lists_open_items_only, case_reorient_malformed_line_keeps_the_note,
+              case_reorient_nothing_when_no_open_items))
 
 
 CASES = (
-    case_closed_by_default,
-    case_opener_captured_with_central_time,
-    table_open_forms,
-    table_close_forms,
-    case_near_miss_closers_open_nothing_while_closed,
-    case_fb_done_prefix_opens_nothing_while_closed,
-    case_fb_done_line_at_the_end_closes_in_the_same_message,
-    case_same_message_close_keeps_the_old_controls,
-    case_close_words_count_only_as_a_last_line,
-    case_open_last_line_fb_done_starts_no_judge,
+    case_every_owner_message_is_captured,
     case_notices_are_never_captured,
-    table_quiet_gap,
-    case_judge_runs_once_per_open_prompt_with_the_sonnet_id,
-    case_judge_not_feedback_keeps_the_prompt_and_closes,
-    case_judge_failure_keeps_capture_open_and_saves,
-    case_judge_child_closes_only_the_last_captured_message,
+    case_one_line_messages_never_trigger_the_gate,
+    case_two_messages_in_a_turn_are_a_burst,
+    case_long_or_bulleted_message_is_a_burst,
+    case_burst_jotted_passes,
+    case_unjotted_burst_keeps_blocking_in_later_turns,
+    case_stop_hook_active_still_counts_the_turn,
+    case_damaged_turn_state_counts_every_message,
     case_verbatim_scanner_text_is_fenced,
     case_fail_open_writes_nothing,
     case_capture_write_failure_says_not_saved,
     case_lone_surrogate_is_saved_or_said_not_saved,
-    case_agent_never_opens_closes_or_captures,
+    case_agent_never_captures,
     case_sessions_are_isolated,
     case_gate_no_inbox_and_empty_inbox_pass_silently,
     case_gate_all_jotted_passes_silently,
@@ -1646,7 +1057,6 @@ CASES = (
     case_gate_id_match_is_a_whole_token,
     table_gate_scanner_text,
     case_gate_notes_heading_is_plain_text,
-    case_gate_reminder_follows_capture_state,
     case_gate_unreadable_inbox_blocks_and_names_the_file,
     case_gate_reads_only_its_own_session,
     case_gate_ruling_homed_to_handoff_blocks,
@@ -1658,7 +1068,6 @@ CASES = (
     case_gate_unreadable_layout_fails_open_with_one_line,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
-    case_judge_child_is_detached_hook_returns_first,  # last: it leaves a 5 s child running
 )
 
 
@@ -1674,7 +1083,6 @@ def run_case(case):
 
 def main():
     try:
-        install_judge_stub()
         for case in CASES:
             run_case(case)
     finally:

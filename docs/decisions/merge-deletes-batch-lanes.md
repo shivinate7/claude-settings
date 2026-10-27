@@ -42,7 +42,11 @@ Built on branch `merge-cuts-lanes` (commit 1cae7c63), in `merge/merge.py`: `lane
   (a partial stack).
 - It keeps a lane, with a line, when an open PR at its tip aims at any other base (a backport).
 - It keeps a lane, with a line, when every merge that took its tip into the batch was reverted on the batch (a
-  "This reverts commit" message, counted through reverts of reverts). A dropped lane needs its branch to rejoin.
+  "This reverts commit" message, counted through reverts of reverts). The tool refuses such a batch before the claim
+  (`refuse_dropped_lane`), so this line is a fallback: a revert on main deletes the lane's files when the lane
+  later merges main (incident: batch #663 dropped the platform-ask lane by a revert, and it lost 11 of 13 files). The remedy: rebuild the batch branch from main without the lane. A failed read refuses too, unless the owner passes
+  `--undo-check-unknown-ok`. The check sees only a lane that joined by a merge commit. A lane that joined by a
+  fast-forward, a rebase or a cherry-pick and left by a plain revert is not seen; the rule's "never revert" covers it.
 - It keeps a head whose open PR has a head sha that differs from the tip.
 - A head with two or more open PRs is judged on all their bases, by the rules above.
 - `Host.open_heads` raises on a failed read, or on 1000 or more rows. Then no head is deleted.

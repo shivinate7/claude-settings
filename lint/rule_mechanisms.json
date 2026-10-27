@@ -267,7 +267,7 @@
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step."
+        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step. merge/merge.py refuses one part only: a batch that drops a lane by a revert (refuse_dropped_lane)."
       }
     },
     "verification-screens-verdict": {

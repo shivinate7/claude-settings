@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 
 const PAGES = {
   "/content.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}
-    @media (prefers-color-scheme: dark){body{background:#000;color:#eee}}</style><h1>Shoot fixture</h1><p>Known content.</p>`,
+    @media (prefers-color-scheme: dark){body{background:#000;color:#eee}}</style><h1>Shoot fixture</h1><p>Known content.</p><nav style="display:none"><b>Phone nav</b></nav><div style="display:contents"><i>Wrapped</i></div>`,
   "/app/prefixed.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}</style><h1>Under a prefix</h1>`,
   "/blank.html": `<!doctype html><style>body{margin:0;background:#fff}</style>`,
 };
@@ -108,6 +108,14 @@ test("one PNG per route x width x theme, each at its width, with known content n
   assert.equal((await pixels(b, path.join(r.dir, "content-390-light.png"))).width, 390);
   assert.ok(light.colours > 2, `known content rendered ${light.colours} colour(s): blank`);
   assert.ok(light.mean > 200 && dark.mean < 55, `light mean ${light.mean}, dark mean ${dark.mean}: the theme did not apply`);
+  // The rendered page beside each PNG, for lint/label_once.py.
+  const htmls = fs.readdirSync(r.dir).filter((f) => f.endsWith(".html")).sort();
+  assert.deepEqual(htmls, r.pngs.map((f) => f.replace(/\.png$/, ".html")));
+  const html = fs.readFileSync(path.join(r.dir, "content-820-light.html"), "utf8");
+  assert.match(html, /<h1>Shoot fixture<\/h1>/);
+  assert.match(html, /<nav style="display:none" hidden="">/);  // an element the browser does not show is marked
+  assert.doesNotMatch(html, /<h1[^>]*hidden/);
+  assert.match(html, /<div style="display:contents"><i>Wrapped<\/i><\/div>/);  // a wrapper with no box is still shown
 });
 
 test("a 404 route is a fail", async (t) => {
