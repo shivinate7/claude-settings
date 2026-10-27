@@ -560,7 +560,7 @@
     "questions-go-to-owner": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a question names what the session does meanwhile, whether the session kept working on what does not depend on the answer, and whether it also reached the waiting page, is a content judgment. No check refuses a question box while work runs: debt question-box-while-work-runs."
+        "reason": "Whether a question names what the session does meanwhile, whether the session kept working on what does not depend on the answer, and whether it also reached the waiting page, is a content judgment. The session-board mod refuses a question box while this session's agents or background commands run (record session-board-mod-limits)."
       }
     },
     "style-cut-narration": {

@@ -1238,10 +1238,11 @@ async function stopWith(h, tasks, agentId) {
   if (!hook) throw new Error('no classic.Stop hook')
   return hook.fn(h.$, { hook_event_name: 'Stop', session_id: ID, background_tasks: tasks, ...(agentId ? { agent_id: agentId } : {}) }, async () => ({}))
 }
+const PYOK = () => ({ exitCode: 0, stdout: '', stderr: '' })
 const guardLines = h => h.pythonCalls.filter(a => a.some(x => String(x).includes('guard_core')))
 
 await test('question box: a live agent refuses it, and the refusal says what to do instead', async () => {
-  const h = await start({ liveAgents: [{ id: 'ag1', type: 'Explore', status: 'running', description: 'x' }], python: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  const h = await start({ liveAgents: [{ id: 'ag1', type: 'Explore', status: 'running', description: 'x' }], python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   const r = await askBox(h)
   same(r && r.decision, 'deny', 'verdict')
@@ -1255,7 +1256,7 @@ await test('question box: a live agent refuses it, and the refusal says what to 
 })
 
 await test('question box: a live background command refuses it, until its notice arrives', async () => {
-  const h = await start({ python: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   await bashBackground(h, 'b1', 'task1')
   const r = await askBox(h)
@@ -1266,7 +1267,7 @@ await test('question box: a live background command refuses it, until its notice
 })
 
 await test('question box: the turn-end list of background work replaces what the check tracked', async () => {
-  const h = await start({ python: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   await bashBackground(h, 'b1', 'task1')
   await stopWith(h, [])
@@ -1291,7 +1292,7 @@ await test('question box: the asking agent does not count itself', async () => {
 })
 
 await test('question box: an unreadable agent list fails open and says unknown', async () => {
-  const h = await start({ agentListThrow: true, python: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  const h = await start({ agentListThrow: true, python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   same((await askBox(h)).decision, 'allow', 'verdict')
   await settle()
@@ -1314,6 +1315,21 @@ await test('question box: an earlier deny stands and costs no read', async () =>
   h.$.agent.list = async () => { reads++; return [] }
   same((await askBox(h, {}, 'deny')).decision, 'deny', 'verdict')
   same(reads, 0, 'no agent read')
+})
+
+await test("question box: GUARD_PY writes one guard.log line through the real guard_core writer", async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const hooks = fileURLToPath(new URL('../../hooks', import.meta.url))
+  const cfg = mkdtempSync(join(tmpdir(), 'sb-guardlog-'))
+  try {
+    const r = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-B', '-c', lib.GUARD_PY, hooks, ID, 'deny', lib.QUESTION_RULE, 'agents=1 commands=0'], { cwd: cfg, env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, encoding: 'utf8' })
+    same(r.status, 0, 'python exit: ' + r.stderr)
+    const fields = readFileSync(join(cfg, 'guard.log'), 'utf8').trim().split('\t')
+    same(fields.slice(1), ['AskUserQuestion', 'deny', 'question-box-while-work', 'agents=1 commands=0', ID], 'guard.log fields after the time')
+  } finally { rmSync(cfg, { recursive: true, force: true }) }
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length

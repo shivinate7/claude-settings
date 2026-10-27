@@ -1,6 +1,6 @@
 # session-board
 
-A mod. It adds two commands. `/board` shows the local sessions and agents and what each one is doing. `/safe-stop` checks that a session has no running work before you stop it. It draws nothing else. It calls no model.
+A mod. It adds two commands. `/board` shows the local sessions and agents and what each one is doing. `/safe-stop` checks that a session has no running work before you stop it. It also refuses a question box while the session's own work runs. It draws nothing else. It calls no model.
 
 ## /board
 
@@ -109,3 +109,12 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - `node mods/session-board/session-board.test.mjs` runs the tests (stdlib only).
 - `claude plugin validate mods/session-board` checks the mod.
 - Try it: `claude --plugin-dir mods/session-board`, then `/board`.
+
+## The question-box check
+
+AskUserQuestion is refused while an agent or a background command of this session runs. A box stops the session until the owner answers, and the running work goes on with no brake.
+
+- Agents come from the host's agent list, read once per box. Background commands are the ones the mod saw start and not yet end. The engine's list at each turn end resets them.
+- The refusal says to ask in the reply and on the waiting page, then keep working.
+- An unreadable agent list lets the box through, and the debug log and `guard.log` say unknown.
+- Each refusal writes one `guard.log` line through `hooks/guard_core.py`, rule `question-box-while-work`.

@@ -336,6 +336,49 @@ export function configDir(env, platform) {
   return home ? home + (win ? '\\' : '/') + '.claude' : ''
 }
 
+// The question-box check (rule questions-go-to-owner). A box stops the session until the owner
+// answers, and running work goes on with no brake. The agent list is the host's; the background
+// commands are the ones this mod saw start and not yet end.
+export const QUESTION_RULE = 'question-box-while-work'
+
+// Python that writes one guard.log line through hooks/guard_core.py's own locked writer.
+// argv: hooks folder, session id, decision, rule, matched.
+export const GUARD_PY = [
+  'import sys',
+  'sys.path.append(sys.argv[1])',
+  'import guard_core as g',
+  'g.set_log_session(sys.argv[2])',
+  'g.record("AskUserQuestion", sys.argv[3], sys.argv[4], sys.argv[5])',
+].join('\n')
+
+// Live agents in the host's list, the asking loop left out: it cannot wait on itself.
+export function liveAgentCount(list, selfId) {
+  return (Array.isArray(list) ? list : []).filter(a => a && LIVE.has(a.status) && !(selfId && a.id === selfId)).length
+}
+
+// The task id and status of a task notice, or null for any other text.
+export function taskNotice(text) {
+  const s = typeof text === 'string' ? text : ''
+  const id = /<task-id>([^<\s]{1,200})<\/task-id>/.exec(s)
+  const status = /<status>([^<\s]{1,40})<\/status>/.exec(s)
+  return id ? { id: id[1], status: status ? status[1] : '' } : null
+}
+
+// The shell task ids in a Stop input's background_tasks, or null when it carries no list.
+export function shellTaskIds(tasks) {
+  if (!Array.isArray(tasks)) return null
+  return tasks.filter(t => t && t.type === 'shell' && typeof t.id === 'string').map(t => t.id)
+}
+
+const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
+
+// The refusal text, or null when nothing runs.
+export function questionRefusal(agents, commands) {
+  if (!agents && !commands) return null
+  const running = [agents ? plural(agents, 'agent') : '', commands ? plural(commands, 'background command') : ''].filter(Boolean).join(' and ')
+  return `Question box refused: ${running} of this session still run, and a box stops the session until the owner answers. Ask in your reply and on the waiting page instead, then keep working on what does not depend on the answer (rule questions-go-to-owner).`
+}
+
 // /safe-stop. The text goes to the session as a prompt. The handoff hook's own prompt file holds
 // the rules for the file itself. No handoff writer lives in this mod.
 export const safeStopMessage = (prompt, handoff) =>
