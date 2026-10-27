@@ -13,7 +13,7 @@ The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 202
 - The report gate, `lint/report_gate.py`, still blocks, but no block makes a session send its report twice (roadmap c101, the report gate never asks for the report again). A wrong Done label, a missing model name, a missing `Unstarted:` line or a bare record id gets a block that asks for only the corrected lines. Only a missing report is sent in full. Incident: on Oct 26 21:12 CDT a mailaudit session sent its whole report twice to fix one Done label and add model names.
 - It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
 - The model call times out at 20 s. Three runs took 6.6, 7.0 and 8.0 s on the owner's machine, and the Stop entry in `settings.json` allows 25 s.
-- Its rules are `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output` and `output-never-hand-off-doable-step`. They stay `unmechanized` in `lint/rule_mechanisms.json` until the hook catches a real defect.
+- Its rules are `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output`, `output-never-hand-off-doable-step`, `style-table-gold-column` and `questions-go-to-owner` (an Input Needed pick that can be undone). The first five stay `unmechanized` and `questions-go-to-owner` stays `judgment` in `lint/rule_mechanisms.json` until the hook catches a real defect.
 
 Kind: process
 Home: hooks/reply_judge.py

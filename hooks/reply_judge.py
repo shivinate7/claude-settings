@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against five style rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never blocks. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against six rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never blocks. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -13,7 +13,8 @@ Sampling: the judge runs on Stop n of a session (counting only Stops that carry 
 at once with no model call and no output. The count is a file per session under the state folder.
 
 Input Needed: a reply with an Input Needed item is judged on every Stop, besides the sample, so
-each handed-off step is checked for its reason and the check. The label is read in code, not by the
+each handed-off step is checked for its reason and the check. It is also checked for a pick that can
+be undone, which the session takes and does not ask (rule questions-go-to-owner). The label is read in code, not by the
 model, from lint/report_gate.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
 import fails, the Stop is judged and one stderr line says so.
 
@@ -50,12 +51,12 @@ EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
-                "style-table-gold-column")
+                "style-table-gold-column", "questions-go-to-owner")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
-    "Judge the final reply below against five rules. "
+    "Judge the final reply below against six rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -71,6 +72,12 @@ INSTRUCTIONS = (
     "flag an item that names neither. "
     "style-table-gold-column: a table that compares options, tools or runs carries a column for the gold standard or target, "
     "what good looks like; flag a comparison table with no such column, and never flag a table that only lists facts. "
+    "questions-go-to-owner: flag an Input Needed item whose pick can be undone, such as now or later, "
+    "a branch, a draft, a file edit or a folder move; the session takes that pick and names it under Done. "
+    "Never flag a pick that cannot be undone, such as a merge, a deploy, a delete with no copy, spend or a message to a person. "
+    "Never flag a pick that changes the owner's goal: what to build, a product's scope, or what the owner wants. "
+    "Never flag work in another repo. "
+    "Never flag a pick another rule keeps for the owner's word, such as a model switch or a stale decision. "
     "Running background work never makes a reply unfinished. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
