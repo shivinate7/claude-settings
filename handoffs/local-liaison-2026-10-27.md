@@ -46,3 +46,10 @@ the card ('offer' always asks; 'user_asked' only on shiv's own turn).
 
 Filing, closing and order go to the current triage thread; builds go to the current build advisor
 (both change often; ask the coordinator).
+
+## Late finding (Oct 27 14:30 UTC)
+
+An override shiv types in this project thread likely never reaches the Mac session's guard: the
+guard counts "override" only as a whole prompt typed in that session. Unchecked. If an override is
+ever needed on the Mac, have shiv type it in the Mac session window itself. frozen-path takes no
+override in any case (hooks/guard.py, owner-override section).
