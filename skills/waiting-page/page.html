@@ -143,13 +143,14 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt.sel .oframe { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
 .oshot.none .slot { display: block; height: 100%; border: 1.5px dashed var(--line); border-radius: 8px; }
 .opts.withd { container-type: inline-size; }
-/* 470px is two 230px columns and one 10px gap. In one column nothing lines up with an empty slot, so it folds away. */
-@container (width < 470px) { .opts.withd .oshot.none { aspect-ratio: auto; height: 0; } .oshot.none .slot { display: none; } }
+/* 710px is three 230px columns and two 10px gaps. Below it a lone no-design option can sit in its own row, and the shared rows still line up without the slot, so it folds away. */
+@container (width < 710px) { .opts.withd .oshot.none { aspect-ratio: auto; height: 0; } .oshot.none .slot { display: none; } }
 .ofull { grid-area: 2 / 1; align-self: start; justify-self: end; margin-right: 16px; position: relative; z-index: 1; width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: zoom-in; display: grid; place-items: center; }
-.ofull .ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
+.ofull .ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--ink); border: 1px solid var(--faint); box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
 .ofull:hover .ic { border-color: var(--acc); }
 .ofull:focus-visible { outline: none; }
-.ofull:focus-visible .ic { outline: 2px solid var(--acc); outline-offset: 2px; }
+/* The halo keeps the ring readable on the mockup's white. */
+.ofull:focus-visible .ic { outline: 2px solid var(--acc); outline-offset: 2px; box-shadow: 0 0 0 6px var(--surface); }
 /* Without subgrid, row 2 of .optw is not the picture row, so the button would cover the label. The Designs tab still opens each option's mockup. */
 @supports not (grid-template-rows: subgrid) { .ofull { display: none; } }
 .opt:hover { border-color: var(--faint); }
@@ -239,8 +240,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
 .dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px; }
 .dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 220px; }
-.dsh-head .btn { min-height: 40px; }
-.dsh-head .btn.quiet { color: var(--on-hdr); border-color: color-mix(in srgb, var(--on-hdr) 40%, transparent); }
+.dsh-head .btn { min-height: 40px; border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
 .dsh-body { position: relative; min-height: 0; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
 .dsh-body .dframe { position: absolute; inset: 0; width: 100%; height: 100%; }
 .dsh-body .dframe.off { visibility: hidden; }
@@ -448,13 +450,13 @@ function optCard(it, o, chosen, withd) {
     ? h("span", { class: "oshot" }, frame(o.design, "Mockup for option " + K, { class: "oframe", tabindex: "-1" }))
     : h("span", { class: "oshot none", "aria-hidden": "true" }, h("span", { class: "slot" }));
   const label = h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": lid, checked: chosen === o.key, onchange: () => choose(it, o.key) }),
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": lid, "aria-describedby": "h-" + it.id + "-" + o.key + " t-" + it.id + "-" + o.key + (o.key === it.pick ? " p-" + it.id + "-" + o.key : ""), checked: chosen === o.key, onchange: () => choose(it, o.key) }),
     h("span", { class: "head" }, h("span", { class: "key" }, K), h("span", { class: "lab", id: lid }, o.label)),
     shot,
-    h("p", { class: "how" }, o.how),
-    h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
-    o.key === it.pick ? h("div", { class: "pick" }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
-  const full = !o.design ? null : h("button", { class: "ofull", type: "button", "aria-label": "Open full size: option " + K, title: "Open full size", onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDesign(o.design); } });
+    h("p", { class: "how", id: "h-" + it.id + "-" + o.key }, o.how),
+    h("div", { class: "tr", id: "t-" + it.id + "-" + o.key }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    o.key === it.pick ? h("div", { class: "pick", id: "p-" + it.id + "-" + o.key }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
+  const full = !o.design ? null : h("button", { class: "ofull", type: "button", "aria-label": "Open full size: option " + K, onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDesign(o.design); } });
   if (full) full.innerHTML = '<span class="ic">' + ICON_FULL + "</span>";
   return h("div", { class: "optw" }, label, full);
 }
