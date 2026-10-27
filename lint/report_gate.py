@@ -7,8 +7,13 @@ transcript, or a parse error.
 Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
 after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
-order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report. When
-stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
+order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
+When stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet, with one
+exception: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
+holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
+the rewrite once for model names and the `Unstarted:` line only. A failure blocks with a correction.
+Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
+stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
@@ -83,10 +88,19 @@ BLOCK_REASON_TAIL = (
 # missing-report block asks for the report itself, so its reply carries every other fix. Once the
 # report is there, every other block asks for a short correction.
 # A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this gate stays quiet on it.
+# set, so this gate stays quiet on it. The rewrite after a missing-report block is the one
+# exception: rewrite_problems() checks it once, and its own block leaves no marker.
 CORRECTION_TAIL = (
     " Post only the corrected lines, as a short correction. Never send the report again."
 )
+
+MODELS_REASON = (
+    "Model-name gate: a Done item that agents built or reviewed names each one's role "
+    "and model, like \"(builder sonnet, reviewer sonnet)\". Here: ")
+UNSTARTED_REASON = (
+    "Unstarted gate: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
+    "Name each queued item with every question answered that you left unstarted, with "
+    "its reason, or write \"Unstarted: none\".")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -494,6 +508,62 @@ def pick_has_a_control(records, text, cwd):
     return False
 
 
+def _marker_path(hook):
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import local_time
+    return local_time.report_marker_path(hook.get("session_id"))
+
+
+def rewrite_problems(hook):
+    """Reasons for the rewrite that follows a missing-report block, or []. The marker is
+    consumed before any check, so a second rewrite finds none and stays quiet. It holds the
+    index of the turn's human record, so the spawns are read from the same turn whether or not
+    the hook's feedback record counts as human. Fails open on any error."""
+    try:
+        marker = _marker_path(hook)
+        if marker is None:
+            return []
+        with open(marker, encoding="utf-8") as f:
+            idx = int(f.read().strip())
+        os.remove(marker)
+        path = hook.get("transcript_path")
+        if not path or not os.path.exists(path):
+            return []
+        records = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(rec, dict):
+                    records.append(rec)
+        if idx >= len(records):
+            return []
+        text = last_reply(hook)
+        spawned = spawn_models(records[idx + 1:])
+        reasons = []
+        models = done_models_problem(text, spawned)
+        if models:
+            reasons.append(MODELS_REASON + models + ".")
+        if unstarted_problem(text, spawned):
+            reasons.append(UNSTARTED_REASON)
+        return reasons
+    except Exception:
+        return []
+
+
+def write_marker(hook, idx):
+    try:
+        marker = _marker_path(hook)
+        if marker is not None:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(str(idx))
+    except Exception:
+        pass
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -504,6 +574,9 @@ def main():
     if hook.get("hook_event_name") != "Stop":
         return
     if hook.get("stop_hook_active"):
+        reasons = rewrite_problems(hook)
+        if reasons:
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
         return
 
     path = hook.get("transcript_path")
@@ -555,14 +628,9 @@ def main():
     spawned = spawn_models(after)
     models = done_models_problem(text, spawned) if shape_ok else ""
     if models:
-        reasons.append(
-            "Model-name gate: a Done item that agents built or reviewed names each one's role "
-            "and model, like \"(builder sonnet, reviewer sonnet)\". Here: " + models + ".")
+        reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
-        reasons.append(
-            "Unstarted gate: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
-            "Name each queued item with every question answered that you left unstarted, with "
-            "its reason, or write \"Unstarted: none\".")
+        reasons.append(UNSTARTED_REASON)
     try:
         if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
             reasons.append(PICK_REFUSAL)
@@ -577,6 +645,8 @@ def main():
         reason = " ".join(reasons)
         if shape_ok:
             reason += CORRECTION_TAIL
+        else:
+            write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))
 
 
