@@ -73,5 +73,26 @@ class ConflictMarkers(unittest.TestCase):
         self.assertTrue((self.root / "roadmap.html").exists())
 
 
+class DeferredWithNoQuestion(unittest.TestCase):
+    def count(self, note):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build.upkeep({"c1": dict(STEP, note=note)})
+        return out.getvalue().splitlines()[0].rsplit("deferred on shiv with no question: ", 1)[1]
+
+    def test_deferred_with_no_question_counts(self):
+        self.assertEqual(self.count("Deferred (shiv, Oct 26): needs your answer."), "1")
+        self.assertEqual(self.count("Deferred: shiv's word on the read."), "1")
+
+    def test_asked_line_clears_it(self):
+        self.assertEqual(self.count("Deferred (shiv, Oct 26): x. Asked: waiting page item 31."), "0")
+
+    def test_due_after_line_clears_it(self):
+        self.assertEqual(self.count("Deferred (shiv, Oct 26): x. Due after: o2's layout move."), "0")
+
+    def test_deferred_by_triage_is_not_on_shiv(self):
+        self.assertEqual(self.count("Deferred (triage, Oct 27): not now."), "0")
+
+
 if __name__ == "__main__":
     unittest.main()

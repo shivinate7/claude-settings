@@ -1,10 +1,10 @@
 {
   "ask": "Draft the visual-question rule: when a question counts as visual, what picture each option needs, and where the session publishes it.",
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (its pictures come from d1).\nFrom a home-app question, Oct 17 (TV keyboard: do the arrows hide while typing). The prose rule goes with the reply-style rules; the pictures come from d1 (the designer). Plan on a linked artifact; whether AskUserQuestion's preview field shows a real picture is not checked. Found Oct 26: home-app already answers layout questions with HTML mockups in docs/design/ (f8a59b2), the pattern this rule would make standard. Not started.",
+  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (its pictures come from d1). d1 is done, so the reason is gone. Asked: waiting page item d9-lift-deferral (triage, Oct 27).\nFrom a home-app question, Oct 17 (TV keyboard: do the arrows hide while typing). The prose rule goes with the reply-style rules; the pictures come from d1 (the designer). Plan on a linked artifact; whether AskUserQuestion's preview field shows a real picture is not checked. Found Oct 26: home-app already answers layout questions with HTML mockups in docs/design/ (f8a59b2), the pattern this rule would make standard. Not started.",
   "order": 216,
   "phase": "design",
   "status": "todo",
   "title": "Visual questions come with a picture of each option",
-  "updatedAt": "2026-10-26T06:00:00Z",
+  "updatedAt": "2026-10-27T01:20:00Z",
   "why": "Agreed Oct 17. When a session asks how something should look, words like 'the keyboard has room' can't be judged. You answer these with 'I want a visual comparison' every time, so the session should bring one first: a mockup of each option side by side, published as an artifact (or a screenshot of each build), linked from the question."
 }

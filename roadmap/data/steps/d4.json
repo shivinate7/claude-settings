@@ -1,9 +1,9 @@
 {
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (you chose to deliberate later).\nStale premise, Oct 26: /board is now the session-board mod (claude-settings mods/session-board), a pane in the terminal or app with a plain-text form, not a page built from three elements. A pane is a poor first test for a mockup flow. Your word, Oct 26: deliberate later; triage's pick stands as an option (point the first test at a home-app screen).",
+  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (you chose to deliberate later). Asked: waiting page item d4-first-design-test (triage, Oct 27).\nStale premise, Oct 26: /board is now the session-board mod (claude-settings mods/session-board), a pane in the terminal or app with a plain-text form, not a page built from three elements. A pane is a poor first test for a mockup flow. Your word, Oct 26: deliberate later; triage's pick stands as an option (point the first test at a home-app screen).",
   "order": 240,
   "phase": "design",
   "status": "todo",
   "title": "Redesign /board as the first test",
-  "updatedAt": "2026-10-26T06:00:00Z",
+  "updatedAt": "2026-10-27T01:20:00Z",
   "why": "It was a proof of concept built from three plain elements. Mockup first, then rebuild with Svg for status and progress."
 }

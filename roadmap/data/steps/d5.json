@@ -1,9 +1,9 @@
 {
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (each idea needs your case-by-case call).\nYour word, Oct 26: banchi's design work was half done; there is a lot of good in it, but none of it goes in unvetted: an idea enters ux/ only with its own case (the outcome it protects, and a check), not because banchi has it. This narrows your Oct 20 ruling (only ideas move into ux/, never values or screens). Checked Oct 26 at claude-settings 149f4bc and banchi 19abdfb: ux/principles.md holds one banchi-sourced rule already, the icon rule (ux-one-plain-name, citing banchi's UX-118); spacing by relationship and motion roles are not in ux/; ux/tokens.md says motion is per repo. The 4px pick (banchi's floor plus 2, 3 and 6px steps) is withdrawn. Open for you, at the design phase: keep the icon rule on its own merits, or re-argue it.",
+  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (each idea needs your case-by-case call).\nYour word, Oct 26: banchi's design work was half done; there is a lot of good in it, but none of it goes in unvetted: an idea enters ux/ only with its own case (the outcome it protects, and a check), not because banchi has it. This narrows your Oct 20 ruling (only ideas move into ux/, never values or screens). Checked Oct 26 at claude-settings 149f4bc and banchi 19abdfb: ux/principles.md holds one banchi-sourced rule already, the icon rule (ux-one-plain-name, citing banchi's UX-118); spacing by relationship and motion roles are not in ux/; ux/tokens.md says motion is per repo. The 4px pick (banchi's floor plus 2, 3 and 6px steps) is withdrawn. Open for you: keep the icon rule on its own merits, or re-argue it. Due after: the Design phase opens.",
   "order": 250,
   "phase": "design",
   "status": "todo",
   "title": "Decide which design ideas belong in ux/, each on its own case",
-  "updatedAt": "2026-10-26T06:00:00Z",
+  "updatedAt": "2026-10-27T01:20:00Z",
   "why": "ux/ holds the design ideas every repo shares. Candidates: spacing by relationship, the four jobs of motion, a named reference screen, and a spacing floor."
 }

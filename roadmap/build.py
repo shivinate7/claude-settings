@@ -9,8 +9,9 @@ Then republish roadmap/roadmap.html to the roadmap artifact (see roadmap/README.
 After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
 NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
-entered the top TOP open places in the last day without a "Placed ahead of" line. Cost: one git
-process per build, no file written.
+entered the top TOP open places in the last day without a "Placed ahead of" line; and open steps
+deferred on shiv whose note has neither an "Asked:" nor a "Due after:" line (step c94). It also counts the
+files waiting in roadmap/outbox/ (step c98). Cost: one git process per build, no file written.
 
 Before it builds, it refuses a tree with git conflict markers (step c72) in any tracked file under
 SCANNED, and writes no page. Cost: one more git process and one read of each scanned file per build.
@@ -18,11 +19,16 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 import datetime
 import json
 import pathlib
+import re
 import subprocess
 
 NOTE_WORDS = 250
 STALE_DAYS = 5
 TOP = 5
+# A step waits on shiv when its note says so. "Asked:" names where the question sits; "Due after:"
+# names the work that must land before the question can be asked (step c94).
+DEFERRED_ON_SHIV = re.compile(r"Deferred(?: \((?:shiv|needs shiv)[^)]*\)|: shiv)")
+ASKED = ("Asked:", "Due after:")
 # roadmap.html is left out: build.py rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
@@ -99,6 +105,8 @@ def main():
     (ROOT / "roadmap.html").write_text(head + sep + "\n" + stub + rest, encoding="utf-8")
     print(f"roadmap.html: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
     upkeep(data["steps"])
+    outbox = sorted(p.name for p in (ROOT / "outbox").glob("*.md") if p.name != "README.md")
+    print(f"outbox: {len(outbox)} file(s)" + (": " + ", ".join(outbox) if outbox else ""))
 
 
 def added_at():
@@ -123,9 +131,11 @@ def upkeep(steps):
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
-    long_, stale, empty = [], [], []
+    long_, stale, empty, unasked = [], [], [], []
     for k, d in open_:
         note = d.get("note") or ""
+        if DEFERRED_ON_SHIV.search(note) and not any(a in note for a in ASKED):
+            unasked.append(k)
         words = len(note.split())
         if words > NOTE_WORDS:
             long_.append(f"{k} ({words})")
@@ -146,7 +156,8 @@ def upkeep(steps):
     if not added:
         jumped = ["unknown (git log could not run)"]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
-            ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped)]
+            ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
+            ("deferred on shiv with no question", unasked)]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 109.37,
   "why": "Your answer on the waiting page, Oct 26, to c69's one-CI-job-run-per-lane question: \"none of these\", \"i think u misunderstand the pros and cons tradeoffs i had here\".",
-  "note": "Deferred (shiv, Oct 26): needs your answer. The waiting-page thread is rewriting the options against rule roles-each-layer-proves-once and your rulings on local runs versus CI. Until you answer, agents/builder.md stays as it is. c69's own lane (a shared lint module never breaks test fixtures) merged in #637.",
-  "updatedAt": "2026-10-26T21:05:00Z"
+  "note": "Deferred (shiv, Oct 26): needs your answer. The waiting-page thread is rewriting the options against rule roles-each-layer-proves-once and your rulings on local runs versus CI. Due after: the waiting-page thread posts the rewritten options. Until you answer, agents/builder.md stays as it is. c69's own lane (a shared lint module never breaks test fixtures) merged in #637.",
+  "updatedAt": "2026-10-27T01:20:00Z"
 }

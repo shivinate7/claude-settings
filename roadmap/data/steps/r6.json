@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 306,
   "why": "o16 built the standing roles, roster, briefs and record-branch skeleton as one skill; each repo gets them only when it adopts it.",
-  "note": "Deferred (shiv, Oct 26): you settle each repo's plan first. Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Run it in the same visit as r1 and r5. Source: o16, skill project-ops on main 54be9f1; o8 makes the roadmap viewer generic.",
-  "updatedAt": "2026-10-26T20:05:00Z"
+  "note": "Deferred (shiv, Oct 26): you settle each repo's plan first. Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Run it in the same visit as r1 and r5. Due after: o2's layout move; then each repo's plan goes to you. Source: o16, skill project-ops on main 54be9f1; o8 makes the roadmap viewer generic.",
+  "updatedAt": "2026-10-27T01:20:00Z"
 }
