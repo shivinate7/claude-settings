@@ -1,0 +1,3 @@
+# From "Design the final waiting page"
+
+- New step (shiv's word, cmsg_01DoF7thf3iq2Srr1UsfXgh28ATeFWrfZMPFYdrqu75pev, Oct 26 20:37 CDT): one shared colour wheel for every repo. A repo with no colour of its own gets one drawn from its name: a hue at least 25 degrees from the three state hues (red 5, amber 36, green 145) and at least 30 degrees from every other repo's hue. shiv wants the same wheel to guide a repo that later adopts its own colour scheme, so each repo can pick well by itself. It needs one home in claude-settings (a registry of each repo's brand colour plus the rule), read by the waiting-page template and by any repo's design work. Rides with c100 (the waiting page gets its final look). Port: yes, that is its point.
