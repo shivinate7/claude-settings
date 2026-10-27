@@ -81,7 +81,12 @@ def absent(cwd, rev, path):
         path.encode("utf-8")  # a non-UTF-8 name cannot be passed as an argument: the tree cannot be asked
     except UnicodeEncodeError:
         raise Unknown("the read of %s:%s failed, and the name is not UTF-8" % (rev[:9], path.encode("utf-8", "replace").decode()))
-    if git(cwd, "ls-tree", rev, "--", path)[1].strip():
+    listed = git(cwd, "ls-tree", rev, "--", path)[1].strip()
+    # A gitlink is no blob: its text is "". git before 2.46 answers `cat-file --batch` for one whose commit is
+    # absent with "missing" (newer git says "submodule"), so the same entry must read as "" here, not Unknown.
+    if listed and all(ln.startswith("160000 commit ") and ln.split("\t", 1)[1:] == [path] for ln in listed.splitlines()):
+        return ""
+    if listed:
         raise Unknown("the read of %s:%s failed, though the tree lists it" % (rev[:9], path))
     return ""
 
