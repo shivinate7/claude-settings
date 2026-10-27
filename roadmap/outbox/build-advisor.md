@@ -1,2 +1,4 @@
 - Closes (2026-10-26 23:27 CDT): batch #671 merged as 6902807 with c88 (#651), c101 (#669), c102 (#670); lane PRs closed as replaced. Pace: first lane commit to merge 1 h 12 min (acd0882 at 22:13 CDT to 23:25 CDT); 3 lanes; no lane running while #668 and #671 CI ran; brake refusals: none read (no guard.log in this cloud container, unknown).
 - o13 lane C (#638) conflicts with main 6902807 in six files; sent back to its lane to merge main.
+- Defect for triage (2026-10-26 23:30 CDT): in cloud sessions a PostToolUse Bash hook reads CI with `gh pr view`, which is GraphQL and refused (403), so it reports "CI unknown" after any PR command. It should read CI by REST (`gh api repos/<o>/<r>/commits/<sha>/check-runs`). Seen on #638.
+- o13 lane C (#638) went ready alone at head e1b59d5 on main 6902807 (04:30 UTC).
