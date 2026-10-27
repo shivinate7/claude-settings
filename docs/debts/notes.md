@@ -563,3 +563,4 @@
 - ci-wake-branch-route-narrow: the branch and empty selectors match only open PRs with head `<owner>:<local branch name>`, so a fork head, a branch pushed under another name, or a closed PR gives no watch (hooks/ci_wake.py read_pr)
 - ci-wake-branch-metachar-windows: a branch name with `&`, `|`, `<` or `>` reaches cmd through a .cmd gh launcher in the `-F head=` value. Such a name breaks the `gh pr ready` line first (hooks/ci_wake.py read_pr)
 - ci-job-ste-ignores-inputs: ci-job runs the gates STE step as `bin/ste-changed <base>` and reads neither its `if:` nor its `with:`, so a `full_ste_audit` dispatch (scope all, fail false) is not mirrored locally. The local run is stricter, never looser (bin/ci-job is_ste_action)
+- scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)
