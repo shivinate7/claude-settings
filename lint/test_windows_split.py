@@ -258,7 +258,9 @@ def scope_problems(text):
         if not re.search(rf"^      {f}:\s*\S", block, re.M):
             problems.append(f"scope job has no output {f}")
     for name, job in jobs.items():
-        if name != "scope":
+        # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
+        # alone (actions/ci-done-comment/test_comment.py checks its needs and if).
+        if name not in ("scope", "ci-done"):
             problems += job_gate_problems(name, job, FLAG_OF.get(name))
     return problems
 

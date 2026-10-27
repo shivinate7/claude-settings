@@ -46,6 +46,10 @@ Count each limit. Never wait for the owner to notice.
 - A lane sends its green, reviewed head to the build advisor. A lane never rebases onto main and
   never merges.
 - Each merge go names `frozen at <sha>`. Nobody pushes to that branch until the result is back.
+- A role that waits on CI sets a timed check-in on each wait, and again after each red job.
+- Stall check: at each wake, a standing role asks whether any lane, PR or batch moved since its last
+  turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
+  It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
 
 ## Filing
 

@@ -383,6 +383,7 @@ jobs:
         run: |
           bash actions/all-jobs-passed/test_action.sh
           bash actions/ci-alarm/test_action.sh
+          python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
@@ -1153,3 +1154,42 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
+
+  # Wakes a session that waits on this PR (decision ci-wait-reads-run-status, "The cloud wake").
+  # A run with a red job sends no "all checks done" wake, so this job comments once when the run
+  # ends red. It needs every other job (actions/ci-done-comment/test_comment.py checks the list).
+  # !cancelled() runs it after a failed job and skips it on a superseded run.
+  ci-done:
+    runs-on: ubuntu-latest
+    needs:
+      - scope
+      - gates
+      - gates-shoot
+      - pointer-windows
+      - shell-macos
+      - gates-macos
+      - gates-windows
+      - gates-mutate-guard
+      - gates-windows-guard
+      - gates-windows-guard-2
+      - gates-windows-merge
+      - gates-windows-merge-2
+      - gates-windows-merge-3
+      - gates-windows-merge-4
+      - gates-windows-merge-5
+      - gates-windows-rest
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: actions/ci-done-comment
+
+      - name: Comment when a job ended red
+        uses: $/actions/ci-done-comment
+        with:
+          needs: ${{ toJSON(needs) }}
