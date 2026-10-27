@@ -201,6 +201,47 @@ class LaneCap(unittest.TestCase):
 PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
 
 
+class Playwright(unittest.TestCase):
+    WORKFLOW = ".github/workflows/ci.yml"
+
+    def test_apt_installs_are_red(self):
+        wf = self.WORKFLOW
+        for rel, text in (
+                (wf, "jobs:\n  t:\n    steps:\n      - run: npx playwright install --with-deps chromium\n"),
+                (wf, "      - run: npx playwright install-deps chromium\n"),
+                (wf, "      - run: |\n          npx playwright install \\\n            --with-deps chromium\n"),
+                (wf, "      - run: echo \"a # b\" && npx playwright install --with-deps\n"),
+                (wf, "      - name: Don't skip\n        run: npx playwright install --with-deps\n"),
+                (wf, "      - run: >\n          npx playwright install\n          --with-deps chromium\n"),
+                ("Dockerfile", "RUN npx playwright install --with-deps chromium\n"),
+                ("justfile", "e2e:\n    npx playwright install --with-deps\n"),
+                ("Taskfile.yml", "tasks:\n  e2e:\n    cmds:\n      - npx playwright install --with-deps\n"),
+                (".devcontainer/devcontainer.json", '{"postCreateCommand": "npx playwright install --with-deps"}\n'),
+                (".github/actions/web/action.yml", "    - run: npx playwright install --with-deps\n"),
+                ("Makefile", "e2e:\n\tnpx playwright install --with-deps\n"),
+                ("scripts/ci.sh", "npx playwright install --with-deps chromium\n"),
+                ("app/package.json", '{"scripts": {"postinstall": "playwright install --with-deps"}}\n')):
+            with self.subTest(rel=rel, text=text):
+                code, out = Repo(self).write(rel, text).run("playwright")
+                self.assertEqual(code, 1, out)
+                self.assertIn("apt install: " + rel, out)
+
+    def test_no_apt_comments_and_other_files_pass(self):
+        repo = Repo(self).write(self.WORKFLOW, "      # was: npx playwright install --with-deps\n"
+                                               "      - run: npx playwright install chromium  # never --with-deps\n"
+                                               "      - run: echo \"don't\"  # playwright install-deps\n"
+                                               "      - name: Don't use apt  # playwright install --with-deps\n")
+        repo.write(".github/workflows/b.yml", "      - run: >\n          npx playwright install chromium\n"
+                                              "      - run: echo done --with-deps\n")
+        repo.write("docs/ci.md", "Never run `playwright install --with-deps`.\n")
+        code, out = repo.run("playwright")
+        self.assertEqual((code, out.strip()), (0, "playwright: in shape - no apt step"))
+
+    def test_no_playwright_is_na(self):
+        code, out = Repo(self).write(self.WORKFLOW, "      - run: npm test\n").run("playwright")
+        self.assertEqual((code, out.strip()), (0, "playwright: n/a - no Playwright install"))
+
+
 class ProbesText(unittest.TestCase):
     """probes.md commands, as a session copies them into a shell."""
 

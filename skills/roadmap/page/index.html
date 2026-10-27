@@ -310,6 +310,25 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 .rc .nm{display:block;font-family:var(--font-num);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .count{font-family:var(--font-num);font-size:22px;font-weight:600;padding:10px 12px 2px}
 @media (max-width:560px){ .hl li{grid-template-columns:minmax(0,1fr);gap:2px} }
+/* Live work: the publisher's project threads and open pull requests, read just before the build. */
+.live{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--surface)}
+.live summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;font-size:13px}
+.live summary .lh{font-weight:600;color:var(--ink)}
+.live summary .lh::before{content:'\25B8\00A0';color:var(--muted)}
+.live[open] summary .lh::before{content:'\25BE\00A0'}
+.live summary .asof{margin-left:auto;font-size:11px;color:var(--muted)}
+.live .unk{color:var(--warn)}
+.live ul{list-style:none;margin:0;padding:0}
+.live li{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
+.live li .nm{display:block;font-family:var(--font-num);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.live a{color:var(--accent-ink);text-decoration:none}
+.live a:hover{text-decoration:underline}
+.live h4{margin:0;padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:1px solid var(--line)}
+.tag.st-blocked{color:var(--bad);background:var(--bad-soft)}
+.tag.st-working{color:var(--accent-ink);background:var(--accent-soft)}
+.tag.st-review_ready{color:var(--good);background:var(--good-soft)}
+.tag.st-failed,.tag.st-stopped{color:var(--warn);background:var(--warn-soft)}
+@media (max-width:560px){ .live li{grid-template-columns:minmax(0,1fr);gap:2px} }
 </style>
 <!-- /build:style -->
 
@@ -339,6 +358,7 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
   <section class="now" id="now" aria-label="Where you are"><div class="notice"><p class="muted">Loading the plan…</p></div></section>
 <!-- build:stamps -->
 <p class="stamps" id="stamps" aria-label="Where each panel was read"></p>
+<details class="live" id="live" aria-label="Live work"></details>
 <!-- /build:stamps -->
   <nav class="rail" id="rail" aria-label="Phases"></nav>
 
@@ -864,6 +884,37 @@ function unavailable(){
   const tag = () => Object.entries(marks).forEach(([id, where]) => {
     const meta = document.querySelector(`#s-${CSS.escape(id)} .meta`);
     if(meta && !meta.querySelector('.landed')) meta.insertAdjacentHTML('beforeend', `<span class="tag landed" title="Merged; waiting for triage to close the step">Landed in ${esc(where.join(', '))}</span>`);
+  });
+  tag();
+  new MutationObserver(tag).observe(box, {childList:true, subtree:true});
+})();
+/* Live work: each thread's state and the open pull requests, and a state tag on each step a thread names. */
+(() => {
+  const b = window.ROADMAP_BUILD || {}, w = b.live || {}, el = document.getElementById('live'), box = document.getElementById('phases');
+  if(!el) return;
+  const NAME = {blocked:'Waiting on you', working:'Working', review_ready:'Ready for review', failed:'Failed', stopped:'Stopped', done:'Done'};
+  const when = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
+  const link = (url, text) => /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
+  if(!Array.isArray(w.threads)){
+    el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by the roadmap builder)')}</span></summary>`;
+    return;
+  }
+  const open = w.threads.filter(t => t.state !== 'done'), done = w.threads.length - open.length;
+  const counts = Object.keys(NAME).filter(k => k !== 'done').map(k => [k, open.filter(t => t.state === k).length]).filter(([, n]) => n);
+  const pulls = w.pulls || [], branches = w.branches || [];
+  el.innerHTML = `<summary><span class="lh">Live work</span>${counts.map(([k, n]) => `<span class="tag st-${k}">${n} ${esc(NAME[k].toLowerCase())}</span>`).join('')}`
+    + `<span>${pulls.length} open pull request${pulls.length === 1 ? '' : 's'}</span>`
+    + `<span class="asof">read <span class="num">${esc(String(w.read).startsWith('unknown') ? w.read : when(w.read))}</span></span></summary>`
+    + `<h4>Threads</h4><ul>${open.length ? open.map(t => `<li><span><span class="tag st-${esc(t.state)}">${esc(NAME[t.state])}</span></span><span>${esc(t.title)}<span class="nm">${[t.step ? 'step ' + t.step : '', t.pr || '', t.lastActivity ? 'active ' + when(t.lastActivity) : ''].filter(Boolean).map(esc).join(', ')}</span></span></li>`).join('') : '<li><span></span><span>No thread is open.</span></li>'}</ul>`
+    + (done ? `<p class="asof" style="padding:4px 12px">${done} done thread${done === 1 ? '' : 's'} not shown.</p>` : '')
+    + `<h4>Open pull requests</h4><ul>${pulls.length ? pulls.map(p => `<li><span class="num">#${p.number}${p.draft ? ' draft' : ''}</span><span>${link(p.url, esc(p.title))}<span class="nm">${[p.branch || '', p.checks ? 'checks ' + p.checks : ''].filter(Boolean).map(esc).join(', ')}</span></span></li>`).join('') : '<li><span></span><span>No pull request is open.</span></li>'}</ul>`
+    + (branches.length ? `<h4>Branches with no open pull request</h4><ul>${branches.map(r => `<li><span class="num">${esc(when(r.updatedAt))}</span><span class="nm">${esc(r.name)}</span></li>`).join('')}</ul>` : '')
+    + (w.skipped && w.skipped.length ? `<p class="asof unk" style="padding:4px 12px">Skipped, wrong shape in the live file: ${esc(w.skipped.join(', '))}</p>` : '');
+  if(!box) return;
+  const tag = () => open.forEach(t => {
+    const meta = t.step && document.querySelector(`#s-${CSS.escape(t.step)} .meta`);
+    if(meta && ![...meta.querySelectorAll('.tag[data-thread]')].some(x => x.dataset.thread === t.title))
+      meta.insertAdjacentHTML('beforeend', `<span class="tag st-${esc(t.state)}" data-thread="${esc(t.title)}" title="${esc(t.title)}">${esc(NAME[t.state])}</span>`);
   });
   tag();
   new MutationObserver(tag).observe(box, {childList:true, subtree:true});

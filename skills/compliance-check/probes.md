@@ -40,6 +40,7 @@ session transcripts, not a repo.
 | Git | records folders, slugs lint | one file per record, one folder per kind, slugs of 32 or fewer |
 | Git | `check_silent_undo.py --history` | no lost lines |
 | Verification | `ci-hygiene` skill on `.github/workflows/` | no top finding |
+| Verification | `$PY $P/lint/compliance_probes.py playwright .` reads workflows, actions, Makefiles, shell scripts, Dockerfiles, justfiles, Taskfiles, dev container files and package.json scripts | exit 0. No Playwright install runs apt (`--with-deps`, `install-deps`); a repo that does moves to `actions/playwright-setup` (decision one-browser-setup-no-apt, one shared Playwright setup) |
 | Verification | list the screens, if any, and the sizes and themes they ship in | a check per screen |
 | Verification | `git grep -n sleep`; read each hit in its file and judge it | no waiter loop. A loop that sleeps to wait on a condition is a waiter. A lone delay is not |
 | Tokens | none: session practice | `n/a (session)` |

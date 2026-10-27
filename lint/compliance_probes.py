@@ -4,6 +4,7 @@
     python3 lint/compliance_probes.py layout  <child root>
     python3 lint/compliance_probes.py design  <child root>
     python3 lint/compliance_probes.py lanecap <child root>
+    python3 lint/compliance_probes.py playwright <child root>
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
 then one verdict line. Exit 0: in shape, not rolled out, or n/a. Exit 1: a gap. Exit 2: the probe
@@ -19,6 +20,11 @@ design: screen readiness against ux/. The shoot config names the screens, sizes 
 lanecap: a guessed lane cap in a brief or a plan (rule parallelism-no-guessed-lane-cap). A line that
   cites its owner or ruling source, "(owner, ...)" or "owner ... <date>", passes. A cap inside a pair
   of quotes is cited, and passes.
+playwright: a Playwright install that also runs apt (`--with-deps`, `install-deps`) in a workflow, an
+  action, a Makefile, a shell script, a Dockerfile, a justfile, a Taskfile, a dev container file or a
+  package.json script. The runner image already has the
+  browsers' libraries, and that apt step once timed a job out on a slow mirror. The shared
+  actions/playwright-setup installs with no apt step. Comments do not count.
 """
 import json
 import os
@@ -237,7 +243,71 @@ def probe_lanecap(root):
     return finish("lanecap", lines, "in shape - %d brief or plan file(s) read" % len(where), 0)
 
 
-GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap}
+PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"
+                     r"|Dockerfile[^/]*|[^/]+\.Dockerfile|[Jj]ustfile|Taskfile[^/]*\.ya?ml|\.devcontainer/[^/]+)$")
+FOLDED = re.compile(r"^(\s*)(- )?[\w-]+:\s*>[+-]?\d?\s*$")
+PW_APT = re.compile(r"\bplaywright\b[^\n;&|]*\s(--with-deps\b|install-deps\b)")
+
+
+def uncommented(text):
+    """`text` with each `#` comment cut, one pass that skips quoted strings. Backslash-continued
+    lines join, so a flag on a continuation line stays with its command."""
+    out = []
+    for line in text.replace("\\\n", " ").splitlines():
+        quote, cut = None, len(line)
+        for i, ch in enumerate(line):
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'" and not (i and line[i - 1].isalnum()):
+                quote = ch  # a quote after a letter is an apostrophe in text, as in "don't"
+            elif ch == "#" and (i == 0 or line[i - 1].isspace()):
+                cut = i
+                break
+        out.append(line[:cut])
+    return folded(out)
+
+
+def folded(lines):
+    """A YAML folded scalar (`run: >`) is one command over several lines, so its lines join onto
+    the key's line, and the line count stays the same."""
+    out, key, indent = [], None, 0
+    for line in lines:
+        if key is not None and (not line.strip() or len(line) - len(line.lstrip()) > indent):
+            out[key] += " " + line.strip()
+            out.append("")
+            continue
+        key, match = None, FOLDED.match(line)
+        if match:
+            key, indent = len(out), len(match[1])
+        out.append(line)
+    return out
+
+
+def probe_playwright(root):
+    files = tracked(root)
+    hits, seen = [], False
+    for rel in files:
+        if PW_FILE.search(rel):
+            lines = list(enumerate(uncommented(read(root, rel) or ""), 1))
+        elif rel == "package.json" or rel.endswith("/package.json"):
+            try:
+                scripts = json.loads(read(root, rel) or "{}").get("scripts") or {}
+            except (ValueError, AttributeError):
+                continue
+            lines = [("script " + k, v) for k, v in scripts.items() if isinstance(v, str)]
+        else:
+            continue
+        for where, text in lines:
+            seen = seen or "playwright" in text
+            if PW_APT.search(text):
+                hits.append("  apt install: %s:%s: %s" % (rel, where, text.strip()[:160]))
+    if hits:
+        return finish("playwright", hits, "out - %d install(s) run apt; use actions/playwright-setup" % len(hits), 1)
+    return finish("playwright", [], "in shape - no apt step" if seen else "n/a - no Playwright install", 0)
+
+
+GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright}
 
 
 def main(argv):
