@@ -1,0 +1,15 @@
+import SwiftUI
+import __APP__Kit
+
+struct ContentView: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let colors = scheme == .dark ? ThemeColors.dark : ThemeColors.light
+        Text(Greeting.text(for: "__APP__"))
+            .foregroundStyle(colors.text)
+            .padding(Space.m)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(colors.background)
+    }
+}

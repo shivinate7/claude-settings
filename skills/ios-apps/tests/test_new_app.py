@@ -47,6 +47,7 @@ EXPECTED = [
     "tools/gen-tokens.py",
     "tools/ios-ship.json",
 ]
+PLACEHOLDER = r"__[A-Z][A-Z_]*__"
 # The account values bin/ios-ship reads from the account file. None may sit in a repo.
 ACCOUNT_KEYS = {"team_id", "device_udid", "asc_key_path", "asc_key_id", "asc_issuer_id"}
 
@@ -87,8 +88,8 @@ class Starter(unittest.TestCase):
         files = self.made()
         self.assertEqual(sorted(files), EXPECTED)
         for rel, text in files.items():
-            self.assertNotIn("{{", text, rel)
-            self.assertNotIn("__APP__", rel)
+            self.assertNotRegex(text, PLACEHOLDER, rel)
+            self.assertNotRegex(rel, PLACEHOLDER)
 
     def test_project_is_xcodegen_swift_6_ios_26(self):
         spec = self.made()["native/project.yml"]
