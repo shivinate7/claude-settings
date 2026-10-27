@@ -1,0 +1,9 @@
+{
+  "title": "A reviewer at round 2 or 3 runs Sonnet, not its definition's Haiku pin",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.338997,
+  "why": "Finding, Oct 27 (c54 pin-order lane, PR #714, measured in a cloud thread): an agents/*.md model pin beats CLAUDE_CODE_SUBAGENT_MODEL, so a reviewer spawn that names no model runs the reviewer definition's pin (Haiku), even at rounds 2 and 3, where roles-third-try-steps-up says Sonnet.",
+  "note": "Guard rule agent-model-floor refuses only a haiku field, and the step-up rule does not require a model field, so nothing catches it. Next cloud lane: the guard asks for an explicit model on a reviewer spawn whose brief says round 2 or 3 (or the reviewer definition's pin moves to Sonnet and round 1 names Haiku); red first on a round-2 reviewer spawn with no model field. Needs no answer. Port: no; agents and the guard install from claude-settings. Placed ahead of c107 (triage, Oct 27): every review round 2 today runs the wrong model.",
+  "updatedAt": "2026-10-27T18:30:00Z"
+}
