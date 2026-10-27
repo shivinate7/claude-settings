@@ -33,7 +33,7 @@ const TASK = {
 };
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, answers, failDelete }) {
+function stubDb({ items, answers, failDelete, comments }) {
   const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, meta: {} };
   const subs = { items: [], answers: [] };
   window.__log = [];
@@ -50,14 +50,28 @@ function stubDb({ items, answers, failDelete }) {
       }),
     }),
   };
-  window.claude = { use: async (cap) => (cap === "db" ? db : null) };
+  // comments: null (capability absent) or { can, canThrows, failCodes, goneThreads }.
+  // failCodes rejects every send; goneThreads rejects a send into those thread ids with not_found.
+  window.__sent = [];
+  const cm = comments && {
+    canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
+    anchorFor: async (el) => ({ path: "h1", x: 0, y: 0, tag: el.tagName }),
+    sendToClaude: async (target) => {
+      window.__sent.push(target);
+      if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
+      if (comments.failCode) throw { code: comments.failCode, message: "stub" };
+      if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
+      return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
+    },
+  };
+  window.claude = { use: async (cap) => (cap === "db" ? db : cap === "comments" ? (cm || null) : null) };
 }
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false } = {}) {
+async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false, comments = { can: "available" }, storage = {} } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage();
@@ -65,8 +79,9 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   t.after(() => page.close());
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
-  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html", body: html }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers, failDelete });
+  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
+  await page.addInitScript(stubDb, { items, answers, failDelete, comments });
+  await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   if (Object.keys(answers).length) await page.check("#showDone"); // an answered item hides by default
@@ -161,4 +176,178 @@ test("a saved none note does not ride along when the owner picks an option", asy
   await c.getByRole("button", { name: "Update answer" }).click();
   await page.waitForFunction((id) => window.__answers()[id].choice === "b", DECISION.id);
   assert.equal((await answers(page))[DECISION.id].note, "");
+});
+
+const sent = (page) => page.evaluate(() => window.__sent);
+const settle = (page) => page.waitForFunction(() => !document.body.textContent.includes("Saving…"));
+
+test("a save sends one notice that names the item and the choice", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await page.fill(`#n-${DECISION.id}`, "bold");
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "Claude was told" }).waitFor();
+  const s = await sent(page);
+  assert.equal(s.length, 1);
+  assert.match(s[0].text, /27 a \(bold\)/);
+  assert.match(s[0].text, /test thread/);
+  assert.ok(s[0].anchor, "the first notice starts an anchored thread");
+  assert.ok((await answers(page))[DECISION.id], "the answer did not land");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.thread")), "t-new-1");
+});
+
+test("a task save names the item as done", async (t) => {
+  const page = await open(t); if (!page) return;
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.match((await sent(page))[0].text, /28 done/);
+});
+
+test("a second save replies into the stored thread", async (t) => {
+  const page = await open(t, { storage: { "waiting.thread": "t-old" } }); if (!page) return;
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const s = await sent(page);
+  assert.equal(s[0].threadId, "t-old");
+  assert.equal(s[0].anchor, undefined);
+});
+
+test("Accept every pick sends exactly one notice for the batch", async (t) => {
+  const two = { ...DECISION, id: "pick-a-shape", n: 29, title: "Pick a shape" };
+  const page = await open(t, { items: [DECISION, two, TASK] }); if (!page) return;
+  await page.click("#useAll");
+  await page.click("#useAll");
+  await page.waitForFunction(() => window.__sent.length >= 1);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 300))); // a second send would land in this window
+  const s = await sent(page);
+  assert.equal(s.length, 1, "one notice per batch");
+  assert.match(s[0].text, /27 a/);
+  assert.match(s[0].text, /29 a/);
+});
+
+test("no_session sends nothing and the save still lands", async (t) => {
+  const page = await open(t, { comments: { can: "no_session" } }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor();
+  assert.equal((await sent(page)).length, 0);
+  assert.ok((await answers(page))[DECISION.id]);
+});
+
+test("a send that rejects leaves the save and says no session was told", async (t) => {
+  const page = await open(t, { comments: { can: "available", failCode: "claude_unavailable" } }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor();
+  assert.equal((await sent(page)).length, 1, "no retry loop");
+  assert.ok((await answers(page))[DECISION.id]);
+});
+
+test("a canSendToClaude that rejects counts as unavailable", async (t) => {
+  const page = await open(t, { comments: { canThrows: true } }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor();
+  assert.ok((await answers(page))[DECISION.id]);
+});
+
+test("a page without the comments capability still saves", async (t) => {
+  const page = await open(t, { comments: null }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor();
+  assert.ok((await answers(page))[DECISION.id]);
+});
+
+test("a not_found on the stored thread starts a new anchored thread", async (t) => {
+  const page = await open(t, { comments: { can: "available", goneThreads: ["t-old"] }, storage: { "waiting.thread": "t-old" } });
+  if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "Claude was told" }).waitFor();
+  const s = await sent(page);
+  assert.equal(s.length, 2);
+  assert.equal(s[0].threadId, "t-old");
+  assert.ok(s[1].anchor && s[1].anchor.tag === "H1", "the new thread anchors at the h1");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.thread")), "t-new-2");
+});
+
+test("a long note with control characters is cut to 4 KiB, keeps Owners, and is plain", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await page.fill(`#n-${DECISION.id}`, "x\u0001y\u0007z" + "é".repeat(6000));
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4096, "over 4 KiB");
+  assert.match(text, /Owners: test thread/);
+  assert.doesNotMatch(text, /[\u0000-\u0008\u000b-\u001f\u007f]/);
+  assert.match(text, /x y z/);
+});
+
+test("canSendToClaude is asked before the answer write", async (t) => {
+  const page = await open(t); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await page.evaluate(() => {
+    window.__order = [];
+    const real = state.comments.canSendToClaude;
+    state.comments.canSendToClaude = async () => { window.__order.push("can"); return real(); };
+    const col = state.db.collection;
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const set = y.set; y.set = async (b) => { window.__order.push("set"); return set(b); }; return y; }; return x; };
+  });
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.__order), ["can", "set"]);
+});
+
+test("a batch of many items with long owners is cut to 4 KiB and keeps Owners", async (t) => {
+  const many = Array.from({ length: 70 }, (_, i) => ({ ...DECISION, id: i ? "pick-" + i : DECISION.id, n: 100 + i, owner: ("owner" + i + " ").padEnd(120, "o") }));
+  const page = await open(t, { items: many }); if (!page) return;
+  await page.click("#useAll");
+  await page.click("#useAll");
+  await page.waitForFunction(() => window.__sent.length >= 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4096, "over 4 KiB");
+  assert.match(text, /Owners: owner0 /);
+  assert.ok(text.endsWith("…"), "the cut did not run");
+});
+
+test("an owner name is capped at 80 characters", async (t) => {
+  const long = { ...DECISION, owner: "q".repeat(300) };
+  const page = await open(t, { items: [long] }); if (!page) return;
+  const c = card(page, long);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(text.includes("q".repeat(80)) && !text.includes("q".repeat(81)));
+});
+
+test("pressing Accept every pick again while a batch is in flight does nothing", async (t) => {
+  const page = await open(t, { comments: { can: "available", sendDelay: 600 } }); if (!page) return;
+  await page.click("#useAll");
+  await page.click("#useAll");
+  await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("useAll").click(); });
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
+  assert.equal((await sent(page)).length, 1, "a second notice went out");
+  assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
+});
+
+test("a canSendToClaude that never answers does not hold the save", async (t) => {
+  const page = await open(t, { comments: { canHangs: true } }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor({ timeout: 8000 });
+  assert.ok((await answers(page))[DECISION.id]);
+  assert.equal((await sent(page)).length, 0);
 });
