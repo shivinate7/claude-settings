@@ -4,8 +4,10 @@ that an advisory finding is a ::warning that never fails the step, the changed-l
 Also asserts bin/ste-changed matches the step on the same diff: scope, findings, verdict, exit code.
 Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude` input, never this repo's file.
 Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory.
-Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo never runs on import, and the summary still prints."""
-import os, re, subprocess, sys, tempfile
+Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo never runs on import, and the summary still prints.
+Also asserts the command's pin check: a CI pin whose lint differs exits 3 and names the pin and the remedy,
+an unrelated commit is no drift, an unknown pin changes no exit code, and LINT_FILES holds every file the step runs."""
+import ast, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -477,4 +479,81 @@ for scope in ("all", "changed"):
               out + "\nmarkers written: %s" % written)
         check("%s: the summary still prints" % label,
               "### STE lint" in text and "Files checked:" in text, out + "\nsummary file:\n" + text)
+
+
+# The pin check. A scratch claude-settings clone holds the command, its imports and LINT_FILES, so the
+# command's ROOT is that clone. History: A, then C changes the lint, then D changes only README.md (HEAD).
+# E, off D on a side branch, changes the lint again: a pin this copy does not hold.
+src = open(CMD, encoding="utf-8").read()
+m = re.search(r"^LINT_FILES = (\([^)]*\))", src, re.M)
+check("the command names the files the step runs (LINT_FILES)", bool(m), "")
+LINT_FILES = ast.literal_eval(m.group(1)) if m else ()
+for name in ("lint/ste_lint.py", "lint/layout.py"):
+    tree = ast.parse(open(os.path.join(ROOT, name), encoding="utf-8").read())
+    mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    local = sorted("lint/%s.py" % m for m in mods if os.path.exists(os.path.join(ROOT, "lint", m + ".py")))
+    check("LINT_FILES holds every lint module %s imports" % name, set(local) <= set(LINT_FILES), str(local))
+check("LINT_FILES holds the linter run.sh runs",
+      "lint/ste_lint.py" in LINT_FILES and "../../lint/ste_lint.py" in open(os.path.join(HERE, "run.sh")).read(), "")
+
+
+def pin_case(pin, change=lambda work: None, dead=None):
+    """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
+    commit label of the scratch clone. Returns (rc, output, {label: sha})."""
+    with tempfile.TemporaryDirectory() as d:
+        cs = os.path.join(d, "claude-settings")
+        tops = ("bin/ste-changed", "hooks/_nowindow.py", ".ste-lint-exclude", "actions/ste-lint/action.yml",
+                "actions/ste-lint/run.sh")
+        for rel in tops + tuple("lint/" + n for n in os.listdir(os.path.join(ROOT, "lint"))
+                                if n.endswith((".py", ".json"))):
+            dst = os.path.join(cs, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(os.path.join(ROOT, rel), "rb") as f, open(dst, "wb") as g:
+                g.write(f.read())
+        write(cs, "README.md", "x\n")
+        git(d, "init", "-q", "-b", "main", cs)
+        shas = {}
+        for label, rel in (("A", None), ("C", "lint/ste_lint.py"), ("D", "README.md")):
+            if rel:
+                write(cs, rel, "\n# %s\n" % label, "a")
+            git(cs, "add", "."); git(cs, "commit", "-qm", label)
+            shas[label] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
+        git(cs, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(cs, "checkout", "-q", "-b", "side")
+        write(cs, "lint/ste_lint.py", "\n# E\n", "a")
+        git(cs, "commit", "-qam", "E")
+        shas["E"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
+        git(cs, "checkout", "-q", "main")
+        sha = shas.get(pin, pin)
+        wf = "on: pull_request\njobs:\n  l:\n    steps:\n      - uses: o/claude-settings/actions/ste-lint@%s # main\n" % sha
+        if dead:
+            wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
+        work = make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
+        env = {k: v for k, v in os.environ.items() if k not in STEP_ENV}
+        p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ste-changed"), "main"], cwd=work, env=env,
+                           capture_output=True, text=True)
+        return p.returncode, p.stdout + p.stderr, shas
+
+
+rc, out, shas = pin_case("A")
+check("pin drift: an older pin's lint differs, so the command exits 3 though the lint passed",
+      rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out and ".github/workflows/ci.yml:5" in out, out)
+check("pin drift: the remedy names claude-settings main and the rule",
+      "Move the pin to %s" % shas["D"] in out and "git-integration-branch-merge" in out, out)
+rc, out, shas = pin_case("C")
+check("no drift: a pin whose lint files equal this copy's exits 0, though README.md moved since",
+      rc == 0 and "CI pins ste-lint at %s" % shas["C"][:7] in out and "the same lint as this copy" in out, out)
+rc, out, shas = pin_case("C", dead="A")
+check("a commented-out pin is not a pin: an old one in a comment changes nothing",
+      rc == 0 and shas["A"][:7] not in out, out)
+rc, out, shas = pin_case("E")
+check("pin ahead: a pin this copy's history lacks exits 3 and says to pull claude-settings",
+      rc == 3 and "pull claude-settings" in out, out)
+rc, out, _ = pin_case("f" * 40)
+check("unknown pin: a commit this clone does not hold is unknown and exits 0",
+      rc == 0 and "Unknown whether it matches" in out, out)
+rc, out, _ = pin_case("A", default_change)
+check("lint red and drift: the lint's exit code wins, and the drift line still prints",
+      rc == 1 and "older than this copy's lint" in out, out)
 sys.exit(1 if failed else 0)

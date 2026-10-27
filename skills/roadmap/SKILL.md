@@ -29,7 +29,30 @@ clone the newest list reads "unknown", because the history stops before the file
 Health shows the repo map, the compliance scores and the session board. The map's path comes from
 the extras: `{"map": "<path>", "github": "<owner>/<repo>"}`, under `"roadmap"` in the rolled-out
 layout extras file, else in `roadmap/extras.json` on the record branch. The compliance scores have no
-home yet, and the session board is deferred, so both read "unknown" and say why.
+home yet, and the session board's store lives on one machine, so both read "unknown" and say why.
+
+## Live work
+
+A strip under the read-at stamps shows each open project thread's state (waiting on you, working,
+ready for review, failed, stopped) and the open pull requests, folded to one line of counts. A thread
+that names a step also tags that step with its state. The builder cannot reach project threads or
+GitHub, so the publisher reads them just before the build and passes one file:
+
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --out FILE
+
+    {"readAt": "<ISO time of the reads>",
+     "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}],
+     "branches": [{"name", "updatedAt"?}]}
+
+- `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
+  listed. Add `step` only when the thread's brief names it.
+- `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
+- An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
+  `step` that names no open step goes in the upkeep list.
+- With no `--live`, with no `threads` or `pulls` list, or with a `readAt` that is not an ISO time, the
+  strip or its stamp reads "unknown" and says why. A local session's state does not show
+  yet: that waits on step o8's option (c), each session writing its own line.
 
 ## A merge marks a step
 
@@ -57,7 +80,9 @@ After each build the builder prints the upkeep list for the triage thread. It na
 
 ## Cost
 
-About six git processes and one page written per build. No watcher, no timer, no log.
+About six git processes and one page written per build. With `--live`, the publisher's reads add
+one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
+reads. No watcher, no timer, no log.
 
 ## Tests
 
