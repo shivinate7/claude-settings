@@ -948,6 +948,8 @@ class NoResendTests(unittest.TestCase):
              (self.BUILDER,)),
             # Catches: the cite-gloss block asks for the report again.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT gate, PR #5\n> **Next** none", ()),
+            # Catches: two joined reasons each carry the tail.
+            ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
         for name, reply, spawns in rows:
             with self.subTest(block=name):
@@ -956,6 +958,8 @@ class NoResendTests(unittest.TestCase):
                 reason = out["reason"].lower()
                 self.assertIn("post only the corrected lines", reason)
                 self.assertIn("never send the report again", reason)
+                self.assertNotIn("send the report now", reason)
+                self.assertEqual(reason.count("post only the corrected lines"), 1)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
