@@ -1,9 +1,9 @@
 {
   "title": "A batch merges only after a green run against current main",
   "phase": "cleanup",
-  "status": "review",
+  "status": "done",
   "order": 103.3045,
   "why": "Finding, Oct 27 (c95 part 1): a batch could land untested against a main that moved.",
-  "note": "Built Oct 27: draft PR #659 (merge tool refuses a head that lacks main's tip), head 770d7b4, sent to the build advisor for the batch. merge.py refuses before any claim when the PR head does not hold origin/main, and again after the check wait; the refusal says to merge main into the branch. A records-heal merge commit passes. Fresh Sonnet review round 1: clear. Merge suite: 572 tests pass; three new refusal tests were red on the old code. Record merge-needs-current-base. Branch protection unchanged: turning strict on is shiv's decision. Port: no; the merge tool is shared, so repos that use it get the refusal when they install it. Placed ahead of c82, after c96 (triage, Oct 27): every batch merge leans on it.",
-  "updatedAt": "2026-10-27T02:40:00Z"
+  "note": "Merged Oct 27 (PR #659, merge tool refuses a head that lacks main's tip). merge.py refuses before any claim when the PR head does not hold origin/main, and again after the check wait; the refusal says to merge main into the branch. A records-heal merge commit passes. Fresh Sonnet review round 1: clear. Merge suite: 572 tests pass; three new refusal tests were red on the old code. Record merge-needs-current-base. Branch protection unchanged: turning strict on is shiv's decision. Port: no; the merge tool is shared, so repos that use it get the refusal when they install it. Placed ahead of c82, after c96 (triage, Oct 27): every batch merge leans on it.",
+  "updatedAt": "2026-10-27T03:10:07Z"
 }
