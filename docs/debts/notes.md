@@ -50,10 +50,7 @@
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
-- fb-done-forms-unpinned: tests pin only a plain last line 'fb done'; colon, case, punctuation, CRLF, blank-line forms have no case, and fb and done on two last lines also close (hooks/local_time.py)
-- fb-done-unclosed-fence: a last line 'fb done' inside an unclosed code fence still closes capture (hooks/local_time.py CLOSE_LINE)
-- fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py, hooks/feedback_judge.py)
-- fb-judge-marker-race: the judge child can remove a fresh capture marker written in a microsecond gap, closing capture early (hooks/feedback_judge.py)
+- fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
 - frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
 - gate-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (gate wrappers)
 - gate-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (gate scripts)
@@ -116,10 +113,9 @@
 - impeccable-piped-shell-body: a body fed by here-string or $SHELL to a shell, such as bash <<< "npx impeccable install", is allowed (guard_core SHELL_HEREDOC, guard.py)
 - impeccable-python-body: a python, node, perl or ruby heredoc body that runs impeccable is not read (guard.py impeccable_command_hit)
 - in-throwaway-reads-paths-only: in_throwaway judges path text, so git --git-dir=/tmp/x with a real cwd passes as throwaway (hooks/guard_core.py)
-- inbox-done-forms: fb:done and backticked fb done are captured and do not close capture; no test covers fb<TAB>done (inbox capture hook)
-- inbox-midturn-prompt-untested: UserPromptSubmit fires for mid-turn owner messages (audit 2026-10-13); no test pins it (inbox hook)
+- inbox-midturn-prompt-untested: UserPromptSubmit fires for mid-turn owner messages (audit 2026-10-13), and the burst count leans on it; no test pins it (inbox hook)
 - inbox-partial-write-fence: a partial write, needing disk-full, can leave a fence open and merge later blocks into one message (inbox capture hook)
-- inbox-path-drop-silent: if the inbox path cannot be built, an fb message is dropped with one stderr line (inbox capture hook)
+- inbox-path-drop-silent: if the inbox path cannot be built, an owner message is dropped with one stderr line (inbox capture hook)
 - inbox-unreadable-drops-ids: an unreadable inbox drops open ids from the post-compaction note; the Stop gate still names the file (compact hook)
 - index-row-drop-no-finding: a records row can drop silently when a record is renamed to non-.md, or when one Drops-lines trailer excuses the page window-wide (hook_catalog.py, check_silent_undo.py)
 - install-early-exit-unlogged: refusals and lock timeouts exit before the start line, so the install log shows nothing (install.sh, install.ps1)
@@ -337,7 +333,10 @@
 - clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
 - asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
 - foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
-- feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
+- feedback-untagged-relays-count: a scheduled, PR-activity or relayed prompt with no shared_names.MACHINE_TAGS tag counts as an owner message toward a burst; which sources carry a tag is unchecked. Decision: owner-feedback-inbox
+- feedback-turn-state-index-drift: the turn state stores block indexes, so deleting or reordering inbox blocks points them at other messages. Decision: owner-feedback-inbox
+- feedback-burst-thresholds-unmeasured: the burst rule (two messages in a turn, three non-blank lines, two bullets) is the owner's ruling, not measured against real sessions. Decision: owner-feedback-inbox
+- feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done. Decision: owner-feedback-inbox
 - sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is refused at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
 - builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes the write refusal. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
 - memory-home-gaps: a Bash write that does not name the memory folder (cd plus relative path, variable, script) is out of reach. one rare false refusal when this session reads the folder while a peer writes. a ruling typed in chat and never written, and cloud sessions with no memory folder, leave no act to key on. a 'home: process-only' reflex is counted by lint/ruling_census.py only. Decision: memory-is-never-a-rulings-only-home
@@ -465,7 +464,6 @@
 - model-cap-alias-rows-merged: Alias, availableModels and /model picker rows in agent-model-cap are one row now. the haiku 'follows Claude Code' wording is gone. Decision: agent-model-cap
 - discard-fail-closed-list-in-code-only: The shape list that keeps the ask in a linked worktree now lives only in hooks/guard_shared_tree.py. Decision: agent-worktree-discard-is-noted
 - silent-undo-flag-print-no-cap-unrecorded: The 'print every flagged line, no cap' choice left the decision and is unverified in lint/check_silent_undo.py. Decision: silent-undo-check-design
-- feedback-inbox-edge-rules-in-tests-only: the fb trigger and close edge cases (mid-message fb, colon form, post-gap message, fenced done) now live only in tests. Decision: owner-feedback-inbox
 - finished-agent-lock-holds-tree: A finished agent's worktree can hold a lock whose pid is the live host, so the tree stays until the host exits. Decision: none
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/ci-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`.
+"""UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also saves each owner message to the session's feedback inbox.
 
 Modes:
-- UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
-  `fb` also starts feedback capture to the session's inbox file. Capture ends at `fb done`,
-  after 10 minutes of quiet, or when a judge says a prompt is not feedback.
+- UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
+  session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
   (decision owner-override; hooks/override.py). It prints one more line.
@@ -16,46 +15,22 @@ Plain stdout is context for UserPromptSubmit. SubagentStart takes context only a
 The US rule is coded here, not read from zoneinfo: Windows Python often has no tz database.
 Advisory, fail-open: any error prints one stderr line and exits 0.
 
-This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). A UserPromptSubmit
-prompt whose first word is `fb` or `fb:` opens capture. While open, a prompt that starts with `fb done`
-or `fb: done` (any case, any whitespace between the words) closes it, and the rest of that prompt is
-not saved. A prompt that ends with a line `fb done` (same match) is saved without that line and closes
-capture in the same message, whether capture was closed (the prompt opens with `fb`) or open. Capture also ends by itself: when the last captured owner message is more than GAP old, and
-when the Sonnet judge says a prompt is not feedback. Every prompt is saved first. A detached child
-(feedback_judge.py) judges it, off the prompt path: the call takes 8 s or more. On a not-feedback
-answer the child adds a note item under that message and closes capture, if no newer message was
-captured. A failed or late judge changes nothing. A notice (a prompt that starts with a
-shared_names.MACHINE_TAGS tag) is never captured or judged, and does not close capture. With
-capture closed, no `fb ... done` form opens it;
-with capture open, `fb - done` is captured as a message.
-While open, each prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md in a
-backtick fence longer than any backtick run in the text. Open state is the marker file
-<session_id>.inbox.open beside it; its text is the time of the last captured message. `is_open` is the
-one home of "is capture open": feedback_gate.py and precompact_handoff.py call it. LOCAL_TIME_NOW
-(ISO-8601 with an offset) replaces the clock; tests set it. `--agent` never reads stdin and never
-captures. The gate that reads the inbox is feedback_gate.py.
+This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). Every
+UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md, with its
+Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
+capture. A notice (a prompt that starts with a shared_names.MACHINE_TAGS tag) is never saved.
+`--agent` never reads stdin and never saves. The Stop gate that reads the inbox, and decides which
+messages need items, is feedback_gate.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
+clock; tests set it.
 """
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
-try:
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
-    _nowindow = subprocess
 
 CST = timedelta(hours=-6)
-GAP = timedelta(minutes=10)  # quiet time that ends capture
-CLOSE = re.compile(r"fb:?\s+done\b", re.I)  # matched at the start of the stripped prompt
-CLOSE_LINE = re.compile(r"\n[ \t]*fb:?\s+done[^\w\s`]*\s*$", re.I)  # a last line of `fb done`: saves the rest, then closes
-NEAR_MISS = re.compile(r"fb[\W_]+done\b", re.I)  # while closed: never opens
-MESSAGE_MAX = 4000  # the most of a message the judge child gets on its command line
 
 
 def nth_sunday(year, month, n):
@@ -106,86 +81,37 @@ def override_line(result):
 
 
 def inbox_paths(session_id):
-    """(inbox, open marker) for a session, or None when the id cannot be a file name. The one home
+    """(inbox, turn state) for a session, or None when the id cannot be a file name. The one home
     of these paths: feedback_gate.py calls it. precompact_handoff owns the handoffs folder."""
     if not re.fullmatch(r"[\w.-]+", session_id or "") or session_id.startswith("."):
         return None
     import precompact_handoff
     base = os.path.join(os.path.dirname(precompact_handoff.handoff_path(session_id)), session_id)
-    return base + ".inbox.md", base + ".inbox.open"
+    return base + ".inbox.md", base + ".inbox.turns"
 
 
-def is_open(marker, at=None):
-    """True when capture is open: the marker exists and its last captured message is at most GAP old.
-    The marker's text is that message's time; an empty or damaged marker falls back to its mtime."""
-    try:
-        with open(marker, "rb") as f:
-            text = f.read().decode("ascii", "ignore").strip()
-        try:
-            last = datetime.fromisoformat(text)
-            last = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
-        except ValueError:
-            last = datetime.fromtimestamp(os.path.getmtime(marker), timezone.utc)
-    except OSError:
-        return False
-    return (at or clock()) - last <= GAP
-
-
-def capture(raw, stamp, at=None):
-    """Opens, closes or appends for one owner prompt. `raw` is the hook's stdin as bytes."""
+def capture(raw, stamp):
+    """Saves one owner prompt to the inbox. `raw` is the hook's stdin as bytes."""
     hook = json.loads(raw.decode("utf-8"))
     prompt = hook.get("prompt")
     paths = inbox_paths(hook.get("session_id"))
     if paths is None or not isinstance(prompt, str):
         return
-    inbox, marker = paths
-    said = prompt.strip()
     try:
         from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
     except ImportError:  # missing or stale helper: only the notice check degrades; capture and the grant run on
         MACHINE_TAGS = ()
-    if MACHINE_TAGS and said.startswith(MACHINE_TAGS):
-        return  # a notice is not an owner message: never captured, judged or closing
-    at = at or clock()
-    opened = is_open(marker, at)
+    if MACHINE_TAGS and prompt.strip().startswith(MACHINE_TAGS):
+        return  # a notice is not an owner message
     # JSON can carry a lone surrogate, which UTF-8 cannot encode: save U+FFFD in its place.
-    prompt = re.sub("[\ud800-\udfff]", "�", prompt)
+    prompt = re.sub("[\ud800-\udfff]", "\ufffd", prompt)
     try:
-        opener = (prompt.split() or [""])[0] in ("fb", "fb:")
-        if not opened:
-            if os.path.exists(marker):
-                os.remove(marker)  # quiet time ended capture
-            if not opener or NEAR_MISS.match(said):
-                return  # closed: only an opener opens, and never a near-miss of `fb done`
-        elif CLOSE.match(said):
-            os.remove(marker)
-            return
-        closing = CLOSE_LINE.search(prompt)
-        if closing:
-            prompt = prompt[:closing.start()]  # the `fb done` line is not part of the note
-        judge = opened and not opener and not closing  # saved first, judged after: the judge runs detached
         fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", prompt)])
-        os.makedirs(os.path.dirname(inbox), exist_ok=True)
-        with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
+        os.makedirs(os.path.dirname(paths[0]), exist_ok=True)
+        with open(paths[0], "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
             f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, prompt, fence)).encode("utf-8"))
-        if closing:
-            if os.path.exists(marker):
-                os.remove(marker)  # saved, and closed in the same message
-        else:
-            with open(marker, "wb") as f:  # the last captured message's time: the quiet-time clock
-                f.write(at.isoformat().encode("ascii"))
-        if judge:
-            try:  # the same detached-child pattern as janitor/agent_end_reap.py; the hook does not wait
-                child = _nowindow.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
-                                  hook["session_id"], at.isoformat(), prompt[:MESSAGE_MAX]], stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                if os.environ.get("FEEDBACK_JUDGE_INLINE"):
-                    child.wait()  # test seam: the hook waits for the judge
-            except OSError:
-                pass  # no judge: the message stays saved and capture stays open
     except (OSError, ValueError) as e:  # stderr never reaches the owner or the session: use stdout
-        print("Feedback capture: this message was not saved, or capture state did not change (%s)."
-              " Jot it by hand into the handoff." % e)
+        print("Feedback capture: this message was not saved (%s). Jot it by hand into the handoff." % e)
 
 
 def grant_override(raw, at):
@@ -221,7 +147,7 @@ def main(argv):
         if not agent:
             raw = sys.stdin.buffer.read()
             grant_override(raw, now)
-            capture(raw, stamp[len("Local time: "):], now)
+            capture(raw, stamp[len("Local time: "):])
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0
