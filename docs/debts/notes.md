@@ -562,3 +562,4 @@
 - ci-wake-hash-selector-misses: `gh pr ready #12` takes the branch route (`head=owner:#12`) and ends with no watch; fix is to strip `#` before the digit test (hooks/ci_wake.py read_pr)
 - ci-wake-branch-route-narrow: the branch and empty selectors match only open PRs with head `<owner>:<local branch name>`, so a fork head, a branch pushed under another name, or a closed PR gives no watch (hooks/ci_wake.py read_pr)
 - ci-wake-branch-metachar-windows: a branch name with `&`, `|`, `<` or `>` reaches cmd through a .cmd gh launcher in the `-F head=` value. Such a name breaks the `gh pr ready` line first (hooks/ci_wake.py read_pr)
+- scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)
