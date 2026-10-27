@@ -7,6 +7,7 @@ None of them may read PASS. The last class plans the real gates job: every step 
 Run: python3 lint/test_ci_job.py
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -252,6 +253,73 @@ class RealGates(unittest.TestCase):
         multi = [ln for ln in lines if "Opt-in CI template fixture suites" in ln]
         self.assertEqual(len(multi), 1, done.stdout)
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
+
+
+def plan_lint(root, wf_text, extra=()):
+    """Lines of `ci-job lane --lint --plan` over a workflow text."""
+    path = os.path.join(root, "wf.yml")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(wf_text)
+    done = subprocess.run([sys.executable, CI_JOB, "lane", "--lint", "--plan", "--workflow", path, *extra], cwd=root,
+                          capture_output=True, text=True, env=ENV, timeout=60)
+    return done.returncode, done.stdout.splitlines(), done.stdout + done.stderr
+
+
+class LintMode(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="cijob_")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
+
+    def test_lint_mode_lists_exactly_the_lint_steps_of_gates(self):
+        # An independent read: the gates job's single-line run: commands, matched by a pattern written here.
+        want, name, inside = [], None, False
+        with open(GATES, encoding="utf-8") as f:
+            for line in f:
+                if re.match(r"^  [\w-]+:\s*$", line):
+                    inside = line.strip() == "gates:"
+                if not inside:
+                    continue
+                m = re.match(r"^      - name: (.*?)\s*$", line)
+                if m:
+                    name = m.group(1)
+                m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*)$", line)
+                if m and "mutate" not in m.group(1):
+                    want.append(name)
+        self.assertGreater(len(want), 20)
+        done = subprocess.run([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", "origin/main"],
+                              cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
+        lines = done.stdout.splitlines()
+        self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
+        for expected in want:
+            self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
+                            "missing %r in %s" % (expected, done.stdout))
+        self.assertNotIn("test_guard", done.stdout)
+
+    def test_a_new_lint_step_is_picked_up(self):
+        code, lines, out = plan_lint(self.root, workflow(
+            step("old lint", "python3 lint/check_old.py"),
+            step("brand new lint", "python3 lint/check_brand_new.py --strict"),
+            step("new action check", "python3 actions/test_new.py"),
+            step("ste", "bin/ste-changed origin/main"),
+            step("noise", "true")))
+        self.assertEqual(code, 0, out)
+        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines],
+                         ["old lint", "brand new lint", "new action check", "ste"], out)
+
+    def test_full_suites_and_mutation_tests_are_not_selected(self):
+        code, lines, out = plan_lint(self.root, workflow(
+            step("guard suite", "python3 hooks/test_guard.py"),
+            step("guard suite naming lint", "python3 hooks/test_guard.py lint/x.py"),
+            step("chained", "python3 hooks/test_guard.py && python3 lint/check_a.py"),
+            step("lint then suite", "python3 lint/check_a.py && python3 hooks/test_guard.py"),
+            step("mutation", "python3 lint/mutate_thing.py"),
+            step("sweep mutation", "python3 janitor/mutate_sweep.py"),
+            step("mixed block", "python3 lint/check_a.py\npython3 hooks/test_guard.py"),
+            step("wrapped", "bash lint/run.sh"),
+            step("kept", "python3 lint/check_a.py")))
+        self.assertEqual(code, 0, out)
+        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["kept"], out)
 
 
 if __name__ == "__main__":
