@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // shoot [--config F] [--out DIR]: one PNG per route x width x theme, then one verdict line.
+// Beside each PNG it writes the rendered page as .html, for lint/label_once.py (ux-label-once).
 // F defaults to .claude/shoot.json in the current folder. DIR defaults to a new shoot-* folder in the temp folder.
 // Config keys (decision shoot-is-one-shared-command):
 //   baseUrl (required; a path in it is kept: base http://h/app and route /a shoot http://h/app/a),
@@ -10,7 +11,7 @@
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
 // Playwright: the installed package only. This tool never runs `playwright install`.
 // Exit: 0 every shot passed, 1 a shot failed, 2 it could not run (usage, config, no Playwright, no browser).
-// Cost: one browser process per run, closed at exit. No daemon, no watcher.
+// Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). No daemon, no watcher.
 // Test seam: SHOOT_PLAYWRIGHT names the module to load (default playwright).
 "use strict";
 const fs = require("fs");
@@ -140,6 +141,7 @@ async function main() {
               if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
               const png = await page.screenshot({ path: path.join(out, name + ".png"), fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
               if (isBlank(png)) fails.push(`${name}: blank image (one colour) at ${url}`);
+              fs.writeFileSync(path.join(out, name + ".html"), await page.content());
             } catch (e) {
               fails.push(`${name}: ${String(e.message).split("\n")[0]}`);
             } finally {

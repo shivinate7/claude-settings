@@ -108,6 +108,10 @@ test("one PNG per route x width x theme, each at its width, with known content n
   assert.equal((await pixels(b, path.join(r.dir, "content-390-light.png"))).width, 390);
   assert.ok(light.colours > 2, `known content rendered ${light.colours} colour(s): blank`);
   assert.ok(light.mean > 200 && dark.mean < 55, `light mean ${light.mean}, dark mean ${dark.mean}: the theme did not apply`);
+  // The rendered page beside each PNG, for lint/label_once.py.
+  const htmls = fs.readdirSync(r.dir).filter((f) => f.endsWith(".html")).sort();
+  assert.deepEqual(htmls, r.pngs.map((f) => f.replace(/\.png$/, ".html")));
+  assert.match(fs.readFileSync(path.join(r.dir, "content-820-light.html"), "utf8"), /<h1>Shoot fixture<\/h1>/);
 });
 
 test("a 404 route is a fail", async (t) => {
