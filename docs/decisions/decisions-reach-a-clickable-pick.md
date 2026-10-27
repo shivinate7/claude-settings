@@ -5,7 +5,7 @@
 Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if the same main-session turn did one of two things.
 
 - It called `AskUserQuestion`, the question box. The gate does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the gate does not repeat that.
-- It called `ArtifactData` with a `set` or `update`, or a `batch` holding such a write, on collection `items`, on the URL that `layout.waiting_page` gives for this repo, and the reply text holds that URL. When the repo has no waiting page, only the box passes.
+- It called `ArtifactData` with a `set` or `update`, or a `batch` holding such a write, on collection `items`. The URL is the one `layout.waiting_page` gives for this repo, and the reply text holds that URL. When the repo has no waiting page, only the box passes.
 
 The refusal is one line. It says to open the question box, or to put the item on the repo's waiting page and link it.
 
