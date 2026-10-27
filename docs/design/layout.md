@@ -78,9 +78,10 @@ control.
 Outcome: the person sees the result of a press where they look, and nothing that does not change
 looks like part of the result.
 Check: pass when no element sits between a control (tabs, a filter, a toggle) and the area it
-changes, or each element between them stays the same in every state of the control. A summary or
-a rail that sits between the tabs and the tab panel fails.
-Source: the roadmap page, where a summary and a phase rail sat between the tabs and the tab panel.
+changes on screen. An element between them passes when it stays the same in every state of the
+control. A summary or a rail that sits between the tabs and the tab panel fails.
+Source: claude-settings `roadmap/page` on the roadmap branch, where a summary and a phase rail sat
+between the tabs and the tab panel.
 
 ## ux-component-reads-its-box
 
