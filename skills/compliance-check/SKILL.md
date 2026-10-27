@@ -41,6 +41,7 @@ Three groups read the tree, not a rule prefix. Each comes after the rule groups:
 - `Layout`: folder shape against `lint/layout.json` and the child's extras file.
 - `Design`: screen readiness against `docs/design/`.
 - `Copies`: copies of shared things the child holds, from the probe in `copies.md`.
+- `iOS`: drift from the iOS standard of the `ios-apps` skill. A child with no iOS app is `n/a`.
 
 ## 3. Run the probes
 
@@ -52,14 +53,14 @@ not repeat its steps.
 
 ## 4. Scorecard
 
-One line per group, in the order of step 2, then Layout, Design and Copies:
+One line per group, in the order of step 2, then Layout, Design, Copies and iOS:
 
 ```
 <Group>: <in shape | partial | out | parent-covered | n/a | unknown> - <finding> (<file:line or command>)
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
-known score, and lists each unknown probe after it. Layout and Design list each item under the
+known score, and lists each unknown probe after it. Layout, Design and iOS list each item under the
 group line, with its own grade, so one score never hides a finding. A child with no extras file
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.

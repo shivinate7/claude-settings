@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px soli
 </div></div>
 
 <script>
-const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, showDone: false };
+const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, comments: null, showDone: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
 const $ = (id) => document.getElementById(id);
@@ -182,6 +182,51 @@ function card(it) {
   return c;
 }
 
+const TOLD = "Saved. Claude was told.";
+const NOT_TOLD = "Saved. No session was told; reply in the thread to wake one.";
+const MAX_BYTES = 4096;
+const MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000;
+const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+// Owners come first so a cut at the byte cap never drops them.
+function noticeText(entries) {
+  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : ""); }).join(", ");
+  let text = "Saved on the waiting page. Owners: " + owners + ". Items: " + line + ".";
+  const enc = new TextEncoder();
+  while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
+  return text;
+}
+// Asked before the answer write, so only the write and the send sit between the click and the send.
+// The platform wants the send to follow the viewer's own gesture. How long that holds on a slow
+// store is unmeasured.
+// A call that never answers must not hold the save, so it gives up after CAN_WAIT_MS.
+async function canTell() {
+  if (!state.comments) return false;
+  try {
+    const give = new Promise((r) => setTimeout(() => r(false), CAN_WAIT_MS));
+    return await Promise.race([state.comments.canSendToClaude().then((v) => v === "available"), give]);
+  } catch (e) { return false; }
+}
+// One comment per save or batch, into the viewer's stored thread.
+// Any failure only means "no session was told"; the save stands and nothing retries.
+async function notifyClaude(entries, can) {
+  try {
+    const cm = state.comments;
+    if (!cm || !can) return false;
+    const text = noticeText(entries);
+    let id = null;
+    try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
+    let res = null;
+    if (id) {
+      try { res = await cm.sendToClaude({ threadId: id, text }); }
+      catch (e) { if (!e || e.code !== "not_found") throw e; }
+    }
+    if (!res) res = await cm.sendToClaude({ anchor: await cm.anchorFor(document.querySelector("h1")), text });
+    try { localStorage.setItem("waiting.thread", res.threadId); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+
 async function save(it, btn, st) {
   if (!state.db) return;
   const d = state.draft[it.id] || {};
@@ -190,12 +235,20 @@ async function save(it, btn, st) {
   if (it.kind === "decision") body.choice = d.choice || prev.choice || ""; else body.done = true;
   if (body.choice === NONE && !body.note.trim()) { st.className = "status"; st.textContent = "Add a note saying what you want instead, then save."; const n = $("n-" + it.id); if (n) n.focus(); return; }
   btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
+  const can = await canTell();
   try {
     await state.db.collection("answers").doc(it.id).set(body);
     delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
   } catch (e) {
     btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
+    return;
   }
+  st.textContent = "Saved. Telling Claude…"; $("barStatus").textContent = "Item " + it.n + ": Saved. Telling Claude…";
+  const told = await notifyClaude([{ n: it.n, choice: body.choice, note: body.note, owner: it.owner }], can);
+  state.notice[it.id] = told ? TOLD : NOT_TOLD;
+  // An answered card leaves the list, so the bar carries the outcome too.
+  $("barStatus").textContent = "Item " + it.n + ": " + state.notice[it.id];
+  render();
 }
 
 function render() {
@@ -240,18 +293,27 @@ $("copy").addEventListener("click", async () => {
 });
 
 $("useAll").addEventListener("click", async () => {
-  if (!state.db) return;
+  if (!state.db || state.batching) return;
   const todo = state.items.filter((it) => it.kind === "decision" && !isAnswered(it) && !(state.draft[it.id] || {}).choice);
   if (!todo.length) { $("barStatus").textContent = "Every open decision already has an answer."; return; }
   if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
   $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
-  $("barStatus").textContent = "Saving…";
-  for (const it of todo) {
-    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); }
-    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; return; }
-  }
-  $("barStatus").textContent = "Saved " + todo.length + " picks.";
+  state.batching = true;
+  try { await saveBatch(todo); } finally { state.batching = false; }
 });
+
+async function saveBatch(todo) {
+  $("barStatus").textContent = "Saving…";
+  const can = await canTell();
+  const saved = [];
+  for (const it of todo) {
+    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); saved.push({ n: it.n, choice: it.pick, note: "accepted pick", owner: it.owner }); }
+    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; if (saved.length) await notifyClaude(saved, can); return; }
+  }
+  $("barStatus").textContent = "Saved. Telling Claude…";
+  const told = await notifyClaude(saved, can);
+  $("barStatus").textContent = "Saved " + todo.length + " picks. " + (told ? "Claude was told." : "No session was told; reply in the thread to wake one.");
+}
 
 render();
 (async () => {
@@ -259,6 +321,7 @@ render();
   try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
   if (!db) { state.db = false; render(); return; }
   state.db = db;
+  try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); render(); }, () => {});
   db.collection("answers").onSnapshot((s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); state.answers = m; render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; render(); }, () => {});

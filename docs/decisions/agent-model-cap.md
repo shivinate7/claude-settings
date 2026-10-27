@@ -47,6 +47,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `impeccable` | no model pin; runs on the caller's model | none |
 | skill `plain-english-map` | no model pin; runs on the caller's model | none |
 | skill `project-ops` | no model pin; runs on the caller's model | none |
+| skill `ios-apps` | no model pin; runs on the caller's model | none |
 | skill `roadmap` | no model pin; runs on the caller's model | none |
 | skill `waiting-page` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |

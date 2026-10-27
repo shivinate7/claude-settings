@@ -913,6 +913,74 @@ class UnstartedItemsTests(unittest.TestCase):
                 self.assertIsNone(self.verdict(reply, spawns))
 
 
+class NoResendTests(unittest.TestCase):
+    """A report gate never makes a session send its whole report twice (roadmap c101)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    BUILDER = {"subagent_type": "builder", "prompt": "build it"}
+
+    def verdict(self, reply, spawns=(), stop_hook_active=False):
+        records = [human("do the task")]
+        for spawn in spawns:
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                    assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path,
+                "stop_hook_active": stop_hook_active}
+        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        run = run_gate(REPORT_GATE, hook, env=env)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_nr_red_each_report_block_asks_for_the_corrected_lines_only(self):
+        rows = [
+            # Catches: the label-word block asks for the report again.
+            ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
+            # Catches: the model-name block asks for the report again.
+            ("model names", "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none",
+             (self.BUILDER,)),
+            # Catches: the Unstarted block asks for the report again.
+            ("Unstarted line", "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge",
+             (self.BUILDER,)),
+            # Catches: the cite-gloss block asks for the report again.
+            ("cite gloss", "Per D12.\n\n> **Done** BUILT gate, PR #5\n> **Next** none", ()),
+            # Catches: two joined reasons each carry the tail.
+            ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
+        ]
+        for name, reply, spawns in rows:
+            with self.subTest(block=name):
+                out = self.verdict(reply, spawns)
+                self.assertEqual(out["decision"], "block")
+                reason = out["reason"].lower()
+                self.assertIn("post only the corrected lines", reason)
+                self.assertIn("never send the report again", reason)
+                self.assertNotIn("send the report now", reason)
+                self.assertEqual(reason.count("post only the corrected lines"), 1)
+
+    def test_nr_missing_report_block_keeps_the_reply(self):
+        out = self.verdict("All done.")
+        self.assertIn("Do not write it again.", out["reason"])
+        self.assertNotIn("post only the corrected lines", out["reason"].lower())
+
+    def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
+        # Catches: the block asks for the report and also says never send it.
+        out = self.verdict("Per D12.\n\nAll done.")
+        self.assertIn("'D12'", out["reason"])
+        self.assertIn("Send the report now", out["reason"])
+        self.assertNotIn("never send the report again", out["reason"].lower())
+
+    def test_nr_correction_only_follow_up_passes(self):
+        # The follow-up holds only the corrected lines, with no report. It runs as a rewrite.
+        for reply in ("Correction: the first Done line is OTHER, and the builder ran sonnet.",
+                      "> **Done** OTHER fixed it in abc123 (builder sonnet)"):
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.verdict(reply, (self.BUILDER,), stop_hook_active=True))
+
+
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
 

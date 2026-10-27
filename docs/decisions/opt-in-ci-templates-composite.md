@@ -2,12 +2,13 @@
 
 ## The ruling
 
-Six templates any repo can adopt live in one home and one shape: a composite action under
+Seven templates any repo can adopt live in one home and one shape: a composite action under
 `actions/<name>/`, or a plain file where the template is no CI step.
 
 | Template | Home |
 | --- | --- |
 | All-jobs-passed gate | `actions/all-jobs-passed` |
+| CI done comment on a red run | `actions/ci-done-comment` |
 | Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper) |
 | Weekly README link check | `actions/readme-links` (calls `ci-alarm/issue.sh`) |
 | Ruling kind check on a pull request | `actions/ruling-kind` (runs `lint/check_ruling_kind.py` on the caller's checkout) |
@@ -23,9 +24,9 @@ Why composite, not `workflow_call`:
 
 The main-ref hook lets local main move only to a commit origin already has. `gh pr merge` runs on GitHub and moves no local ref.
 
-`gates.yml` runs the six tests. It does not call the templates. CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
+`gates.yml` runs the seven tests. It calls one template, `ci-done-comment`, because this repo's own sessions wait on its CI (decision ci-wait-reads-run-status, "The cloud wake"). CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
 
-Each template ships a test that goes red on its defect (`test_action.sh`, `test_readme_links.py`, `test_hook.sh`, `skip-locally-fail-in-ci.test.mjs`).
+Each template ships a test that goes red on its defect (`test_action.sh`, `test_comment.py`, `test_readme_links.py`, `test_hook.sh`, `skip-locally-fail-in-ci.test.mjs`).
 
 Kind: process
 Home: rule:building-one-home-per-capability

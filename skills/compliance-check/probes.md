@@ -82,6 +82,26 @@ The probe reads tracked files only, so an untracked folder is not there.
 
 Then mark `docs/design/checklist.md` for each route in `shoot.json`, at each size and theme.
 
+## iOS
+
+`$PY $P/lint/compliance_probes.py ios .` grades each item on its own line, against the standard in
+the `ios-apps` skill. A child with no iOS app (no `project.yml` for iOS, no `.xcodeproj`) is `n/a`.
+Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
+
+| Item | Pass when |
+| --- | --- |
+| make targets | the Makefile has `phone`, `testflight` and `native-check` |
+| ship path | `phone` calls `ios-ship install` and `testflight` calls `ios-ship testflight`, with no wrapper script |
+| project file | no tracked `.xcodeproj`; XcodeGen writes it from `project.yml`. A tracked one is `partial` |
+| kit package | a tracked `Package.swift` holds the app logic. None is `partial` |
+| swift 6 | each project file sets `SWIFT_VERSION` 6, no `swift-tools-version` below 6, no language mode 5 |
+| ci runner | each macOS image a workflow names, matrix values too, is the pinned image (`IOS_RUNNER`) or a larger runner of it, never `macos-latest` |
+| ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app |
+| slow tests | no workflow runs `xcodebuild test`, `make ui-test`, `make native-check` or `sim-test`; UI tests run once per batch on the Mac |
+| account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
+
+The lowest iOS, the tokens and the test style are read by hand in a repo visit.
+
 ## Copies
 
 The copy probe and its verdicts are in `copies.md`, beside this file.
