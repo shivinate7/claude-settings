@@ -34,6 +34,11 @@ PREFIX = "check_mod_versions: FAIL:"
 FAKE = 'Shows "version": "9.9.9", then // and /* and # and a lone quote: Don\'t'
 
 
+# Git's auto gc runs detached and writes into .git/objects while rm_tree deletes it.
+os.environ.update({"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto", "GIT_CONFIG_VALUE_0": "0",
+                   "GIT_CONFIG_KEY_1": "maintenance.auto", "GIT_CONFIG_VALUE_1": "false"})
+
+
 def rm_tree(path):
     def clear(func, p, _exc):
         os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
