@@ -422,7 +422,8 @@ jobs:
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
   # `gates` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
-  # installs the copy that .github/shoot/package-lock.json pins. bin/shoot itself never installs either.
+  # installs the copy that .github/shoot/package-lock.json pins, through actions/playwright-setup.
+  # bin/shoot itself never installs either.
   gates-shoot:
     runs-on: ubuntu-latest
     needs: scope
@@ -435,14 +436,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the pinned Playwright
-        run: npm ci --prefix .github/shoot --ignore-scripts --no-audit --no-fund
-
-      # No --with-deps: the runner image already has Chromium's system libraries, and the apt step
-      # that --with-deps adds once took more than 11 min on a slow mirror. A missing library fails
-      # the suite (it fails in CI when it cannot launch a browser), never skips it.
-      - name: Install Chromium
-        run: .github/shoot/node_modules/.bin/playwright install chromium
+      - name: Install the pinned Playwright and Chromium, no apt step
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
 
       - name: shoot fixture suite
         shell: bash

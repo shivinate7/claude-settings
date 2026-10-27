@@ -13,8 +13,8 @@ here. Decision `questions-go-to-owner` holds the rulings.
 Run `python3 ~/.claude/lint/layout.py waiting-page <repo root>`. It prints the URL, or `unknown`.
 The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-extras.json`.
 
-- `unknown` is not an error. Ask in the terminal question box only, and say in one line that the
-  repo has no waiting page.
+- `unknown` is not an error. Ask in the reply while anything runs, else in the terminal question
+  box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
 
 ## The database
@@ -43,14 +43,21 @@ The page hides an item with status `closed`. It shows an item as answered when `
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
-3. Ask in the terminal question box too, and put the page URL in the box (ruling 3a).
+3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
+   - While an agent, a lane or a background command of this session runs, or starts in the same
+     response, open no question box. Put the question
+     and the page URL in the reply, and keep orchestrating. A box stops the session until the owner
+     answers, and what runs goes on with no one to brake it. You may end the turn: each agent's end
+     wakes the session.
+   - With nothing running, ask in the terminal question box too, and put the page URL in the box.
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
 
 A save on the page wakes no session. Only the owning session reads, routes and closes its items.
 It reads the answers at each wake, and at the start of each turn while it has an item open:
-`ArtifactData list answers`. Another session never relays an answer.
+`ArtifactData list answers`. An answer typed in the chat counts the same. Another session never
+relays an answer.
 
 - An answer saved on the page counts as the owner's word for the item it names, and only for that
   item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,

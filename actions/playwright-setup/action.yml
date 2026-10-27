@@ -1,0 +1,52 @@
+name: Playwright setup
+description: >
+  Installs the Playwright that a lockfile pins, and its browsers, with no apt step. The runner image
+  already has the browsers' system libraries, and `--with-deps` once spent more than 11 min on a slow
+  apt mirror. A missing library fails the suite when it cannot launch a browser, never skips it.
+  The browser download is cached by the pinned Playwright version.
+  It needs playwright-core reachable from package-dir, so a pnpm strict layout is not supported.
+inputs:
+  package-dir:
+    description: "The folder whose package.json and package-lock.json pin playwright or @playwright/test."
+    required: false
+    default: "."
+  browsers:
+    description: "Space-separated browser names for `playwright install`."
+    required: false
+    default: "chromium"
+  npm-ci:
+    description: "Set to false when an earlier step already ran npm ci in package-dir."
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned Playwright
+      if: ${{ inputs.npm-ci == 'true' }}
+      shell: bash
+      env:
+        DIR: ${{ inputs.package-dir }}
+      run: npm ci --prefix "$DIR" --ignore-scripts --no-audit --no-fund
+
+    - name: Read the pinned Playwright version
+      id: pin
+      shell: bash
+      env:
+        DIR: ${{ inputs.package-dir }}
+      run: bash "${{ github.action_path }}/pin.sh"
+
+    - name: Cache the browsers
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.pin.outputs.version }}-${{ inputs.browsers }}
+
+    # No --with-deps, on purpose. On a cache hit this only checks the browsers are there.
+    - name: Install the browsers
+      shell: bash
+      env:
+        CLI: ${{ steps.pin.outputs.cli }}
+        BROWSERS: ${{ inputs.browsers }}
+      run: |
+        # shellcheck disable=SC2086  # BROWSERS is a space-separated list, split on purpose
+        node "$CLI" install $BROWSERS
