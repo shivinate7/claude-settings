@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `ux/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
@@ -253,6 +253,13 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
   failure exits with `xctrace`'s code (124 when the tool's timeout stops it) and prints the log path. A failed retry
   also says that the phone may need unlocking or a cable.
 * `--app NAME` limits a run to the named apps. A name that is not in the config exits 2. `profile` needs exactly one.
+
+## Simulator tests
+
+`bin/sim-test` runs `xcodebuild test` on one phone simulator. It runs on macOS only, under `/bin/bash` 3.2.
+Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
+It reuses the first booted iPhone. With none booted, it boots the shared iPhone 18 Pro, runs the tests, and shuts that simulator down, also on failure, INT and TERM.
+It never shuts down a simulator it did not boot. The exit code is xcodebuild's. The tool takes no lock and waits for no load.
 
 ## Standing roles and a roadmap record for a repo
 

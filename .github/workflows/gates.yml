@@ -91,6 +91,9 @@ jobs:
       - name: Shell lint (ShellCheck), bin/ios-ship
         run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning bin/ios-ship
 
+      - name: Shell lint (ShellCheck), bin/sim-test
+        run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning bin/sim-test
+
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
         run: python3 hooks/test_guard.py
@@ -496,7 +499,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
-  # checkout-detection suite and the ios-ship suite (a bash 3.2 script for macOS) are the only gates
+  # checkout-detection suite, the ios-ship suite and the sim-test suite (bash 3.2 scripts for macOS) are the only gates
   # whose result depends on either. gates-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
@@ -530,6 +533,12 @@ jobs:
       - name: ios-ship fixture suite (bash on PATH)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: bash lint/test_ios_ship.sh
+      - name: sim-test fixture suite (/bin/bash 3.2)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: /bin/bash lint/test_sim_test.sh
+      - name: sim-test fixture suite (bash on PATH)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: bash lint/test_sim_test.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the gates
   # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
