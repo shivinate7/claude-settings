@@ -31,8 +31,8 @@ mockups. Landed 2026-10-27.
 
 Limits: the word lists catch the common forms of a keep rule and of a current-view name, not every
 paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
-The spawn hook does not know view names. The
-`Blind lanes:` line is the orchestrator's own count, not a count of spawned lanes.
+The spawn hook does not know view names. The `Blind lanes:` line is the orchestrator's own
+count, not a count of spawned lanes.
 
 Cost: one python start per Agent or Task call. It writes no file but the guard.log line of a refusal.
 
