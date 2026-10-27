@@ -141,6 +141,8 @@ async function main() {
               if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
               const png = await page.screenshot({ path: path.join(out, name + ".png"), fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
               if (isBlank(png)) fails.push(`${name}: blank image (one colour) at ${url}`);
+              // Mark each element the browser does not show, so the probe skips it (a phone nav on a wide screen).
+              await page.evaluate(() => { for (const el of document.body ? document.body.querySelectorAll("*") : []) if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) el.setAttribute("hidden", ""); });
               fs.writeFileSync(path.join(out, name + ".html"), await page.content());
             } catch (e) {
               fails.push(`${name}: ${String(e.message).split("\n")[0]}`);

@@ -25,8 +25,8 @@ come from the owner's own repos. Each rule cites its repo and entry. A rule that
   - frontend-design: visual direction.
 - `ux-label-once` holds "say a label once" (owner, Oct 26 20:40 CDT: the waiting page repeated "Blocking",
   "Upcoming" and "Whenever"). impeccable `clarify` held it as advice, and nothing caught it.
-  `lint/label_once.py` names each repeat in a rendered page. A repeat in data, such as a table column, is
-  the reviewer's call.
+  `lint/label_once.py` names each repeat in a rendered page. The probe skips controls and table cells. The
+  reviewer judges each other hit.
 - Not house rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 

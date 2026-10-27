@@ -47,6 +47,18 @@ class LabelOnce(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn('"blocking" shows 3 times', out)
 
+    def test_counts_and_colons_are_the_same_label(self):
+        page = "<main><h2>Upcoming</h2><span>Upcoming (3)</span><span>upcoming</span><b>2</b><p>Upcoming:</p></main>"
+        code, out = self.run_probe(page)
+        self.assertEqual(code, 1, out)
+        self.assertIn('"upcoming" shows 4 times', out)
+
+    def test_open_skip_tag_at_the_end_is_unknown(self):
+        page = "<main><button>Go<p>x</p><div>Blocking</div><div>Blocking</div>"  # cut off: never closed
+        code, out = self.run_probe(page)
+        self.assertEqual(code, 2, out)
+        self.assertIn("UNKNOWN", out)
+
     def test_each_label_once_is_green(self):
         code, out = self.run_probe(ONCE_EACH)
         self.assertEqual((code, out), (0, ""))
@@ -57,6 +69,7 @@ class LabelOnce(unittest.TestCase):
 <label>Name</label><label>Name</label><span>A</span><span>A</span>
 <button>Edit</button><button>Edit</button><a href="#">Open</a><a href="#">Open</a>
 <p>Sent</p><span hidden>Sent</span><span aria-hidden="true">Sent</span>
+<svg><text>Mon</text><text>Mon</text></svg>
 <script>var s = "Sent"; // Sent</script><style>.x::after{content:"Sent"}</style></main>"""
         self.assertEqual(self.run_probe(page), (0, ""))
 
@@ -67,11 +80,16 @@ class LabelOnce(unittest.TestCase):
 
     def test_scanner_traps(self):
         # building-scanner-respects-strings: comment openers inside text, a lone quote, a comment.
-        page = """<main><p>Don't</p><p>a /* b</p><p>// c</p><p># d</p>
-<!-- <p>Blocking</p><p>Blocking</p> --><p>Blocking</p>
+        page = """<main><p>Don't stop</p><p>Don't stop</p><p>Go /* Blocking</p><p>// Blocking</p>
+<p># Blocking</p><!-- <p>Blocking</p><p>Blocking</p> --><p>Blocking</p>
 <pre>line one
+line two</pre><pre>line one
 line two</pre></main>"""
-        self.assertEqual(self.run_probe(page), (0, ""))
+        code, out = self.run_probe(page)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.count("shows"), 1, out)  # the two-line pre text is four words, not a label
+        self.assertIn('"don\'t stop" shows 2 times', out)
+        self.assertNotIn('"blocking"', out)
 
     def test_void_tags_and_unclosed_tags_keep_the_stack(self):
         # A void tag inside a button must not leave the probe stuck inside the button.

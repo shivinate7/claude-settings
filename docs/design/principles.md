@@ -102,7 +102,8 @@ banchi `docs/DESIGN.md` UX-118 (one icon, one meaning) and `CLAUDE.md` "Register
 ## ux-label-once
 
 A label or a status word shows once on a screen. Each other place shows it by shape or colour.
-Check: run `python3 ~/.claude/lint/label_once.py` on the `.html` files that `bin/shoot` writes. Pass
+Check: run `python3 ~/.claude/lint/label_once.py` on the `.html` files that `bin/shoot` writes. A
+second showing is a hit. Pass
 when it prints nothing, or when each hit it names is data, not a label. A word in a sentence passes.
 Source: owner, Oct 26 20:40 CDT, on the waiting page ("Blocking", "Upcoming" and "Whenever" three
 times or more: too much verbiage).
