@@ -286,6 +286,81 @@ def rm_var_reason(hits) -> str:
         "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
     )
 
+# A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path: a recursive `rm` with a relative
+# target, after `cd X` joined by `;`, `&&` or a newline, is flagged. Claude Code's prompt cannot follow
+# the cd, and a failed cd runs the rm in the working folder. Segments and tokens come from the same
+# walk as above, so quotes and comments are not text to it. `sh -c` bodies are not walked.
+_CD_OPENERS = ("(", "{", "!", "time")
+_CD_JOINS = (";", "&&", "\n", "")
+
+
+def _cd_word(segment: str):
+    """Return the raw directory word of a `cd` segment, "" when it names none, None when not a cd."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    raw = _RAW_WORD.findall(segment)
+    i = 0
+    while i < len(tokens) and tokens[i] in _CD_OPENERS:
+        i += 1
+    if i < len(tokens) and tokens[i].startswith("(") and tokens[i][1:] == "cd":
+        tokens[i] = "cd"
+    if i >= len(tokens) or tokens[i] != "cd":
+        return None
+    dirs = [k for k in range(i + 1, len(tokens)) if not tokens[k].startswith("-") or tokens[k] == "-"]
+    return raw[dirs[-1]] if dirs and len(raw) == len(tokens) else ""
+
+
+def _cd_relative(word: str) -> bool:
+    bare = word.lstrip("\"'")
+    return bool(bare) and bare[0] not in "/$~"
+
+
+def _cd_remedy(flags, target: str, cd_word: str) -> str:
+    """Return `rm FLAGS <dir>/<target>`: a variable dir is written "${NAME:?}", a literal absolute
+    dir as it is, and anything else "${DIR:?}", which stops the command until the person sets DIR
+    to the full path."""
+    base = cd_word.strip("\"'")
+    named = re.fullmatch(r"\$(?:\{(\w+)\}|(\w+))", base)
+    if named:
+        base = '"${%s:?}"' % (named.group(1) or named.group(2))
+    elif not base.startswith("/") or re.search(r"[\s$`*?\[{}~\\'\"]", base):
+        base = '"${DIR:?}"'
+    target = target[2:] if target.startswith("./") else target
+    return " ".join(["rm"] + flags + [base + "/" + target])
+
+
+def rm_after_cd_hits(text: str) -> list:
+    """Return each flagged `rm` as `rm FLAGS <dir>/<target>`, in the absolute form."""
+    ends = []
+    found = []
+    moved = None
+    for segment, end in zip(split_segments(text, ends), ends):
+        word = _cd_word(segment)
+        if word is not None:
+            moved = word if end in _CD_JOINS else None   # `cd X || rm …` is no landed cd
+            continue
+        call = rm_call(segment) if moved is not None else None
+        if not call:
+            continue
+        _, _, flags, targets, recursive = call
+        targets = [t[:-1] if t.endswith((")", "}")) and not t.endswith(("\\)", "\\}")) else t
+                   for t in targets]
+        targets = [t for t in targets if t and not re.match(r"\d*[<>&|]", t)]   # a redirect word is no target
+        if recursive and any(_cd_relative(t) for t in targets):
+            found += [_cd_remedy(flags, t, moved) for t in targets if _cd_relative(t)]
+    return found
+
+
+def rm_after_cd_reason(hits) -> str:
+    return (
+        "a recursive delete that follows a cd names its target relative to a folder the "
+        "permission prompt cannot see, and when the cd fails the delete runs in the working "
+        "folder. Retry with no cd: give the target as a full path, or as a quoted variable that "
+        "holds one. Retry with: " + "; ".join(hits)
+    )
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"

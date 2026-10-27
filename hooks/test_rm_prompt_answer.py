@@ -274,6 +274,11 @@ if os.name == "nt":
           'S=%s/rm-test-child; rm -rf "${S:?}"' % GB_HOME, real_home=True)
 
 
+# The remedy of rule rm-after-cd (`cd "$S" && rm -rf dl`) gets the auto-allow. Its glob form does not.
+allow("the rm-after-cd remedy, a plain target", 'S=/tmp/w; rm -rf "${S:?}"/dl')
+silent("the rm-after-cd remedy, a glob target", 'S=/tmp/w; rm -rf "${S:?}"/dl/*')
+
+
 def run(stdin_text, real_home=False):
     """Return (rc, stdout, stderr) for one run of the hook, or None when the hook file is absent."""
     if not os.path.exists(HOOK):
