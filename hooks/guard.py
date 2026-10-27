@@ -1770,7 +1770,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only a
+# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below).
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
