@@ -1,0 +1,45 @@
+{
+  "about": "One colour per repo. Read it through lint/repo_colour.py (colour_for), never from a copy. A repo that has its own brand colour keeps it, read from that repo; each source names where. A repo with none gets a hue drawn from its name by the rule below, and the draw is stored here so a later repo never moves it. When a drawn repo gets its own colour, replace its entry and drop it from rule.drawn. Ruling: owner, 2026-10-26 20:37 CDT, roadmap step c105 (one colour wheel for every repo).",
+  "rule": {
+    "state_hues": [
+      5,
+      36,
+      145
+    ],
+    "state_gap": 25,
+    "repo_gap": 30,
+    "step": 37,
+    "saturation": 55,
+    "lightness": 40,
+    "min_saturation": 0.2,
+    "drawn": [
+      "ios-adblock",
+      "adblock-lists",
+      "home"
+    ]
+  },
+  "sources": {
+    "claude-settings": "skills/waiting-page/page.html, the template's amber",
+    "home-app": "web/style.css, --accent",
+    "banchi": "app/src/tokens.css, --bn-accent",
+    "q_max": "src/index.css, --color-aq-accent (Compass Orange)",
+    "degen": "tokens.json, light accent",
+    "mailaudit": "shared/tokens.json, accent",
+    "joyous": "src/layouts/Base.astro, --green",
+    "ios-adblock": "drawn from the name; no colour of its own found",
+    "adblock-lists": "drawn from the name; no colour of its own found",
+    "home": "drawn from the name; no colour of its own found"
+  },
+  "repos": {
+    "claude-settings": "#b45f06",
+    "home-app": "#0a84ff",
+    "banchi": "#3d5af1",
+    "q_max": "#f47820",
+    "degen": "#0b5fff",
+    "mailaudit": "#6f5ca6",
+    "joyous": "#27553f",
+    "ios-adblock": "#9e2e75",
+    "adblock-lists": "#519e2e",
+    "home": "#8f9e2e"
+  }
+}
