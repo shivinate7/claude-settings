@@ -9,7 +9,7 @@ Contract (the hook's own docstring). On each agent start
 the hook prints one JSON object on stdout and exits 0:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "<text>"}}
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
-  input (builder, test-author, reviewer, Explore, record-writer), the general scope line for any
+  input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer), the general scope line for any
   other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer and any other type; never for reviewer, Explore, Plan or
@@ -47,7 +47,9 @@ SCOPE_LINE = {
     "reviewer": "- Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "- Scope: Explore. Never edit. Read and search only.",
     "record-writer": "- Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
-    "designer": "- Scope: designer. Edit files in the repo's design folder only. Report any other change needed.",
+    "designer": "- Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
+                "Your brief names your lane kind: blind, informed or directed. In a blind lane, never read "
+                "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.",
     "design-reviewer": "- Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
