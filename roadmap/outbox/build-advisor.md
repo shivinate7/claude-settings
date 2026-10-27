@@ -6,3 +6,5 @@
 - c88 (#651) was dropped from #663 after run 3 (its test imported PyYAML, which CI lacks); its lane fixed it and joins the next batch. o13 lane C (#638) left out (30 conflicts); it re-merges main 1733dac.
 - Batch #667 (c86 #665, c91 part 1 #666, c99 #662) is in CI on main 1733dac.
 - Finding for the batch rules (git-integration-branch-merge): dropping a lane with `git revert -m 1` of its merge leaves the revert on main, so the lane's later merge of main silently deletes the lane's files (c88, Oct 27: only 2 of 13 files showed as conflicts). The c88 lane re-applied its diff (acd0882). A drop should rebuild the batch without the lane, or the lane must re-apply after merging main. Candidate step: the merge tool or a rule names the safe drop.
+- Close or update, batch #667 merged Oct 27 03:38 UTC as main 835cde5: c86 question-box check (#665), c91 part 1 iOS standard (#666; c91 parts after 1 stay), c99 waiting-page save wake (#662).
+- Batch #668 (c88 alone, #651) is in CI on main 835cde5.
