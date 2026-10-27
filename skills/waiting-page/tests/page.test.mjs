@@ -266,7 +266,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 
     await choose(page, items[0], "b"); await same("a pick");
     await choose(page, items[0], "a"); await same("a second pick");
     await takePick(page, items[3]); await same("Take my pick");
-    await card(page, items[3]).getByRole("button", { name: "Clear" }).click(); await same("Clear");
+    await choose(page, items[3], "a"); await same("a click on the selected pick");
     await card(page, items[4]).getByRole("button", { name: /Take my pick/ }).click();
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
@@ -458,7 +458,7 @@ test("a page with no designs has no Designs tab", async (t) => {
   assert.equal(await page.locator("#tabD").isHidden(), true);
 });
 
-// ---------------------------------------------------------------- answers, notes and Clear
+// ---------------------------------------------------------------- answers, notes and withdrawing
 
 test("a decision offers None of these, and it needs a note before it sends", async (t) => {
   const page = await open(t); if (!page) return;
@@ -487,56 +487,95 @@ test("when the store refuses a write, the answer line can be copied", async (t) 
   assert.equal(await page.evaluate(() => window.__copied), "27 none of these (Green)");
 });
 
-test("Clear unselects a drafted pick that was never sent", async (t) => {
-  const page = await open(t); if (!page) return;
-  const c = card(page, DECISION);
-  await choose(page, DECISION, "a");
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true);
-  await c.getByRole("button", { name: "Clear" }).click();
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "the pick is still selected after Clear");
-  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
-  assert.deepEqual(await page.evaluate(() => window.__log), [], "Clear on a draft wrote to the database");
+const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count();
+
+test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
+  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  assert.equal(await clearCount(page), 0);
+  await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
+  assert.equal(await clearCount(page), 0);
+  await card(page, TASK).getByRole("button", { name: "Change" }).click();
+  assert.equal(await clearCount(page), 0);
+  assert.equal(await page.locator(".clearbtn").count(), 0);
 });
 
-test("Clear on a changed answer deletes the saved record, so the item reads as unanswered", async (t) => {
+test("a second click on the selected option unselects it, with no write", async (t) => {
+  const page = await open(t); if (!page) return;
+  await choose(page, DECISION, "a");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true);
+  await choose(page, DECISION, "a");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "the pick is still selected after a second click");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
+  assert.equal(await page.locator("#send").isDisabled(), true);
+  assert.deepEqual(await page.evaluate(() => window.__log), []);
+});
+
+test("a second click unselects a stood pick, and it stays unselected", async (t) => {
+  const it = mk("stand-solo", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "the pick does not stand");
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a stood pick cannot be unselected");
+  assert.equal(await page.locator("#send").isDisabled(), true, "an unselected stood pick still goes with Send");
+  await takePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a pick taken with Take my pick cannot be unselected");
+});
+
+test("emptying a note drops it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "a thought");
+  await page.fill(`#n-${DECISION.id}`, "");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
+  assert.equal(await page.locator("#send").isDisabled(), true);
+});
+
+test("a changed answer left empty makes Send withdraw it", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
-  await c.getByRole("button", { name: "Clear" }).click();
+  assert.equal(await page.locator("#send").textContent(), "Send answers", "withdraw is offered with the draft in place");
+  await choose(page, DECISION, "a");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  assert.equal(await page.locator("#send").isDisabled(), false);
+  await send(page);
   await page.waitForFunction((id) => !(id in window.__answers()), DECISION.id);
   assert.deepEqual(await page.evaluate(() => window.__log), [["delete", "answers", DECISION.id]]);
   assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false);
   assert.equal(await c.locator(".receipt").count(), 0);
 });
 
-test("Clear deletes a task's done mark too", async (t) => {
+test("a task's done mark is withdrawn the same way", async (t) => {
   const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } });
   if (!page) return;
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
-  await card(page, TASK).getByRole("button", { name: "Clear" }).click();
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click();
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  await send(page);
   await page.waitForFunction((id) => !(id in window.__answers()), TASK.id);
   assert.equal(await card(page, TASK).getByRole("button", { name: "Mark done" }).count(), 1);
 });
 
-test("Clear shows as soon as the owner types a note, and drops it", async (t) => {
-  const page = await open(t); if (!page) return;
-  await addNote(page, DECISION, "a thought");
-  await card(page, DECISION).getByRole("button", { name: "Clear" }).click();
-  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
-  assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "the note box stayed");
-});
-
-test("a Clear the store refuses keeps the pick and says so", async (t) => {
+test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
-  await choose(page, DECISION, "b");
-  await c.getByRole("button", { name: "Clear" }).click();
-  await c.getByText("Not cleared (denied)", { exact: false }).waitFor();
-  const draft = JSON.parse(await page.evaluate(() => localStorage.getItem("waiting.draft")));
-  assert.equal(draft[DECISION.id] && draft[DECISION.id].choice, "b", "the draft went although the answer stayed");
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-b`), true);
+  await choose(page, DECISION, "a");
+  await send(page);
+  await c.getByText("Not withdrawn (denied)", { exact: false }).waitFor();
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
+});
+
+test("a note with no option picked is an answer: choice none plus the note", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "Green please");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note alone");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "none");
+  assert.equal(a.note, "Green please");
 });
 
 test("a saved none note does not ride along when the owner picks an option", async (t) => {
