@@ -9,11 +9,11 @@ between the mockups.
 
 ## Lane kinds
 
-Each lane is one designer agent: agentType `designer`, Opus (`subagent-model-cap`), in its own
+Each lane is one designer agent: agentType `designer`, Opus (`agent-model-cap`), in its own
 worktree (`parallelism-each-own-checkout`).
 
 - **Blind lane.** The brief names only the screen's job, its users, its data shapes and the house
-  rules in `~/.claude/ux/`. The brief never gives the current screen, its code, its screenshots, its
+  rules in `~/.claude/docs/design/`. The brief never gives the current screen, its code, its screenshots, its
   mockups, or the repo's design spec and tokens. The orchestrator reads the data shapes from the spec's data section or
   the owner's words, and writes them into the brief in plain words. The brief never names the spec.
   Never paste screen code into a blind brief. A blind lane shows ideas the repo's habits would hide.

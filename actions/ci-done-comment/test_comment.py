@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Red proof for actions/ci-done-comment, and for its caller in this repo's gates.yml.
+"""The red run for actions/ci-done-comment, and for its caller in this repo's gates.yml.
 
 A run with a red job must post one comment that names each red job. A green run, or one whose
 only non-green jobs were skipped, must post nothing. The gates.yml caller must need every other

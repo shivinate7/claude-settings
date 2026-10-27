@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for bin/sim-test. CI runs this under /bin/bash (3.2) and under bash on PATH (shell-macos job).
-# SIM_TEST=PATH picks the script under test; the default is bin/sim-test in this repo. A red proof points it at a stub.
+# SIM_TEST=PATH picks the script under test; the default is bin/sim-test in this repo. A red run points it at a stub.
 # No real simulator or xcodebuild is touched. xcrun, xcodebuild, top and mkdir are PATH shims, and the tool runs under
 # a temp HOME. Temp files follow decisions/test-temp-standard.md: one run folder <pid>-<UUID> under one temp root,
 # and the first request of a run sweeps siblings older than a day.
