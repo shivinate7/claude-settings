@@ -345,6 +345,7 @@ class Flow(Env):
         sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -371,6 +372,7 @@ class Flow(Env):
         sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         p = os.path.join(self.co, "ostype.txt")
@@ -434,6 +436,7 @@ class Flow(Env):
         put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)  # a failed afterMerge exits non-zero
         self.assertIn("FAILED (exit 3). The merge landed and stays.", out)
@@ -554,8 +557,8 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md")  # only the exact paths of the ruling
 
     def test_a_rule_file_that_only_main_changed_is_not_flagged(self):
-        self.on_main("CLAUDE.md", "main's own change\n")  # the PR never touches it: a two-dot diff would name it
-        self.pr_writes({".claude/CLAUDE.md": "pr rules\n"})
+        self.on_main("CLAUDE.md", "main's own change\n")  # the PR never touches it; it reaches the head only by the sync merge
+        self.pr_writes({".claude/CLAUDE.md": "pr rules\n"}, sync_main=True)
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".claude/CLAUDE.md")
 
@@ -644,6 +647,7 @@ class ClaudeMdFlag(Env):
         sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
         self.pr_writes({"output-styles/日本.md": "a\n"})  # not in cp1252, unlike café
         try:
             rc, out = self.run_merge("7", "--confirm", stdout=PipeOut())
@@ -847,6 +851,50 @@ class Guards(Env):
         self.assertEqual(rc, 1)
         self.assertIn("cannot fetch origin main", out)
         self.assertFalse(self.host.merged)
+
+    def main_moves(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+
+    def test_a_head_without_the_base_tip_is_refused_before_any_claim(self):  # merge-needs-current-base
+        self.main_moves()
+        self.host.merged = False
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertIn("Merge main into the branch", out)
+        self.assertFalse(self.host.merged)
+        self.assertEqual(self.host.waits, [])
+        self.assertEqual(self.refs(), before)  # no claim push, and the lock ref is gone
+
+    def test_a_base_that_moves_during_the_wait_reverts_the_claim_and_merges_nothing(self):
+        self.host.merged = False
+        self.host.on_wait = self.main_moves
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertFalse(self.host.merged)
+        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
+
+    def test_a_head_that_merged_the_moved_base_merges(self):
+        self.main_moves()
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged)
+
+    def test_the_preview_names_a_head_without_the_base_tip(self):
+        self.main_moves()
+        rc, out = self.run_merge("7")
+        self.assertIn("base:   BEHIND:", out)
+        self.assertIn("--confirm refuses it", out)
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(self.other, "git", "merge", "-q", "--no-edit", "main"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7")
+        self.assertIn("base:   holds main's tip", out)
 
     def test_the_claim_commit_works_with_no_git_identity(self):
         info = self.host.pr(7)
@@ -2726,6 +2774,7 @@ def drop_config(env):
         sh(o, "git", "commit", "-qm", f"no config on {b}")
         sh(o, "git", "push", "-q", "origin", b)
     sh(env.co, "git", "pull", "-q", "--ff-only")
+    head_takes_base(env)
 
 def stamp_marker(env):
     """Point merge.STAMP at a stub that writes a file when it runs. -> that file's path; absent unless stamp ran."""
@@ -4295,6 +4344,15 @@ def put_base_config(env, text):
     put(os.path.join(o, ".github/stamp.json"), text)
     sh(o, "git", "commit", "-qam", "base config")
     sh(o, "git", "push", "-q", "origin", "main")
+    head_takes_base(env)
+
+def head_takes_base(env):
+    """Merge origin's main into the PR branch, as a lane does before its run, so a setup push to main is not a moved base (merge-needs-current-base)."""
+    o, b = env.other, env.host.branch
+    if sh(o, "git", "ls-remote", "origin", f"refs/heads/{b}"):
+        sh(o, "git", "checkout", "-q", "-B", b, f"origin/{b}")
+        sh(o, "git", "merge", "-q", "--no-edit", "main")
+        sh(o, "git", "push", "-q", "origin", b)
     sh(env.co, "git", "fetch", "-q", "origin")  # the base is visible to env.co; its checkout is not pulled
 
 def put_base_bytes(env, data):
@@ -4308,7 +4366,7 @@ def put_base_bytes(env, data):
         f.write(data)
     sh(o, "git", "commit", "-qam", "base config, raw bytes")
     sh(o, "git", "push", "-q", "origin", "main")
-    sh(env.co, "git", "fetch", "-q", "origin")
+    head_takes_base(env)
 
 class ConfigFile(Env):
     """The merge block and defaultBranch come from the base branch's .github/stamp.json, never the local checkout.
@@ -4455,6 +4513,7 @@ class ClaimSkipped(Env):
         put(os.path.join(o, ".github/stamp.json"), json.dumps(cfg))
         sh(o, "git", "commit", "-qam", "config without kinds"); sh(o, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
 
     def check_skipped(self, cfg):
         self.base_config(cfg)
@@ -4790,7 +4849,8 @@ class UndoMemo(Env):
         self.no_claim()
         self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks)
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)  # the scan runs again, then the moved base refuses the merge (merge-needs-current-base)
+        self.assertIn("does not hold origin/main", out)
         self.assertEqual(undos, 2, out)
         self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
 
@@ -6081,6 +6141,7 @@ class RecordsEnv(Env):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
         self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
         sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
 
     def on(self, branch, files, msg="records"):
         """Push one commit to origin/<branch> from the second clone, as a person or another run would."""
@@ -6090,6 +6151,21 @@ class RecordsEnv(Env):
         for rel, text in files.items():
             put_lf(os.path.join(o, rel), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
+
+    def in_wait(self, action, at=1):
+        """Run action as the at-th check wait starts: main moves while the run waits, after the head was read current.
+        A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here."""
+        actions = getattr(self, "_wait_actions", None)
+        if actions is None:
+            actions = self._wait_actions = {}
+            real = self.host.wait_checks
+            def wait(n, sha, d, prior=None):
+                act = actions.pop(len(self.host.waits) + 1, None)
+                if act:
+                    act()
+                return real(n, sha, d, prior)
+            self.host.wait_checks = wait
+        actions[at] = action
 
     def drop(self, branch, rel, msg):
         """Push one commit to origin/<branch> from the second clone that removes rel, as a person would."""
@@ -6290,14 +6366,18 @@ class RecordsRebuild(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_main_gaining_an_unrelated_change_during_the_wait_still_merges_a_fresh_page(self):
+    def test_main_gaining_an_unrelated_change_during_the_wait_refuses_and_reverts(self):
+        # The page is fresh, but no run tested the head with main's new commit (merge-needs-current-base).
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
         self.host.on_wait = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
 
     def test_the_preview_on_a_non_default_base_says_nothing_about_the_page(self):
         # The records line sits inside the default-branch block of preview(), so a pull request
@@ -6373,9 +6453,9 @@ class RecordsRebuildReal(RecordsEnv):
         # Only the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
         # records_stale() must not read any conflict as "cannot be proved fresh" and revert the claim.
         self.kinds_off()
-        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
-                "a debt and a hand-written page on main")
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                                     "a debt and a hand-written page on main"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
@@ -6388,9 +6468,9 @@ class RecordsRebuildReal(RecordsEnv):
         # A conflict outside the generated page must still stop the merge. This blocks a blanket
         # -X ours or -X theirs that would silence every conflict.
         self.kinds_off()
-        self.on("main", {"notes.txt": "main side\n"}, "a note on main")
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "notes.txt": "head side\n"}, "a debt and a note")
         before = self.head()
+        self.in_wait(lambda: self.on("main", {"notes.txt": "main side\n"}, "a note on main"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("does not merge cleanly", out)
@@ -6414,7 +6494,7 @@ class RecordsScope(RecordsEnv):
         sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
         put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
-        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        self.in_wait(lambda: self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page"))
         before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"))  # the defect: markers reach main
@@ -6438,7 +6518,7 @@ class RecordsScope(RecordsEnv):
         self.assertIn("conflict-marker-size: 9", sh(o, "git", "check-attr", "conflict-marker-size", "--", "docs/records.md"))  # the precondition
         put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "the head edits the page"); sh(o, "git", "push", "-q", "origin", "feat")
-        self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page")
+        self.in_wait(lambda: self.on("main", {"docs/records.md": "records\n- main\n"}, "main edits the page"))
         before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertNotIn("<<<<<<<", self.show("main", "docs/records.md"), "the defect: nine-character markers reach main")
@@ -6468,19 +6548,19 @@ class RecordsScope(RecordsEnv):
             put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
         msg = ["-m", "the head edits the page"] + (["-m", "Drops-lines: docs/records.md -- a generated page, rebuilt by the generator"] if trailer else [])
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", *msg); sh(o, "git", "push", "-q", "origin", "feat")
-        self.drop("main", "docs/records.md", "main drops the page")
+        self.in_wait(lambda: self.drop("main", "docs/records.md", "main drops the page"))
 
     def test_a_page_deleted_on_main_and_edited_on_the_head_with_no_records_stops_the_merge(self):
         # The generator writes nothing here, and the head's page has no marker, so the head's page would be committed to main.
         self.delete_edit_setup()
-        before, head_before = self.rev("origin/main"), self.head()
+        head_before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertNotIn("docs/records.md", self.tree_names("origin/main"), "the defect: the head's page reaches main")
         self.assertEqual(rc, 1, out)
         lines = [l for l in out.splitlines() if l.startswith("merge: ") and "records" in l]
         self.assertTrue(lines, out)
         self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.rev("origin/main"), before)
+        self.assertEqual(self.log1("%s", "origin/main"), "main drops the page")  # main's tip is the drop: nothing merged
         self.assertEqual(self.head(), head_before)  # nothing pushed to feat
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
@@ -6543,11 +6623,11 @@ class RecordsHeal(RecordsEnv):
             p.start(); self.addCleanup(p.stop)
 
     def heal_setup(self):
-        """A debt and a hand-written page on main; the head adds a debt. The head's rebuild commits one page, and the heal merges both."""
+        """The head adds a debt; a debt and a hand-written page land on main during the head's wait. The head's rebuild commits one page, and the heal merges both."""
         self.kinds_off()
-        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
-                "a debt and a hand-written page on main")
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                                     "a debt and a hand-written page on main"))
 
     def on_heal_wait(self, action):
         """Run action when the heal wait starts: the third wait, on the merge commit."""
@@ -7656,6 +7736,7 @@ def push_base(env, files):
     sh(o, "git", "commit", "-q", "-m", "base files")
     sh(o, "git", "push", "-q", "origin", "main")
     sh(env.co, "git", "pull", "-q", "--ff-only", "origin", "main")
+    head_takes_base(env)
 
 
 class CapsHost(merge.Host):
