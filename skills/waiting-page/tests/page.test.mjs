@@ -1060,3 +1060,47 @@ test("a note typed on an item whose pick stands sends the stood pick plus the no
   assert.equal(a.choice, "a");
   assert.equal(a.note, "with a thought");
 });
+
+// ---------------------------------------------------------------- rank inside a tier
+
+const order = (page) => page.evaluate(() => [...document.querySelectorAll("section.tier")].map((sec) => [sec.id, [...sec.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
+const at = (day) => `2026-10-${String(day).padStart(2, "0")}T00:00:00Z`;
+
+test("inside a tier, rank overrides age, and an item with no rank sorts after the ranked ones by age", async (t) => {
+  const items = [
+    mk("old-rank2", 1, { added: at(1), rank: 2 }), mk("new-rank1", 2, { added: at(5), rank: 1 }),
+    mk("old-none", 3, { added: at(2) }), mk("new-none", 4, { added: at(6) }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "old-none", "new-none"]);
+});
+
+test("a group stays together at its best member's rank", async (t) => {
+  const items = [
+    mk("solo-0", 1, { added: at(3), rank: 0 }), mk("grp-a", 2, { added: at(1), rank: 5, group: "g" }),
+    mk("grp-b", 3, { added: at(2), rank: 1, group: "g" }), mk("solo-3", 4, { added: at(1), rank: 3 }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  const calm = (await order(page)).find((x) => x[0] === "tier-calm")[1];
+  assert.equal(calm[0], "solo-0");
+  assert.deepEqual(calm.slice(1, 3).sort(), ["grp-a", "grp-b"], "the group is split: " + calm);
+  assert.equal(calm[3], "solo-3");
+});
+
+test("rank never moves an item across tiers", async (t) => {
+  const items = [mk("calm-rank0", 1, { rank: 0 }), mk("hold-rank9", 2, { holds: "A lane waits.", rank: 9 }), mk("stand-rank0", 3, { stands: true, rank: 0 })];
+  const page = await open(t, { items }); if (!page) return;
+  const tiers = await order(page);
+  assert.deepEqual(tiers.map((x) => x[0]), ["tier-holds", "tier-calm", "tier-stands"]);
+  assert.deepEqual(tiers.map((x) => x[1]), [["hold-rank9"], ["calm-rank0"], ["stand-rank0"]]);
+});
+
+test("SKILL.md names the page's one writer and the rank field", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  assert.match(skill, /`writer`/);
+  assert.match(skill, /`rank`/);
+  assert.match(skill, /re-rank/i);
+  const rule = fs.readFileSync(path.join(HERE, "..", "..", "..", "docs", "decisions", "questions-go-to-owner.md"), "utf8");
+  assert.match(rule, /one writer/i);
+  assert.match(rule, /`rank`/);
+});
