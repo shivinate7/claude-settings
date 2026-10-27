@@ -238,6 +238,44 @@ class Usage(Job):
         self.assertIn("no job", done.stdout)
 
 
+class SteAction(Job):
+    """The gates STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+
+    def branch_with(self, text):
+        def git(*a):
+            subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
+        with open(os.path.join(self.root, "a.md"), "w", encoding="utf-8") as f:
+            f.write("# T\n\nShort line.\n")
+        git("add", ".")
+        git("commit", "-qm", "base")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        git("checkout", "-qb", "lane")
+        with open(os.path.join(self.root, "a.md"), "w", encoding="utf-8") as f:
+            f.write("# T\n\n" + text + "\n")
+        git("commit", "-qam", "change")
+
+    def test_an_over_long_sentence_in_a_changed_md_fails_the_lint_run(self):
+        self.branch_with(" ".join(["word"] * 40) + " end.")
+        rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    def test_a_short_sentence_in_a_changed_md_passes_the_lint_run(self):
+        self.branch_with("A short sentence.")
+        rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_with_no_base_the_ste_step_is_skipped_not_passed(self):
+        self.branch_with("A short sentence.")
+        rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"), args=("--lint",))
+        self.assertEqual(self.verdicts(lines), ["skipped"], out)
+
+    def test_another_action_is_still_not_run_locally(self):
+        rc, lines, out = self.run_job(step("other", uses="actions/checkout@v4"), args=("--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["not run locally"], out)
+
+
 class RealGates(unittest.TestCase):
     def test_every_gates_step_gets_one_line(self):
         sys.path.insert(0, HERE)
@@ -249,7 +287,7 @@ class RealGates(unittest.TestCase):
         lines = done.stdout.splitlines()
         self.assertEqual(len(lines), want, done.stdout + done.stderr)
         self.assertGreater(want, 50)
-        self.assertTrue(any(ln.startswith("not run locally") and "ste-lint" in ln for ln in lines), done.stdout)
+        self.assertTrue(any(ln.startswith("would run") and "STE lint" in ln for ln in lines), done.stdout)
         multi = [ln for ln in lines if "Opt-in CI template fixture suites" in ln]
         self.assertEqual(len(multi), 1, done.stdout)
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
@@ -286,6 +324,8 @@ class LintMode(unittest.TestCase):
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
+                if re.match(r"^        uses: \S*actions/ste-lint\s*$", line):
+                    want.append(name)  # the STE action: ci-job runs bin/ste-changed in its place
         self.assertGreater(len(want), 20)
         done = subprocess.run([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)

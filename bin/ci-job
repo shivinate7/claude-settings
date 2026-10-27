@@ -5,7 +5,9 @@
 # --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
 # list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...` or
 # `bin/ste-changed ...`, one command per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and
-# every other command (hooks/ suites, bash, pipx, uses:) is left out and printed nowhere. A lane runs
+# every other command (hooks/ suites, bash, pipx, other uses:) is left out and printed nowhere. The one `uses:`
+# it knows is actions/ste-lint: with --base it runs `bin/ste-changed <base>` in its place (the one home of that
+# step, shared with the action through actions/ste-lint/run.sh); without --base it is skipped. A lane runs
 # `bin/ci-job gates --lint --base origin/main` before it joins a batch. Use it with a job such as gates.
 # Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
@@ -108,8 +110,18 @@ def missing_in_log(log, start, script):
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed)(?: [^|&;`<>]*)?")
 
 
+STE_ACTION = re.compile(r"(?:\S*/)?actions/ste-lint(?:@\S*)?")
+
+
+def is_ste_action(step):
+    return STE_ACTION.fullmatch((step_key(step, "uses") or "").split(" #")[0].strip()) is not None
+
+
 def is_lint(step):
-    """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script."""
+    """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script.
+    The ste-lint action counts: plan() runs bin/ste-changed for it."""
+    if is_ste_action(step):
+        return True
     body = run_body(step)
     lines = [ln.strip() for ln in (body or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
     return bool(lines) and all(LINT_CMD.fullmatch(ln) and "mutate" not in ln.split()[1 if ln.startswith("python3") else 0]
@@ -120,6 +132,12 @@ def plan(step, pr, values):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
+    if is_ste_action(step):
+        if not pr:
+            return "skipped", "a pull-request step: pass --base to run it", None, None, None
+        if not shutil.which("bash") or not shutil.which("python3"):
+            return "unknown", "tool missing: bash and python3", None, None, None
+        return "run", '"%s" "%s"' % (os.path.join(BIN, "ste-changed"), values["base"]), SHELLS[None], {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)
@@ -183,7 +201,7 @@ def main(argv):
         print("unknown  job %r sets a job-level env: or defaults:, which this runner does not read" % job)
         return 2
     base = opts["--base"]
-    values = {"github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
+    values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
