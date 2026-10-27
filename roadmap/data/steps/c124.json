@@ -1,7 +1,7 @@
 {
   "title": "Lint tests share one folder-removal helper",
   "phase": "cleanup",
-  "status": "review",
+  "status": "doing",
   "order": 103.3387,
   "why": "Build advisor, Oct 27 07:10 CDT: five lint tests (check_mod_versions, glossary, hook_stubs, record_slugs, ruling_kind) copy the same rm_tree helper; a git auto-gc race in it turned batch #690 red three times.",
   "note": "Built and reviewed: draft PR #695 (head f6b06ca), sent to the build advisor for the batch, Oct 27. Shared rm_tree lives in testing/tracked_tree.py; seven tests call it (six lint, plus actions/test_ruling_kind_records_dir.py). It ignores a file that vanished mid-delete. The gc race itself is fixed in gates.yml's env (batch #690). Port: no; the tests live in claude-settings.",
