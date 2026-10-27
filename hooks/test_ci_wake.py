@@ -57,7 +57,7 @@ The gh stub: a `gh` launcher in a temp folder, the only PATH entry for these cas
 is ever reached. On Windows the launcher is `gh.cmd`, and a list-form subprocess call of "gh"
 skips a .cmd stand-in (decision list-form-subprocess-ignores-a-path-shim-on-windows). So the hook
 must find gh with shutil.which. The stub answers `gh api repos/O/R/pulls/N` and
-`gh api repos/O/R/pulls?head=OWNER:BRANCH&state=open` in the REST field names only (the cloud proxy
+`gh api -X GET repos/O/R/pulls -F head=OWNER:BRANCH -f state=open` (it refuses any argument holding `&`) in the REST field names only (the cloud proxy
 refuses GraphQL: every `gh pr ...` call and `gh api graphql` exit 1 with the proxy's 403 text), and the --json forms of `run list --commit SHA` and `run view <id>` from a JSON fixture. `run view`
 prints only the fields `--json` names. `run watch` exits 1: the hook must never run it. The stub
 writes every call to its own file beside the log (one file per call, so parallel calls never share one).
@@ -164,7 +164,7 @@ def api_repo(args):
     """The repo in the path of a `gh api repos/OWNER/REPO/...` call, else None. A {owner}/{repo} placeholder
     names none: gh fills it from the folder."""
     plain = strip_repo(args)
-    path = plain[1] if len(plain) > 1 and plain[0] == "api" else ""
+    path = next((a for a in plain[1:] if a.startswith("repos/")), "") if plain[:1] == ["api"] else ""
     parts = path.split("/")
     if len(parts) > 2 and parts[0] == "repos" and "{" not in parts[1] + parts[2]:
         return parts[1] + "/" + parts[2].split("?")[0]
@@ -272,7 +272,7 @@ def rest_pr(p):
             "merged": False, "merged_at": None}
 
 def rest(path, full, args, fx):
-    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls?head=OWNER:BRANCH&state=open`."""
+    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open."""
     parts = path.split("/")
     if len(parts) < 4 or parts[0] != "repos" or parts[3] != "pulls":
         sys.stderr.write("stub gh: unsupported api path: %s\n" % full)
@@ -286,7 +286,11 @@ def rest(path, full, args, fx):
             return 1
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
-    query = dict(q.split("=", 1) for q in full.partition("?")[2].split("&") if "=" in q)
+    query = {}
+    for i, a in enumerate(args):
+        if a in ("-f", "-F") and i + 1 < len(args) and "=" in args[i + 1]:
+            k, v = args[i + 1].split("=", 1)
+            query[k] = v
     head = query.get("head", "")
     owner, _, branch = head.partition(":")
     # a {owner} placeholder is the folder's owner; the stub holds one repo per entry
@@ -306,6 +310,10 @@ def main(args):
     if fx.get("mode") == "garbage":
         sys.stdout.write("<html>not json</html>\n")
         return 0
+    amp = [a for a in args if "&" in a]
+    if amp:  # cmd.exe behind a .cmd launcher reads `&` as a command separator
+        sys.stderr.write("'state' is not recognized as an internal or external command: %r\n" % amp)
+        return 1
     plain = strip_repo(args)
     obj = plain[0] if plain else ""
     verb = plain[1] if len(plain) > 1 else ""
@@ -315,7 +323,15 @@ def main(args):
         sys.stderr.write("GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)\n")
         return 1
     if obj == "api":
-        return rest(verb.split("?")[0], verb, args, fx)
+        words, skip = [], False
+        for a in plain[1:]:
+            if skip:
+                skip = False
+            elif a in ("-X", "-f", "-F", "--hostname"):
+                skip = True
+            elif not a.startswith("-"):
+                words.append(a)
+        return rest(words[0] if words else "", words[0] if words else "", args, fx)
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
@@ -381,8 +397,11 @@ def write_stub():
 
 
 def link_git():
-    """The cases run with the stub folder as the only PATH entry, and the empty-selector read runs git."""
+    """The cases run with the stub folder as the only PATH entry, and the empty-selector read runs git.
+    On Windows the launcher is git.cmd, as for gh."""
     real = shutil.which("git")
+    with open(os.path.join(BIN, "git.cmd"), "w", encoding="utf-8", newline="") as f:
+        f.write('@echo off\r\n"%s" %%*\r\n' % real)
     launcher = os.path.join(BIN, "git")
     with open(launcher, "w", encoding="utf-8", newline="\n") as f:
         f.write('#!/bin/sh\nexec "%s" "$@"\n' % real)
@@ -1417,8 +1436,8 @@ def case_folder_without_workflows_still_watches_the_pr_repo():
 
 
 def api_reads(res):
-    """The path of every `gh api` call, in order."""
-    return [c[1] for c in map(GH.strip_repo, res.calls) if c[:1] == ["api"] and len(c) > 1]
+    """The words after `api` of every `gh api` call (path, then fields), in order."""
+    return [" ".join(c[1:]) for c in map(GH.strip_repo, res.calls) if c[:1] == ["api"] and len(c) > 1]
 
 
 def graphql_calls(res):
@@ -1436,10 +1455,10 @@ def case_pr_read_is_rest_for_every_selector():
     rows = (
         ("number", "gh pr ready 12", "repos/{owner}/{repo}/pulls/12"),
         ("url", "gh pr ready " + URL_APP, "repos/%s/pulls/214" % REPO_APP),
-        ("branch", "gh pr ready " + branch, "repos/{owner}/{repo}/pulls?head={owner}:%s&state=open" % branch),
+        ("branch", "gh pr ready " + branch, "-X GET repos/{owner}/{repo}/pulls -F head={owner}:%s -f state=open" % branch),
         ("branch with -R", "gh pr ready %s -R %s" % (branch, REPO_APP),
-         "repos/%s/pulls?head=%s:%s&state=open" % (REPO_APP, REPO_APP.split("/")[0], branch)),
-        ("empty selector", "gh pr ready", "repos/{owner}/{repo}/pulls?head={owner}:%s&state=open" % branch),
+         "-X GET repos/%s/pulls -F head=%s:%s -f state=open" % (REPO_APP, REPO_APP.split("/")[0], branch)),
+        ("empty selector", "gh pr ready", "-X GET repos/{owner}/{repo}/pulls -F head={owner}:%s -f state=open" % branch),
     )
     for name, command, path in rows:
         label = "REST read, %s selector" % name

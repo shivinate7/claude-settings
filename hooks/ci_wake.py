@@ -27,7 +27,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -276,8 +275,11 @@ def current_branch(cwd):
         import _nowindow
     except ImportError:
         _nowindow = subprocess
+    exe = shutil.which("git")  # a bare "git" misses a .cmd launcher on Windows, as for gh
+    if exe is None:
+        raise Unknown("git branch read failed: git is not on PATH")
     try:
-        p = _nowindow.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=cwd, stdin=subprocess.DEVNULL,
+        p = _nowindow.run([exe, "symbolic-ref", "--short", "-q", "HEAD"], cwd=cwd, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, timeout=READ_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unknown("git branch read failed: %s" % type(e).__name__)
@@ -302,7 +304,9 @@ def read_pr(selector, repo, cwd):
     head = selector or current_branch(cwd)
     if ":" not in head:
         head = slug.split("/")[0] + ":" + head
-    found = gh_json(["api", "%s?head=%s&state=open" % (base, urllib.parse.quote(head, safe="/:{}")), *tail], cwd)
+    # Fields, not a query string: a `&` in an argument is a command separator to cmd.exe behind a .cmd
+    # launcher. -F fills a {owner} placeholder inside its value; -f does not.
+    found = gh_json(["api", "-X", "GET", base, "-F", "head=" + head, "-f", "state=open", *tail], cwd)
     if not found:
         raise NoPR()
     return pr_fields(found[0])
