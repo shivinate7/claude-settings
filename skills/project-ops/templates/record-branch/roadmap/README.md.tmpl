@@ -6,7 +6,8 @@
 
 The page builder is `skills/roadmap` in claude-settings. Build the page from this repo's checkout:
 
-    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --out FILE
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --out FILE
 
-Triage passes `--live` at each publish. The skill says what `live.json` holds, and what the page
-shows without it. Build again after each edit to `data/`.
+The builder runs without live work. Triage adds `--live live.json` at each publish, after the
+publisher writes `live.json`. The skill says what that file holds, and what the page shows without
+it. Build again after each edit to `data/`.

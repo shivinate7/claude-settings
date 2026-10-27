@@ -88,7 +88,9 @@ class Scaffold(unittest.TestCase):
 
     def test_triage_passes_live_at_each_publish(self):
         text = tree(SKILL)["templates/operating-model.md"]
-        self.assertRegex(text, r"(?s)publishes the roadmap page.*--live")
+        bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
+        self.assertIn("publishes the roadmap page", bullet)
+        self.assertIn("--live", bullet)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")

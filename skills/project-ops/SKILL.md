@@ -47,8 +47,9 @@ branch's `handoffs/` folder that a standing role writes for its successor.
 ## The roadmap page
 
 `skills/roadmap` is the one home for building and publishing the page, for any checkout. This
-skill keeps no copy. Its `SKILL.md` says how to build, what `--live` passes and what the step file
-holds. An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
+skill keeps no copy. Its `SKILL.md` says how to build and what `--live` passes. The scaffolded
+`roadmap/README.md` (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
+An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
 reads it there.
 
 ## Rules this skill does not restate
