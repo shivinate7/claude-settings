@@ -90,6 +90,7 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
+  await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.style.height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
@@ -1103,4 +1104,54 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
   const rule = fs.readFileSync(path.join(HERE, "..", "..", "..", "docs", "decisions", "questions-go-to-owner.md"), "utf8");
   assert.match(rule, /one writer/i);
   assert.match(rule, /`rank`/);
+});
+
+// ---------------------------------------------------------------- round 2 looks
+
+const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
+const FULLW = '<body style="margin:0;background:#2a6"><div style="width:390px;height:300px;background:#26a">x</div></body>';
+
+for (const width of [390, 1440]) {
+  test(`the View control sits under the picture and never covers it, at ${width} wide`, async (t) => {
+    const it = mk("pill-q", 52, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "p-a" }], designs: [{ slug: "p-a", label: "A", focus: "#panel" }] });
+    const page = await open(t, { items: [it], designData: { "p-a": PANEL }, viewport: { width, height: 900 } }); if (!page) return;
+    await page.waitForFunction((id) => document.querySelector(`#item-${id} .dfitwrap`).getBoundingClientRect().height > 0, it.id);
+    const m = await card(page, it).locator(".opic").evaluate((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), v = o.querySelector(".view").getBoundingClientRect(); return { wrapBottom: w.bottom, wrapTop: w.top, viewTop: v.top, viewH: v.height }; });
+    assert.ok(m.viewTop >= m.wrapBottom - 1, "the View control covers the picture");
+    assert.ok(m.viewH >= 40, "the View control is under 40px high: " + m.viewH);
+  });
+
+  test(`the viewer head is one row, and the mockup is whole and centered, at ${width} wide`, async (t) => {
+    const it = viewerItem();
+    const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+    await page.waitForFunction(() => { const f = document.querySelector("#dStage .dframe:not(.off)"); return f && f.getBoundingClientRect().height > 60; });
+    const m = await page.evaluate(() => { const f = document.querySelector("#dStage iframe").getBoundingClientRect(), h = document.querySelector(".dsh-head").getBoundingClientRect(); return { left: f.left, right: f.right, headH: h.height, vw: innerWidth }; });
+    assert.ok(m.headH < 70, "the viewer head is " + m.headH + "px high");
+    assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, "the mockup is cut: " + m.left + " to " + m.right);
+    if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "the mockup is not centered");
+    for (const id of ["dPrev", "dNext", "dFull", "dClose"]) assert.ok((await page.locator("#" + id).boundingBox()).height >= 40, id + " is under 40px");
+  });
+}
+
+test("a picture's height is reserved from its declared size before it loads", async (t) => {
+  const it = mk("reserve-q", 53, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "r-a" }], designs: [{ slug: "r-a", label: "A", focus: "#panel", size: { w: 600, h: 400 } }] });
+  const mockup = '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>';
+  const page = await open(t, { items: [it], designData: { "r-a": mockup }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await page.waitForFunction((id) => document.querySelector(`#item-${id} iframe`).style.transform.includes("translate"), it.id);
+  const first = await page.evaluate(() => window.__firstFit);
+  const last = await page.evaluate((id) => document.querySelector(`#item-${id} .dfitwrap`).style.height, it.id);
+  assert.ok(first && Math.abs(parseFloat(first) - parseFloat(last)) <= 3, `first paint ${first}, loaded ${last}`);
+});
+
+test("two designs of one slug with different focus keep their own size, and the viewer opens on the tapped option", async (t) => {
+  const two = '<body style="margin:0"><div id="p1" style="width:300px;height:200px;background:#a62"></div><div id="p2" style="width:300px;height:100px;background:#26a"></div></body>';
+  const it = mk("shared-q", 54, { pick: "a", options: [{ key: "a", label: "Layout A", how: "h", gain: "g", lose: "l" }, { key: "b", label: "Layout B", how: "h", gain: "g", lose: "l" }],
+    designs: [{ slug: "shared", option: "a", label: "A", focus: "#p1" }, { slug: "shared", option: "b", label: "B", focus: "#p2" }] });
+  const page = await open(t, { items: [it], designData: { shared: two }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await page.waitForFunction((id) => [...document.querySelectorAll(`#item-${id} .dfitwrap`)].every((w) => w.querySelector("iframe").style.transform.includes("translate")), it.id);
+  const hs = await card(page, it).locator(".dfitwrap").evaluateAll((ws) => ws.map((w) => w.getBoundingClientRect().height));
+  assert.ok(hs[0] > hs[1] * 1.6, "the second picture took the first one's size: " + hs);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+  assert.match(await page.locator("#dTitle").textContent(), /^Layout B/);
 });
