@@ -11851,6 +11851,23 @@ add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, 
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+# `Round 3 of 3` is the builder's marker. `Try N of 3` counts until the sunset in note try-marker-sunset.
+add("floor step-up: builder Round 3 of 3 on sonnet is denied", "deny", "roles-third-round-steps-up",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "allow",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 on the full opus id is allowed (standing grant)", "allow",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="claude-opus-5-5", subagent_type="builder")
+add("floor step-up: builder Round 1 of 3 on opus asks (only round 3 is a standing grant)", "ask",
+    "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
+    subagent_type="builder")
+add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 with no model is denied", "deny", "roles-third-round-steps-up",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 on line two after a lone quote is denied on sonnet", "deny",
+    "roles-third-round-steps-up", tool="Agent", prompt="Don't skip the check.\nRound 3 of 3. Finish the fix.",
+    model="sonnet", subagent_type="builder")
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant
