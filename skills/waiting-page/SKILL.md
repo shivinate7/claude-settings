@@ -169,6 +169,5 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 ## Update a repo's page
 
 When the template changes, republish `page.html` to each repo's page URL with the same
-capabilities (`db` and `comments`). Check that the page still shows the repo's items after the
-republish: that the database survives a republish is unmeasured on the first page you update, so
-update one page first and read its items.
+capabilities (`db` and `comments`). Update one page first, then read its items. That the database
+survives a republish is unmeasured, so check that the items are still there.
