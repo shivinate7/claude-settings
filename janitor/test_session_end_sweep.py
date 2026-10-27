@@ -377,11 +377,13 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
 
 class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
     """The second permissions.deny layer must keep every entry it shipped with, so a missing
-    interpreter still blocks pkill/killall, .env*, and the frozen config paths (see settings.json,
-    "permissions.deny")."""
+    interpreter still blocks .env* and the frozen config paths (see settings.json, "permissions.deny").
+    pkill and killall are no deny entries: such an entry refuses before the hook runs, so an owner override
+    could not lift it. The guard refuses them (machine-wide-kill), and the guard launcher blocks when
+    python or guard.py is missing; the two cases below pin those two halves."""
 
     EXPECTED = (
-        "Bash(pkill:*)", "Bash(killall:*)", "Read(.env)", "Edit(.env)", "Read(.env.*)",
+        "Read(.env)", "Edit(.env)", "Read(.env.*)",
         "Edit(.env.*)", "Read(!.env.example)", "Edit(!.env.example)",
         "Edit(~/.claude/settings.json)", "Edit(~/.claude/CLAUDE.md)",
         "Edit(~/.claude/hooks/**)", "Edit(~/.claude/lint/**)", "Edit(~/.claude/agents/**)",
@@ -393,6 +395,59 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
             deny = json.load(handle)["permissions"]["deny"]
         missing = [e for e in self.EXPECTED if e not in deny]
         self.assertFalse(missing, "settings.json permissions.deny is missing: %r" % missing)
+
+    def test_deny_list_holds_no_pkill_or_killall_entry(self):
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+            deny = json.load(handle)["permissions"]["deny"]
+        held = [e for e in deny if e.startswith(("Bash(pkill", "Bash(killall"))]
+        self.assertEqual(held, [], "an owner override cannot lift a deny entry")
+
+    def guard_launcher(self):
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+            pre = json.load(handle)["hooks"]["PreToolUse"]
+        rows = [h["command"] for e in pre for h in e["hooks"]
+                if h.get("type") == "command" and "guard.py" in h.get("command", "")
+                and "stall_watch" not in h["command"]]
+        self.assertEqual(len(rows), 1, "want one guard.py launcher, found %d" % len(rows))
+        return rows[0]
+
+    def run_launcher(self, with_guard, path):
+        import shutil, tempfile
+        shell = shutil.which("sh")
+        if not shell:
+            self.skipTest("no sh on this host")
+        with tempfile.TemporaryDirectory() as cfg, tempfile.TemporaryDirectory() as empty:
+            if with_guard:
+                os.makedirs(os.path.join(cfg, "hooks"))
+                open(os.path.join(cfg, "hooks", "guard.py"), "w").close()
+            env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=empty if path is None else path)
+            return subprocess.run([shell, "-c", self.guard_launcher()], input="{}", capture_output=True,
+                                  text=True, env=env, timeout=60)
+
+    def test_the_guard_launcher_blocks_when_guard_py_is_missing(self):
+        r = self.run_launcher(False, None)
+        self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_the_guard_launcher_blocks_when_python_is_missing(self):
+        r = self.run_launcher(True, None)
+        self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_the_guard_denies_pkill_and_killall_as_machine_wide_kill(self):
+        import tempfile
+        guard = os.environ.get("GUARD_UNDER_TEST") or os.path.join(REPO_ROOT, "hooks", "guard.py")
+        for command in ("pkill -f node", "pkill node", "killall node"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as cfg, \
+                    tempfile.TemporaryDirectory() as work:
+                env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+                env.pop("PYTHONPATH", None)
+                env.pop("CLAUDE_CODE_SESSION_ID", None)
+                payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": work})
+                r = subprocess.run([sys.executable, guard], input=payload, capture_output=True, text=True,
+                                   env=env, timeout=120)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                out = json.loads(r.stdout)["hookSpecificOutput"]
+                self.assertEqual(out["permissionDecision"], "deny", r.stdout)
+                self.assertIn("machine-wide-kill", out["permissionDecisionReason"])
 
 
 class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):

@@ -197,6 +197,13 @@ class Shim(unittest.TestCase):
     def test_refuses_root(self):
         self.assertRefused(["-rf", "/"], ["/"])
 
+    def test_a_refusal_says_that_no_override_lifts_it(self):
+        # The shim runs inside the command, after the guard's gate, so an owner override cannot reach it
+        # (decision owner-override). The refusal says so, in place of leaving the owner to type one.
+        r = self.rm("-rf", "/")
+        self.assertRefusal(r, ["-rf", "/"], ["/"])
+        self.assertIn("no override", (r.stdout + r.stderr).lower())
+
     def test_root_refuses_the_whole_call(self):
         # The real rm refuses "/" by itself, so a bare `rm -rf /` cannot show that the shim ran. A safe
         # path ahead of "/" must survive: the shim stops before the real rm deletes anything.

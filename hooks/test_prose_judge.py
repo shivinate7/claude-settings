@@ -359,6 +359,80 @@ def case_e_a_failed_decision_watch_import_does_not_block():
     check("e: failed import: not a block (exit 2 or a deny)", code != 2 and "deny" not in out, (code, out[-200:]))
 
 
+# (f) a refusal goes through guard_core.refuse(), so an owner override lifts it (decision owner-override).
+# Each case runs the hook in a fresh interpreter with a config folder of its own, and reads guard.log.
+OV_CHILD = r"""
+import io, json, os, sys
+sys.path.insert(0, sys.argv[1])
+import prose_judge
+prose_judge.invoke_model = lambda prompt, **kw: ({"ok": False, "reason": os.environ["OV_REASON"]}, None)
+sys.stdin = io.TextIOWrapper(io.BytesIO(os.environ["OV_PAYLOAD"].encode("utf-8")), encoding="utf-8")
+sys.exit(prose_judge.main())
+"""
+OV_FUTURE, OV_PAST = "2099-01-01T00:00:00+00:00", "2000-01-01T00:00:00+00:00"
+
+
+def ov_run(payload, override=None, session="ses00001"):
+    """Run the hook once with a model that always blocks. override is (session id, file body) or None.
+    Return (exit_code, stdout, guard.log text)."""
+    import shutil
+    import tempfile
+    cfg = tempfile.mkdtemp(prefix="prose_judge_cfg_")
+    try:
+        if override is not None:
+            folder = os.path.join(cfg, "state", "override")
+            os.makedirs(folder)
+            body = override[1]
+            with open(os.path.join(folder, override[0] + ".json"), "w", encoding="utf-8") as f:
+                f.write(body if isinstance(body, str) else json.dumps(body))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, OV_REASON=REASON,
+                   OV_PAYLOAD=json.dumps(dict(payload, session_id=session)))
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        proc = subprocess.run([sys.executable, "-c", OV_CHILD, HERE], env=env, capture_output=True,
+                              text=True, encoding="utf-8", timeout=60)
+        log = os.path.join(cfg, "guard.log")
+        text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+        return proc.returncode, proc.stdout, text, proc.stderr
+    finally:
+        shutil.rmtree(cfg, ignore_errors=True)
+
+
+def case_f_an_override_lifts_the_refusal():
+    if not need_module():
+        return
+    timed = {"kind": "timed", "until": OV_FUTURE}
+    once = {"kind": "once", "until": OV_FUTURE, "id": "0" * 32}
+    for tool_payload in (edit("decisions/a.md"), write("decisions/x.md")):
+        name = "f: " + tool_payload["tool_name"]
+        for label, override, lifted in (
+            ("a timed override", ("ses00001", timed), True),
+            ("a one-act override", ("ses00001", once), True),
+            ("an ended override", ("ses00001", dict(timed, until=OV_PAST)), False),
+            ("another session's override", ("ses00002", timed), False),
+            ("a corrupt override file", ("ses00001", "{not json"), False),
+            ("no override", None, False),
+        ):
+            code, out, log, err = ov_run(tool_payload, override)
+            if lifted:
+                check("%s, %s: lifted, no output, one override log line" % (name, label),
+                      code == 0 and out == "" and log.count("\toverride\tprose-judge\t") == 1
+                      and "\tdeny\t" not in log, (code, out[:120], log, err[-120:]))
+            else:
+                hso = (json_or_none(out) or {}).get("hookSpecificOutput") or {}
+                check("%s, %s: the deny stands, with the judge's reason and one deny log line" % (name, label),
+                      code == 0 and hso.get("permissionDecision") == "deny"
+                      and REASON in hso.get("permissionDecisionReason", "")
+                      and log.count("\tdeny\tprose-judge\t") == 1, (code, out[:120], log, err[-120:]))
+    code, out, log, err = ov_run(edit("decisions/a.md"))
+    reason = ((json_or_none(out) or {}).get("hookSpecificOutput") or {}).get("permissionDecisionReason", "")
+    import override as home
+    offer = getattr(home, "offer", None)
+    check("f: the refusal ends with the override line", offer is not None
+          and reason.rstrip().endswith(offer("prose-judge").strip()), reason[-160:])
+    code, out, log, err = ov_run(edit("src/app.ts"), ("ses00001", {"kind": "once", "until": OV_FUTURE, "id": "1" * 32}))
+    check("f: a path that is not judged spends no override", out == "" and "override" not in log, (out, log))
+
+
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
@@ -368,7 +442,8 @@ def main():
                  case_d_bad_input_allows, case_e_a_skipped_input_loads_no_repo_module,
                  case_e_a_replaced_invoke_model_is_the_one_called,
                  case_e_the_unreplaced_call_reaches_decision_watch,
-                 case_e_a_failed_decision_watch_import_does_not_block):
+                 case_e_a_failed_decision_watch_import_does_not_block,
+                 case_f_an_override_lifts_the_refusal):
         try:
             case()
         except Exception as exc:

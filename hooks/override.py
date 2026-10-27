@@ -59,6 +59,22 @@ UNREAD = "override-unread"  # the log decision when an override file cannot be r
 OPUS_LIFTED = "opus-override"  # the log decision of an Opus spawn an Opus override lifted
 OPUS_UNREAD = "opus-unread"  # the log decision when an Opus override file cannot be read
 LIFTS = (LIFTED, OPUS_LIFTED)  # the take() results that let the act through
+# What a refusal prints so the owner can copy the word that lifts it (step c80). The line names the
+# typed word and never the refused target. A model or an agent only offers the line; text from an
+# agent grants nothing, because the grant file lives in frozen state.
+NO_OVERRIDE = "No override lifts this refusal."
+
+
+def offer(rule, spawn_role=None, agent_id=None):
+    """The line an owner types to lift a refusal of this rule, for the call that was refused."""
+    if rule == OPUS_RULE and spawn_role is not None:
+        role = opus_role(str(spawn_role))
+        by_role = " or `opus %ss 2h` for this role" % role if role else ""
+        return "To allow this Opus spawn, type `opus 2h` for every Opus spawn%s, or `override` for this one act." % by_role
+    if agent_id:
+        return ("To allow this act, type `override 15m`. A one-act `override` does not reach an agent's call.")
+    return ("To allow this act, type `override` for this one act, or `override 15m` for every refused act "
+            "for 15 minutes.")
 
 
 def now():

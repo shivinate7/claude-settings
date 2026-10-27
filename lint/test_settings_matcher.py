@@ -7,6 +7,28 @@ import json, os, re, subprocess, sys, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
+CALL_JUDGE = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "call_judge.py")
+
+
+def call_judge_judges():
+    """JUDGES of hooks/call_judge.py: tool name -> (prompt, model, timeout, rule, fallback). The Agent spawn
+    judge and the AskUserQuestion reviewer live there, as one command hook, so an owner override can lift them.
+    CALL_JUDGE_UNDER_TEST points the test at another copy (a red run on a wrong model constant)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("call_judge_under_test", CALL_JUDGE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(module.JUDGES)
+
+
+def call_judge_entries():
+    """The PreToolUse entries whose command hook runs call_judge.py."""
+    with open(SETTINGS, encoding="utf-8") as f:
+        pre = json.load(f)["hooks"]["PreToolUse"]
+    return [(e, h) for e in pre for h in e["hooks"]
+            if h.get("type") == "command" and "call_judge.py" in h.get("command", "")]
+
 
 def guard_matchers():
     entries = json.load(open(SETTINGS))["hooks"]["PreToolUse"]
@@ -65,14 +87,17 @@ class ProseJudgeRow(unittest.TestCase):
         self.assertGreater(hook.get("timeout", 0), 0)
 
     def test_agent_judge_stays(self):
-        hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]]
-        self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "Agent prompt judge missing")
+        # The Agent spawn judge is a model call in hooks/call_judge.py, launched by one command hook that
+        # covers Agent. It is no prompt hook now, because a prompt hook cannot read an owner override.
+        rows = call_judge_entries()
+        self.assertEqual(len(rows), 1, "want one call_judge.py command hook, found %d" % len(rows))
+        self.assertTrue(covers(rows[0][0], "Agent"), "call_judge.py does not run on Agent")
+        self.assertIn("Agent", call_judge_judges(), "call_judge.py holds no Agent judge")
+        self.assertFalse([h for e in pre_tool_entries() if covers(e, "Agent") for h in e["hooks"]
+                          if h.get("type") in JUDGE_TYPES], "a prompt or agent hook still runs on Agent")
 
     def agent_prompt(self):
-        hooks = [h for e in pre_tool_entries() if e.get("matcher") == "Agent" for h in e["hooks"]
-                 if h.get("type") == "prompt"]
-        self.assertEqual(len(hooks), 1)
-        return " ".join(hooks[0]["prompt"].split())
+        return " ".join(call_judge_judges()["Agent"][0].split())
 
     def test_explore_rule_passes_sonnet_and_opus(self):
         # The floor is Sonnet; the owner's "use opus" must pass (agent-model-cap, audit Explore row).
@@ -125,17 +150,27 @@ def judge_hooks():
 
 
 class JudgeModelIds(unittest.TestCase):
-    def test_every_prompt_and_agent_hook_names_a_full_model_id(self):
+    def test_every_judge_names_a_full_model_id(self):
+        # The judges' models live in hooks/call_judge.py now. Any prompt or agent hook that comes back to
+        # settings.json is held to the same rule.
         found, bad = 0, []
-        for label, hook in judge_hooks():
+        for tool, judge in call_judge_judges().items():
             found += 1
+            model = judge[1]
+            if not (isinstance(model, str) and model.startswith("claude-")):
+                bad.append("call_judge.py %s model=%r" % (tool, model))
+        for label, hook in judge_hooks():
             model = hook.get("model")
             if not (isinstance(model, str) and model.startswith("claude-")):
                 bad.append("%s (%s) model=%r" % (label, hook["type"], model))
         if not found:
-            self.fail("no prompt or agent hook found, so the scan proves nothing")
+            self.fail("call_judge.py holds no judge, so the scan proves nothing")
         if bad:
             self.fail("model is not a full id (must start claude-): " + "; ".join(bad))
+
+    def test_the_agent_judge_runs_sonnet(self):
+        model = call_judge_judges()["Agent"][1]
+        self.assertTrue(model.startswith("claude-sonnet-"), "the Agent spawn judge runs %r, want Sonnet" % model)
 
 
 # decision-watch runs as the mod (an enabled plugin), not as a Stop row. The reply judge and the
@@ -199,7 +234,7 @@ class ModsAutoUpdate(unittest.TestCase):
 # gate backs the rubric: the prompt text is the only home of it, and these cases pin that text.
 # An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
 # hooks beside it carry `continueOnBlock`, which is not one of them.
-AGENT_HOOK_KEYS = {"type", "prompt", "if", "timeout", "model", "statusMessage", "once"}
+COMMAND_HOOK_KEYS = {"type", "command", "if", "timeout", "statusMessage", "once", "async"}
 OPUS_PREFIX = "claude-opus-"
 # Each rubric item the prompt must name, with the patterns that must all match the prompt. The prompt is
 # whitespace-folded and matched without case, except the three labels, which match as written.
@@ -255,27 +290,33 @@ class QuestionReviewer(unittest.TestCase):
     def ask_hooks(self):
         return [h for e in pre_tool_entries() if covers(e, "AskUserQuestion") for h in e["hooks"]]
 
-    def agent_hook(self):
-        agents = [h for h in self.ask_hooks() if h.get("type") == "agent"]
-        self.assertEqual(len(agents), 1, "want one agent hook on AskUserQuestion, found %d" % len(agents))
-        return agents[0]
+    def question_prompt(self):
+        return call_judge_judges()["AskUserQuestion"][0]
 
-    def test_ask_user_question_runs_one_hook_and_it_is_an_agent(self):
-        types = [h.get("type") for h in self.ask_hooks()]
-        self.assertEqual(types, ["agent"], "AskUserQuestion hooks are %s, want one agent hook" % types)
+    def test_ask_user_question_runs_one_hook_and_it_is_call_judge(self):
+        # The reviewer is a model call in hooks/call_judge.py, launched by one command hook, so an owner
+        # override can lift its refusal. No agent hook may come back: it reads no override.
+        hooks = self.ask_hooks()
+        self.assertEqual([h.get("type") for h in hooks], ["command"],
+                         "AskUserQuestion hooks are %s, want one command hook" % [h.get("type") for h in hooks])
+        self.assertIn("call_judge.py", script_names(hooks[0].get("command", "")))
 
-    def test_agent_hook_pins_an_opus_id(self):
-        model = self.agent_hook().get("model")
+    def test_the_reviewer_runs_an_opus_id(self):
+        model = call_judge_judges()["AskUserQuestion"][1]
         self.assertTrue(isinstance(model, str) and model.startswith(OPUS_PREFIX),
-                        "agent hook model is %r, want a full id starting %s" % (model, OPUS_PREFIX))
+                        "the question reviewer model is %r, want a full id starting %s" % (model, OPUS_PREFIX))
 
-    def test_agent_hook_uses_only_agent_hook_keys(self):
-        extra = sorted(set(self.agent_hook()) - AGENT_HOOK_KEYS)
-        self.assertEqual(extra, [], "keys outside the agent-hook schema: %s" % extra)
+    def test_call_judge_hook_uses_only_command_hook_keys(self):
+        # The models and prompts live in call_judge.py. A model or prompt key on the row would be dead text.
+        (_, hook), = call_judge_entries()
+        extra = sorted(set(hook) - COMMAND_HOOK_KEYS)
+        self.assertEqual(extra, [], "keys outside the command-hook schema: %s" % extra)
+        self.assertGreater(hook.get("timeout", 0), max(j[2] for j in call_judge_judges().values()),
+                           "the hook timeout does not outlast the longest model call")
 
-    def test_agent_hook_prompt_names_every_rubric_item(self):
-        gaps = rubric_gaps(self.agent_hook().get("prompt") or "")
-        self.assertEqual(gaps, [], "the agent hook prompt does not name: %s" % gaps)
+    def test_the_reviewer_prompt_names_every_rubric_item(self):
+        gaps = rubric_gaps(self.question_prompt())
+        self.assertEqual(gaps, [], "the question reviewer prompt does not name: %s" % gaps)
 
     def test_the_rubric_check_sees_each_missing_item(self):
         # Green on main by design: it tests the check, not settings.json.
@@ -287,12 +328,12 @@ class QuestionReviewer(unittest.TestCase):
                 rest = " ".join(v for k, v in SAMPLE.items() if k != item)
                 self.assertEqual(rubric_gaps(rest), [item])
 
-    def test_agent_hook_prompt_lists_the_kinds_of_the_premise_table(self):
+    def test_reviewer_prompt_lists_the_kinds_of_the_premise_table(self):
         with open(PREMISE_FORMAT, encoding="utf-8") as f:
             table = table_kinds(f.read())
         self.assertTrue(table, "no kind rows in %s" % PREMISE_FORMAT)
-        listed = prompt_kinds(self.agent_hook().get("prompt") or "")
-        self.assertTrue(listed, "the agent hook prompt lists no source kinds after 'source kind:'")
+        listed = prompt_kinds(self.question_prompt())
+        self.assertTrue(listed, "the question reviewer prompt lists no source kinds after 'source kind:'")
         self.assertEqual(sorted(listed), sorted(table),
                          "hook prompt kinds %s, premise table kinds %s: update the one that drifted" % (listed, table))
 
@@ -336,14 +377,13 @@ class SteHooksRemoved(unittest.TestCase):
 
     def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
         # The two command gates stay: hooks/test_wrappers.py pins that each one fails closed. The question
-        # check is one agent hook, so it is matched by type and by its matcher, not by a script name.
+        # check is the call_judge.py command hook, matched by its script and its matcher.
         with open(SETTINGS, encoding="utf-8") as f:
             pre = json.load(f)["hooks"]["PreToolUse"]
         names = [n for c in command_rows(pre) for n in script_names(c)]
         self.assertIn("guard.py", names)
-        agent_entries = [e for e in pre if any(h.get("type") == "agent" for h in e.get("hooks", []))]
-        covered = [e for e in agent_entries if "AskUserQuestion" in e.get("matcher", "").split("|")]
-        self.assertTrue(covered, "no PreToolUse agent hook has AskUserQuestion in its matcher")
+        covered = [e for e, _ in call_judge_entries() if "AskUserQuestion" in e.get("matcher", "").split("|")]
+        self.assertTrue(covered, "no PreToolUse call_judge.py command hook has AskUserQuestion in its matcher")
 
 
 # The SendMessage judges must see the receiver's busy state and the override. A prompt hook
@@ -362,36 +402,29 @@ class SendMessageJudge(unittest.TestCase):
                         "SendMessage has only prompt hooks, which cannot read the board's busy state")
 
 
-# Every prompt or agent judge in settings.json must have a row in the model-per-role table
-# (docs/decisions/agent-model-cap.md), and that row's model must equal the hook's model.
+# Every judge in hooks/call_judge.py must have a row in the model-per-role table
+# (docs/decisions/agent-model-cap.md), and that row's model must equal the module's model.
 RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "agent-model-cap.md")
-JUDGE_ROW = "prompt-hook judges"
+ROW_NAMES = {"Agent": "Agent spawn judge", "AskUserQuestion": "question reviewer"}  # first-cell words of each row
 
 
-def judge_rows(text):
-    """Table rows whose first cell names the prompt-hook judges, as cell lists."""
-    rows = []
-    for line in text.splitlines():
-        if line.startswith("|"):
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if len(cells) >= 2 and JUDGE_ROW in cells[0]:
-                rows.append(cells)
-    return rows
+def table_rows(text):
+    """Table rows as cell lists."""
+    return [[c.strip() for c in line.strip().strip("|").split("|")] for line in text.splitlines()
+            if line.startswith("|")]
 
 
-def table_gaps(text, hooks):
-    """One line per judge the table does not name, or names with another model."""
-    rows = judge_rows(text)
+def table_gaps(text, judges):
+    """One line per judge the table does not name, or names with another model. judges: tool -> judge tuple."""
+    rows = table_rows(text)
     gaps = []
-    for label, hook in hooks:
-        m = re.search(r"matcher=(\S+)", label)
-        name = m.group(1) if m else label
-        named = [r for r in rows if name in re.findall(r"[A-Za-z]+", r[0])]
-        model = hook.get("model") or ""
+    for tool, judge in judges.items():
+        named = [r for r in rows if len(r) >= 2 and ROW_NAMES.get(tool, tool) in r[0]]
+        model = judge[1] or ""
         if not named:
-            gaps.append("%s: no model-table row names it" % name)
+            gaps.append("%s: no model-table row names it" % tool)
         elif not any(model and model in r[1] for r in named):
-            gaps.append("%s: table model is not %s" % (name, model))
+            gaps.append("%s: table model is not %s" % (tool, model))
     return gaps
 
 
@@ -400,18 +433,28 @@ class JudgeModelRows(unittest.TestCase):
         with open(RECORD, encoding="utf-8") as f:
             self.text = f.read()
 
-    def test_every_prompt_or_agent_judge_has_a_row_with_its_model(self):
-        hooks = list(judge_hooks())
-        self.assertTrue(hooks, "no judge hook found, so the check proves nothing")
-        self.assertEqual(table_gaps(self.text, hooks), [])
+    def test_every_call_judge_judge_has_a_row_with_its_model(self):
+        judges = call_judge_judges()
+        self.assertEqual(sorted(judges), sorted(ROW_NAMES), "call_judge.py judges changed; update ROW_NAMES")
+        self.assertEqual(table_gaps(self.text, judges), [])
+
+    def test_the_question_row_names_the_standing_grant(self):
+        # The reviewer runs Opus under the owner's class-level standing grant (decision question-reviewer-agent-hook).
+        row = [r for r in table_rows(self.text) if len(r) >= 2 and ROW_NAMES["AskUserQuestion"] in r[0]]
+        self.assertTrue(row and "standing grant" in row[0][1], "the question reviewer row does not name its standing grant")
 
     def test_check_goes_red_when_the_agent_row_is_missing(self):
-        # Mutation: take Agent out of the judge row. The check must name it.
-        self.assertTrue(any("Agent" in re.findall(r"[A-Za-z]+", r[0]) for r in judge_rows(self.text)),
+        # Mutation: take the Agent row's name out. The check must name it.
+        self.assertTrue(any(ROW_NAMES["Agent"] in r[0] for r in table_rows(self.text)),
                         "the judge row changed; update this mutation")
-        mutated = "\n".join(l.replace("Agent", "") if JUDGE_ROW in l else l for l in self.text.splitlines())
-        gaps = table_gaps(mutated, list(judge_hooks()))
+        mutated = self.text.replace(ROW_NAMES["Agent"], "")
+        gaps = table_gaps(mutated, call_judge_judges())
         self.assertTrue(any(g.startswith("Agent:") for g in gaps), gaps)
+
+    def test_check_goes_red_when_the_table_model_differs(self):
+        judges = call_judge_judges()
+        wrong = dict(judges, Agent=(judges["Agent"][0], "claude-haiku-9-9") + tuple(judges["Agent"][2:]))
+        self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
 
 
 if __name__ == "__main__":
