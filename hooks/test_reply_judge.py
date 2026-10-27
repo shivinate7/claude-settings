@@ -1146,6 +1146,26 @@ def case_undoable_pick_finding_logs_its_rule():
           (run.code, run.out))
 
 
+# --------------------------------------------------------------------------- d9
+# A pick between visual options needs a picture of each option in the reply. A reply that asks the
+# owner to pick and only links to the mockups (a folder, a repo or a file) is flagged.
+
+LINK_ONLY_ASK = (
+    "Done: drew three layouts for the price history.\n"
+    "Input Needed: pick where a card's price history shows, A, B or C. The three mockups are in "
+    "https://github.com/shivinate7/banchi/tree/main/docs/mockups/price-history\n"
+)
+
+
+def case_prompt_flags_a_visual_pick_that_only_links():
+    run = run_hook(LINK_ONLY_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, LINK_ONLY_ASK)
+    check("prompt: a sentence flags a pick between visual options that only links to them",
+          has_pin(sentences, ("flag",), ("visual", "look"), ("link",), ("folder", "repo", "file")), sentences)
+    check("prompt: a sentence says each option needs its own picture",
+          has_pin(sentences, ("picture", "image", "design"), ("each option", "every option")), sentences)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1191,6 +1211,7 @@ CASES = (
     case_prompt_notes_an_undoable_pick,
     case_prompt_spares_irreversible_and_goal_picks,
     case_undoable_pick_finding_logs_its_rule,
+    case_prompt_flags_a_visual_pick_that_only_links,
 )
 
 

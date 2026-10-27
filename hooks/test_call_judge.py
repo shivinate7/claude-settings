@@ -197,6 +197,19 @@ def case_agent_refusal():
           ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
 
 
+def case_spawn_prompt_bars_a_lane_waiting_page_write():
+    # A lane has no wake after it ends, so it cannot read its answer (step c126). The orchestrator writes the item.
+    r = run_hook(spawn_input("builder", model="sonnet",
+                             brief="Build the screen. If you have a question, post an item on the waiting page. " + MARK),
+                 answer=ALLOW)
+    prompt = (r.calls[0]["prompt"] if r.calls else "").lower()
+    sentences = re.split(r"[.\n]", prompt)
+    check("agent: the spawn prompt flags a brief that tells a lane to write a waiting-page item",
+          any(all(w in s for w in ("flag", "waiting", "lane")) for s in sentences), prompt[:200])
+    check("agent: the spawn prompt says the lane puts its question in its report",
+          any(all(w in s for w in ("report", "question")) for s in sentences), prompt[:200])
+
+
 def case_agent_override():
     flagged = spawn_input("builder", model="sonnet")
     agent_call = spawn_input("builder", model="sonnet", agent="a1")
@@ -316,7 +329,7 @@ def case_settings_row():
 
 
 def main():
-    for case in (case_agent_refusal, case_agent_override, case_explore_row_is_vetoed, case_question,
+    for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed, case_question,
                  case_fail_open, case_settings_row):
         try:
             case()
