@@ -39,10 +39,10 @@ guard rule, so the watcher does the waiting and the session is told once.
   quiet time. A job with no named log, or whose logs stop changing, stalls as before. The redirection is the
   signal because it is the act; a declared note can be wrong, and an unnamed file is not read. Limit: a
   relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
-  The watcher reports a stall only on a job state and named-log sample taken in the same pass, because a
-  sample from the once-a-second check can be a second old and miss a write or the job's end.
-  Cost: no new process, timer or file; one stat per named log each second in the watcher's own loop, one
-  more sample before each stall report, and one at each Stop check.
+  The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
+  from the once-a-second check can be a second old, and miss a write or the job's end.
+  Cost: no new process, timer or file. Each named log gets one stat a second in the watcher's own loop,
+  one more before each stall report, and one at each Stop check.
 
 ## The Stop-time check
 
