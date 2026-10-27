@@ -228,6 +228,26 @@ class T(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
+    # Lines captured from a real `swift test` (Swift 6.4): the XCTest summary is always there and says 0 for a Swift Testing run.
+    XCT0 = "Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds"
+    ST_PASS = "\u2714 Test run with 1 test in 0 suites passed after 0.001 seconds."
+    ST_FAIL = "\u2718 Test run with 2 tests in 0 suites failed after 0.001 seconds with 1 issue."
+
+    def test_swift_testing_pass_on_exit0_is_pass(self):
+        r = run(f"print({self.XCT0!r})\nprint({self.ST_PASS!r})")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_swift_testing_failure_on_exit0_is_fail_even_with_xctest_tests(self):
+        r = run(f"print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint({self.ST_FAIL!r})")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("runner failure marker", r.stdout.splitlines()[0])
+
+    def test_swift_testing_zero_tests_on_exit0_is_fail_no_tests_ran(self):
+        r = run(f"print({self.XCT0!r})\nprint('\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("no tests ran", r.stdout.splitlines()[0])
+
     def test_singular_one_test_is_pass(self):
         r = run("print('Executed 1 test, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')")
         self.assertEqual(r.returncode, 0, r.stdout)
