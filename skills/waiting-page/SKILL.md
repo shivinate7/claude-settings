@@ -69,7 +69,7 @@ The page hides an item with status `closed`. It shows an item as answered, in pl
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
    and make it equal to the key. After the `set`, read the item back (`ArtifactData get
    items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
-   unique key, and no key `none`. Fix the item at once if a check fails. The page refuses to send an
+   unique key, and no key `none`. If a check fails, fix the item at once. The page refuses to send an
    answer to a broken item.
    - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
