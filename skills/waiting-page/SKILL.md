@@ -169,8 +169,21 @@ the Designs tab pages through every mockup whose question is open.
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
 
-## Update a repo's page
+## Update a repo's pages
 
-When the template changes, republish `page.html` to each repo's page URL with the same
-capabilities (`db` and `comments`). Update one page first, then read its items. That the database
-survives a republish is unmeasured, so check that the items are still there.
+A batch that changes `page.html` republishes each waiting page this account can reach, before the
+batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
+`live_pages()` in `lint/layout.py`.
+
+1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
+   that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
+   raw HTML, or that does not name this account a writer, is unreadable too.
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
+   `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
+3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
+   `{comments: {}}`. Keep the page's `designData` block for the items still open. A republish with
+   less drops the saved items or the wake.
+4. Update one page first, then read its items: they must all still be there. That the database
+   survives a republish is unmeasured.
+5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
+   its owner.
