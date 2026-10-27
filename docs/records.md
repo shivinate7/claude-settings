@@ -133,6 +133,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
+| `decisions-reach-a-clickable-pick` | Roadmap step c118, 2026-10-27. | [`docs/decisions/decisions-reach-a-clickable-pick.md`](../docs/decisions/decisions-reach-a-clickable-pick.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`docs/decisions/default-branch-read-order.md`](../docs/decisions/default-branch-read-order.md) |
 | `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`docs/decisions/dependabot-security-only.md`](../docs/decisions/dependabot-security-only.md) |
 | `design-agents` | Owner, 2026-10-26 (waiting-page item 15, answer b): a lane that touches a screen gets two design agents, and both run Opus. | [`docs/decisions/design-agents.md`](../docs/decisions/design-agents.md) |
