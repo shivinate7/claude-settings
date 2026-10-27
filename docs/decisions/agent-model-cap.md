@@ -94,11 +94,34 @@ model and whose definition names no model. `agents/builder.md` carries no `model
 spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
+**The order**, first wins: the spawn's `model` field, then the agent definition's `model:` (a built-in
+definition or a pin in `agents/*.md`, `inherit` included), then the variable, then the parent's model.
+
 MEASURED in a cloud session, 2026-10-26, by each agent transcript's `model` field. The variable
 was `sonnet`, and no `agents/` files were installed. A `general-purpose` spawn with no model ran
-Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. An `Explore` spawn that set model `haiku` ran Haiku, so the call's `model` beats both. So a definition that
-names a model, `inherit` included, beats the variable. In cloud, an Explore search runs Opus, not
-Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because cloud installs none.
+Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. An `Explore` spawn that set model `haiku` ran Haiku. In cloud, an Explore search runs Opus, not Haiku.
+
+MEASURED Oct 27, cloud: this repo's `agents/*.md` copied to `~/.claude/agents`, Claude Code 2.1.311,
+each case a fresh headless `claude -p` with a parent model unlike both candidates. The model came from
+the run's `modelUsage` and the agent's own report of its model id. Spawns set no model unless named.
+
+| Agent, pin | Variable | Parent | Observed |
+|---|---|---|---|
+| reviewer, `haiku` | sonnet | opus | haiku |
+| reviewer, `haiku` | opus | sonnet | haiku |
+| reviewer, `haiku` | unset | sonnet | haiku |
+| reviewer, `haiku`, spawn sets `sonnet` | opus | haiku | sonnet |
+| designer, `opus` | sonnet | haiku | opus |
+| designer, `opus` | haiku | sonnet | opus |
+| builder, no pin | haiku | sonnet | haiku |
+| builder, no pin | unset | haiku | haiku |
+
+So a pin in `agents/*.md` beats the variable in both directions. A reviewer spawn that names no model
+runs Haiku even where the variable is `sonnet`; rounds 2 and 3 must set the model per spawn.
+A running cloud thread does not load `~/.claude/agents` files written mid-session: its Agent tool
+refused `reviewer`, `designer` and `builder` as unknown types. A process started after the write
+loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in
+the same container, reads the same order.
 
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
