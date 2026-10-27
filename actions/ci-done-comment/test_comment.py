@@ -58,6 +58,7 @@ def ci_done_problems(text):
     job = jobs.get("ci-done")
     if job is None:
         return ["gates.yml has no ci-done job"]
+    job = re.sub(r"^\s*#.*\n", "", job, flags=re.M)  # a commented-out line does nothing
     out = []
     needs = re.search(r"^    needs:\s*\n((?:      - [\w-]+\s*\n)+)", job, re.M)
     got = sorted(re.findall(r"- ([\w-]+)", needs.group(1))) if needs else []
@@ -104,6 +105,7 @@ class GatesCaller(unittest.TestCase):
             "runs on drafts": GOOD.replace(" && !github.event.pull_request.draft", ""),
             "read-only token": GOOD.replace("pull-requests: write", "pull-requests: read"),
             "no needs passed": GOOD.replace("needs: ${{ toJSON(needs) }}", "needs: '{}'"),
+            "step commented out": GOOD.replace("      - uses:", "      # - uses:"),
         }
         for name, text in broken.items():
             with self.subTest(name):
