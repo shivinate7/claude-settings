@@ -388,10 +388,13 @@ function sorted() {
   const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
   const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
-  by.holds.sort(byAge);
-  by.due.sort((a, b) => dl(a) - dl(b) || byAge(a, b));
-  by.calm.sort((a, b) => (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
-  by.stands.sort(byAge);
+  // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
+  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
+  const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
+  by.holds.sort((a, b) => byRank(a, b) || byAge(a, b));
+  by.due.sort((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b));
+  by.calm.sort((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
+  by.stands.sort((a, b) => byRank(a, b) || byAge(a, b));
   return by;
 }
 

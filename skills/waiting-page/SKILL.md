@@ -35,6 +35,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+  - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
+    (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
+    ranked items, oldest first. A group sits together at its best member's `rank`.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
@@ -60,7 +63,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them as the delivery trail on the answered card. Without a record the trail shows only "Saved".
-- `meta/page`: `checked` (what the items were measured against), `parked` (a list of
+- `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
+  `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
@@ -72,12 +76,25 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 The page hides an item with status `closed`. It shows an item as answered, in place, when
 `answers/<id>` exists. It stays on the page until the owning session closes the item.
 
+## The writer
+
+Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
+project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
+it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
+into `meta/page`.
+
+- Every other session and every lane sends its question to the writer. The writer writes the item.
+  `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
+- The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
+  write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
+  the page, not only its own. It re-ranks when it adds, updates or closes an item.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
    `owner`. Never tell a lane to write an item: it has no wake after it ends, so it cannot read the
    answer, and two writers clash on the design republish (see "Add a design").
-1. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
+1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
