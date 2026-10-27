@@ -71,6 +71,18 @@ shows or hides. Use as few as the frame needs, and name each one as a token, suc
 `--bp-wide: 64rem`. A media query cannot use a custom property, so write the value in the
 query and keep the token as its name in the docs.
 
+## ux-control-beside-area
+
+A control sits next to the area it changes. Anything between them belongs to every state of that
+control.
+Outcome: the person sees the result of a press where they look, and nothing that does not change
+looks like part of the result.
+Check: pass when no element sits between a control (tabs, a filter, a toggle) and the area it
+changes on screen. An element between them passes when it stays the same in every state of the
+control. A summary or a rail that sits between the tabs and the tab panel fails.
+Source: claude-settings `roadmap/page` on the roadmap branch, where a summary and a phase rail sat
+between the tabs and the tab panel.
+
 ## ux-component-reads-its-box
 
 A shared component changes its shape from its own width, with a container query. It never reads
