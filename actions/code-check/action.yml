@@ -1,0 +1,21 @@
+name: Code check
+description: >
+  One type check and one bug lint per language, from the table in standard.json beside this file.
+  Fails on a tracked language with no row, on a bug a pinned tool finds, and on a shrunk mypy list.
+  The repo's mypy module list and excluded folders live in .code-check.json at its root. The caller
+  needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref) and setup-python.
+  Formatter layers wait for o2 and do not run.
+inputs:
+  base:
+    description: Base commit for the mypy list shrink check. Empty skips that check and says so.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Check code
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+      run: |
+        python3 "${{ github.action_path }}/code_check.py" --base "$BASE"
