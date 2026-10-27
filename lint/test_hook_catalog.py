@@ -358,7 +358,10 @@ class RealRepo(unittest.TestCase):
             elif not any(r["Kind"] == "judge" and r["Key"].strip("`") == key
                          and (r["Event"], r["Matcher"], r["If"]) == (event, matcher, cond) for r in judge_page):
                 problems.append("%s: no judge row keyed by %r" % (label, key))
-        self.assertTrue(seen, "no prompt hook found, so the scan proves nothing")
+        # settings.json registers no prompt or agent hook now: every judge is a command hook, so no
+        # override is out of reach. The scan finds none, and the page holds no judge row.
+        self.assertEqual(seen, 0, "a prompt or agent hook is registered again: an owner override cannot lift it")
+        self.assertEqual([r["Key"] for r in judge_page if r["Kind"] == "judge"], [], "stale judge row")
         self.assertFalse(problems, "\n".join(problems))
 
     def test_r1b_every_inline_command_has_one_line_summary_in_the_sidecar(self):
