@@ -4,7 +4,10 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is one private page per repo or project. It holds every item that waits on the
-owner, from every session. Every repo's page is the same template. The page is fixed. All content
+owner. Only a session that reads its own answers at a wake writes an item. A lane (a background
+agent, or a lane session that ends) never writes one: it puts its question in its report, and the
+orchestrator writes the item with itself as `owner` and routes the answer back to the lane or its
+next try. Every repo's page is the same template. The page is fixed. All content
 lives in its database, through the ArtifactData tool. The one exception is a design mockup: it is
 stored in the page itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each question
 here. Decision `questions-go-to-owner` holds the rulings.
@@ -61,6 +64,9 @@ The page hides an item with status `closed`. It shows an item as answered, in pl
 
 ## Add an item
 
+0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
+   `owner`. Never tell a lane to write an item: it has no wake after it ends, so it cannot read the
+   answer, and two writers clash on the design republish (see "Add a design").
 1. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
