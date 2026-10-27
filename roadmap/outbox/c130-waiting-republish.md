@@ -1,2 +1,0 @@
-- Note on c130 (reviewer, non-blocking): the stale-page check counts a page current when the template text appears inside the fetched page. That match is unmeasured against a real host-wrapped read; run it once on the live project page before relying on it. A false "behind" is the risk, never a false "current".
-- Note on c130 (reviewer, non-blocking): with no repo roots given, the check reads the claude-settings clone and its sibling folders only. A repo checked out elsewhere is left out, and nothing says the list is partial.

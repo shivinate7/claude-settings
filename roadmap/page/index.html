@@ -696,6 +696,8 @@ function setView(v){
   ui.view=v;
   document.querySelectorAll('.tabs [role=tab]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===v)));
   ['plan','log','ref'].forEach(k=>$('#v-'+k).hidden = k!==v);
+  // The summary and the phase rail belong to Plan only; on another tab the content starts right under the tabs.
+  $('#now').hidden = $('#rail').hidden = v!=='plan';
   saveView();
 }
 function goStep(id){
@@ -747,7 +749,7 @@ document.addEventListener('click',e=>{
   if((n=hit('[data-more]'))){ const id=n.dataset.more, c=n.previousElementSibling, open=c.classList.toggle('clamp'); open?ui.notes.delete(id):ui.notes.add(id); n.textContent=open?'Show all':'Show less'; return; }
   if((n=hit('[data-go]'))){ goStep(n.dataset.go); return; }
   if((n=hit('[data-view-go]'))){ setView(n.dataset.viewGo); window.scrollTo({top:0}); return; }
-  if((n=hit('[data-view]'))){ setView(n.dataset.view); return; }
+  if((n=hit('[data-view]'))){ setView(n.dataset.view); window.scrollTo({top:0}); return; }
   if((n=hit('[data-phase]'))){ ui.phase=n.dataset.phase; setView('plan'); renderPlan(); const f=document.querySelector(`[data-phase="${ui.phase}"]`); if(f) f.focus(); return; }
   if((n=hit('[data-mode]'))){ applyTheme(n.dataset.mode); try{ localStorage.setItem('rm-theme', n.dataset.mode); }catch(err){ /* not kept */ } return; }
   if((n=hit('[data-pg]'))){

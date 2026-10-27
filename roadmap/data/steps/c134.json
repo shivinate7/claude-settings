@@ -1,0 +1,9 @@
+{
+  "title": "A control sits next to what it changes",
+  "phase": "design",
+  "status": "todo",
+  "order": 103.33896,
+  "why": "Your gripe, Oct 27 11:54 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2RdkcPenYiHE7EDh6dxrMba): on the roadmap page the Plan, Changes and Reference tabs sat at the top, while what they change began below the summary and the phase rail.",
+  "note": "Fixed on the roadmap page (triage, Oct 27): the summary and the phase rail now show on Plan only, and a tab press scrolls to the top, so Changes and Reference start right under the tabs. Next cloud lane: a rule in docs/design/layout.md, \"A control sits next to the area it changes; anything between them belongs to every state of that control\", with a check in design-review's checklist; the waiting page's tabs are the first case to check. Needs no answer. Port: yes, docs/design governs every repo's screens. Placed ahead of c107 (triage, Oct 27): small, and a gripe.",
+  "updatedAt": "2026-10-27T17:00:00Z"
+}
