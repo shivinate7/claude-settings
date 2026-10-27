@@ -2,7 +2,7 @@
   "title": "A waiting-page question can take several answers, not only one",
   "phase": "cleanup",
   "status": "todo",
-  "order": 103.33846,
+  "order": 103.33848,
   "why": "Your gripe, Oct 27 11:57 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh22hFCVAnYvJQAELYVZs8BrM): every question is pick-one, so item 31, where you wanted a mix of the options, had no way to say so.",
   "note": "Next cloud lane: skills/waiting-page gains a multi-select item kind (checkboxes, with an optional \"rank them\" mode), and the page saves a list of picks in its answer; the skill tells sessions to use it whenever options are not mutually exclusive; the reply check flags a pick-one question whose options could combine. Absorbs c122's item 5 (combined answers such as A+B). Red first on item 31's shape: options that can coexist, asked as pick-one. Due after: c126 and d9 merge, since they edit the same skill files. Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of d9's successors and right after c126 (triage, Oct 27): a gripe that every waiting-page question shows.",
   "updatedAt": "2026-10-27T17:06:00Z"
