@@ -176,6 +176,14 @@ class Stamps(Fixture):
         self.assertTrue(debts["read"].startswith("unknown"), debts)
         self.assertNotIn("none", debts["read"])
 
+    def test_todo_home_has_its_own_panel(self):
+        page, _ = self.build_from_main()
+        self.assertTrue(self.panels(page)["To-do"]["read"].startswith("unknown"))  # no docs/todo.md yet
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "todo.md").write_text("# To-do\n", encoding="utf-8")
+        page, _ = self.build_from_main()
+        self.assertEqual(self.panels(page)["To-do"]["home"], "docs/todo.md")
+
     def test_missing_record_branch_reads_unknown(self):
         self.on_main()
         git(self.repo, "branch", "-q", "-D", "roadmap")

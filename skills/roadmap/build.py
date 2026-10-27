@@ -42,7 +42,7 @@ SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
 HOMES = (("decisions", "Decisions"), ("debts", "Debts"), ("debt-notes", "Debt notes"),
-         ("plans", "Plans"), ("specs", "Specs"))
+         ("todo", "To-do"), ("plans", "Plans"), ("specs", "Specs"))
 
 # A merge subject that names its pull request: GitHub's merge commit, or a squash title ending "(#N)".
 PR_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b|\(#(\d+)\)\s*$")

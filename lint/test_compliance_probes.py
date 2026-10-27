@@ -91,6 +91,12 @@ class Layout(unittest.TestCase):
         code, out = Repo(self).write(legacy + "/a.md").run("layout")
         self.assertIn("legacy home of decisions, moves to " + kind_path("decisions"), out)
 
+    def test_a_todo_kept_by_legacy_repos_is_not_missing(self):
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {"todo": {"path": "records"}}}').write("records/backlog.md")
+        subprocess.run(["git", "-C", repo.root, "rm", "-q", "--cached", kind_path("todo")], check=True)
+        code, out = repo.run("layout")
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"))
+
     def test_untracked_core_kind_is_missing(self):
         rules = kind_path("rules")
         repo = Repo(self).write(EXTRAS, '{"kinds": {}}')
