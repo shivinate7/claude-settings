@@ -1,0 +1,9 @@
+{
+  "title": "Every roadmap writer is held to the note cap at commit, not only triage",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33899,
+  "why": "Finding, Oct 27 (triage 8): other threads pushed notes over 250 words five times in one hour, and each blocked triage's next commit until triage trimmed someone else's note.",
+  "note": "Today only triage gates its commits on build.py's upkeep line; other threads append to notes and push. Next cloud lane: a pre-commit hook on the roadmap branch (installed by a one-line setup the branch CLAUDE.md names) runs build.py and refuses a commit that leaves a note over 250 words, naming the note; red first on today's c122 append. Needs no answer. Port: no; the roadmap branch is claude-settings' own. Placed ahead of c107 (triage, Oct 27): it costs triage a trim on nearly every write.",
+  "updatedAt": "2026-10-27T18:00:00Z"
+}
