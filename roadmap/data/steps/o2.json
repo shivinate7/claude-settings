@@ -5,6 +5,6 @@
   "phase": "organize",
   "status": "active",
   "title": "One layout for every repo",
-  "updatedAt": "2026-10-27T01:30:00Z",
+  "updatedAt": "2026-10-27T01:03:00Z",
   "why": "One place for each kind of file in every repo, so any agent finds the right file without being told: decisions, debts, plans, specs and design under docs/, tokens in tokens/tokens.json, and one layout file in claude-settings that every shared tool reads."
 }

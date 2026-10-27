@@ -1,0 +1,9 @@
+{
+  "title": "Main's full CI run ends green, not cancelled",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.304,
+  "why": "Finding, Oct 27 (c95 part 1): a milestone CI run is noise while most full runs never finish.",
+  "note": "Measured Oct 13 to 27 at main 2ad85de (c95 thread): 85 of 133 runs on main ended cancelled; 4 of 48 were green last week. Cancelled jobs: the Windows merge shards (93 times, about 20 min), Windows guard (46), Windows rest (19, one at 43 min against its 38-min cap), and the gates-shoot Chromium install (10 min). Example run 40356599728. c61 (Windows jobs fit their caps) had one fully green push run on Oct 26, and c39 set the cap rules; neither fixed this. Unknown: how many were cancelled by a newer push (concurrency) and how many by a timeout; read that first. Needs no answer from you. Port: no; claude-settings' own workflows. Placed ahead of c82, after c95 (triage, Oct 27): it blocks c95's pick.",
+  "updatedAt": "2026-10-27T01:03:00Z"
+}

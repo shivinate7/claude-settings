@@ -1,0 +1,9 @@
+{
+  "title": "A batch merges only after a green run against current main",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3045,
+  "why": "Finding, Oct 27 (c95 part 1): a batch could land untested against a main that moved.",
+  "note": "Read by API Oct 27: main's branch protection has strict false, and merge.py refuses only BEHIND, which GitHub reports only when strict is on. Fix, one of: turn strict on, or have the merge tool refuse a batch whose base moved since its last green run. The second keeps CI runs down, which fits c95. A prerequisite of c95's option C. Needs no answer from you unless the fix changes branch protection; then it comes to you first. Port: no; claude-settings only. Placed ahead of c82, after c96 (triage, Oct 27): with fewer CI runs, each merge must be proven.",
+  "updatedAt": "2026-10-27T01:03:00Z"
+}
