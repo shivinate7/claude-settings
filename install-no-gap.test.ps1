@@ -48,6 +48,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { Write-Host 'SKIP: install no-gap (Windows only)'; exit 0 }
 
 $Repo   = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Repo 'testing\SharedRead.ps1')   # Read-Shared: a child's output reads back while a handle holds it
 $Failed = 0
 function Check([string]$name, [bool]$ok) {
     if ($ok) { Write-Host "PASS: $name" } else { Write-Host "FAIL: $name"; $script:Failed++ }
@@ -248,7 +249,7 @@ function Write-Fixture([string]$rel, [string]$text) {
 
 # The text a child run printed to a redirected file. A missing or unreadable file throws.
 function Get-RunText([string]$Path) {
-    return [IO.File]::ReadAllText($Path)
+    return Read-Shared $Path
 }
 
 # Runs install.ps1 from the clone $CloneDir in a child shell. Returns its exit code.
