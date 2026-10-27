@@ -557,3 +557,4 @@
 - blind-brief-word-list-misses: the keep and current word lists miss paraphrases with no sign of today's product, such as "Keep the app's layout", "Match the app" or "Keep the three views"; the spawn hook knows no view names (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
 - blind-brief-count-unchecked: `Blind lanes: <n>` is the orchestrator's own count, never compared with the blind briefs spawned (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
 - pick-gate-drive-letters: a drive name such as "the A: drive and the B: drive" in an Input Needed item reads as two lettered options (lint/report_gate.py OPTION_INLINE_RE). Decision: decisions-reach-a-clickable-pick.
+- pick-gate-way-word: a plain ask with an inline numbered list and the word "way", "option" or "choose", such as "Is there a way to run 1. tests 2. lint?", reads as a pick (lint/report_gate.py PICK_WORD_RE). Decision: decisions-reach-a-clickable-pick.
