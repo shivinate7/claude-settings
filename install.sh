@@ -533,9 +533,9 @@ done < "$SRC/landed-dirs.txt"
 # A folder an earlier install landed and the repo has since moved: ux, now docs/design (decision
 # ux-house-rules). Local mode removes its dangling links into "$SRC/ux", the same test land_dir
 # prunes with, then the folder once it is empty. A person's own file and a cloud copy stay, as land_dir leaves them.
-for sub in ux; do
-  DEST_DIR="$CLAUDE_DIR/$sub"
-  [ -d "$DEST_DIR" ] && [ ! -L "$DEST_DIR" ] && [ "$CLOUD" != 1 ] || continue
+sub=ux
+DEST_DIR="$CLAUDE_DIR/$sub"
+if [ -d "$DEST_DIR" ] && [ ! -L "$DEST_DIR" ] && [ "$CLOUD" != 1 ]; then
   for d in "$DEST_DIR"/*; do
     [ -L "$d" ] || continue
     case "$(readlink "$d")" in "$SRC/$sub"/*) ;; *) continue ;; esac
@@ -543,7 +543,7 @@ for sub in ux; do
     rm -f "$d"
   done
   if [ -z "$(ls -A "$DEST_DIR")" ]; then rmdir "$DEST_DIR" && log "removed $DEST_DIR (the repo no longer lands it)"; fi
-done
+fi
 
 # Packages that a skill loads (typescript, for plain-english-map): one `npm ci` in the clone root.
 # A skill is linked, so its real path is in the clone, and it finds the clone's node_modules. A failure
