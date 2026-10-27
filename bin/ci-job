@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-# ci-job <job> [--workflow <file>] [--base <ref>] [--plan]: run every step of one workflow job here,
+# ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint]: run every step of one workflow job here,
 # each through bin/verdict, and print one verdict per step. It runs on demand only: a lane never runs a full
-# job, because the batch CI run is the only full run (lanes-run-no-full-ci-job).
+# job, because the batch CI run is the only full run (lanes-run-no-full-ci-job). The one exception is --lint.
+# --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
+# list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...` or
+# `bin/ste-changed ...`, one command per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and
+# every other command (hooks/ suites, bash, pipx, uses:) is left out and printed nowhere. A lane runs
+# `bin/ci-job gates --lint --base origin/main` before it joins a batch. Use it with a job such as gates.
 # Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
@@ -100,6 +105,17 @@ def missing_in_log(log, start, script):
     return sorted(set(found))
 
 
+LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed)(?: [^|&;`<>]*)?")
+
+
+def is_lint(step):
+    """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script."""
+    body = run_body(step)
+    lines = [ln.strip() for ln in (body or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    return bool(lines) and all(LINT_CMD.fullmatch(ln) and "mutate" not in ln.split()[1 if ln.startswith("python3") else 0]
+                               for ln in lines)
+
+
 def plan(step, pr, values):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
     if step_key(step, "continue-on-error") not in (None, "false"):
@@ -141,14 +157,15 @@ def main(argv):
         if key in args:
             i = args.index(key)
             if i + 1 >= len(args):
-                print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan]")
+                print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint]")
                 return 2
             opts[key] = args[i + 1]
             del args[i:i + 2]
     dry = "--plan" in args
-    args = [a for a in args if a != "--plan"]
+    lint = "--lint" in args
+    args = [a for a in args if a not in ("--plan", "--lint")]
     if len(args) != 1:
-        print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan]")
+        print("usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint]")
         return 2
     job = args[0]
     top = git("rev-parse", "--show-toplevel") or os.getcwd()
@@ -174,6 +191,8 @@ def main(argv):
         os.close(fd)
     tally = {"FAIL": 0, "unknown": 0}
     for n, step in enumerate(step_blocks(block), 1):
+        if lint and not is_lint(step):
+            continue
         name = step_key(step, "name") or ("step %d" % n)
         state, detail, shell, env, cwd = plan(step, bool(base), values)
         if state != "run":

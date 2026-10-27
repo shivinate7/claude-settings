@@ -457,6 +457,47 @@ land_dir() {
   fi
 }
 
+# Skill backups never land inside skills/ or any folder Claude Code scans: a backup there loads as
+# one more skill, and cloud runs install at every resume and merge. They go to
+# "$CLAUDE_DIR/backups/skills/<name>.<time>". A backup is moved there, never deleted.
+SKILL_BAK_DIR="$CLAUDE_DIR/backups/skills"
+# What a cloud run last copied into skills/<name>, as a tree hash, kept outside skills/.
+SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
+
+# Print a hash of a directory tree: every file path and every file content.
+# It covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup.
+tree_hash() {
+  [ -d "$1" ] || return 1
+  ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+      printf '%s ' "$f"; sha256_of < "$f"
+    done ) | sha256_of
+}
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | awk '{print $1}'
+}
+
+# Move $1 to the skill backup folder as $2.<time>. A name that is taken gets the pid added.
+backup_skill() {
+  mkdir -p "$SKILL_BAK_DIR"
+  BAK="$SKILL_BAK_DIR/$2.$(date +%Y%m%d%H%M%S)"
+  [ ! -e "$BAK" ] || BAK="$BAK.$$"
+  mv "$1" "$BAK"
+  log "existing $1 moved to $BAK"
+}
+
+# An older installer left skills/<name>.bak.<time> folders. Move each out of skills/.
+move_old_skill_baks() {
+  for old in "$DEST_DIR"/*.bak.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]; do
+    [ -d "$old" ] && [ ! -L "$old" ] || continue
+    bn=$(basename "$old")
+    mkdir -p "$SKILL_BAK_DIR"
+    to="$SKILL_BAK_DIR/$bn"
+    [ ! -e "$to" ] || to="$to.$$"
+    mv "$old" "$to"
+    log "old backup $old moved to $to"
+  done
+}
+
 # skills/ lands differently from land_dir(): each skills/<name>/ is ONE whole-directory
 # symlink, ~/.claude/skills/<name> -> <clone>/skills/<name>, not a per-file symlink. The
 # skills docs allow a skill entry to be "a symlink to a directory elsewhere on disk". A
@@ -470,31 +511,36 @@ land_dir() {
 land_skills_dir() {
   DEST_DIR="$CLAUDE_DIR/skills"
   mkdir -p "$DEST_DIR"
+  move_old_skill_baks
   LANDED=""
   for d in "$SRC/skills"/*; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
     DEST="$DEST_DIR/$name"
     if [ "$CLOUD" = 1 ]; then
-      if [ -e "$DEST" ]; then
-        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$DEST" "$BAK"
-        log "existing $DEST moved to $BAK"
+      # Our own earlier copy is replaced with no backup. It is ours when its tree hash is the
+      # one recorded at the last copy (the source may have changed since), or when it equals
+      # the source. Anything else is a hand edit or a person's skill: back it up.
+      if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+        have=$(tree_hash "$DEST"); rec=$(cat "$SKILL_COPY_DIR/$name" 2>/dev/null)
+        if [ -n "$have" ] && { [ "$have" = "$rec" ] || [ "$have" = "$(tree_hash "$d")" ]; }; then
+          rm -rf "$DEST"
+        else
+          backup_skill "$DEST" "$name"
+        fi
       fi
       cp -r "$d" "$DEST"
+      mkdir -p "$SKILL_COPY_DIR"
+      tree_hash "$DEST" > "$SKILL_COPY_DIR/$name"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then LANDED="$LANDED $name"; continue; fi
       # A real directory at DEST (not a symlink): on the first local install ever, it is a
       # person's own hand-made skill, backed up. After that, a real directory here is this
       # same installer's own earlier copy, from a no-symlink-rights machine where `ln -sfn`
       # fell back to copying it: replace it, no backup (D: copy-mode-overwrites-no-backup).
-      # Cloud mode above always backs up: it never writes this marker, so a cloud run can't
-      # tell its own earlier copy from a person's, and keeps the safe default.
       if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
         if [ "$FIRST_LOCAL_RUN" = 1 ]; then
-          BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-          mv "$DEST" "$BAK"
-          log "existing $DEST moved to $BAK"
+          backup_skill "$DEST" "$name"
         else
           rm -rf "$DEST"
         fi
