@@ -23,6 +23,8 @@
 #           1 with one lock line and writes nothing.
 #   log3    install.ps1 and the post-merge hook each log one start line and one end line, naming
 #           the install id and the process id. install.sh does not run on Windows, so it has no leg here.
+#   read1   A run's output file is read while another handle still holds it open for write, as a child
+#           that outlives its run holds it. The read returns the text. A missing file still throws.
 #
 # Every case works under its own folder in a temp root. None touches the real ~/.claude. The
 # sampling loops are bounded by a deadline and read local files only; they measure, they do not wait
@@ -247,6 +249,17 @@ function Get-RunText([string]$Out) {
     foreach ($f in @("$Out.out.txt", "$Out.err.txt")) { if (Test-Path -LiteralPath $f) { $parts += [IO.File]::ReadAllText($f) } }
     return ($parts -join "`n")
 }
+
+# ---- read1: a run's output is read while another handle still holds it open for write ------------
+$R1    = Join-Path $Root 'read1'
+New-Item -ItemType Directory -Force -Path $R1 | Out-Null
+$r1Out = Join-Path $R1 'run'
+[IO.File]::WriteAllText("$r1Out.out.txt", "one lock line`n", $Utf8)
+$r1Hold = [IO.File]::Open("$r1Out.out.txt", [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try { $r1Text = Get-RunText $r1Out; $r1Err = '' } catch { $r1Text = ''; $r1Err = $_.Exception.Message } finally { $r1Hold.Close() }
+Check 'read1: a run output held open for write by another handle reads back whole' ($r1Text.Trim() -eq 'one lock line') "read gave '$($r1Text.Trim())'; error: $r1Err"
+$r1Missing = try { $null = Read-Shared (Join-Path $R1 'absent.txt'); 'no error' } catch { 'threw' }
+Check 'read1: the shared read still throws on a missing file' ($r1Missing -eq 'threw') "a read of a missing file gave: $r1Missing"
 
 # ---- setup: one clean install, so the guard files exist ----------------------------------------
 $C0   = Join-Path $Root 'base'
