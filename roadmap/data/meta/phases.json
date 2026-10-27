@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Oct 22: claude-settings 11f5e4f, banchi 6c3a171, q_max b47bd00, home-app 956e1ab, home 3fbb3d1",
+    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423, home 53ca423",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -13,7 +13,7 @@
         "label": "Design agents in place",
         "rule": "Designer (d1) and design reviewer (d2); agents/ has neither",
         "target": "2 of 2",
-        "value": "0 of 2"
+        "value": "2 of 2"
       },
       {
         "label": "Repos with one DESIGN.md",
@@ -29,18 +29,18 @@
     ]
   },
   "later": {
-    "asOf": "Measured Oct 22 at claude-settings 11f5e4f",
+    "asOf": "Measured Oct 27 at claude-settings d4e1b86",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
         "label": "Agents defined",
         "rule": "agents/ in claude-settings. An agent pruner, gated on evals (l4)",
-        "value": 7
+        "value": 9
       },
       {
         "label": "Skills in claude-settings",
         "rule": "skills/; one is the vendored impeccable",
-        "value": 6
+        "value": 11
       },
       {
         "label": "Plugins and mods enabled",
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Oct 22: claude-settings 11f5e4f, banchi 6c3a171, q_max b47bd00, home-app 956e1ab, home 3fbb3d1",
+    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423, home 53ca423",
     "foot": "All five repos measured.",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 398 (Oct 25, 9683902), q_max 182, claude-settings 106, home-app 15, home 9",
         "target": "200 or fewer",
-        "value": 398
+        "value": 402
       },
       {
         "label": "Remote branches, claude-settings",
@@ -77,9 +77,10 @@
           240,
           26,
           31,
-          36
+          36,
+          55
         ],
-        "value": 36
+        "value": 55
       },
       {
         "label": "Repos with a living roadmap page",
@@ -90,7 +91,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Oct 22: q_max b47bd00, home-app 956e1ab",
+    "asOf": "Measured Oct 27: q_max b47bd00, home-app 53ca423",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -109,7 +110,7 @@
         "label": "home-app padding or spacing literals",
         "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 167
+        "value": 168
       },
       {
         "label": "home-app web border radii",
