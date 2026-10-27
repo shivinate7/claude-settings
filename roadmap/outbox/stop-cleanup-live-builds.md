@@ -1,0 +1,4 @@
+# Outbox: Stop cleanup deleting live build folders
+
+- New step (shiv's ask cmsg_01DoF7thf3iq2Srr1UsfXgh239AWxeRqxYqdRJxDTTE96w): build folders follow the worktree's 30-minute idle clock. Today the agent-end reap deletes DerivedData and .build the moment an agent ends, but the worktree itself waits 30 idle minutes, because a finished agent is resumed into its own worktree by name. A resumed agent therefore rebuilds from nothing, which adds Mac load. Fix: reap build folders only in agent worktrees idle 30 min or more, at a later agent end, keeping PR 720's process gate, because a long build makes no git activity and reads as idle. Windows runs the same code. Related: PR 720 (keep build folders while a process runs in the agent worktree).
+- Parked (shiv's ask, coordinator pause Oct 27): find what drove the Mac to load 123 (several sessions running xcodebuild and simulators at once?) and propose a cap. Not started.
