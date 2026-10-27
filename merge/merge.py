@@ -1760,7 +1760,7 @@ def main(argv, host=None, lock=None):
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
         return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
-        print(f"merge: {e}\nmerge: No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)
+        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)
         return 1
 
 if __name__ == "__main__":
