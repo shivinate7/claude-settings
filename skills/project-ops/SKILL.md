@@ -46,15 +46,11 @@ branch's `handoffs/` folder that a standing role writes for its successor.
 
 ## The roadmap page
 
-The page builder has one home: `roadmap/build.py` on the `roadmap` branch of claude-settings. This
-skill points at it and keeps no copy. Today the builder reads only its own branch's `roadmap/data/`,
-and its viewer names claude-settings. The claude-settings roadmap step "a living roadmap page for
-every repo" makes the page read any repo's data. Until it lands, an adopting repo keeps its record
-in `roadmap/data/` with the same file shape, and has no page.
-
-Each step file is `roadmap/data/steps/<id>.json`, with the fields `title`, `status` (`todo`,
-`active`, `done`), `phase`, `order`, `why`, `note`, `ask` and `updatedAt`. A topic file in
-`roadmap/data/topics/` holds reference facts. `roadmap/data/meta/` holds page-wide data such as phases.
+`skills/roadmap` is the one home for building and publishing the page, for any checkout. This
+skill keeps no copy. Its `SKILL.md` says how to build and what `--live` passes. The scaffolded
+`roadmap/README.md` (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
+An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
+reads it there.
 
 ## Rules this skill does not restate
 
