@@ -32,6 +32,8 @@ SKIP=0
 
 ok() { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
+# True when DIR holds an entry whose name has .bak. in it.
+has_bak() { for e in "$1"/*.bak.*; do [ -e "$e" ] && return 0; done; return 1; }
 skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
 
 # Detect once whether this account can create a real symbolic link, and reuse the answer
@@ -1132,7 +1134,7 @@ skills_bak1() {
   skills_bak_run; skills_bak_run
   stray=$(find "$cfg" -name '*.bak.*' ! -name 'settings.json.bak.*' ! -name 'CLAUDE.md.bak.*' 2>/dev/null | head -n3)
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
   elif [ -n "$stray" ] || [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $stray $(ls "$cfg/backups/skills" 2>/dev/null)"
   elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill content wrong"
   else ok "$name"; fi
@@ -1149,7 +1151,7 @@ skills_bak2() {
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
   elif [ -z "$bak" ]; then bad "$name" "no backup under $cfg/backups/skills; skills/ holds: $(ls "$cfg/skills")"
   elif [ "$(cat "$bak/SKILL.md" 2>/dev/null)" != "hand edit" ]; then bad "$name" "backup lost the hand edit"
-  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
   elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill was not refreshed"
   else ok "$name"; fi
   rm -rf "$h"
@@ -1162,7 +1164,7 @@ skills_bak3() {
   printf 'v2\n' > "$co/skills/fresh-prose/SKILL.md"
   skills_bak_run
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
   elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $(ls "$cfg/backups/skills")"
   elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v2" ]; then bad "$name" "skill was not refreshed to v2"
   else ok "$name"; fi
@@ -1177,7 +1179,7 @@ skills_bak4() {
   skills_bak_run
   moved=$(ls -d "$cfg/backups/skills/"fresh-prose.bak.20260101000000 2>/dev/null | head -n1)
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ still holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ still holds a .bak.* entry: $(ls "$cfg/skills")"
   elif [ -z "$moved" ] || [ "$(cat "$moved/SKILL.md" 2>/dev/null)" != "old backup" ]; then bad "$name" "old backup not found intact under backups/skills"
   else ok "$name"; fi
   rm -rf "$h"
@@ -1190,7 +1192,7 @@ skills_bak5() {
   printf 'v1\n' > "$cfg/skills/fresh-prose/SKILL.md"
   skills_bak_run
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
   elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $(ls "$cfg/backups/skills")"
   else ok "$name"; fi
   rm -rf "$h"
