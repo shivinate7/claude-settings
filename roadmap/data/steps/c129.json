@@ -1,0 +1,9 @@
+{
+  "title": "The local gates run matches CI: the STE lint step, and the silent-undo test on git 2.43",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3386,
+  "why": "Findings from the c125 lane (lanes run the gates lint before batching), Oct 27.",
+  "note": "(1) gates.yml runs the STE lint as a uses: action, so ci-job --lint skips it; a bin/ste-changed run step in gates closes the gap. (2) lint/test_check_silent_undo.py errors in a cloud container with git 2.43 (test_a_gitlink_with_an_absent_commit_is_not_unknown, in check_silent_undo's absent); CI's result is unknown. Fix the cause or record a debt; red first in the container. Needs no answer. Port: no; it lives in claude-settings. Placed ahead of c124 (triage, Oct 27): a lane's local run should catch what CI catches, or c125 fails quietly.",
+  "updatedAt": "2026-10-27T16:30:00Z"
+}
