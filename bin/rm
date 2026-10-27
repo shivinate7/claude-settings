@@ -18,7 +18,7 @@ find_real() {
     IFS=$_ifs
     _p=${_d:-.}/rm
     if [ -f "$_p" ] && [ -x "$_p" ]; then
-      _l1= _l2=
+      _l1='' _l2=''
       { IFS= read -r _l1; case $_l1 in '#!'*) IFS= read -r _l2 ;; esac; } < "$_p" 2>/dev/null
       IFS=$_ifs
       if [ "$_l2" != "# claude-settings-rm-shim" ]; then REAL=$_p; return 0; fi
