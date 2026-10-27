@@ -1049,7 +1049,7 @@ class PickGateTests(unittest.TestCase):
     def test_pk_red_page_write_without_link_in_reply_blocks(self):
         self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
 
-    def test_pk_red_subagent_calls_do_not_count(self):
+    def test_pk_red_agent_calls_do_not_count(self):
         calls = [("AskUserQuestion", {}, True), ("ArtifactData", self.page_set()[1], True)]
         self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, calls))
 
