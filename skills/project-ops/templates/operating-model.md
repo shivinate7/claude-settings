@@ -61,7 +61,7 @@ Count each limit. Never wait for the owner to notice.
 
 ## Messages between threads
 
-- Send a message at once only when work is blocked (a PR held, a lane stopped), or when the owner
+- Send a message at once in two cases: work is blocked (a PR held, a lane stopped), or the owner
   asked for something to be passed on.
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<thread-slug>.md`
   on the record branch. Each thread keeps one file and rewrites it to hold only what is unfiled.
