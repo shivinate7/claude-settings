@@ -191,8 +191,7 @@ unmeasured.
 A question about how something looks carries one design per option. The owner picks by looking, so
 a link to a folder, a repo or a file is never enough. Each option's picture sits at the top of its
 own option card. A tap on an option's picture opens the viewer. A tap on the rest of the card
-picks the option. The picture carries a small "View" control, and the picture is 40px or more
-high. A design that no option names shows at the front
+picks the option. A "View" control, 40px or more high, sits in a row under the picture. It never covers the picture. A design that no option names shows at the front
 of the item, before the options. An option that names a design (`design`) which the item does not
 carry shows a warning line in its card in place of the picture.
 
@@ -208,6 +207,9 @@ carry shows a warning line in its card in place of the picture.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element whole, scaled to fit the card, so the part being decided is in frame.
      Without `focus` the card shows the whole mockup.
+   - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
+     focused element, else the whole mockup). The card reserves that height before the mockup loads,
+     so the first paint does not jump.
    - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
      width of an option is one more design with that `option`. The first design of an option is its
      picture on the card.

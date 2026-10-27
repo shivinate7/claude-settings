@@ -90,7 +90,7 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
-  await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.style.height; }).observe(document, { childList: true, subtree: true }); });
+  await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
@@ -1140,8 +1140,8 @@ test("a picture's height is reserved from its declared size before it loads", as
   const page = await open(t, { items: [it], designData: { "r-a": mockup }, viewport: { width: 1440, height: 900 } }); if (!page) return;
   await page.waitForFunction((id) => document.querySelector(`#item-${id} iframe`).style.transform.includes("translate"), it.id);
   const first = await page.evaluate(() => window.__firstFit);
-  const last = await page.evaluate((id) => document.querySelector(`#item-${id} .dfitwrap`).style.height, it.id);
-  assert.ok(first && Math.abs(parseFloat(first) - parseFloat(last)) <= 3, `first paint ${first}, loaded ${last}`);
+  const last = await page.evaluate((id) => document.querySelector(`#item-${id} .dfitwrap`).getBoundingClientRect().height, it.id);
+  assert.ok(first && Math.abs(first - last) <= 3, `first paint ${first}, loaded ${last}`);
 });
 
 test("two designs of one slug with different focus keep their own size, and the viewer opens on the tapped option", async (t) => {

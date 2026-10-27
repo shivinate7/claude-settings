@@ -145,7 +145,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
 .opt .lab { min-width: 0; overflow-wrap: anywhere; }
 .opt .opic { display: block; position: relative; cursor: zoom-in; min-height: 40px; }
-.opt .opic .view { position: absolute; right: 8px; bottom: 8px; padding: 4px 10px; min-height: 28px; display: inline-flex; align-items: center; border-radius: 99px; background: var(--hdr); color: var(--on-hdr); font: 600 13px var(--body); opacity: .92; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 40px; margin-top: 6px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
 .opts.pics { grid-auto-rows: auto; }
 .opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
 @supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
@@ -231,13 +231,16 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dfitwrap.inert .dframe { pointer-events: none; }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
-.dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px; }
-.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 220px; }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
 .dsh-head .btn { min-height: 40px; }
 .dsh-head .btn.quiet { color: var(--on-hdr); border-color: color-mix(in srgb, var(--on-hdr) 40%, transparent); }
-.dsh-body { position: relative; min-height: 0; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
-.dsh-body .dframe { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dsh-body .dframe.off { visibility: hidden; }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
 body.sheet-open { overflow: hidden; }
 </style>
 
@@ -265,10 +268,10 @@ body.sheet-open { overflow: hidden; }
 <div class="dsheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="dsh-head"><div class="in">
     <h2 id="dTitle"></h2><span id="dPos"></span>
-    <button class="btn quiet" type="button" id="dPrev">Prev</button><button class="btn quiet" type="button" id="dNext">Next</button>
+    <button class="btn quiet" type="button" id="dPrev" aria-label="Previous design"><span class="lg">Prev</span><span class="sm" aria-hidden="true">&#8249;</span></button><button class="btn quiet" type="button" id="dNext" aria-label="Next design"><span class="lg">Next</span><span class="sm" aria-hidden="true">&#8250;</span></button>
     <button class="btn quiet" type="button" id="dBack"></button>
-    <button class="btn quiet" type="button" id="dFull">Open full size</button>
-    <button class="btn" type="button" id="dClose">Close</button>
+    <button class="btn quiet" type="button" id="dFull" aria-label="Open full size"><span class="lg">Open full size</span><span class="sm" aria-hidden="true">&#10530;</span></button>
+    <button class="btn" type="button" id="dClose" aria-label="Close"><span class="lg">Close</span><span class="sm" aria-hidden="true">&#10005;</span></button>
   </div></div>
   <div class="dsh-body" id="dStage"></div>
 </div>
@@ -457,7 +460,7 @@ function sparkle() {
   b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
   return b;
 }
-const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design);
+const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) || (it.designs || []).some((d) => d.option);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
 // A question about how something looks sets `look`: an option card with no picture then shows a warning.
 const optionDesigns = (it, o) => { const all = it.designs || [], first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
@@ -467,10 +470,10 @@ function optPic(it, o) {
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
   return h("span", { class: "opic", role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen", onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
-    fitFrame(mine[0].slug, o.label, true, mine[0].focus), h("span", { class: "view", "aria-hidden": "true" }, "View"));
+    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size), h("span", { class: "view", "aria-hidden": "true" }, "View"));
 }
 // Designs that no option names show at the front of the item.
-const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return (it.designs || []).filter((d) => !named.has(d.slug)); };
+const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return (it.designs || []).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key;
   return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
@@ -859,23 +862,35 @@ let DESIGN_HTML = {};
 try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
 const allDesigns = () => state.items.filter((it) => it.designs && !isSaved(it)).flatMap((it) => it.designs.map((d) => ({ ...d, it })));
 // A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
-const FIT_W = 390, FIT_H = {};
+const FIT_W = 390;
 let FITS = [];
-const FIT_F = {};
+// Sizes the mockups reported, by slug plus focus. They are kept in this browser, so the next load reserves the height before the mockup loads.
+let FIT = {};
+try { FIT = JSON.parse(localStorage.getItem("waiting.fit") || "{}") || {}; } catch (e) {}
+const saveFit = () => { try { localStorage.setItem("waiting.fit", JSON.stringify(FIT)); } catch (e) {} };
 // The mockup reports its height and, when a `focus` selector names an element, that element's box.
 const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus || "").replace(/</g, "\\u003c") + ';function s(){var f=null;try{var e=F&&document.querySelector(F);if(e){var r=e.getBoundingClientRect();f={x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}}}catch(x){}parent.postMessage({dfit:1,h:Math.ceil(document.documentElement.scrollHeight),f:f},"*")}addEventListener("load",s);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()<\/script>';
-function fitFrame(slug, title, inert, focus) {
+// `size` ({w, h}) is the declared size of what the card shows: the focused element, else the whole mockup. It holds the height until the mockup reports its own.
+function fitFrame(slug, title, inert, focus, maxScale, size) {
+  const key = slug + "|" + (focus || "");
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
   f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + fitScript(focus);
   const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
   const fit = () => {
-    const box = focus && FIT_F[slug], ww = wrap.clientWidth || FIT_W, ht = FIT_H[slug] || 200;
-    const sc = Math.min(1, ww / (box ? Math.max(box.w, 1) : FIT_W));
+    const c = FIT[key], ww = wrap.clientWidth || FIT_W;
+    const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
+    const ht = c ? c.h : (!focus && size ? size.h : 200);
+    const sc = Math.min(maxScale || 1, ww / (box ? Math.max(box.w, 1) : FIT_W));
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
-    wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
+    if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
+    else {
+      // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
+      const dw = focus ? size.w : FIT_W;
+      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+    }
   };
-  FITS.push({ f, slug, fit });
+  FITS.push({ f, key, fit });
   if (window.ResizeObserver) new ResizeObserver(fit).observe(wrap);
   fit(); return wrap;
 }
@@ -883,8 +898,8 @@ window.addEventListener("message", (e) => {
   const d = e.data; if (!d || d.dfit !== 1 || typeof d.h !== "number") return;
   FITS = FITS.filter((x) => x.f.isConnected);
   const m = FITS.find((x) => x.f.contentWindow === e.source); if (!m) return;
-  FIT_H[m.slug] = Math.max(40, Math.min(d.h, 20000)); FIT_F[m.slug] = d.f && typeof d.f.w === "number" ? d.f : null;
-  FITS.filter((x) => x.slug === m.slug).forEach((x) => x.fit());
+  FIT[m.key] = { h: Math.max(40, Math.min(d.h, 20000)), f: d.f && typeof d.f.w === "number" ? d.f : null }; saveFit();
+  FITS.filter((x) => x.key === m.key).forEach((x) => x.fit());
 });
 function frame(slug, title) {
   const f = h("iframe", { class: "dframe", title, sandbox: "allow-scripts", loading: "lazy" });
@@ -894,18 +909,18 @@ function frame(slug, title) {
 // The sheet's frames are built once and only shown or hidden, so paging never reloads a mockup and closing leaves the list where it was.
 let dList = [], dAt = 0, dFrom = null, dY = 0;
 const STAGE = {};
-function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = frame(d.slug, d.label); STAGE[d.slug].removeAttribute("loading"); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
+function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off");
-  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + " of " + dList.length;
+  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
 }
 // The viewer of one item: every option's design at every width the item carries, in option order.
 function openViewer(it, o) {
-  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")", it })));
-  const at = list.findIndex((d) => d.slug === (optionDesigns(it, o)[0] || {}).slug);
+  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")", it, optKey: x.key })));
+  const at = list.findIndex((d) => d.optKey === o.key);
   openDesign(null, list, Math.max(0, at));
 }
 $("dFull").onclick = () => {
