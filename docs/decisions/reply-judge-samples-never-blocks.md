@@ -12,7 +12,7 @@ The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 202
 - A finding never blocks (owner ruling 2026-10-13 11:33 CDT). The hook runs `async: true` and passes the finding as a note at the start of the next turn. Reason: a block came after the owner had read the reply, so the session sent the reply twice. The report-shape gate still blocks.
 - It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
 - The model call times out at 20 s. Three runs took 6.6, 7.0 and 8.0 s on the owner's machine, and the Stop entry in `settings.json` allows 25 s.
-- Its rules are `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output` and `output-never-hand-off-doable-step`. They stay `unmechanized` in `lint/rule_mechanisms.json` until the hook catches a real defect.
+- Its rules are `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output`, `output-never-hand-off-doable-step`, `style-table-gold-column` and `questions-go-to-owner` (an Input Needed pick that can be undone). They keep their kind in `lint/rule_mechanisms.json` until the hook catches a real defect.
 
 Kind: process
 Home: hooks/reply_judge.py
